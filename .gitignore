@@ -1,8 +1,16 @@
+# --- File & Folder Sistem / Editor ---
+.vscode/
+.DS_Store
+Thumbs.db
+
 #file ektensi
 *.ex5
 *.ex4
 *.log
-*.tmp
+.tmp
+.cache
+.set
+.tpl
 
 #Folder MQL5
 /.continue
