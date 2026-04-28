@@ -1,3 +1,10 @@
+#file ektensi
+*.ex5
+*.ex4
+*.log
+*.tmp
+
+#Folder MQL5
 /.continue
 /.vscode
 /Files
@@ -9,10 +16,6 @@
 /Scripts
 /Services
 /Shared Projects
-.ex5
-.ex4
-.log
-.tmp
 C:\Users\agsi\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\MQL5\Include\Arrays
 C:\Users\agsi\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\MQL5\Include\Canvas
 C:\Users\agsi\AppData\Roaming\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\MQL5\Include\ChartObjects
