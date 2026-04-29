@@ -166,7 +166,7 @@ public:
 
    virtual void OnSignalGenerated(SignalGeneratedEvent* e) override
    {
-      if(CheckPointer(e) == POINTER_INVALID || !m_isInitialized) return;
+      if(CheckPointer(e) == POINTER_INVALID || !m_initialized) return;
       
       // Throttle: prevent rapid fire
       if(GetTickCount64() - m_lastOrderTime < m_orderThrottleMs) {
