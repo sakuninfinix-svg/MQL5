@@ -1,31 +1,48 @@
 ```
 # Compiled and build artifacts
-*.mqh
-*.ex4
-*.ex5
-*.mq4
-*.mq5
-*.cache
-*.log
+*.pyc
+__pycache__/
+*.o
+*.obj
+*.class
+*.exe
+*.dll
+*.so
+*.a
+*.out
 
 # Dependencies
-include/
-
-# Meta files
-*.swp
-*.swo
-*.tmp
-
-# Environment
+node_modules/
+venv/
+.venv/
 .env
 .env.local
-*.env.*
+.env.*
+
+# Build directories
+dist/
+build/
+target/
+.coverage
+coverage/
+htmlcov/
 
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
+*.tmp
 
-# OS specific
+# System files
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+
+# Cache directories
+.mypy_cache/
+.pytest_cache/
+.gradle/
 ```
