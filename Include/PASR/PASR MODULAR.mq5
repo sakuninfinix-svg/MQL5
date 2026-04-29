@@ -10,7 +10,9 @@
 #include <PASR/4.SRManager.mqh>
 #include <PASR/5.SignalManager.mqh>
 #include <PASR/6.ExecutionManager.mqh>
+#include <PASR/7.RiskCalculator.mqh>
 #include <PASR/8.RecoveryManager.mqh>
+#include <PASR/9.PatternManager.mqh>
 #include <PASR/10.DataManager.mqh>
 #include <PASR/11.DashboardManager.mqh>
 

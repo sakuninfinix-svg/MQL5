@@ -1,60 +1,31 @@
-<<<<<<< Updated upstream
-# --- File & Folder Sistem / Editor ---
+```
+# Compiled and build artifacts
+*.mqh
+*.ex4
+*.ex5
+*.mq4
+*.mq5
+*.cache
+*.log
+
+# Dependencies
+include/
+
+# Meta files
+*.swp
+*.swo
+*.tmp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
 .vscode/
+.idea/
+
+# OS specific
 .DS_Store
 Thumbs.db
-
-#file ektensi
-=======
->>>>>>> Stashed changes
-*.ex5
-*.ex4
-*.log
-.tmp
-<<<<<<< Updated upstream
-.cache
-.set
-.tpl
-
-#Folder MQL5
-=======
-*.dat
-
-#Folders
->>>>>>> Stashed changes
-/.continue
-/.vscode
-/Experts/Advisors
-/Experts/Examples
-/Experts/Free Robots
-/Files
-/Images
-/Include/Arrays
-/Include/Canvas
-/Include/ChartObjects
-/Include/Charts
-/Include/Control
-/Include/Expert
-/Include/Files
-/Include/Generic
-/Include/Graphics
-/Include/Indicators
-/Include/Math
-/Include/OpenCL
-/Include/Strings
-/Include/Tools
-/Include/Trade
-/Include/WinAPI
-/Include/MovingAverages.mqh
-/Include/Object.mqh
-/Include/stdLibErr.mqh
-/Include/VirtualKeys.mqh
-/Indicators
-/Libraries
-/Logs
-/Profiles
-/Scripts
-/Services
-/Shared Projects
-/temp
-/tester
+```
