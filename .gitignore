@@ -1,18 +1,28 @@
+<<<<<<< Updated upstream
 # --- File & Folder Sistem / Editor ---
 .vscode/
 .DS_Store
 Thumbs.db
 
 #file ektensi
+=======
+#File Extensions
+>>>>>>> Stashed changes
 *.ex5
 *.ex4
 *.log
 .tmp
+<<<<<<< Updated upstream
 .cache
 .set
 .tpl
 
 #Folder MQL5
+=======
+*.dat
+
+#Folders
+>>>>>>> Stashed changes
 /.continue
 /.vscode
 /Files
