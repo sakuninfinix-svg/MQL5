@@ -3,13 +3,46 @@
 *.mqh
 *.ex4
 *.ex5
-*.mq4
-*.mq5
 *.cache
 *.log
 
 # Dependencies
-include/
+.continue
+.vscode
+Experts/Advisors
+Experts/Examples
+Experts/Free Robots
+Files
+Images
+Include/Arrays
+Include/Canvas
+Include/ChartObjects
+Include/Charts
+Include/Control
+Include/Expert
+Include/Files
+Include/Generic
+Include/Graphics
+Include/Indicators
+Include/Math
+Include/OpenCL
+Include/Strings
+Include/Tools
+Include/Trade
+Include/WinAPI
+Include/MovingAverages.mqh
+Include/Object.mqh
+Include/stdLibErr.mqh
+Include/VirtualKeys.mqh
+Indicators
+Libraries
+Logs
+Profiles
+Scripts
+Services
+Shared Projects
+temp
+tester
 
 # Meta files
 *.swp
