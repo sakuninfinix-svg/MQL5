@@ -88,6 +88,15 @@ private:
       int signalCooldownBars;
       double atrBufferMult;
       bool debugMode;
+      // NEW: High Quality Entry Settings
+      double highQualityThreshold;
+      bool useDynamicCooldown;
+      int reducedCooldownBars;
+      double mtfAlignmentBonus;
+      bool usePatternWeights;
+      double strongZoneBufferMult;
+      bool useAdaptiveZoneBuffer;
+      int srMinTouchesStrong;
    } m_cfgCache;
 
    //+------------------------------------------------------------------+
@@ -113,6 +122,15 @@ private:
       m_cfgCache.signalCooldownBars = CFG.SignalCooldownBars;
       m_cfgCache.atrBufferMult = CFG.ATRBufferMult;
       m_cfgCache.debugMode = CFG.DebugMode;
+      // NEW: High Quality Entry Settings
+      m_cfgCache.highQualityThreshold = CFG.HighQualityThreshold;
+      m_cfgCache.useDynamicCooldown = CFG.UseDynamicCooldown;
+      m_cfgCache.reducedCooldownBars = CFG.ReducedCooldownBars;
+      m_cfgCache.mtfAlignmentBonus = CFG.MTFAlignmentBonus;
+      m_cfgCache.usePatternWeights = CFG.UsePatternWeights;
+      m_cfgCache.strongZoneBufferMult = CFG.StrongZoneBufferMult;
+      m_cfgCache.useAdaptiveZoneBuffer = CFG.UseAdaptiveZoneBuffer;
+      m_cfgCache.srMinTouchesStrong = CFG.SRMinTouchesStrong;
    }
 
    bool FetchCandleBatch(int shiftStart, int count, MqlRates &outRates[])
@@ -203,7 +221,15 @@ private:
    // --- Signal Cooldown Management ---
    bool IsSignalCooldownActive(double price, ENUM_ORDER_TYPE orderType, double atrPoints)
    {
+      return IsSignalCooldownActiveWithCustomBars(price, orderType, atrPoints, m_cfgCache.signalCooldownBars);
+   }
+   
+   // NEW: Signal Cooldown dengan custom bars untuk dynamic cooldown
+   bool IsSignalCooldownActiveWithCustomBars(double price, ENUM_ORDER_TYPE orderType, double atrPoints, int cooldownBars)
+   {
       datetime now = TimeCurrent();
+      datetime expiryTime = now + (cooldownBars * PeriodSeconds(_Period));
+      
       for (int i = ArraySize(m_signalCooldowns) - 1; i >= 0; i--)
       {
          if (now > m_signalCooldowns[i].expiry)
@@ -270,11 +296,17 @@ private:
 
    bool PassZoneTouchFilter(int shift, int dir, double zonePrice,
                             double atrPoints, double dynamicMult, string &reason,
-                            const MqlRates &rates[])
+                            const MqlRates &rates[], int zoneStrength = 0)
    {
       double extreme = (dir == 1) ? rates[shift].low : rates[shift].high;
       double zoneWidth = (atrPoints * dynamicMult) * _Point;
       double multiplier = (m_cfgCache.entryMode == MODE_SAFE) ? 0.5 : 1.0;
+      
+      // NEW: Adaptive Zone Buffer berdasarkan strength zona
+      if (m_cfgCache.useAdaptiveZoneBuffer && zoneStrength >= m_cfgCache.srMinTouchesStrong)
+      {
+         multiplier *= m_cfgCache.strongZoneBufferMult; // Lebih longgar untuk zona kuat
+      }
 
       bool ok = (dir == 1) ? (extreme <= zonePrice + (zoneWidth * multiplier)) : (extreme >= zonePrice - (zoneWidth * multiplier));
 
@@ -444,7 +476,8 @@ private:
          }
 
          // 3. Zone Touch Filter
-         if (!PassZoneTouchFilter(shift, dir, zonePrice, atrPoints, currentBufferMult, currentFilterReason, rates))
+         int zoneStrength = 0; // TODO: Get from SRManager if available
+         if (!PassZoneTouchFilter(shift, dir, zonePrice, atrPoints, currentBufferMult, currentFilterReason, rates, zoneStrength))
          {
             reason = currentFilterReason;
             continue;
@@ -475,11 +508,21 @@ private:
 
          // Bonus jika selaras dengan HTF zone alignment
          if ((dir == 1 && supHtfAlign == 1) || (dir == -1 && resHtfAlign == 1))
-            finalConfluenceScore += m_cfgCache.mtfBonus * 0.5;
+            finalConfluenceScore += m_cfgCache.mtfAlignmentBonus;
 
          // Bonus jika zona sangat kuat (misal: Strong Zone Mult)
          if (currentBufferMult < m_cfgCache.strongZoneThreshold)
             finalConfluenceScore += m_cfgCache.strongZoneBonus;
+
+         // NEW: Pattern Weight System - beri bobot lebih ke pattern berkualitas
+         if (m_cfgCache.usePatternWeights)
+         {
+            if (pType == PATTERN_FAKEY)
+               finalConfluenceScore *= 1.2;  // Fakey: highest winrate historically
+            else if (pType == PATTERN_ENGULFING)
+               finalConfluenceScore *= 1.1;  // Engulfing: strong momentum
+            // Pinbar/Inside: base weight 1.0
+         }
 
          if (finalConfluenceScore < m_cfgCache.minConfluenceScore)
          {
@@ -509,8 +552,16 @@ private:
             continue;
          }
 
-         // 9. Signal Cooldown Filter
-         if (IsSignalCooldownActive(signalPrice, currentOrderType, atrPoints))
+         // 9. Signal Cooldown Filter - NEW: Dynamic Cooldown untuk HQ Setup
+         bool isHighQualitySetup = (finalConfluenceScore >= m_cfgCache.highQualityThreshold);
+         int effectiveCooldownBars = m_cfgCache.signalCooldownBars;
+         
+         if (m_cfgCache.useDynamicCooldown && isHighQualitySetup)
+         {
+            effectiveCooldownBars = m_cfgCache.reducedCooldownBars; // Bypass cooldown normal untuk HQ setup
+         }
+         
+         if (IsSignalCooldownActiveWithCustomBars(signalPrice, currentOrderType, atrPoints, effectiveCooldownBars))
          {
             reason = "Signal cooldown active";
             continue;

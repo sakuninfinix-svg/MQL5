@@ -17,7 +17,10 @@ enum ENUM_PATTERN_TYPE
    PATTERN_ENGULFING,
    PATTERN_BOTTOM,
    PATTERN_FAKEY,
-   PATTERN_INSIDE_BAR_BREAKOUT
+   PATTERN_INSIDE_BAR_BREAKOUT,
+   PATTERN_MORNING_STAR,      // NEW: Morning/Evening Star
+   PATTERN_THREE_INSIDE,       // NEW: Three Inside Up/Down
+   PATTERN_RAILROAD_TRACKS     // NEW: Railroad Tracks
 };
 
 struct SignalDecision
@@ -138,8 +141,18 @@ input double InpMinDominanceGap = 0.2;       // Minimal Selisih Skor Dominansi
 input double InpMTFBonus = 0.4;              // Bonus Skor Searah MTF
 input double InpStrongZoneBonus = 0.2;       // Bonus Skor Zona Kuat (Mult < 0.4)
 input double InpStrongZoneThreshold = 0.4;   // Ambang Multiplier Zona Kuat
+input double InpHighQualityThreshold = 1.8;  // Threshold setup premium (bypass cooldown)
+input bool InpUseDynamicCooldown = true;     // Cooldown adaptif untuk HQ setup
+input int InpReducedCooldownBars = 2;        // Cooldown untuk HQ setup
+input double InpMTFAlignmentBonus = 0.5;     // Bonus MTF aligned
+input bool InpUsePatternWeights = true;      // Gunakan bobot pattern historis
+input double InpStrongZoneBufferMult = 0.7;  // Buffer multiplier untuk zona kuat (strength >=3)
+input bool InpUseAdaptiveZoneBuffer = true;  // Buffer zona adaptif berdasarkan strength
 input double InpMaxSignalSizeATR = 1.8;      // Max Ukuran Sinyal (ATR x)
 input double InpEngulfingBodyMult = 1.2;     // Rasio Tubuh Engulfing (1.2 = 120%)
+input int InpStarMiddleBarLookback = 3;      // Lookback untuk Middle Bar Star Pattern
+input double InpStarGapThreshold = 0.3;      // Threshold gap untuk Star Pattern (ATR x)
+input double InpRailroadMinBodyRatio = 1.5;  // Min ratio body untuk Railroad Tracks
 
 input double InpMinTPDistanceATR = 0.3;  // Min Jarak ke TP (ATR x)
 input double InpMinSRRangeATR = 0.5;     // Min Range Zona SR (ATR x)
@@ -218,6 +231,17 @@ struct StrategyConfig
    double MinDominanceGap;
    double MaxSignalATR;
    double EngulfingBodyMult;
+   int StarMiddleBarLookback;
+   double StarGapThreshold;
+   double RailroadMinBodyRatio;
+   // NEW: High Quality Entry Settings
+   double HighQualityThreshold;
+   bool UseDynamicCooldown;
+   int ReducedCooldownBars;
+   double MTFAlignmentBonus;
+   bool UsePatternWeights;
+   double StrongZoneBufferMult;
+   bool UseAdaptiveZoneBuffer;
 
    // price action
    double MinTPDistanceATR;
@@ -323,6 +347,17 @@ void SetCommonDefaults()
    CFG.MinDominanceGap = InpMinDominanceGap;
    CFG.MaxSignalATR = InpMaxSignalSizeATR;
    CFG.EngulfingBodyMult = InpEngulfingBodyMult;
+   CFG.StarMiddleBarLookback = InpStarMiddleBarLookback;
+   CFG.StarGapThreshold = InpStarGapThreshold;
+   CFG.RailroadMinBodyRatio = InpRailroadMinBodyRatio;
+   // NEW: High Quality Entry Settings
+   CFG.HighQualityThreshold = InpHighQualityThreshold;
+   CFG.UseDynamicCooldown = InpUseDynamicCooldown;
+   CFG.ReducedCooldownBars = InpReducedCooldownBars;
+   CFG.MTFAlignmentBonus = InpMTFAlignmentBonus;
+   CFG.UsePatternWeights = InpUsePatternWeights;
+   CFG.StrongZoneBufferMult = InpStrongZoneBufferMult;
+   CFG.UseAdaptiveZoneBuffer = InpUseAdaptiveZoneBuffer;
    CFG.MinTPDistanceATR = InpMinTPDistanceATR;
    CFG.MinSRRangeATR = InpMinSRRangeATR;
    CFG.MinWickRatio = InpMinWickRatio;
