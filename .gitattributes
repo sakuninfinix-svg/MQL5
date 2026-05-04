@@ -1,0 +1,11 @@
+﻿# Pastikan semua file MQL5 diperlakukan sebagai teks
+*.mq5 text eol=crlf working-tree-encoding=UTF-8
+*.mqh text eol=crlf working-tree-encoding=UTF-8
+*.mq4 text eol=crlf working-tree-encoding=UTF-8
+
+# Paksa Git untuk mengenali encoding UTF-8
+*.mq5 diff=cpp
+*.mqh diff=cpp
+
+# Opsional: Jika ingin memastikan file tidak berubah menjadi biner
+*.mq5 -working-tree-encoding
