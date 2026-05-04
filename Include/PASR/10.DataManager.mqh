@@ -6,6 +6,7 @@
 #define __DATA_MANAGER_MQH__
 
 #property strict
+#include "mql5_vscode_fix.h"
 #include "IManager.mqh"
 
 class DataManager : public IManager
@@ -62,8 +63,14 @@ public:
 
    virtual void DeclareEvents() override
    {
-      AddEvent("PriceUpdate");
+      AddEvent("NewBar");
       AddEvent("Heartbeat");
+   }
+
+   virtual void OnConfigReload(ConfigReloadEvent *e) override
+   {
+      IManager::OnConfigReload(e);
+      ResetIndicators();
    }
 
    bool ResetIndicators()
@@ -103,7 +110,7 @@ public:
       }
    }
 
-   virtual void OnPriceUpdate(PriceUpdateEvent *e) override
+   virtual void OnNewBar(NewBarEvent *e) override
    {
       UpdateIndicators();
    }
@@ -137,7 +144,7 @@ public:
          for (int i = 0; i < HistoryDealsTotal(); i++)
          {
             ulong t = HistoryDealGetTicket(i);
-            if (t > 0 && HistoryDealGetInteger(t, DEAL_MAGIC) == CFG.MagicNum && HistoryDealGetString(t, DEAL_SYMBOL) == _Symbol)
+            if (t > 0 && HistoryDealGetInteger(t, DEAL_MAGIC) == CFG.MagicNum && (HistoryDealGetString(t, DEAL_SYMBOL) == _Symbol))
             {
                dailySum += HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP) + HistoryDealGetDouble(t, DEAL_COMMISSION);
             }
@@ -188,7 +195,7 @@ public:
       for (int i = 0; i < PositionsTotal(); i++)
       {
          ulong ticket = PositionGetTicket(i);
-         if (ticket <= 0 || PositionGetInteger(POSITION_MAGIC) != magic || PositionGetString(POSITION_SYMBOL) != _Symbol)
+         if (ticket <= 0 || PositionGetInteger(POSITION_MAGIC) != magic || (PositionGetString(POSITION_SYMBOL) != _Symbol))
             continue;
          floatingTotal += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP) + PositionGetDouble(POSITION_COMMISSION);
          temp.normalCount++;
@@ -201,7 +208,7 @@ public:
       for (int i = 0; i < OrdersTotal(); i++)
       {
          ulong oTicket = OrderGetTicket(i);
-         if (oTicket > 0 && OrderGetInteger(ORDER_MAGIC) == magic && OrderGetString(ORDER_SYMBOL) == _Symbol)
+         if (oTicket > 0 && OrderGetInteger(ORDER_MAGIC) == magic && (OrderGetString(ORDER_SYMBOL) == _Symbol))
          {
             ENUM_ORDER_STATE oState = (ENUM_ORDER_STATE)OrderGetInteger(ORDER_STATE);
             if (oState == ORDER_STATE_STARTED || oState == ORDER_STATE_PLACED)

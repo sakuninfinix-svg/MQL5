@@ -50,6 +50,10 @@ private:
    datetime m_lastProcessedBar;
    SignalDecision m_pendingSignal;
    bool m_signalPending;
+   bool m_marketGateOpen;
+   bool m_marketEntryAllowed;
+   double m_marketSpread;
+   double m_marketATR;
 
    // --- Cached Market Data from Events ---
    struct CachedMarketData
@@ -70,6 +74,10 @@ private:
       int signalLookback;
       bool useMTF;
       bool exitOnOpposite;
+      double minConfluenceScore;
+      double mtfBonus;
+      double strongZoneBonus;
+      double strongZoneThreshold;
       double zoneReuseATR;
       int patternFailureCooldownBars;
       ENUM_ENTRY_MODE entryMode;
@@ -91,6 +99,10 @@ private:
       m_cfgCache.signalLookback = CFG.SignalLookback;
       m_cfgCache.useMTF = CFG.UseMTF;
       m_cfgCache.exitOnOpposite = CFG.ExitOnOpposite;
+      m_cfgCache.minConfluenceScore = CFG.MinConfluenceScore;
+      m_cfgCache.mtfBonus = CFG.MTFBonus;
+      m_cfgCache.strongZoneBonus = CFG.StrongZoneBonus;
+      m_cfgCache.strongZoneThreshold = CFG.StrongZoneThreshold;
       m_cfgCache.zoneReuseATR = CFG.ZoneReuseATR;
       m_cfgCache.patternFailureCooldownBars = CFG.PatternFailureCooldownBars;
       m_cfgCache.entryMode = CFG.EntryMode;
@@ -181,7 +193,7 @@ private:
       int sz = ArraySize(m_failedZones);
       ArrayResize(m_failedZones, sz + 1);
       m_failedZones[sz].price = zonePrice;
-      m_failedZones[sz].expiry = TimeCurrent() + (m_cfgCache.patternFailureCooldownBars * PeriodSeconds());
+      m_failedZones[sz].expiry = TimeCurrent() + (m_cfgCache.patternFailureCooldownBars * PeriodSeconds(_Period));
 
       if (m_cfgCache.debugMode)
          PrintFormat("[PASR Signal] Level %.5f registered as FAILED. Cooldown %d candles.",
@@ -212,7 +224,7 @@ private:
       int sz = ArraySize(m_signalCooldowns);
       ArrayResize(m_signalCooldowns, sz + 1);
       m_signalCooldowns[sz].price = price;
-      m_signalCooldowns[sz].expiry = TimeCurrent() + (m_cfgCache.signalCooldownBars * PeriodSeconds());
+      m_signalCooldowns[sz].expiry = TimeCurrent() + (m_cfgCache.signalCooldownBars * PeriodSeconds(_Period));
 
       if (m_cfgCache.debugMode)
          PrintFormat("[PASR Signal] Signal cooldown registered @ %.5f for %d bars.",
@@ -294,8 +306,11 @@ private:
       double threshold = atrPoints * m_cfgCache.momentumThresholdATR * _Point;
       int pushCount = 0;
 
-      for (int i = 1; i <= 3 && (shift + i) < ArraySize(rates); i++)
+      for (int i = 1; i <= 3; i++)
       {
+         if (shift + i + 1 >= ArraySize(rates))
+            break;
+
          double curO = rates[shift + i].open, curC = rates[shift + i].close;
          double curH = rates[shift + i].high, curL = rates[shift + i].low;
          double prevH = rates[shift + i + 1].high, prevL = rates[shift + i + 1].low;
@@ -319,12 +334,20 @@ private:
 
    bool PassMTFFilter(int dir, double referencePrice,
                       double htfSupport, double htfResistance,
-                      double atrPoints, int &bias, string &reason)
+                      double atrPoints, int supHtfAlign, int resHtfAlign,
+                      int &bias, string &reason)
    {
       bias = GetMTFBias(referencePrice, htfSupport, htfResistance, atrPoints);
 
       if (!m_cfgCache.useMTF)
          return true;
+
+      // Block trades that are contra to HTF zone alignment
+      if ((dir == 1 && supHtfAlign == -1) || (dir == -1 && resHtfAlign == -1))
+      {
+         reason = "Blocked by HTF zone contra-alignment";
+         return false;
+      }
 
       int qualityScore = dir * bias;
 
@@ -335,7 +358,10 @@ private:
       }
       if (qualityScore == 0)
       {
-         reason = "Standard Quality Signal (MTF Neutral)";
+         if ((dir == 1 && supHtfAlign == 1) || (dir == -1 && resHtfAlign == 1))
+            reason = "Standard Quality Signal (HTF support confirmed)";
+         else
+            reason = "Standard Quality Signal (MTF Neutral)";
          return true;
       }
 
@@ -383,7 +409,7 @@ private:
 
       // === OPTIMIZATION: Batch fetch candles once ===
       MqlRates rates[];
-      if (!FetchCandleBatch(1, m_cfgCache.signalLookback + 3, rates))
+      if (!FetchCandleBatch(1, m_cfgCache.signalLookback + 4, rates))
       {
          decision.reason = "Failed to fetch candle data";
          return false;
@@ -398,24 +424,19 @@ private:
          double signalPrice = 0;
          ENUM_PATTERN_TYPE pType = PATTERN_NONE;
          string patternReason = "";
+         double pScore = 0;
 
          // Pattern detection via PatternManager
-         if (!m_patterns.Detect(rates, shift, atrPoints, pType, dir, signalPrice, patternReason))
+         if (!m_patterns.Detect(rates, shift, atrPoints, pType, dir, signalPrice, pScore, patternReason))
             continue;
 
          double zonePrice = (dir == 1) ? support : resistance;
          double currentBufferMult = (dir == 1) ? supBufferMult : resBufferMult;
          int currentHtfAlign = (dir == 1) ? supHtfAlign : resHtfAlign;
+         ENUM_ORDER_TYPE currentOrderType = (dir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
 
          // === FILTER PIPELINE ===
-         // 1. HTF Alignment Filter
-         if (m_cfgCache.useMTF && currentHtfAlign < 0)
-         {
-            reason = (dir == 1) ? "HTF Contra-Support" : "HTF Contra-Resistance";
-            continue;
-         }
-
-         // 2. Zone Broken Filter
+         // 1. Zone Broken Filter
          if ((dir == 1 && isSupBroken) || (dir == -1 && isResBroken))
          {
             reason = "Zone broken (Price closed outside)";
@@ -436,12 +457,33 @@ private:
             continue;
          }
 
-         // 5. MTF Quality Filter
+         // 4. MTF Quality & Alignment Filter (Digabung)
          int bias = 0;
-         if (!PassMTFFilter(dir, rates[shift].close, htfSupport, htfResistance,
-                            atrPoints, bias, currentFilterReason))
+         if (!PassMTFFilter(dir, rates[shift].close, htfSupport, htfResistance, atrPoints,
+                            supHtfAlign, resHtfAlign, bias, currentFilterReason))
          {
             reason = currentFilterReason;
+            continue;
+         }
+
+         // === DYNAMIC CONFLUENCE SCORING ===
+         double finalConfluenceScore = pScore;
+
+         // Bonus jika searah MTF
+         if ((dir == 1 && bias > 0) || (dir == -1 && bias < 0))
+            finalConfluenceScore += m_cfgCache.mtfBonus;
+
+         // Bonus jika selaras dengan HTF zone alignment
+         if ((dir == 1 && supHtfAlign == 1) || (dir == -1 && resHtfAlign == 1))
+            finalConfluenceScore += m_cfgCache.mtfBonus * 0.5;
+
+         // Bonus jika zona sangat kuat (misal: Strong Zone Mult)
+         if (currentBufferMult < m_cfgCache.strongZoneThreshold)
+            finalConfluenceScore += m_cfgCache.strongZoneBonus;
+
+         if (finalConfluenceScore < m_cfgCache.minConfluenceScore)
+         {
+            reason = StringFormat("Total Confluence Weak (%.2f < %.2f)", finalConfluenceScore, m_cfgCache.minConfluenceScore);
             continue;
          }
 
@@ -468,7 +510,7 @@ private:
          }
 
          // 9. Signal Cooldown Filter
-         if (IsSignalCooldownActive(signalPrice, decision.orderType, atrPoints))
+         if (IsSignalCooldownActive(signalPrice, currentOrderType, atrPoints))
          {
             reason = "Signal cooldown active";
             continue;
@@ -476,7 +518,7 @@ private:
 
          // === SIGNAL FOUND: Populate decision struct ===
          decision.valid = true;
-         decision.orderType = (dir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+         decision.orderType = currentOrderType;
          decision.signalPrice = signalPrice;
          decision.patternType = pType;
          decision.zonePrice = zonePrice;
@@ -513,6 +555,10 @@ public:
       m_hasNewTick = false;
       m_hasNewBar = false;
       m_signalPending = false;
+      m_marketGateOpen = true;
+      m_marketEntryAllowed = true;
+      m_marketSpread = 0.0;
+      m_marketATR = 0.0;
    }
 
    virtual void Deinit() override
@@ -528,6 +574,7 @@ public:
       AddEvent("PriceUpdate");
       AddEvent("NewBar");
       AddEvent("ZoneUpdate");
+      AddEvent("MarketGate");
    }
 
    //+------------------------------------------------------------------+
@@ -552,6 +599,17 @@ public:
          return;
       if (CheckPointer(m_data) == POINTER_INVALID)
          return;
+
+      if (!m_marketGateOpen || !m_marketEntryAllowed)
+      {
+         if (m_cfgCache.debugMode)
+            PrintFormat("[SignalManager] Market gate closed or cooldown active. gateOpen=%s entryAllowed=%s",
+                        m_marketGateOpen ? "true" : "false",
+                        m_marketEntryAllowed ? "true" : "false");
+         m_lastProcessedBar = e.barOpenTime;
+         m_hasNewTick = false;
+         return;
+      }
 
       // === SIGNAL DETECTION EXECUTION ===
       ProcessSignalOnNewBar(e);
@@ -599,6 +657,17 @@ public:
          m_marketData.resBufferMult = ze.resBufferMult;
          m_marketData.supHtfAlign = ze.supHtfAlign;
          m_marketData.resHtfAlign = ze.resHtfAlign;
+      }
+      else if (e.Type() == "MarketGate")
+      {
+         MarketGateEvent *mg = dynamic_cast<MarketGateEvent *>(e);
+         if (CheckPointer(mg) == POINTER_INVALID)
+            return;
+
+         m_marketGateOpen = mg.gateOpen;
+         m_marketEntryAllowed = mg.entryAllowed;
+         m_marketSpread = mg.spread;
+         m_marketATR = mg.atrPoints;
       }
    }
    //+------------------------------------------------------------------+

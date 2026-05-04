@@ -34,6 +34,13 @@ private:
    datetime m_lastLossBarTime;
    int m_consecutiveLosses;
 
+   bool m_gateOpen;
+   bool m_entryAllowed;
+   double m_lastSpread;
+   double m_lastATR;
+   MqlTick m_lastTick;
+   bool m_hasLastTick;
+
    // Config Cache
    struct MarketConfigCache
    {
@@ -54,12 +61,13 @@ private:
    void FetchWebNews();
 
 public:
-   MarketManager() : IManager("MarketManager", 100)
+   MarketManager() : IManager("MarketManager", 100), m_gateOpen(true), m_entryAllowed(true), m_lastSpread(0.0), m_lastATR(0.0), m_hasLastTick(false)
    {
       m_baseCurr = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE);
       m_profitCurr = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
       ZeroMemory(m_sessionStarts);
       ZeroMemory(m_sessionEnds);
+      ZeroMemory(m_lastTick);
    }
    ~MarketManager();
 
@@ -85,6 +93,16 @@ public:
       RefreshConfigCache();
    }
 
+   virtual void DeclareEvents() override
+   {
+      AddEvent("Heartbeat");
+      AddEvent("PriceUpdate");
+      AddEvent("NewBar");
+   }
+
+   virtual void OnPriceUpdate(PriceUpdateEvent *e) override;
+   virtual void OnNewBar(NewBarEvent *e) override;
+
    virtual bool Init() override;
    bool IsNewBar();
    bool PassesGate(const MqlTick &tick, double &currentSpread, double currentATR);
@@ -99,12 +117,19 @@ public:
    void UpdateLastEntryBarTime(datetime time) { m_lastEntryBarTime = time; }
    void UpdateLossStreak(double netProfit);
    void SetLastBarTime(datetime time) { m_lastBarTime = time; }
+
+   virtual void OnHeartbeat(HeartbeatEvent *e) override
+   {
+      if (m_cfgCache.useNews)
+         FetchWebNews();
+   }
 };
 //+------------------------------------------------------------------+
 //| Destructor                                                       |
 //+------------------------------------------------------------------+
 MarketManager::~MarketManager()
 {
+   ArrayFree(m_webNewsTimes);
 }
 
 //+------------------------------------------------------------------+
@@ -185,7 +210,12 @@ bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, doubl
 
    if (currentATR < m_cfgCache.atrMin || currentATR > m_cfgCache.atrMax)
    {
-      m_data.DebugLog(m_cfgCache.debugMode, "ATR out of range: " + DoubleToString(currentATR, 1));
+      if (m_cfgCache.debugMode)
+      {
+         string reason = (currentATR < m_cfgCache.atrMin) ? "Too Low" : "Too High";
+         PrintFormat("[%s] ATR Gate Blocked: Current %.1f (Min: %.1f, Max: %.1f) - %s",
+                     m_name, currentATR, m_cfgCache.atrMin, m_cfgCache.atrMax, reason);
+      }
       return false;
    }
 
@@ -193,6 +223,110 @@ bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, doubl
       return false;
 
    return true;
+}
+
+void MarketManager::OnPriceUpdate(PriceUpdateEvent *e)
+{
+   if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
+      return;
+
+   double currentSpread = 0.0;
+   double currentATR = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
+   bool gateOpen = true;
+
+   if (currentATR <= 0)
+   {
+      gateOpen = false;
+      if (m_cfgCache.debugMode)
+         PrintFormat("[%s] Market gate blocked: ATR unavailable.", m_name);
+   }
+   else
+   {
+      gateOpen = PassesGate(e.tick, currentSpread, currentATR);
+   }
+
+   m_lastTick = e.tick;
+   m_hasLastTick = true;
+
+   bool entryAllowed = !IsEntryCooldownActive();
+   bool stateChanged = (gateOpen != m_gateOpen) || (entryAllowed != m_entryAllowed) ||
+                       (MathAbs(currentSpread - m_lastSpread) > 0.0001) ||
+                       (MathAbs(currentATR - m_lastATR) > 0.0001);
+
+   m_gateOpen = gateOpen;
+   m_entryAllowed = entryAllowed;
+   m_lastSpread = currentSpread;
+   m_lastATR = currentATR;
+
+   if (stateChanged || m_cfgCache.debugMode)
+   {
+      if (m_cfgCache.debugMode)
+      {
+         PrintFormat("[%s] MarketGate updated - gateOpen=%s entryAllowed=%s spread=%.1f atr=%.2f",
+                     m_name,
+                     m_gateOpen ? "true" : "false",
+                     m_entryAllowed ? "true" : "false",
+                     m_lastSpread,
+                     m_lastATR);
+      }
+      MarketGateEvent *evt = new MarketGateEvent(m_gateOpen, m_lastSpread, m_lastATR, m_entryAllowed);
+      EventBus::Instance().Dispatch(evt);
+   }
+}
+
+void MarketManager::OnNewBar(NewBarEvent *e)
+{
+   if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
+      return;
+
+   bool recalculatedGate = m_gateOpen;
+   double currentSpread = m_lastSpread;
+   double currentATR = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
+
+   if (!m_hasLastTick)
+   {
+      MqlTick latestTick;
+      if (SymbolInfoTick(_Symbol, latestTick))
+      {
+         m_lastTick = latestTick;
+         m_hasLastTick = true;
+      }
+   }
+
+   if (m_hasLastTick && currentATR > 0)
+   {
+      recalculatedGate = PassesGate(m_lastTick, currentSpread, currentATR);
+   }
+   else if (currentATR <= 0)
+   {
+      recalculatedGate = false;
+      if (m_cfgCache.debugMode)
+         PrintFormat("[%s] Market gate blocked on new bar: ATR unavailable.", m_name);
+   }
+
+   bool entryAllowed = !IsEntryCooldownActive();
+   bool stateChanged = (recalculatedGate != m_gateOpen) ||
+                       (entryAllowed != m_entryAllowed) ||
+                       (MathAbs(currentSpread - m_lastSpread) > 0.0001) ||
+                       (MathAbs(currentATR - m_lastATR) > 0.0001);
+
+   m_gateOpen = recalculatedGate;
+   m_entryAllowed = entryAllowed;
+   m_lastSpread = currentSpread;
+   m_lastATR = currentATR;
+
+   if (stateChanged || m_cfgCache.debugMode)
+   {
+      if (m_cfgCache.debugMode)
+         PrintFormat("[%s] MarketGate updated on NewBar - gateOpen=%s entryAllowed=%s spread=%.1f atr=%.2f",
+                     m_name,
+                     m_gateOpen ? "true" : "false",
+                     m_entryAllowed ? "true" : "false",
+                     m_lastSpread,
+                     m_lastATR);
+      MarketGateEvent *evt = new MarketGateEvent(m_gateOpen, m_lastSpread, m_lastATR, m_entryAllowed);
+      EventBus::Instance().Dispatch(evt);
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -224,11 +358,11 @@ void MarketManager::FetchWebNews()
 {
    if (MQLInfoInteger(MQL_TESTER))
       return;
-   if (TimeCurrent() < m_lastWebFetch + 3600)
-      return; // Throttle web requests to once per hour
-   char dta[], result[];
+   if (TimeCurrent() < m_lastWebFetch + 1800)
+      return; // Fetch every 30 mins
+   char data[], result[];
    string headers;
-   int res = WebRequest("GET", m_cfgCache.newsWebURL, NULL, NULL, 5000, dta, 0, result, headers);
+   int res = WebRequest("GET", m_cfgCache.newsWebURL, NULL, NULL, 5000, data, 0, result, headers);
 
    if (res != 200)
    {
@@ -271,7 +405,7 @@ void MarketManager::FetchWebNews()
             {
                dStr = dParts[2] + "." + dParts[0] + "." + dParts[1];
                if (dStr == "..")
-                  continue; // Skip malformed dates
+                  continue;
             }
 
             string timeOnly = tStr;
@@ -288,9 +422,7 @@ void MarketManager::FetchWebNews()
                hr += 12;
             else if (StringFind(tStr, "AM") >= 0 && hr == 12)
                hr = 0;
-
             string finalTime = StringFormat("%02d:%02d", hr, mn);
-
             datetime eventTime = StringToTime(dStr + " " + finalTime);
             if (eventTime > 0)
             {
@@ -323,8 +455,7 @@ bool MarketManager::IsNewsTime()
    m_lastNewsResult = false;
    m_newsStatus = "Market Clear";
 
-   // 1. Cek Web Fallback terlebih dahulu (karena kita simpan cache-nya)
-   FetchWebNews();
+   // Use cached news from FetchWebNews (called via Heartbeat)
    datetime now = TimeGMT(); // Web feeds usually use GMT
    for (int i = 0; i < ArraySize(m_webNewsTimes); i++)
    {
@@ -383,13 +514,11 @@ bool MarketManager::IsNewsTime()
 }
 
 //+------------------------------------------------------------------+
-//| GetATRPoints                                                     |
-//+------------------------------------------------------------------+
 //| IsEntryCooldownActive                                            |
 //+------------------------------------------------------------------+
 bool MarketManager::IsEntryCooldownActive()
 {
-   // MQL5 Best Practice: Gunakan CopyTime untuk async safety
+
    datetime times[];
    if (CopyTime(_Symbol, _Period, 0, 1, times) <= 0)
       return false;

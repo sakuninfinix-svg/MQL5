@@ -6,6 +6,7 @@
 #define __EXECUTION_MANAGER_MQH__
 
 #property strict
+#include "mql5_vscode_fix.h"
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
 #include "7.RiskCalculator.mqh"
@@ -38,6 +39,7 @@ private:
       ulong magicNum;
       bool debugMode;
       ENUM_ENTRY_MODE entryMode;
+      ENUM_TPSL_MODE tpslMode;
    } m_cfgCache;
 
    //+------------------------------------------------------------------+
@@ -57,6 +59,7 @@ private:
       m_cfgCache.magicNum = CFG.MagicNum;
       m_cfgCache.debugMode = CFG.DebugMode;
       m_cfgCache.entryMode = CFG.EntryMode;
+      m_cfgCache.tpslMode = CFG.TPSLMode;
 
       // Refresh RiskCalculator config
       m_riskCalc.LoadConfig();
@@ -162,13 +165,26 @@ private:
          }
          if (tp - price < requiredTP)
          {
-            reason = "BUY TP too close to price";
+            reason = StringFormat("BUY TP too close: %.1f < required %.1f (ATR %.1f)",
+                                  (tp - price) / _Point, requiredTP / _Point, minTPDist / _Point);
             return false;
          }
          if (sl > 0 && price - sl < stopLevel)
          {
-            reason = "BUY SL violates stop level";
+            reason = StringFormat("BUY SL violates stop level: %.1f < %.1f",
+                                  (price - sl) / _Point, stopLevel / _Point);
             return false;
+         }
+         // Risk check: Position risk should not exceed 5% of account
+         if (CheckPointer(m_data) != POINTER_INVALID)
+         {
+            double slDist = MathAbs(price - sl) / _Point;
+            double posRiskPct = m_riskCalc.GetRiskPercentage(m_cfgCache.lotSize > 0 ? m_cfgCache.lotSize : 0.1, slDist);
+            if (posRiskPct > 5.0)
+            {
+               reason = StringFormat("Position risk too high: %.2f%% > 5%%", posRiskPct);
+               return false;
+            }
          }
       }
       else
@@ -185,13 +201,26 @@ private:
          }
          if (price - tp < requiredTP)
          {
-            reason = "SELL TP too close to price";
+            reason = StringFormat("SELL TP too close: %.1f < required %.1f (ATR %.1f)",
+                                  (price - tp) / _Point, requiredTP / _Point, minTPDist / _Point);
             return false;
          }
          if (sl > 0 && sl - price < stopLevel)
          {
-            reason = "SELL SL violates stop level";
+            reason = StringFormat("SELL SL violates stop level: %.1f < %.1f",
+                                  (sl - price) / _Point, stopLevel / _Point);
             return false;
+         }
+         // Risk check: Position risk should not exceed 5% of account
+         if (CheckPointer(m_data) != POINTER_INVALID)
+         {
+            double slDist = MathAbs(sl - price) / _Point;
+            double posRiskPct = m_riskCalc.GetRiskPercentage(m_cfgCache.lotSize > 0 ? m_cfgCache.lotSize : 0.1, slDist);
+            if (posRiskPct > 5.0)
+            {
+               reason = StringFormat("Position risk too high: %.2f%% > 5%%", posRiskPct);
+               return false;
+            }
          }
       }
       reason = "OK";
@@ -205,7 +234,7 @@ public:
    ExecutionManager() : IManager("ExecutionManager", 40)
    {
       m_lastOrderTime = 0;
-      m_orderThrottleMs = 2000; // Min 2s between orders to prevent spam
+      m_orderThrottleMs = (uint)CFG.OrderThrottleMs;
    }
 
    virtual void DeclareEvents() override
@@ -258,11 +287,7 @@ public:
          {
             lastBarExecuted = currBar;
             m_lastOrderTime = GetTickCount64();
-
-            // Notify other modules
-            OrderExecutionEvent *execEvent = new OrderExecutionEvent(
-                true, reqID, plan.type, plan.entry, plan.brokerSL, plan.tp, plan.lot, "AsyncAccepted");
-            EventBus::Instance().Dispatch(execEvent);
+            // Order will be confirmed later by OnTradeTransaction when the trade is actually opened.
          }
       }
    }
@@ -271,9 +296,8 @@ public:
    {
       if (m_cfgCache.debugMode)
          Print("[Execution] EMERGENCY STOP: Halting new orders.");
-      // Throttle will block new orders. Optionally clear pending GVs:
-      DeletePendingStateById(_Symbol, 0); // Trigger cleanup with prefix match
-      GlobalVariablesDeleteAll("PASR_PEND_" + (string)m_cfgCache.magicNum + "_");
+      // Clear stale pending order state for this symbol and magic number.
+      GlobalVariablesDeleteAll("PASR_PEND_" + (string)m_cfgCache.magicNum + "_" + _Symbol + "_");
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -320,15 +344,27 @@ public:
 
       if (plan.type == ORDER_TYPE_BUY)
       {
-         double sl = support - (atrPoints * m_cfgCache.slBufferATR * _Point);    // SL below support
-         double tp = resistance - (atrPoints * m_cfgCache.tpBufferATR * _Point); // TP below resistance
+         double sl = 0;
+         if (m_cfgCache.tpslMode == TPSL_PATTERN)
+            sl = decision.signalPrice - (atrPoints * 0.1 * _Point);
+         else
+            sl = support - (atrPoints * m_cfgCache.slBufferATR * _Point);
+
+         double tp = resistance - (atrPoints * m_cfgCache.tpBufferATR * _Point);
+
          plan.brokerSL = m_data ? m_data.NormalizePrice(_Symbol, sl) : NormalizeDouble(sl, _Digits);
          plan.tp = m_data ? m_data.NormalizePrice(_Symbol, tp) : NormalizeDouble(tp, _Digits);
       }
       else
       {
-         double sl = resistance + (atrPoints * m_cfgCache.slBufferATR * _Point); // SL above resistance
-         double tp = support + (atrPoints * m_cfgCache.tpBufferATR * _Point);    // TP above support
+         double sl = 0;
+         if (m_cfgCache.tpslMode == TPSL_PATTERN)
+            sl = decision.signalPrice + (atrPoints * 0.1 * _Point);
+         else
+            sl = resistance + (atrPoints * m_cfgCache.slBufferATR * _Point);
+
+         double tp = support + (atrPoints * m_cfgCache.tpBufferATR * _Point);
+
          plan.brokerSL = m_data ? m_data.NormalizePrice(_Symbol, sl) : NormalizeDouble(sl, _Digits);
          plan.tp = m_data ? m_data.NormalizePrice(_Symbol, tp) : NormalizeDouble(tp, _Digits);
       }

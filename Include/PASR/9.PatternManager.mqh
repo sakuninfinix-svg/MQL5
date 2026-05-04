@@ -9,7 +9,7 @@
 
 #include "2.Config.mqh"
 
-class PatternManager
+    class PatternManager
 {
 private:
    struct PatternVote
@@ -29,11 +29,13 @@ public:
                ENUM_PATTERN_TYPE &outType,
                int &outDir,
                double &outExtreme,
+               double &outScore,
                string &outReason)
    {
       outType = PATTERN_NONE;
       outDir = 0;
       outExtreme = 0.0;
+      outScore = 0.0;
       outReason = "";
 
       if (shift < 1 || atrPoints <= 0)
@@ -61,8 +63,6 @@ public:
 
       double buyScore = 0.0;
       double sellScore = 0.0;
-      int buyCount = 0;
-      int sellCount = 0;
 
       for (int i = 0; i < 5; i++)
       {
@@ -71,13 +71,17 @@ public:
 
          if (votes[i].dir == 1)
          {
-            buyScore += votes[i].score;
-            buyCount++;
+            if(CFG.UsePatternConfluence)
+               buyScore += votes[i].score;
+            else
+               buyScore = MathMax(buyScore, votes[i].score);
          }
          else if (votes[i].dir == -1)
          {
-            sellScore += votes[i].score;
-            sellCount++;
+            if(CFG.UsePatternConfluence)
+               sellScore += votes[i].score;
+            else
+               sellScore = MathMax(sellScore, votes[i].score);
          }
       }
 
@@ -85,18 +89,13 @@ public:
       double conflictScore = MathMin(buyScore, sellScore);
       double dominanceGap = totalScore - conflictScore;
 
-      if (totalScore < 1.60)
-      {
-         outReason = StringFormat("Confluence weak | buy=%.2f sell=%.2f", buyScore, sellScore);
-         return false;
-      }
-
-      if (dominanceGap < 0.35)
+      if (dominanceGap < CFG.MinDominanceGap)
       {
          outReason = StringFormat("Confluence conflict | buy=%.2f sell=%.2f", buyScore, sellScore);
          return false;
       }
 
+      outScore = totalScore;
       outDir = (buyScore > sellScore) ? 1 : -1;
 
       int bestIdx = FindBestVote(votes, outDir);
@@ -109,8 +108,11 @@ public:
       outType = votes[bestIdx].type;
       outExtreme = votes[bestIdx].extreme;
 
-      string stack = BuildConfluenceLabel(votes, outDir);
-      outReason = votes[bestIdx].label +
+      string stack = "";
+      if (CFG.UsePatternConfluence)
+         stack = " | Stack: " + BuildConfluenceLabel(votes, outDir);
+
+      outReason = votes[bestIdx].label + 
                   StringFormat(" | Confluence %.2f | %s", totalScore, stack);
 
       return true;
@@ -307,8 +309,8 @@ private:
 
       double body1 = CandleBody(rates, shift);
       double body2 = CandleBody(rates, shift + 1);
-      if (body2 > 0.0 && body1 >= body2 * 1.20)
-         score += 0.20;
+         if (body2 > 0.0 && body1 >= body2 * CFG.EngulfingBodyMult)
+            score += 0.20;
       if (NormalizeATRFactor(CandleRange(rates, shift), atrPoints) >= 0.70)
          score += 0.15;
 

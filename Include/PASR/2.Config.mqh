@@ -45,20 +45,25 @@ struct OrderPlan
 
 enum ENUM_ENTRY_MODE
 {
-   MODE_SAFE,
-   MODE_AGGRESSIVE
+   MODE_SAFE,      // Eksekusi Jika Sinyal Valid & Kondisi Optimal
+   MODE_AGGRESSIVE // Eksekusi Sinyal Valid saja
+};
+enum ENUM_TPSL_MODE
+{
+   TPSL_SR,     // Support/Resistance
+   TPSL_PATTERN // Extreme Pattern
 };
 enum ENUM_SR_MODE
 {
-   SR_EXTREME,
-   SR_SWING,
-   SR_AUTO
+   SR_EXTREME, // Extreme High/Low
+   SR_SWING,   // Swing
+   SR_AUTO     // Sesuai Kondisi Extreme/swing
 };
 enum ENUM_NEWS_LEVEL
 {
-   NEWS_HIGH = 1,
-   NEWS_HIGH_MEDIUM = 2,
-   NEWS_ALL = 3
+   NEWS_HIGH = 1,        // Blokir News High
+   NEWS_HIGH_MEDIUM = 2, // Blokir News High & Medium
+   NEWS_ALL = 3          // Blokir Semua News (High, Medium, Low)
 };
 
 enum ENUM_TRADE_STATE
@@ -105,16 +110,16 @@ input double InpMaxDailyLossPct = 5.0;      // Batas Maksimal Loss Harian (%)
 input ulong InpMagicNum = 20260403;         // ID Transaksi
 
 input ENUM_ENTRY_MODE InpEntryMode = MODE_SAFE; // Mode Entry (Safe/Aggressive)
+input ENUM_TPSL_MODE InpTPSLMode = TPSL_SR;     // Mode Penentuan TP/SL
+input int InpOrderThrottleMs = 2000;            // Jeda Eksekusi (ms)
 input bool InpUseMTF = false;                   // Gunakan Filter Multi-Timeframe
 input bool InpUseTrailing = true;               // Aktifkan Trailing & Lock Profit
 input bool InpExitOnOpposite = true;            // Close Posisi jika muncul Sinyal Lawan
 input bool InpDebugMode = true;                 // Aktifkan Mode Debug (Log)
 
-input group ">>> CUSTOM OVERRIDE (aktif hanya jika PROFILE_CUSTOM) <<<"
-
-input int InpATRPeriod = 14;                                                        // ATR Period
-input double InpATRMin = 150.0;     
-input double InpATRMax = 4000.0;                                                   // Batas Minimum ATR (Points)
+input int InpATRPeriod = 14;
+input double InpATRMin = 150.0;
+input double InpATRMax = 4000.0;                                                       // Batas Minimum ATR (Points)
 input bool InpUseNewsFilter = true;                                                    // Aktifkan News Filter
 input int InpNewsFreezeMinutes = 60;                                                   // News Freeze (Menit sebelum/sesudah)
 input ENUM_NEWS_LEVEL InpNewsLevel = NEWS_HIGH_MEDIUM;                                 // Level News yang Diblokir
@@ -122,9 +127,19 @@ input string InpNewsWebURL = "https://nfs.faireconomy.media/ff_calendar_thisweek
 
 input ENUM_SR_MODE InpSRMode = SR_AUTO;      // Mode Deteksi SR
 input int InpSRLookback = 20;                // SR Lookback (Candles)
+input int InpSwingLookback = 50;             // Swing/Fractal Lookback
+input double InpSRTouchBufferATR = 0.5;      // Toleransi Sentuhan Zona (ATR x)
+input int InpSRMinTouchesStrong = 3;         // Min Sentuhan untuk Zona SR Kuat
 input int InpSignalLookback = 5;             // Signal Lookback (Candles)
 input double InpMomentumThresholdATR = 0.15; // Ambang Momentum (ATR x)
+input double InpMinConfluenceScore = 1.1;    // Skor Minimal Confluence (Total)
+input bool InpUsePatternConfluence = true;   // Validasi Multiple Pattern
+input double InpMinDominanceGap = 0.2;       // Minimal Selisih Skor Dominansi
+input double InpMTFBonus = 0.4;              // Bonus Skor Searah MTF
+input double InpStrongZoneBonus = 0.2;       // Bonus Skor Zona Kuat (Mult < 0.4)
+input double InpStrongZoneThreshold = 0.4;   // Ambang Multiplier Zona Kuat
 input double InpMaxSignalSizeATR = 1.8;      // Max Ukuran Sinyal (ATR x)
+input double InpEngulfingBodyMult = 1.2;     // Rasio Tubuh Engulfing (1.2 = 120%)
 
 input double InpMinTPDistanceATR = 0.3;  // Min Jarak ke TP (ATR x)
 input double InpMinSRRangeATR = 0.5;     // Min Range Zona SR (ATR x)
@@ -186,11 +201,23 @@ struct StrategyConfig
 
    // strategy
    ENUM_ENTRY_MODE EntryMode;
+   ENUM_TPSL_MODE TPSLMode;
+   int OrderThrottleMs;
    ENUM_SR_MODE SRMode;
    int SRLookback;
+   int SwingLookback;
+   double SRTouchBufferATR;
+   int SRMinTouchesStrong;
    int SignalLookback;
    double MomentumThresholdATR;
+   double MinConfluenceScore;
+   bool UsePatternConfluence;
+   double MTFBonus;
+   double StrongZoneBonus;
+   double StrongZoneThreshold;
+   double MinDominanceGap;
    double MaxSignalATR;
+   double EngulfingBodyMult;
 
    // price action
    double MinTPDistanceATR;
@@ -253,6 +280,8 @@ void SetCommonDefaults()
 {
    CFG.MagicNum = InpMagicNum;
    CFG.EntryMode = InpEntryMode;
+   CFG.TPSLMode = InpTPSLMode;
+   CFG.OrderThrottleMs = InpOrderThrottleMs;
    CFG.UseMTF = InpUseMTF;
    CFG.TradingSessions[0] = InpSessionSun;
    CFG.TradingSessions[1] = InpSessionMon;
@@ -281,9 +310,19 @@ void SetCommonDefaults()
    CFG.NewsFreeze = InpNewsFreezeMinutes;
    CFG.SRMode = InpSRMode;
    CFG.SRLookback = InpSRLookback;
+   CFG.SwingLookback = InpSwingLookback;
+   CFG.SRTouchBufferATR = InpSRTouchBufferATR;
+   CFG.SRMinTouchesStrong = InpSRMinTouchesStrong;
    CFG.SignalLookback = InpSignalLookback;
    CFG.MomentumThresholdATR = InpMomentumThresholdATR;
+   CFG.MinConfluenceScore = InpMinConfluenceScore;
+   CFG.UsePatternConfluence = InpUsePatternConfluence;
+   CFG.MTFBonus = InpMTFBonus;
+   CFG.StrongZoneBonus = InpStrongZoneBonus;
+   CFG.StrongZoneThreshold = InpStrongZoneThreshold;
+   CFG.MinDominanceGap = InpMinDominanceGap;
    CFG.MaxSignalATR = InpMaxSignalSizeATR;
+   CFG.EngulfingBodyMult = InpEngulfingBodyMult;
    CFG.MinTPDistanceATR = InpMinTPDistanceATR;
    CFG.MinSRRangeATR = InpMinSRRangeATR;
    CFG.MinWickRatio = InpMinWickRatio;
@@ -327,6 +366,7 @@ void PrintConfigSummary()
    Print("ATR Range        : ", DoubleToString(CFG.ATRMin, 1), " - ", DoubleToString(CFG.ATRMax, 1));
    Print("SR Mode          : ", (string)CFG.SRMode);
    Print("Signal Lookback  : ", CFG.SignalLookback);
+   Print("Pattern Conflu.  : ", (CFG.UsePatternConfluence ? "Enabled" : "Disabled"));
    Print("Use MTF          : ", (CFG.UseMTF ? "true" : "false"));
    Print("Use Trailing     : ", (CFG.UseTrailing ? "true" : "false"));
 }

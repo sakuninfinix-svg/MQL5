@@ -204,10 +204,18 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             OrderExecutionEvent *confirm = new OrderExecutionEvent(
                 true, positionID, type, entry, sl, tp, volume, "Confirmed", comment);
             EventBus::Instance().Dispatch(confirm);
+
+            datetime times[];
+            if (CopyTime(_Symbol, _Period, 0, 1, times) > 0)
+               market.UpdateLastEntryBarTime(times[0]);
          }
          else if (entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_INOUT)
          {
             dta.RefreshDailyProfit();
+            double netProfit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT) +
+                               HistoryDealGetDouble(trans.deal, DEAL_COMMISSION) +
+                               HistoryDealGetDouble(trans.deal, DEAL_SWAP);
+            market.UpdateLossStreak(netProfit);
          }
       }
    }

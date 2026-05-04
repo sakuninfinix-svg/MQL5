@@ -28,8 +28,8 @@ private:
    CTrade m_trade;
 
    // Event-Driven State
-   ulong m_lastTrailingUpdate;    // Throttle trailing modifications (dalam mikrosekon)
-   int m_trailingThrottleMs;      // Min interval between trailing updates
+   ulong m_lastTrailingUpdate; // Throttle trailing modifications (dalam mikrosekon)
+   int m_trailingThrottleMs;   // Min interval between trailing updates
 
    // Config Cache (avoid repeated CFG reads)
    struct RecoveryConfigCache
@@ -124,8 +124,16 @@ private:
 
    void ProcessTrailingAndPartial(RecoveryEngine *r, const MqlTick &tick, double atrPoints)
    {
-      if (CheckPointer(r) == POINTER_INVALID || !r.active || !PositionSelectByTicket(r.mainTicket))
+      if (CheckPointer(r) == POINTER_INVALID || !r.active)
          return;
+      if (!PositionSelectByTicket(r.mainTicket))
+      {
+         // Position no longer exists - clean up engine
+         r.active = false;
+         ClearEngineGVs(r.mainTicket);
+         r.Reset();
+         return;
+      }
       if (r.state != TRADE_STATE_NORMAL)
          return;
 
@@ -193,10 +201,16 @@ private:
                      {
                         r.partialArmedNormal = false;
                         r.partialClosed = true;
+                        
+                        // Enhancement: Automatic Break-Even after Partial Close
+                        if(m_trade.PositionModify(r.mainTicket, openPrice, tpPrice))
+                        {
+                           if (m_cfgCache.debugMode)
+                              PrintFormat("[Recovery] Partial Close Success. SL moved to Break-Even for %d", r.mainTicket);
+                        }
+                        
                         r.lastActionTick = GetTickCount64();
                         r.SaveState(m_cfgCache.magicNum);
-                        if (m_cfgCache.debugMode)
-                           Print("[Recovery] Partial closed for ticket: ", r.mainTicket);
                      }
                   }
                }
@@ -205,14 +219,17 @@ private:
       }
 
       // === TRAILING STOP LOGIC (Throttled) ===
-      if (!m_cfgCache.useTrailing)
+      if (!m_cfgCache.useTrailing || !r.active)
          return;
       if (GetMicrosecondCount() - m_lastTrailingUpdate < (ulong)m_trailingThrottleMs * 1000)
          return;
 
       double newSL = slPrice;
-      double stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+      double stopLevel = MathMax(SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL), 
+                                 SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL)) * _Point;
+      
       double minModifyStep = atr * 0.12;
+      int modifyError = 0;
 
       if (type == POSITION_TYPE_BUY)
       {
@@ -223,12 +240,19 @@ private:
 
          if (newSL > slPrice + minModifyStep && (curPrice - newSL) > stopLevel)
          {
-            if (m_trade.PositionModify(r.mainTicket, NormalizeDouble(newSL, _Digits), tpPrice))
+            newSL = NormalizeDouble(newSL, _Digits);
+            if (m_trade.PositionModify(r.mainTicket, newSL, tpPrice))
             {
                r.SaveState(m_cfgCache.magicNum);
                m_lastTrailingUpdate = GetMicrosecondCount();
                if (m_cfgCache.debugMode)
-                  PrintFormat("[Recovery] Trailing BUY %d to %.5f (TP: %.5f)", r.mainTicket, newSL, tpPrice);
+                  PrintFormat("[Recovery] ✓ Trailing BUY %d: SL %.5f (Profit: %.2f ATR)", r.mainTicket, newSL, profitATR);
+            }
+            else
+            {
+               modifyError = GetLastError();
+               if (m_cfgCache.debugMode)
+                  PrintFormat("[Recovery] ✗ Trailing BUY %d failed: Error %d", r.mainTicket, modifyError);
             }
          }
       }
@@ -248,12 +272,19 @@ private:
          }
          if (newSL > 0 && (slPrice <= 0 || newSL < slPrice - minModifyStep) && (newSL - curPrice) > stopLevel)
          {
-            if (m_trade.PositionModify(r.mainTicket, NormalizeDouble(newSL, _Digits), tpPrice))
+            newSL = NormalizeDouble(newSL, _Digits);
+            if (m_trade.PositionModify(r.mainTicket, newSL, tpPrice))
             {
                r.SaveState(m_cfgCache.magicNum);
                m_lastTrailingUpdate = GetMicrosecondCount();
                if (m_cfgCache.debugMode)
-                  PrintFormat("[Recovery] Trailing SELL %d to %.5f (TP: %.5f)", r.mainTicket, newSL, tpPrice);
+                  PrintFormat("[Recovery] ✓ Trailing SELL %d: SL %.5f (Profit: %.2f ATR)", r.mainTicket, newSL, profitATR);
+            }
+            else
+            {
+               modifyError = GetLastError();
+               if (m_cfgCache.debugMode)
+                  PrintFormat("[Recovery] ✗ Trailing SELL %d failed: Error %d", r.mainTicket, modifyError);
             }
          }
       }
@@ -278,7 +309,6 @@ private:
             continue;
          }
 
-         // Check max duration
          if (m_cfgCache.maxTradeDurationDays > 0 && r.entryTime > 0)
          {
             if (TimeCurrent() > r.entryTime + (m_cfgCache.maxTradeDurationDays * 86400))
@@ -287,8 +317,6 @@ private:
                continue;
             }
          }
-
-         // Update peak equity
          r.peakEquity = MathMax(r.peakEquity, AccountInfoDouble(ACCOUNT_EQUITY));
       }
    }

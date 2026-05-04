@@ -62,21 +62,12 @@ private:
    }
 
    // Helper: Mencari Swing Fractal terdekat dengan CopyHigh/CopyLow (MQL5 Best Practice)
-   double FindNearestSwing(bool isSupport, int maxBars, int &foundShift)
+   double FindNearestSwing(bool isSupport, int maxBars, int &foundShift, const double &highs[], const double &lows[])
    {
       foundShift = -1;
-
-      // Batch fetch highs/lows untuk performa (MQL5 async-safe)
-      double highs[], lows[];
-      ArraySetAsSeries(highs, true);
-      ArraySetAsSeries(lows, true);
-
-      if (CopyHigh(_Symbol, _Period, 0, maxBars + 2, highs) <= 0)
-         return 0;
-      if (CopyLow(_Symbol, _Period, 0, maxBars + 2, lows) <= 0)
-         return 0;
-
-      for (int i = 2; i <= maxBars; i++)
+      int available = MathMin(maxBars, ArraySize(highs) - 2);
+      
+      for (int i = 2; i <= available; i++)
       {
          if (isSupport)
          {
@@ -149,24 +140,6 @@ public:
       RefreshConfigCache();
    }
 
-   // Cache untuk menghindari kalkulasi berulang
-   struct ZoneCache
-   {
-      datetime lastCalcBar;
-      double support, resistance;
-      double htfSupport, htfResistance;
-      bool isSupBroken, isResBroken;
-      double supBufferMult, resBufferMult;
-      int supHtfAlign, resHtfAlign;
-      bool valid;
-
-      void Invalidate()
-      {
-         valid = false;
-         lastCalcBar = 0;
-      }
-   } m_zoneCache;
-
    virtual void DeclareEvents() override
    {
       AddEvent("NewBar");
@@ -181,15 +154,8 @@ public:
          return;
       datetime currentBar = times[0];
 
-      if (m_zoneCache.valid && m_zoneCache.lastCalcBar == currentBar)
-         return; // Skip jika sudah dihitung di bar ini
-
       UpdateHTFZones();
       UpdateMainZones(m_data.GetATRPoints());
-
-      // Update cache
-      m_zoneCache.lastCalcBar = currentBar;
-      m_zoneCache.valid = true;
    }
 
    void UpdateMainZones(double atrPoints)
@@ -199,21 +165,21 @@ public:
       int swResShift = -1, swSupShift = -1;
 
       // 1. Ambil Data Extreme (HH/LL) dengan CopyHigh/CopyLow (MQL5 Best Practice)
+      // Optimized: Fetch data once for both Extreme and Swing logic
+      int lookback = MathMax(CFG.SRLookback, CFG.SwingLookback) + 2;
       double highs[], lows[];
       ArraySetAsSeries(highs, true);
       ArraySetAsSeries(lows, true);
 
-      if (CopyHigh(_Symbol, _Period, 1, CFG.SRLookback, highs) > 0 &&
-          CopyLow(_Symbol, _Period, 1, CFG.SRLookback, lows) > 0)
-      {
-         // Find max high and min low
-         extRes = highs[ArrayMaximum(highs)];
-         extSup = lows[ArrayMinimum(lows)];
-      }
+      if (CopyHigh(_Symbol, _Period, 1, lookback, highs) <= 0 || CopyLow(_Symbol, _Period, 1, lookback, lows) <= 0)
+         return;
+
+      extRes = highs[ArrayMaximum(highs, 0, CFG.SRLookback)];
+      extSup = lows[ArrayMinimum(lows, 0, CFG.SRLookback)];
 
       // 2. Ambil Data Swing (Fractal terdekat < 50 bar)
-      swRes = FindNearestSwing(false, 50, swResShift);
-      swSup = FindNearestSwing(true, 50, swSupShift);
+      swRes = FindNearestSwing(false, CFG.SwingLookback, swResShift, highs, lows);
+      swSup = FindNearestSwing(true, CFG.SwingLookback, swSupShift, highs, lows);
 
       // Logic Pemilihan berdasarkan Mode
       if (CFG.SRMode == SR_EXTREME)
@@ -245,18 +211,6 @@ public:
       DrawOrMoveHLine("SupLine", m_targetSupport, clrAqua);
 
       CheckZoneStatus(atrPoints);
-
-      // Update cache dengan hasil terbaru
-      m_zoneCache.support = m_targetSupport;
-      m_zoneCache.resistance = m_targetResistance;
-      m_zoneCache.htfSupport = m_htfSupport;
-      m_zoneCache.htfResistance = m_htfResistance;
-      m_zoneCache.isSupBroken = m_isSupportBroken;
-      m_zoneCache.isResBroken = m_isResistanceBroken;
-      m_zoneCache.supBufferMult = m_supBufferMult;
-      m_zoneCache.resBufferMult = m_resBufferMult;
-      m_zoneCache.supHtfAlign = m_supHtfAlignment;
-      m_zoneCache.resHtfAlign = m_resHtfAlignment;
 
       // Setelah zone dihitung, kirim event:
       ZoneUpdateEvent *zoneEvent = new ZoneUpdateEvent(
@@ -290,7 +244,7 @@ public:
 
       // Hitung Touch Count untuk menentukan Buffer Mult dengan CopyHigh/CopyLow
       int supTouches = 0, resTouches = 0;
-      double touchZone = (atrPoints * 0.5) * _Point; // Gunakan standar 0.5 ATR untuk deteksi sentuhan
+      double touchZone = (atrPoints * CFG.SRTouchBufferATR) * _Point;
 
       double lows[], highs[];
       ArraySetAsSeries(lows, true);
@@ -311,7 +265,7 @@ public:
       // Tentukan Multiplier Dinamis untuk Support
       if (m_isSupportBroken)
          m_supBufferMult = CFG.BufferMultWeak;
-      else if (supTouches >= 3)
+      else if (supTouches >= CFG.SRMinTouchesStrong)
          m_supBufferMult = CFG.BufferMultStrong;
       else if (supTouches <= 1)
          m_supBufferMult = CFG.ATRBufferMult;
@@ -321,12 +275,12 @@ public:
       // Tentukan Multiplier Dinamis untuk Resistance
       if (m_isResistanceBroken)
          m_resBufferMult = CFG.BufferMultWeak;
-      else if (resTouches >= 3)
+      else if (resTouches >= CFG.SRMinTouchesStrong)
          m_resBufferMult = CFG.BufferMultStrong;
       else if (resTouches <= 1)
          m_resBufferMult = CFG.ATRBufferMult;
       else
-         m_resBufferMult = 0.65; // Normal/Intermediate
+         m_resBufferMult = 0.65;
 
       // --- HTF Alignment Integration ---
       m_supHtfAlignment = 0;

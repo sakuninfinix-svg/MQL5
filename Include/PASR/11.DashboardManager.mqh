@@ -92,13 +92,13 @@ public:
 class DashboardManagerFactory
 {
 public:
-   static DashboardManager *Create(DashboardUI *ui, DataManager *dta)
+   static DashboardManager *Create(DashboardUI *ui, DataManager *dataManager)
    {
       DashboardManager *ctrl = new DashboardManager();
       if (CheckPointer(ctrl) != POINTER_INVALID)
       {
          ctrl.SetUI(ui);
-         ctrl.SetDataManager(dta);
+         ctrl.SetDataManager(dataManager);
          if (!ctrl.Init())
          {
             delete ctrl;
@@ -135,19 +135,24 @@ public:
       if (!CAppDialog::Create(chart, name, subwin, x1, y1, x2, y2))
          return false;
 
+      int localWidth = x2 - x1; // Hitung lebar relatif dialog
       int x = 10, y = 10;
-      m_lblState.Create(m_chart_id, m_name + "_st", m_subwin, x, y, x2 - 20, y + 15);
+      m_lblState.Create(m_chart_id, m_name + "_st", m_subwin, x, y, localWidth - 10, y + 20);
       m_lblState.Text("System Initializing...");
+      m_lblState.Color(clrBlack); // Pastikan warna terlihat di bg putih
       Add(m_lblState);
 
       y += 25;
-      m_lblPnL.Create(m_chart_id, m_name + "_pnl", m_subwin, x, y, x2 - 20, y + 15);
+      m_lblPnL.Create(m_chart_id, m_name + "_pnl", m_subwin, x, y, localWidth - 10, y + 20);
+      m_lblPnL.Text("Waiting for data...");
+      m_lblPnL.Color(clrBlack);
       Add(m_lblPnL);
 
       y += 50;
-      m_btnStop.Create(m_chart_id, m_name + "_stop", m_subwin, x, y, x + 100, y + 25);
+      m_btnStop.Create(m_chart_id, m_name + "_stop", m_subwin, x, y, x + 130, y + 25);
       m_btnStop.Text("EMERGENCY STOP");
       m_btnStop.ColorBackground(clrFireBrick);
+      m_btnStop.Color(clrWhite);
       Add(m_btnStop);
 
       return true;

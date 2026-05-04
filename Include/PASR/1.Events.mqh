@@ -192,6 +192,20 @@ public:
    virtual string Serialize() const override { return reason; }
 };
 
+class MarketGateEvent : public Event
+{
+public:
+   bool gateOpen;
+   bool entryAllowed;
+   double spread;
+   double atrPoints;
+
+   MarketGateEvent(bool open, double spreadValue, double atrValue, bool allowed)
+       : Event("MarketManager"), gateOpen(open), entryAllowed(allowed), spread(spreadValue), atrPoints(atrValue) {}
+
+   virtual string Type() const override { return "MarketGate"; }
+};
+
 //+------------------------------------------------------------------+
 //| EVENT UTILITIES                                                  |
 //+------------------------------------------------------------------+

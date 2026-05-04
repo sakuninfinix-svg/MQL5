@@ -6,6 +6,7 @@
 #ifndef __I_MANAGER_MQH__
 #define __I_MANAGER_MQH__
 
+#include "mql5_vscode_fix.h"
 #include "0.EventBus.mqh"
 #include "1.Events.mqh"
 #include "2.Config.mqh"
@@ -87,7 +88,7 @@ public:
       Log("🛑 Deinitialized.");
    }
 
-   void SetDataManager(DataManager *dta) { m_data = dta; }
+   void SetDataManager(DataManager *manager) { m_data = manager; }
    DataManager *GetDataManager() const { return m_data; }
 
    virtual void RefreshConfigCache()
@@ -175,7 +176,7 @@ protected:
    {
       if (CheckPointer(m_bus) == POINTER_INVALID)
          return;
-      IEventHandler *self = (IEventHandler *)GetPointer(this);
+      IEventHandler *self = GetPointer(this);
       for (int i = 0; i < ArraySize(m_subscribedEvents); i++)
       {
          m_bus.Subscribe(m_subscribedEvents[i], self, m_priority);
@@ -186,10 +187,10 @@ protected:
    {
       if (CheckPointer(m_bus) == POINTER_INVALID)
          return;
-      IEventHandler *self = (IEventHandler *)GetPointer(this); // Menggunakan variabel lokal
+      IEventHandler *self = GetPointer(this);
       for (int i = 0; i < ArraySize(m_subscribedEvents); i++)
       {
-         m_bus.Subscribe(m_subscribedEvents[i], self, m_priority); // Menggunakan variabel lokal
+         m_bus.Unsubscribe(m_subscribedEvents[i], self);
       }
    }
 
