@@ -28,6 +28,39 @@ target/
 *.tmp
 
 # System/Environment files
+*.ex4
+*.ex5
+
+# Build artifacts
+*.dll
+*.so
+*.dylib
+
+# Dependencies
+node_modules/
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Coverage and testing
+coverage/
+htmlcov/
+.coverage
+
+# OS specific
 .DS_Store
 Thumbs.db
 .env
@@ -38,9 +71,8 @@ Thumbs.db
 *.log
 coverage/
 htmlcov/
-.coverage
 
-# Compressed files
+# Compression files
 *.zip
 *.gz
 *.tar
