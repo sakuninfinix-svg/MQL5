@@ -1,6 +1,8 @@
-﻿#!/bin/bash
+#!/bin/bash
 echo "Checking for circular dependencies..."
 echo ""
+
+cd "$(dirname "$0")" || exit 1
 
 # Check if any file includes itself directly or indirectly
 for file in *.mqh; do
