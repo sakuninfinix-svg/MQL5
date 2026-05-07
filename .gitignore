@@ -24,6 +24,40 @@ dist/
 build/
 target/
 .gradle/
+.continue/
+Files/
+Images/
+Include/Arrays/
+Include/Canvas/
+Include/ChartObjects/
+Include/Charts/Chart.mqh
+Include/Controls/
+Include/Expert/
+Include/Files/
+Include/Generic/
+Include/Graphics/
+Include/Indicators/
+Include/WinAPI/
+Include/MovingAverages.mqh
+Include/Strings/String.mqh
+Include/OpenCL/OpenCL.mqh
+Include/VirtualKeys.mqh
+Include/Object.mqh
+Include/Trade/
+Include/Tools/DateTime.mqh
+Include/StdLibErr.mqh
+Indicators/
+Scripts/Examples/
+Scripts/UnitTests/
+Profiles/Charts/
+Profiles/SymbolSets/
+Profiles/Templates/
+Profiles/Tester/
+Profiles/deleted/
+Experts/Advisors/
+Experts/Examples/
+Include/Math/
+Experts/Free Robots/
 
 # OS specific
 .DS_Store
@@ -39,50 +73,15 @@ Thumbs.db
 *.swo
 *.tmp
 
-# System/Environment files
-*.ex4
-*.ex5
-
-# Build artifacts
-*.dll
-*.so
-*.dylib
-
-# Dependencies
-node_modules/
-
 # Logs and temp files
 *.log
 *.tmp
 *.temp
 
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Environment
-.env
-.env.local
-*.env.*
-
 # Coverage and testing
 coverage/
 htmlcov/
 .coverage
-
-# OS specific
-.DS_Store
-Thumbs.db
-.env
-.env.local
-*.env.*
-
-# Logs and coverage
-*.log
-coverage/
-htmlcov/
 
 # Compression files
 *.zip
