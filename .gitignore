@@ -15,6 +15,10 @@
 node_modules/
 venv/
 .venv/
+*.ex4
+*.ex5
+*.cache
+*.log
 __pycache__/
 dist/
 build/
@@ -35,54 +39,50 @@ Thumbs.db
 *.swo
 *.tmp
 
-#MQL5 Folder
-.continue/
-Experts/Advisors/
-Experts/Examples/
-Experts/Free Robots/
-Files/
-Images/
-Inlude/Arrays/
-Inlude/Canvas/
-Inlude/ChartObjects/
-Inlude/Charts/
-Inlude/Controls/
-Inlude/Experts/
-Inlude/Files/
-Inlude/Generic/
-Inlude/Graphics/
-Inlude/Indicators/
-Inlude/Math/
-Inlude/OpenCL/
-Inlude/Strings/
-Inlude/Tools/
-Inlude/Trade/
-Inlude/WinAPI/
-Inlude/MovingAverages.mqh
-Inlude/Object.mqh
-Inlude/StdLibErr.mqh
-Inlude/VirtualKeys.mqh
-Indicators/
-Libraries/
-Logs/
-Profiles/
-Scripts/
-Services/
-Shared Projects/
-
 # System/Environment files
 *.ex4
 *.ex5
+
+# Build artifacts
+*.dll
+*.so
+*.dylib
+
+# Dependencies
+node_modules/
 
 # Logs and temp files
 *.log
 *.tmp
 *.temp
 
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.env.*
+
 # Coverage and testing
 coverage/
 htmlcov/
 .coverage
+
+# OS specific
+.DS_Store
+Thumbs.db
+.env
+.env.local
+*.env.*
+
+# Logs and coverage
+*.log
+coverage/
+htmlcov/
 
 # Compression files
 *.zip
