@@ -24,6 +24,8 @@ private:
    double m_resBufferMult;
    int m_supHtfAlignment; // 1: Aligned, 0: Neutral, -1: Contra
    int m_resHtfAlignment;
+   int m_supStrength; // NEW: Zone strength (touch count)
+   int m_resStrength;
 
    // Config Cache
    struct SRConfigCache
@@ -118,7 +120,9 @@ public:
                  m_supBufferMult(0.5),
                  m_resBufferMult(0.5),
                  m_supHtfAlignment(0),
-                 m_resHtfAlignment(0) {}
+                 m_resHtfAlignment(0),
+                 m_supStrength(0),
+                 m_resStrength(0) {}
 
    virtual void RefreshConfigCache() override
    {
@@ -219,6 +223,7 @@ public:
           m_isSupportBroken, m_isResistanceBroken,
           m_supBufferMult, m_resBufferMult,
           m_supHtfAlignment, m_resHtfAlignment,
+          m_supStrength, m_resStrength,
           atrPoints);
       if (CheckPointer(EventBus::Instance()) != POINTER_INVALID)
          EventBus::Instance().Dispatch(zoneEvent);
@@ -261,6 +266,10 @@ public:
                resTouches++;
          }
       }
+
+      // Store zone strength
+      m_supStrength = supTouches;
+      m_resStrength = resTouches;
 
       // Tentukan Multiplier Dinamis untuk Support
       if (m_isSupportBroken)
@@ -345,6 +354,8 @@ public:
    double ResBufferMult() const { return m_resBufferMult; }
    int SupHtfAlignment() const { return m_supHtfAlignment; }
    int ResHtfAlignment() const { return m_resHtfAlignment; }
+   int SupStrength() const { return m_supStrength; }
+   int ResStrength() const { return m_resStrength; }
 };
 
 #endif

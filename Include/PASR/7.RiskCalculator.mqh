@@ -25,10 +25,19 @@ private:
       ulong magicNum;
    } m_cfg;
 
+   // NEW: Daily loss tracking
+   struct DailyStats
+   {
+      datetime date;
+      double realizedLoss;
+      int consecutiveLosses;
+   } m_daily;
+
 public:
    RiskCalculator()
    {
       LoadConfig();
+      ResetDailyStats();
    }
 
    // Load configuration from global CFG
@@ -39,6 +48,50 @@ public:
       m_cfg.lotSize = CFG.LotSize;
       m_cfg.minTPDistanceATR = CFG.MinTPDistanceATR;
       m_cfg.magicNum = CFG.MagicNum;
+   }
+
+   // NEW: Reset daily statistics
+   void ResetDailyStats()
+   {
+      m_daily.date = 0;
+      m_daily.realizedLoss = 0;
+      m_daily.consecutiveLosses = 0;
+   }
+
+   // NEW: Check if trade can be opened based on daily loss limits
+   bool CanOpenTrade(double tradeRiskAmount)
+   {
+      datetime today = iTime(_Symbol, PERIOD_D1, 0);
+      
+      if (m_daily.date != today)
+      {
+         ResetDailyStats();
+         m_daily.date = today;
+      }
+      
+      double maxDailyLoss = AccountInfoDouble(ACCOUNT_EQUITY) * (CFG.MaxDailyLossPct / 100.0);
+      return (m_daily.realizedLoss + tradeRiskAmount) < maxDailyLoss;
+   }
+
+   // NEW: Record closed trade result
+   void RecordClosedTrade(double profit)
+   {
+      if (profit < 0)
+      {
+         m_daily.realizedLoss += MathAbs(profit);
+         m_daily.consecutiveLosses++;
+         
+         // Check consecutive loss limit
+         if (m_daily.consecutiveLosses >= CFG.MaxConsecutiveLoss)
+         {
+            // Trigger emergency stop - this would be handled by caller
+            Print("[RiskCalculator] Max consecutive losses reached: ", m_daily.consecutiveLosses);
+         }
+      }
+      else
+      {
+         m_daily.consecutiveLosses = 0;  // Reset on win
+      }
    }
 
    // Validate SL and TP distances

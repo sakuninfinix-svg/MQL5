@@ -3,7 +3,7 @@
 
 // File ini hanya untuk membantu IntelliSense VS Code (C++)
 // MetaEditor akan mengabaikan ini karena MQL5 tidak mendefinisikan __c++
-#ifdef __cplusplus
+#if defined(__cplusplus) && !defined(__MQL5__) // Pastikan hanya aktif untuk C++ compiler, bukan MQL5 compiler
 #define input extern
 #define sinput extern
 #define group

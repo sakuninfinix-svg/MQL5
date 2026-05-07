@@ -31,16 +31,14 @@
 - Volume normalization
 
 ### 2. VARIABLE NAME ERROR in `6.ExecutionManager.mqh`
-**Problem:** Line 169 used undefined variable `m_isInitialized` instead of `m_initialized`.
-**Solution:** Changed to `m_initialized` (consistent with IManager base class).
+
 
 ### 3. NON-STANDARD METHOD in `8.RecoveryManager.mqh`
 **Problem:** Used `m_trade.PositionClosePartial()` which is not standard MQL5 CTrade method.
 **Solution:** Replaced with manual partial close implementation using `OrderSend()` with proper request structure.
 
 ### 4. FILE NAMING ISSUE
-**Problem:** File named `8.RecoveryManager (2).mqh` (with space and parenthesis).
-**Solution:** Renamed to `8.RecoveryManager.mqh` for consistency.
+
 
 ### 5. MISSING INCLUDES in `PASR MODULAR.mq5`
 **Problem:** Missing includes for `7.RiskCalculator.mqh` and `9.PatternManager.mqh`.

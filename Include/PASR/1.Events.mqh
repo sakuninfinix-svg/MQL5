@@ -85,14 +85,15 @@ public:
    bool isSupBroken, isResBroken;
    double supBufferMult, resBufferMult;
    int supHtfAlign, resHtfAlign;
+   int supStrength, resStrength; // NEW: Zone strength for adaptive filtering
    double atrPoints;
 
    ZoneUpdateEvent(double sup, double res, double htfSup, double htfRes,
                    bool supBroken, bool resBroken, double supMult, double resMult,
-                   int supAlign, int resAlign, double atr)
+                   int supAlign, int resAlign, int supStr, int resStr, double atr)
        : Event("SRManager"), support(sup), resistance(res), htfSupport(htfSup), htfResistance(htfRes),
          isSupBroken(supBroken), isResBroken(resBroken), supBufferMult(supMult), resBufferMult(resMult),
-         supHtfAlign(supAlign), resHtfAlign(resAlign), atrPoints(atr) {}
+         supHtfAlign(supAlign), resHtfAlign(resAlign), supStrength(supStr), resStrength(resStr), atrPoints(atr) {}
 
    virtual string Type() const override { return "ZoneUpdate"; }
 };
@@ -111,6 +112,37 @@ public:
        : Event("SignalManager"), signal(sig), atrPoints(atr), support(sup), resistance(res) {}
 
    virtual string Type() const override { return "SignalGenerated"; }
+};
+
+// NEW: Recovery Opportunity Event
+class RecoveryOpportunityEvent : public Event
+{
+public:
+   ulong originalTicket;
+   double slHitPrice;
+   int direction;
+   double atrPoints;
+   double originalLot;
+
+   RecoveryOpportunityEvent(ulong ticket, double slPrice, int dir, double atr, double lot)
+       : Event("RecoveryManager"), originalTicket(ticket), slHitPrice(slPrice), direction(dir), atrPoints(atr), originalLot(lot) {}
+
+   virtual string Type() const override { return "RecoveryOpportunity"; }
+};
+
+// NEW: Recovery Signal Event
+class RecoverySignalEvent : public Event
+{
+public:
+   ulong originalTicket; // Link back to the original trade
+   SignalDecision signal;
+   double atrPoints;
+   double support, resistance;
+
+   RecoverySignalEvent(ulong originalT, const SignalDecision &sig, double atr, double sup, double res)
+       : Event("SignalManager"), originalTicket(originalT), signal(sig), atrPoints(atr), support(sup), resistance(res) {}
+
+   virtual string Type() const override { return "RecoverySignal"; }
 };
 
 class ConfigReloadEvent : public Event

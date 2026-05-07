@@ -442,7 +442,7 @@ void MarketManager::FetchWebNews()
 //+------------------------------------------------------------------+
 bool MarketManager::IsNewsTime()
 {
-   if (!m_cfgCache.useNews)
+   if (m_cfgCache.newsLevel == NEWS_OFF)
    {
       m_newsStatus = "News filter OFF";
       return (m_lastNewsResult = false);

@@ -132,6 +132,15 @@ public:
       return m_instance;
    }
 
+   static void Release()
+   {
+      if (m_instance != NULL)
+      {
+         delete m_instance;
+         m_instance = NULL;
+      }
+   }
+
    // Register handler for specific event type
    bool Subscribe(const string eventType, IEventHandler *handler, int priority = 100)
    {

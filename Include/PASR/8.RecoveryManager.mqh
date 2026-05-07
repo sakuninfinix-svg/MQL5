@@ -48,6 +48,13 @@ private:
       bool exitOnOpposite;
       ulong magicNum;
       bool debugMode;
+      // Recovery Mode
+      bool useRecoveryMode;
+      int recoveryCooldownBars;
+      int maxRecoveryAttempts;
+      double recoveryLotMult;
+      double recoveryPatternScoreThreshold;
+      double recoveryZoneToleranceATR;
    } m_cfgCache;
 
    //+------------------------------------------------------------------+
@@ -70,6 +77,13 @@ private:
       m_cfgCache.exitOnOpposite = CFG.ExitOnOpposite;
       m_cfgCache.magicNum = CFG.MagicNum;
       m_cfgCache.debugMode = CFG.DebugMode;
+      // Recovery Mode
+      m_cfgCache.useRecoveryMode = CFG.UseRecoveryMode;
+      m_cfgCache.recoveryCooldownBars = CFG.RecoveryCooldownBars;
+      m_cfgCache.maxRecoveryAttempts = CFG.MaxRecoveryAttempts;
+      m_cfgCache.recoveryLotMult = CFG.RecoveryLotMult;
+      m_cfgCache.recoveryPatternScoreThreshold = CFG.RecoveryPatternScoreThreshold;
+      m_cfgCache.recoveryZoneToleranceATR = CFG.RecoveryZoneToleranceATR;
 
       // Refresh RiskCalculator config
       m_riskCalc.LoadConfig();
@@ -137,6 +151,7 @@ private:
       if (r.state != TRADE_STATE_NORMAL)
          return;
 
+      // Check if SL was hit
       ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
       double slPrice = PositionGetDouble(POSITION_SL);
@@ -145,6 +160,33 @@ private:
       double atr = atrPoints * _Point;
       double curPrice = (type == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
       double profitATR = (type == POSITION_TYPE_BUY) ? (curPrice - openPrice) / atr : (openPrice - curPrice) / atr;
+      
+      bool slHit = false;
+      if (slPrice > 0)
+      {
+         if (type == POSITION_TYPE_BUY && curPrice <= slPrice)
+            slHit = true;
+         else if (type == POSITION_TYPE_SELL && curPrice >= slPrice)
+            slHit = true;
+      }
+
+      if (slHit)
+      {
+         if (m_cfgCache.useRecoveryMode && r.recoveryAttempts < m_cfgCache.maxRecoveryAttempts)
+         {
+            r.state = TRADE_STATE_RECOVERY;
+            r.slHitPrice = curPrice; // Record actual SL hit price
+            r.slHitTime = TimeCurrent();
+            r.recoveryAttempts++; // Increment attempt counter
+            r.recoveryCooldownExpiry = TimeCurrent() + (m_cfgCache.recoveryCooldownBars * PeriodSeconds(_Period));
+            r.SaveState(m_cfgCache.magicNum);
+            Log(StringFormat("Position %d hit SL. Entering RECOVERY mode. Attempt %d.", r.mainTicket, r.recoveryAttempts));
+            DispatchEvent(new RecoveryOpportunityEvent(r.mainTicket, r.slHitPrice, r.direction, atrPoints, r.originalLot));
+            return; // Do not close position yet
+         }
+         CloseActivePosition(r, "SL Hit"); // Close if recovery mode is off or max attempts reached
+         return;
+      }
 
       // === PARTIAL CLOSE LOGIC ===
       if (m_cfgCache.usePartialClose && !r.partialClosed && curLot > 0)
@@ -167,51 +209,26 @@ private:
                   closeLot = NormalizeDouble(curLot * m_cfgCache.partialCloseLotPct, 2);
 
                double minVol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-               if (closeLot >= minVol)
+               if (closeLot >= minVol && closeLot < curLot)
                {
-                  // Manual partial close: Close part of position and leave the rest
-                  MqlTradeRequest request;
-                  MqlTradeResult result;
-                  ZeroMemory(request);
-                  ZeroMemory(result);
-
-                  request.action = TRADE_ACTION_DEAL;
-                  request.position = r.mainTicket;
-                  request.volume = closeLot;
-                  request.price = (type == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
-                  request.deviation = 30;
-                  request.magic = m_cfgCache.magicNum;
-                  request.comment = "Partial Close";
-
-                  // Set opposite order type for closing
-                  request.type = (type == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
-
-                  // Determine filling mode
-                  long filling = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
-                  if ((filling & SYMBOL_FILLING_IOC) != 0)
-                     request.type_filling = ORDER_FILLING_IOC;
-                  else if ((filling & SYMBOL_FILLING_FOK) != 0)
-                     request.type_filling = ORDER_FILLING_FOK;
-                  else
-                     request.type_filling = ORDER_FILLING_RETURN;
-
-                  if (OrderSend(request, result))
+                  // Simplified Partial Close using CTrade for Hedging/Netting compatibility
+if (m_trade.PositionClosePartial(r.mainTicket, closeLot))
                   {
-                     if (result.retcode == TRADE_RETCODE_DONE)
+                     r.partialArmedNormal = false;
+                     r.partialClosed = true;
+                     
+                     // Enhancement: Automatic Break-Even after Partial Close
+                     double stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+                     bool canMoveBE = (type == POSITION_TYPE_BUY) ? (curPrice - openPrice > stopLevel) : (openPrice - curPrice > stopLevel);
+                     
+                     if(canMoveBE && m_trade.PositionModify(r.mainTicket, openPrice, tpPrice)) // Move SL to BE
                      {
-                        r.partialArmedNormal = false;
-                        r.partialClosed = true;
-                        
-                        // Enhancement: Automatic Break-Even after Partial Close
-                        if(m_trade.PositionModify(r.mainTicket, openPrice, tpPrice))
-                        {
-                           if (m_cfgCache.debugMode)
-                              PrintFormat("[Recovery] Partial Close Success. SL moved to Break-Even for %d", r.mainTicket);
-                        }
-                        
-                        r.lastActionTick = GetTickCount64();
-                        r.SaveState(m_cfgCache.magicNum);
+                        if (m_cfgCache.debugMode)
+                           PrintFormat("[Recovery] Partial Close Success. SL moved to Break-Even for %d", r.mainTicket);
                      }
+                     
+                     r.lastActionTick = GetTickCount64();
+                     r.SaveState(m_cfgCache.magicNum);
                   }
                }
             }
@@ -221,8 +238,13 @@ private:
       // === TRAILING STOP LOGIC (Throttled) ===
       if (!m_cfgCache.useTrailing || !r.active)
          return;
-      if (GetMicrosecondCount() - m_lastTrailingUpdate < (ulong)m_trailingThrottleMs * 1000)
+      
+      ulong now = GetMicrosecondCount();
+      if (now - m_lastTrailingUpdate < (ulong)m_trailingThrottleMs * 1000)
          return;
+      
+      // Update timestamp immediately to prevent race condition
+      m_lastTrailingUpdate = now;
 
       double newSL = slPrice;
       double stopLevel = MathMax(SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL), 
@@ -290,6 +312,35 @@ private:
       }
    }
 
+   // NEW: Process positions in TRADE_STATE_RECOVERY
+   void ProcessRecovery(RecoveryEngine *r, double atrPoints)
+   {
+      if (CheckPointer(r) == POINTER_INVALID || r.state != TRADE_STATE_RECOVERY)
+         return;
+
+      // Check if recovery cooldown is active
+      if (TimeCurrent() < r.recoveryCooldownExpiry)
+      {
+         Log(StringFormat("Position %d in RECOVERY cooldown. Remaining: %d sec", r.mainTicket, r.recoveryCooldownExpiry - TimeCurrent()));
+         return;
+      }
+
+      // Check if max recovery attempts reached (this check is also done when SL is hit)
+      if (r.recoveryAttempts >= m_cfgCache.maxRecoveryAttempts)
+      {
+         CloseActivePosition(r, "Max recovery attempts reached");
+         return;
+      }
+
+      // If here, cooldown is over and attempts remain.
+      // RecoveryOpportunityEvent was dispatched when SL was hit.
+      // SignalManager will listen for it and dispatch RecoverySignalEvent.
+      // This method primarily manages the state and timeouts.
+      Log(StringFormat("Position %d in RECOVERY mode, looking for re-entry signal near %.5f", r.mainTicket, r.slHitPrice));
+      // No direct signal detection here, rely on events from SignalManager
+   }
+
+
    void VerifyAndCleanupEngines()
    {
       for (int i = ArraySize(engines) - 1; i >= 0; i--)
@@ -297,6 +348,12 @@ private:
          RecoveryEngine *r = engines[i];
          if (CheckPointer(r) == POINTER_INVALID || !r.active)
             continue;
+
+         // Process recovery state
+         if (r.state == TRADE_STATE_RECOVERY)
+         {
+            ProcessRecovery(r, m_data.GetATRPoints());
+         }
 
          // Check if position still exists
          if (!PositionSelectByTicket(r.mainTicket))
@@ -336,6 +393,7 @@ public:
    {
       AddEvent("PriceUpdate");
       AddEvent("OrderExecution");
+      AddEvent("RecoverySignal"); // Subscribe to recovery signals from SignalManager
       AddEvent("SignalGenerated");
    }
 
@@ -399,6 +457,23 @@ public:
       CloseOppositePositions(e.signal.orderType);
    }
 
+   // NEW: Handle RecoverySignalEvent from SignalManager
+   virtual void OnRecoverySignal(RecoverySignalEvent *e) override
+   {
+      if (CheckPointer(e) == POINTER_INVALID)
+         return;
+
+      RecoveryEngine *r = GetEngine(e.originalTicket);
+      if (CheckPointer(r) == POINTER_INVALID || r.state != TRADE_STATE_RECOVERY)
+      {
+         Log(StringFormat("Received recovery signal for non-recovery/non-existent position %d. Ignoring.", e.originalTicket));
+         return;
+      }
+      // SignalManager has found a re-entry opportunity. ExecutionManager will handle placing the order.
+      // We just need to ensure this engine is ready for the new trade to be linked.
+      Log(StringFormat("Recovery signal received for original trade %d. Signal: %s", e.originalTicket, e.signal.reason));
+   }
+
    virtual void OnEmergencyStop(EmergencyStopEvent *e) override
    {
       if (CheckPointer(e) == POINTER_INVALID)
@@ -408,11 +483,15 @@ public:
       for (int i = ArraySize(engines) - 1; i >= 0; i--)
       {
          RecoveryEngine *r = engines[i];
-         if (CheckPointer(r) != POINTER_INVALID && r.active)
+         if (CheckPointer(r) != POINTER_INVALID)
          {
-            CloseActivePosition(r, "Emergency: " + e.reason);
+            if (r.active)
+               CloseActivePosition(r, "Emergency: " + e.reason);
+            delete r;  // Properly delete engine
+            engines[i] = NULL;
          }
       }
+      ArrayResize(engines, 0);  // Clear array after deleting all engines
    }
 
    virtual void OnHeartbeat(HeartbeatEvent *e) override
@@ -448,6 +527,10 @@ public:
    void Register(ulong ticket, ENUM_ORDER_TYPE type, double entry, double tp,
                  double brokerSL, double atr, double lot, double zonePrice)
    {
+      // Store original trade details for potential recovery
+      double originalEntry = entry;
+      double originalSL = brokerSL;
+      double originalTP = tp;
       if (FindEngineIndex(ticket) >= 0)
          return;
 
@@ -491,8 +574,12 @@ public:
       target.peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
       target.entryTime = TimeCurrent();
 
+      target.originalEntry = originalEntry;
+      target.originalSL = originalSL;
+      target.originalTP = originalTP;
+      target.originalLot = lot;
       // Partial TP setup
-      double pcDist = target.lastKnownATR * CFG.PartialCloseATR * _Point;
+      double pcDist = target.lastKnownATR * m_cfgCache.partialCloseATR * _Point;
       target.partialTP = NormalizeDouble(entry + ((type == ORDER_TYPE_BUY ? 1.0 : -1.0) * pcDist), _Digits);
       target.SaveState(m_cfgCache.magicNum);
 

@@ -64,6 +64,7 @@ private:
       bool isSupBroken, isResBroken;
       double supBufferMult, resBufferMult;
       int supHtfAlign, resHtfAlign;
+      int supStrength, resStrength; // NEW: Zone strength for adaptive filtering
 
       void Reset() { ZeroMemory(this); }
    } m_marketData;
@@ -74,8 +75,7 @@ private:
       int signalLookback;
       bool useMTF;
       bool exitOnOpposite;
-      double minConfluenceScore;
-      double mtfBonus;
+      ENUM_TPSL_MODE tpslMode;
       double strongZoneBonus;
       double strongZoneThreshold;
       double zoneReuseATR;
@@ -85,6 +85,8 @@ private:
       double antiBreakoutPct;
       double momentumThresholdATR;
       double minTPDistanceATR;
+      double slBufferATR;
+      double tpBufferATR;
       int signalCooldownBars;
       double atrBufferMult;
       bool debugMode;
@@ -92,8 +94,11 @@ private:
       double highQualityThreshold;
       bool useDynamicCooldown;
       int reducedCooldownBars;
-      double mtfAlignmentBonus;
+      double mtfConfluenceBonus;
       bool usePatternWeights;
+      double recoveryPatternScoreThreshold;
+      double recoveryZoneToleranceATR;
+      bool useRecoveryMode;
       double strongZoneBufferMult;
       bool useAdaptiveZoneBuffer;
       int srMinTouchesStrong;
@@ -108,8 +113,7 @@ private:
       m_cfgCache.signalLookback = CFG.SignalLookback;
       m_cfgCache.useMTF = CFG.UseMTF;
       m_cfgCache.exitOnOpposite = CFG.ExitOnOpposite;
-      m_cfgCache.minConfluenceScore = CFG.MinConfluenceScore;
-      m_cfgCache.mtfBonus = CFG.MTFBonus;
+      m_cfgCache.tpslMode = CFG.TPSLMode;
       m_cfgCache.strongZoneBonus = CFG.StrongZoneBonus;
       m_cfgCache.strongZoneThreshold = CFG.StrongZoneThreshold;
       m_cfgCache.zoneReuseATR = CFG.ZoneReuseATR;
@@ -119,6 +123,8 @@ private:
       m_cfgCache.antiBreakoutPct = CFG.AntiBreakoutPct;
       m_cfgCache.momentumThresholdATR = CFG.MomentumThresholdATR;
       m_cfgCache.minTPDistanceATR = CFG.MinTPDistanceATR;
+      m_cfgCache.slBufferATR = CFG.SLBufferATR;
+      m_cfgCache.tpBufferATR = CFG.TPBufferATR;
       m_cfgCache.signalCooldownBars = CFG.SignalCooldownBars;
       m_cfgCache.atrBufferMult = CFG.ATRBufferMult;
       m_cfgCache.debugMode = CFG.DebugMode;
@@ -126,8 +132,11 @@ private:
       m_cfgCache.highQualityThreshold = CFG.HighQualityThreshold;
       m_cfgCache.useDynamicCooldown = CFG.UseDynamicCooldown;
       m_cfgCache.reducedCooldownBars = CFG.ReducedCooldownBars;
-      m_cfgCache.mtfAlignmentBonus = CFG.MTFAlignmentBonus;
+      m_cfgCache.mtfConfluenceBonus = CFG.MTFConfluenceBonus;
       m_cfgCache.usePatternWeights = CFG.UsePatternWeights;
+      m_cfgCache.recoveryPatternScoreThreshold = CFG.RecoveryPatternScoreThreshold;
+      m_cfgCache.recoveryZoneToleranceATR = CFG.RecoveryZoneToleranceATR;
+      m_cfgCache.useRecoveryMode = CFG.UseRecoveryMode;
       m_cfgCache.strongZoneBufferMult = CFG.StrongZoneBufferMult;
       m_cfgCache.useAdaptiveZoneBuffer = CFG.UseAdaptiveZoneBuffer;
       m_cfgCache.srMinTouchesStrong = CFG.SRMinTouchesStrong;
@@ -237,9 +246,8 @@ private:
          double tol = atrPoints * m_cfgCache.zoneReuseATR * _Point;
          if (MathAbs(price - m_signalCooldowns[i].price) <= tol)
          {
-            if ((orderType == ORDER_TYPE_BUY && m_signalCooldowns[i].price < price) ||
-                (orderType == ORDER_TYPE_SELL && m_signalCooldowns[i].price > price))
-               return true;
+            // Any signal in the zone within cooldown period blocks new signals
+            return true;
          }
       }
       return false;
@@ -302,10 +310,9 @@ private:
       double zoneWidth = (atrPoints * dynamicMult) * _Point;
       double multiplier = (m_cfgCache.entryMode == MODE_SAFE) ? 0.5 : 1.0;
       
-      // NEW: Adaptive Zone Buffer berdasarkan strength zona
       if (m_cfgCache.useAdaptiveZoneBuffer && zoneStrength >= m_cfgCache.srMinTouchesStrong)
       {
-         multiplier *= m_cfgCache.strongZoneBufferMult; // Lebih longgar untuk zona kuat
+         multiplier *= m_cfgCache.strongZoneBufferMult; 
       }
 
       bool ok = (dir == 1) ? (extreme <= zonePrice + (zoneWidth * multiplier)) : (extreme >= zonePrice - (zoneWidth * multiplier));
@@ -323,18 +330,21 @@ private:
       double range = h - l;
       double body = MathAbs(o - c);
 
-      if (range > m_cfgCache.maxSignalATR * atrPoints * _Point)
+      // Pastikan range tidak 0 untuk menghindari division by zero
+      if (range <= 0) return false;
+
+      double maxAllowedRange = m_cfgCache.maxSignalATR * atrPoints * _Point;
+      if (range > maxAllowedRange)
       {
          reason = "Signal too large";
          return false;
       }
-      if (range > 0 && (body / range) > m_cfgCache.antiBreakoutPct)
+      if ((body / range) > m_cfgCache.antiBreakoutPct)
       {
          reason = "Body too long";
          return false;
       }
 
-      // Filter Momentum: Cek 1-3 candle sebelumnya
       double threshold = atrPoints * m_cfgCache.momentumThresholdATR * _Point;
       int pushCount = 0;
 
@@ -403,16 +413,37 @@ private:
 
    bool PassOpportunityFilter(int dir, int shift, double atrPoints,
                               double support, double resistance,
-                              double signalPrice, string &reason,
+                              double patternExtreme, string &reason,
                               const MqlRates &rates[])
    {
+      double entryPrice = rates[shift].close;
       double target = (dir == 1) ? resistance : support;
-      double profitDist = (dir == 1) ? (target - signalPrice) : (signalPrice - target);
+      
+      // 1. Hitung Proyeksi TP (Selalu ke SR lawan dengan buffer)
+      double tpBuffer = m_cfgCache.tpBufferATR * atrPoints * _Point;
+      double projectedTP = (dir == 1) ? (target - tpBuffer) : (target + tpBuffer);
+      double profitDist = MathAbs(entryPrice - projectedTP);
 
+      // 2. Hitung Proyeksi SL berdasarkan Mode
+      double slBuffer = m_cfgCache.slBufferATR * atrPoints * _Point;
+      double baseSL = (m_cfgCache.tpslMode == TPSL_PATTERN) ? patternExtreme : ((dir == 1) ? support : resistance);
+      double projectedSL = (dir == 1) ? (baseSL - slBuffer) : (baseSL + slBuffer);
+      
+      // Pastikan riskDist minimal 1 point untuk menghindari pembagian nol
+      double riskDist = MathMax(MathAbs(entryPrice - projectedSL), _Point);
+
+      // 3. Validasi Jarak minimum TP
       double minTPDist = (atrPoints * m_cfgCache.minTPDistanceATR) * _Point;
       if (profitDist < minTPDist)
       {
          reason = "TP distance < Min ATR";
+         return false;
+      }
+
+      // 4. Validasi Risk:Reward (Minimal 1:1)
+      if (profitDist < riskDist * 1.0) 
+      {
+         reason = StringFormat("Poor R:R (Risk:%.1fpt TP:%.1fpt)", riskDist/_Point, profitDist/_Point);
          return false;
       }
 
@@ -457,8 +488,8 @@ private:
          ENUM_PATTERN_TYPE pType = PATTERN_NONE;
          string patternReason = "";
          double pScore = 0;
+         double pSLMult = 1.0;
 
-         // Pattern detection via PatternManager
          if (!m_patterns.Detect(rates, shift, atrPoints, pType, dir, signalPrice, pScore, patternReason))
             continue;
 
@@ -476,7 +507,7 @@ private:
          }
 
          // 3. Zone Touch Filter
-         int zoneStrength = 0; // TODO: Get from SRManager if available
+         int zoneStrength = (dir == 1) ? m_marketData.supStrength : m_marketData.resStrength;
          if (!PassZoneTouchFilter(shift, dir, zonePrice, atrPoints, currentBufferMult, currentFilterReason, rates, zoneStrength))
          {
             reason = currentFilterReason;
@@ -503,54 +534,16 @@ private:
          double finalConfluenceScore = pScore;
 
          // Bonus jika searah MTF
-         if ((dir == 1 && bias > 0) || (dir == -1 && bias < 0))
-            finalConfluenceScore += m_cfgCache.mtfBonus;
+         if (m_cfgCache.useMTF)
+         {
+            if (((dir == 1 && bias > 0) || (dir == -1 && bias < 0)) ||
+                ((dir == 1 && supHtfAlign == 1) || (dir == -1 && resHtfAlign == 1)))
+               finalConfluenceScore += m_cfgCache.mtfConfluenceBonus;
+         }
 
          // Bonus jika selaras dengan HTF zone alignment
-         if ((dir == 1 && supHtfAlign == 1) || (dir == -1 && resHtfAlign == 1))
-            finalConfluenceScore += m_cfgCache.mtfAlignmentBonus;
-
-         // Bonus jika zona sangat kuat (misal: Strong Zone Mult)
          if (currentBufferMult < m_cfgCache.strongZoneThreshold)
             finalConfluenceScore += m_cfgCache.strongZoneBonus;
-
-         // NEW: Pattern Weight System - beri bobot lebih ke pattern berkualitas
-         if (m_cfgCache.usePatternWeights)
-         {
-            if (pType == PATTERN_FAKEY)
-               finalConfluenceScore *= 1.2;  // Fakey: highest winrate historically
-            else if (pType == PATTERN_ENGULFING)
-               finalConfluenceScore *= 1.1;  // Engulfing: strong momentum
-            // Pinbar/Inside: base weight 1.0
-         }
-
-         if (finalConfluenceScore < m_cfgCache.minConfluenceScore)
-         {
-            reason = StringFormat("Total Confluence Weak (%.2f < %.2f)", finalConfluenceScore, m_cfgCache.minConfluenceScore);
-            continue;
-         }
-
-         // 6. Opportunity/R:R Filter
-         if (!PassOpportunityFilter(dir, shift, atrPoints, support, resistance,
-                                    signalPrice, currentFilterReason, rates))
-         {
-            reason = currentFilterReason;
-            continue;
-         }
-
-         // 7. Zone Reuse Filter
-         if (IsZoneReuseBlocked(dir == 1, zonePrice, atrPoints))
-         {
-            reason = "Zone reuse blocked";
-            continue;
-         }
-
-         // 8. Pattern Failure Cooldown
-         if (IsPatternFailureBlocked(dir == 1, zonePrice, atrPoints))
-         {
-            reason = "Level failure cooldown";
-            continue;
-         }
 
          // 9. Signal Cooldown Filter - NEW: Dynamic Cooldown untuk HQ Setup
          bool isHighQualitySetup = (finalConfluenceScore >= m_cfgCache.highQualityThreshold);
@@ -574,6 +567,7 @@ private:
          decision.patternType = pType;
          decision.zonePrice = zonePrice;
          decision.signalShift = shift;
+         decision.slMultiplier = pSLMult;
          decision.bias = bias;
          decision.reason = patternReason + (currentFilterReason != "" ? " | " + currentFilterReason : "");
 
@@ -590,6 +584,79 @@ private:
       // No signal found
       decision.reason = (reason == "") ? "No signal" : reason;
       return false;
+   }
+
+   // NEW: Detect signal specifically for recovery
+   bool DetectRecoverySignal(SignalDecision &decision,
+                             ulong originalTicket,
+                             double slHitPrice,
+                             int originalDirection,
+                             double atrPoints,
+                             double support, double resistance,
+                             double htfSupport, double htfResistance,
+                             bool isSupBroken, bool isResBroken,
+                             double supBufferMult, double resBufferMult,
+                             int supHtfAlign, int resHtfAlign)
+   {
+      ZeroMemory(decision);
+      string reason = "No recovery pattern detected";
+
+      if (!m_cfgCache.useRecoveryMode)
+         return false;
+
+      // Fetch candles around the SL hit price
+      MqlRates rates[];
+      // Look for patterns on the last closed bar (shift 0)
+      if (!FetchCandleBatch(1, 4, rates)) // Need at least 3-4 bars for most patterns
+      {
+         decision.reason = "Failed to fetch candle data for recovery";
+         return false;
+      }
+
+      // We are looking for a reversal pattern in the opposite direction of the original trade
+      int targetDir = -originalDirection;
+
+      // Check last closed bar (shift 0) for a reversal pattern
+      int shift = 0;
+      // string currentFilterReason = ""; // Not used here, patternReason is enough
+      int dir = 0;
+      double signalPrice = 0;
+      ENUM_PATTERN_TYPE pType = PATTERN_NONE;
+      string patternReason = "";
+      double pScore = 0;
+      double pSLMult = 1.0;
+
+      if (!m_patterns.Detect(rates, shift, atrPoints, pType, dir, signalPrice, pScore, pSLMult, patternReason))
+         return false;
+
+      // Ensure pattern is in the target reversal direction
+      if (dir != targetDir)
+         return false;
+
+      // Check if pattern score meets recovery threshold
+      if (pScore < m_cfgCache.recoveryPatternScoreThreshold)
+      {
+         reason = StringFormat("Recovery pattern score too low (%.2f < %.2f)", pScore, m_cfgCache.recoveryPatternScoreThreshold);
+         return false;
+      }
+
+      // Check if the signal is near the SL hit price (within tolerance)
+      double tolerance = atrPoints * m_cfgCache.recoveryZoneToleranceATR * _Point;
+      if (MathAbs(signalPrice - slHitPrice) > tolerance)
+      {
+         reason = StringFormat("Recovery signal too far from SL hit price (%.5f vs %.5f)", signalPrice, slHitPrice);
+         return false;
+      }
+
+      // All checks passed, this is a valid recovery signal
+      decision.valid = true;
+      decision.orderType = (targetDir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      decision.signalPrice = signalPrice;
+      decision.patternType = pType;
+      decision.slMultiplier = pSLMult;
+      decision.bias = targetDir; // Bias is the direction of the recovery signal
+      decision.reason = "RECOVERY SIGNAL: " + patternReason;
+      return true;
    }
 
    //+------------------------------------------------------------------+
@@ -625,6 +692,7 @@ public:
       AddEvent("PriceUpdate");
       AddEvent("NewBar");
       AddEvent("ZoneUpdate");
+      AddEvent("RecoveryOpportunity"); // Listen for recovery opportunities
       AddEvent("MarketGate");
    }
 
@@ -708,6 +776,8 @@ public:
          m_marketData.resBufferMult = ze.resBufferMult;
          m_marketData.supHtfAlign = ze.supHtfAlign;
          m_marketData.resHtfAlign = ze.resHtfAlign;
+         m_marketData.supStrength = ze.supStrength; // NEW: Zone strength
+         m_marketData.resStrength = ze.resStrength;
       }
       else if (e.Type() == "MarketGate")
       {
@@ -719,6 +789,37 @@ public:
          m_marketEntryAllowed = mg.entryAllowed;
          m_marketSpread = mg.spread;
          m_marketATR = mg.atrPoints;
+      }
+      else if (e.Type() == "RecoveryOpportunity")
+      {
+         RecoveryOpportunityEvent *roe = dynamic_cast<RecoveryOpportunityEvent *>(e);
+         if (CheckPointer(roe) == POINTER_INVALID)
+            return;
+
+         if (!m_cfgCache.useRecoveryMode)
+            return;
+
+         // Attempt to detect a recovery signal immediately
+         SignalDecision recoveryDecision;
+         if (DetectRecoverySignal(recoveryDecision,
+                                  roe.originalTicket,
+                                  roe.slHitPrice,
+                                  roe.direction,
+                                  roe.atrPoints,
+                                  m_marketData.support, m_marketData.resistance,
+                                  m_marketData.htfSupport, m_marketData.htfResistance,
+                                  m_marketData.isSupBroken, m_marketData.isResBroken,
+                                  m_marketData.supBufferMult, m_marketData.resBufferMult,
+                                  m_marketData.supHtfAlign, m_marketData.resHtfAlign))
+         {
+            // Signal found! Dispatch to ExecutionManager via event
+            RecoverySignalEvent *recSigEvent = new RecoverySignalEvent(
+                roe.originalTicket, recoveryDecision, roe.atrPoints, m_marketData.support, m_marketData.resistance);
+            EventBus::Instance().Dispatch(recSigEvent);
+            Log(StringFormat("Recovery signal detected for original trade %d: %s", roe.originalTicket, recoveryDecision.reason));
+         } else {
+            Log(StringFormat("No immediate recovery signal found for original trade %d.", roe.originalTicket));
+         }
       }
    }
    //+------------------------------------------------------------------+

@@ -24,8 +24,6 @@
 EventBus *g_eventBus = NULL;
 EventRecorder *g_recorder = NULL;
 DashboardManager *dashCtrl = NULL;
-
-// ✅ Prinsip MetaEditor 5: Definisi static member dipusatkan di file Expert (.mq5)
 DataManager *IManager::s_dataCache = NULL;
 
 MarketManager market;
@@ -59,8 +57,7 @@ int OnInit()
    if (!dta.Init())
       return (INIT_FAILED);
 
-   // Set global cache for all IManager children
-   IManager::SetGlobalDataManager(GetPointer(dta)); // Corrected static method call
+   IManager::SetGlobalDataManager(GetPointer(dta)); 
 
    if (!signal.Init())
       return (INIT_FAILED);
@@ -110,8 +107,7 @@ int OnInit()
             eng.LoadState(t, CFG.MagicNum);
 
             // Dispatch event to notify listeners about current position state
-            g_eventBus.Dispatch(new PositionUpdateEvent( // Dispatch only if engine is valid
-                t, PositionGetDouble(POSITION_PRICE_CURRENT),
+            g_eventBus.Dispatch(new PositionUpdateEvent( t, PositionGetDouble(POSITION_PRICE_CURRENT),
                 PositionGetDouble(POSITION_PROFIT)));
          }
       }
@@ -125,15 +121,9 @@ int OnInit()
 
 void OnDeinit(const int reason)
 {
-   // Stop timer
    EventKillTimer();
-
-   // Clear EventBus subscriptions before destroying objects
-   EventBus *bus = EventBus::Instance();
-   if (CheckPointer(bus) != POINTER_INVALID)
-   {
-      bus.Clear(); // Unsubscribe all handlers
-   }
+   EventBus::Release();
+   
    DashboardManagerFactory::Destroy(dashCtrl);
    if (CheckPointer(g_recorder) != POINTER_INVALID)
    {
@@ -154,18 +144,16 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
 {
-   // Handle new position creation and deal closing
    if (trans.type == TRADE_TRANSACTION_DEAL_ADD && HistoryDealSelect(trans.deal))
    {
       if (HistoryDealGetInteger(trans.deal, DEAL_MAGIC) == CFG.MagicNum &&
           HistoryDealGetString(trans.deal, DEAL_SYMBOL) == _Symbol)
       {
-
          long entryType = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
          ulong positionID = trans.position;
 
          if (entryType == DEAL_ENTRY_IN)
-         { // New position opened
+       { // New position opened
             string comment = HistoryDealGetString(trans.deal, DEAL_COMMENT);
             int hashPos = StringFind(comment, "#");
             ulong tsID = 0;
@@ -178,7 +166,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             double sl = HistoryDealGetDouble(trans.deal, DEAL_SL);
             double tp = HistoryDealGetDouble(trans.deal, DEAL_TP);
 
-            // Robust SL/TP lookup: HistoryDeal might have 0 if orders were modified async
+         // Robust SL/TP lookup: HistoryDeal might hve 0 if orders were modified async
             if (PositionSelectByTicket(positionID))
             {
                if (sl <= 0)
@@ -211,11 +199,28 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
          }
          else if (entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_INOUT)
          {
+            string comment = HistoryDealGetString(trans.deal, DEAL_COMMENT);
+            int recovPos = StringFind(comment, "RECOV_ORIG_");
+            if (recovPos == 0)
+            {
+                // This is a recovery trade closing. We need to mark the original RecoveryEngine as DONE.
+                int ticketStart = StringLen("RECOV_ORIG_");
+                int ticketEnd = StringFind(comment, "_P_", ticketStart);
+                if (ticketEnd > ticketStart) {
+                    ulong originalTicket = (ulong)StringToInteger(StringSubstr(comment, ticketStart, ticketEnd - ticketStart));
+                    recovery.NotifyRecoverySuccess(originalTicket); // New method in RecoveryManager
+                }
+            }
+            // Fall through to normal profit/loss tracking for all trades
+         }
+         else if (entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_INOUT)
+         {
             dta.RefreshDailyProfit();
             double netProfit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT) +
                                HistoryDealGetDouble(trans.deal, DEAL_COMMISSION) +
                                HistoryDealGetDouble(trans.deal, DEAL_SWAP);
             market.UpdateLossStreak(netProfit);
+            dta.UpdateConsecutiveLosses(netProfit); // NEW: Track consecutive losses
          }
       }
    }

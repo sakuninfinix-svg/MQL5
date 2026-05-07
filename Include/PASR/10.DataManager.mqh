@@ -30,12 +30,14 @@ private:
    double m_dayStartBalance;
    datetime m_lastProfitUpdateDay;
    datetime m_lastScanTime;
+   int m_consecutiveLosses; // NEW: Track consecutive losses
 
 public:
    DataManager() : IManager("DataManager", 10),
                    m_atrHandle(INVALID_HANDLE), m_fractalHandle(INVALID_HANDLE),
                    m_realizedDailyProfit(0),
-                   m_dayStartBalance(0), m_lastProfitUpdateDay(0), m_lastScanTime(0)
+                   m_dayStartBalance(0), m_lastProfitUpdateDay(0), m_lastScanTime(0),
+                   m_consecutiveLosses(0)
    {
       m_cache.barTime = 0;
       m_cache.atr = 0;
@@ -57,7 +59,7 @@ public:
    {
       if (!IManager::Init())
          return false;
-      m_data = GetPointer(this); // Prinsip MQL5: Mengatur pointer internal ke diri sendiri
+      m_data = GetPointer(this); 
       return ResetIndicators();
    }
 
@@ -89,7 +91,6 @@ public:
 
    void UpdateIndicators()
    {
-      // MQL5 Best Practice: Gunakan CopyTime untuk async safety
       datetime times[];
       if (CopyTime(_Symbol, _Period, 0, 1, times) <= 0)
          return;
@@ -98,12 +99,16 @@ public:
       if (m_cache.barTime == currentBar && !m_cache.dirty)
          return;
 
+      // Memastikan history terminal sudah tersinkronisasi
+      if (!SeriesInfoInteger(_Symbol, _Period, SERIES_SYNCHRONIZED))
+         return;
+
       double atrBuf[1];
-      if (CopyBuffer(m_atrHandle, 0, 0, 1, atrBuf) > 0)
+      if (CopyBuffer(m_atrHandle, 0, 0, 1, atrBuf) > 0 && atrBuf[0] > 0)
       {
          m_cache.atr = atrBuf[0] / _Point;
-         CopyBuffer(m_fractalHandle, 0, 0, 100, m_cache.fractalsUp);
-         CopyBuffer(m_fractalHandle, 1, 0, 100, m_cache.fractalsDown);
+         if (CopyBuffer(m_fractalHandle, 0, 0, 100, m_cache.fractalsUp) < 100) return;
+         if (CopyBuffer(m_fractalHandle, 1, 0, 100, m_cache.fractalsDown) < 100) return;
 
          m_cache.barTime = currentBar;
          m_cache.dirty = false;
@@ -181,7 +186,10 @@ public:
       datetime today = times[0];
 
       if (today != m_lastProfitUpdateDay)
+      {
          ResetDailyAnchor();
+         m_consecutiveLosses = 0; // Reset consecutive losses on new day
+      }
       else
          RefreshDailyProfit();
 
@@ -298,6 +306,17 @@ public:
          }
       }
    }
+
+   // NEW: Update consecutive losses counter
+   void UpdateConsecutiveLosses(double netProfit)
+   {
+      if (netProfit < 0)
+         m_consecutiveLosses++;
+      else
+         m_consecutiveLosses = 0;
+   }
+
+   int GetConsecutiveLosses() const { return m_consecutiveLosses; }
 
    int ParseHM(string hhmm) const
    {

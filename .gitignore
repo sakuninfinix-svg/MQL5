@@ -9,6 +9,7 @@
 *.a
 *.obj
 *.out
+*.dylib
 
 # Dependencies
 node_modules/
@@ -20,46 +21,6 @@ build/
 target/
 .gradle/
 
-# Editor/IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# System/Environment files
-*.ex4
-*.ex5
-
-# Build artifacts
-*.dll
-*.so
-*.dylib
-
-# Dependencies
-node_modules/
-
-# Logs and temp files
-*.log
-*.tmp
-*.temp
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Environment
-.env
-.env.local
-*.env.*
-
-# Coverage and testing
-coverage/
-htmlcov/
-.coverage
-
 # OS specific
 .DS_Store
 Thumbs.db
@@ -67,10 +28,61 @@ Thumbs.db
 .env.local
 *.env.*
 
-# Logs and coverage
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+#MQL5 Folder
+.continue/
+Experts/Advisors/
+Experts/Examples/
+Experts/Free Robots/
+Files/
+Images/
+Inlude/Arrays/
+Inlude/Canvas/
+Inlude/ChartObjects/
+Inlude/Charts/
+Inlude/Controls/
+Inlude/Experts/
+Inlude/Files/
+Inlude/Generic/
+Inlude/Graphics/
+Inlude/Indicators/
+Inlude/Math/
+Inlude/OpenCL/
+Inlude/Strings/
+Inlude/Tools/
+Inlude/Trade/
+Inlude/WinAPI/
+Inlude/MovingAverages.mqh
+Inlude/Object.mqh
+Inlude/StdLibErr.mqh
+Inlude/VirtualKeys.mqh
+Indicators/
+Libraries/
+Logs/
+Profiles/
+Scripts/
+Services/
+Shared Projects/
+
+# System/Environment files
+*.ex4
+*.ex5
+
+# Logs and temp files
 *.log
+*.tmp
+*.temp
+
+# Coverage and testing
 coverage/
 htmlcov/
+.coverage
 
 # Compression files
 *.zip
