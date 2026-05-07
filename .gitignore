@@ -9,38 +9,64 @@
 *.a
 *.obj
 *.out
+*.dylib
 
 # Dependencies
 node_modules/
 venv/
 .venv/
+*.ex4
+*.ex5
+*.cache
+*.log
 __pycache__/
 dist/
 build/
 target/
 .gradle/
 
-# Editor/IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# System/Environment files
-*.ex4
-*.ex5
-
-# Build artifacts
-*.dll
-*.so
-*.dylib
 
 # Dependencies
-node_modules/
+.continue
+.vscode
+Experts/Advisors
+Experts/Examples
+Experts/Free Robots
+Files
+Images
+Include/Arrays
+Include/Canvas
+Include/ChartObjects
+Include/Charts
+Include/Controls
+Include/Expert
+Include/Files
+Include/Generic
+Include/Graphics
+Include/Indicators
+Include/Math
+Include/OpenCL
+Include/Strings
+Include/Tools
+Include/Trade
+Include/WinAPI
+Include/MovingAverages.mqh
+Include/Object.mqh
+Include/stdLibErr.mqh
+Include/VirtualKeys.mqh
+Indicators
+Libraries
+Logs
+Profiles
+Scripts
+Services
+Shared Projects
+temp
+tester
 
-# Logs and temp files
-*.log
+# Cache directories
+.mypy_cache/
+.pytest_cache/
 *.tmp
 *.temp
 
@@ -49,11 +75,6 @@ node_modules/
 .idea/
 *.swp
 *.swo
-
-# Environment
-.env
-.env.local
-*.env.*
 
 # Coverage and testing
 coverage/
@@ -66,11 +87,6 @@ Thumbs.db
 .env
 .env.local
 *.env.*
-
-# Logs and coverage
-*.log
-coverage/
-htmlcov/
 
 # Compression files
 *.zip
