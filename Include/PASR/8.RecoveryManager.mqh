@@ -136,6 +136,166 @@ private:
       EventBus::Instance().Dispatch(notify);
    }
 
+   //+------------------------------------------------------------------+
+   //| Fakeout Detection - Detects wick penetration beyond SL that     |
+   //| reverses back, indicating a potential fakeout rather than       |
+   //| genuine breakout. Returns true if fakeout pattern detected.     |
+   //+------------------------------------------------------------------+
+   bool DetectFakeout(RecoveryEngine *r, const MqlTick &tick, double atrPoints, int lookbackBars = 3)
+   {
+      if (CheckPointer(r) == POINTER_INVALID || !r.active)
+         return false;
+      
+      MqlRates rates[];
+      ArraySetAsSeries(rates, true);
+      int copied = CopyRates(_Symbol, _Period, 0, lookbackBars + 1, rates);
+      if (copied < lookbackBars + 1)
+         return false;
+      
+      ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      double slPrice = PositionGetDouble(POSITION_SL);
+      double atr = atrPoints * _Point;
+      double sensitivity = m_cfgCache.fakeoutDetectionSensitivity; // Configurable sensitivity
+      
+      // For BUY: Check if price pierced below SL but closed back above
+      // For SELL: Check if price pierced above SL but closed back below
+      bool fakeoutDetected = false;
+      
+      for (int i = 1; i <= lookbackBars; i++)
+      {
+         double low = rates[i].low;
+         double high = rates[i].high;
+         double close = rates[i].close;
+         double open = rates[i].open;
+         
+         if (type == POSITION_TYPE_BUY)
+         {
+            // BUY position: fakeout if low went below SL but close is back above SL + buffer
+            double fakeoutBuffer = atr * sensitivity; // Configurable buffer
+            if (low < slPrice && close > (slPrice + fakeoutBuffer))
+            {
+               // Additional confirmation: next candle should continue in favorable direction
+               if (i > 1 && rates[i-1].close > close)
+               {
+                  fakeoutDetected = true;
+                  if (m_cfgCache.debugMode)
+                     PrintFormat("[Fakeout] BUY fakeout detected on bar %d: Low=%.5f SL=%.5f Close=%.5f", 
+                                 i, low, slPrice, close);
+                  break;
+               }
+            }
+         }
+         else // SELL
+         {
+            // SELL position: fakeout if high went above SL but close is back below SL - buffer
+            double fakeoutBuffer = atr * sensitivity;
+            if (high > slPrice && close < (slPrice - fakeoutBuffer))
+            {
+               // Additional confirmation: next candle should continue in favorable direction
+               if (i > 1 && rates[i-1].close < close)
+               {
+                  fakeoutDetected = true;
+                  if (m_cfgCache.debugMode)
+                     PrintFormat("[Fakeout] SELL fakeout detected on bar %d: High=%.5f SL=%.5f Close=%.5f", 
+                                 i, high, slPrice, close);
+                  break;
+               }
+            }
+         }
+      }
+      
+      return fakeoutDetected;
+   }
+   
+   //+------------------------------------------------------------------+
+   //| Adjust SL/TP on Fakeout - Moves SL further away from fakeout    |
+   //| zone and adjusts TP to give position room to recover            |
+   //+------------------------------------------------------------------+
+   bool AdjustOnFakeout(RecoveryEngine *r, const MqlTick &tick, double atrPoints)
+   {
+      if (CheckPointer(r) == POINTER_INVALID || !r.active)
+         return false;
+      
+      if (!PositionSelectByTicket(r.mainTicket))
+         return false;
+      
+      ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double currentSL = PositionGetDouble(POSITION_SL);
+      double currentTP = PositionGetDouble(POSITION_TP);
+      double atr = atrPoints * _Point;
+      double curPrice = (type == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
+      
+      // Calculate new SL further away from the fakeout zone
+      // Move SL by configurable ATR multiplier beyond the original SL in the unfavorable direction
+      double slAdjustmentMult = m_cfgCache.fakeoutSLAdjustmentATR; // Configurable adjustment
+      double newSL = 0;
+      double newTP = currentTP;
+      
+      if (type == POSITION_TYPE_BUY)
+      {
+         // For BUY: move SL lower (further from current price)
+         double slAdjustment = atr * slAdjustmentMult;
+         newSL = NormalizeDouble(currentSL - slAdjustment, _Digits);
+         
+         // Adjust TP to maintain favorable R:R ratio
+         double originalRisk = openPrice - r.originalSL;
+         double newRisk = openPrice - newSL;
+         double rewardMultiplier = (currentTP - openPrice) / originalRisk;
+         if (rewardMultiplier > 0)
+            newTP = NormalizeDouble(openPrice + (newRisk * rewardMultiplier), _Digits);
+      }
+      else // SELL
+      {
+         // For SELL: move SL higher (further from current price)
+         double slAdjustment = atr * slAdjustmentMult;
+         newSL = NormalizeDouble(currentSL + slAdjustment, _Digits);
+         
+         // Adjust TP to maintain favorable R:R ratio
+         double originalRisk = r.originalSL - openPrice;
+         double newRisk = newSL - openPrice;
+         double rewardMultiplier = (openPrice - currentTP) / originalRisk;
+         if (rewardMultiplier > 0)
+            newTP = NormalizeDouble(openPrice - (newRisk * rewardMultiplier), _Digits);
+      }
+      
+      // Validate SL distance meets broker requirements
+      double stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+      double minDistance = MathMax(stopLevel, atr * 0.5);
+      
+      bool slValid = false;
+      if (type == POSITION_TYPE_BUY)
+         slValid = (curPrice - newSL) > minDistance;
+      else
+         slValid = (newSL - curPrice) > minDistance;
+      
+      if (!slValid)
+      {
+         if (m_cfgCache.debugMode)
+            PrintFormat("[Fakeout] Cannot adjust SL: Too close to current price. Distance=%.5f Min=%.5f", 
+                        MathAbs(curPrice - newSL), minDistance);
+         return false;
+      }
+      
+      // Execute the modification
+      if (m_trade.PositionModify(r.mainTicket, newSL, newTP))
+      {
+         r.lastKnownATR = atrPoints;
+         r.SaveState(m_cfgCache.magicNum);
+         if (m_cfgCache.debugMode)
+            PrintFormat("[Fakeout] SL adjusted for %d: %.5f -> %.5f | TP: %.5f -> %.5f", 
+                        r.mainTicket, currentSL, newSL, currentTP, newTP);
+         return true;
+      }
+      else
+      {
+         int err = GetLastError();
+         if (m_cfgCache.debugMode)
+            PrintFormat("[Fakeout] Failed to adjust SL for %d: Error %d", r.mainTicket, err);
+         return false;
+      }
+   }
+
    void ProcessTrailingAndPartial(RecoveryEngine *r, const MqlTick &tick, double atrPoints)
    {
       if (CheckPointer(r) == POINTER_INVALID || !r.active)
@@ -172,8 +332,24 @@ private:
 
       if (slHit)
       {
+         // FIRST: Try to detect fakeout and adjust SL/TP instead of closing
          if (m_cfgCache.useRecoveryMode && r.recoveryAttempts < m_cfgCache.maxRecoveryAttempts)
          {
+            // Check for fakeout pattern on recent bars
+            if (DetectFakeout(r, tick, atrPoints, 3))
+            {
+               // Fakeout detected! Adjust SL/TP to avoid being stopped out
+               if (AdjustOnFakeout(r, tick, atrPoints))
+               {
+                  Log(StringFormat("Position %d: Fakeout detected! SL/TP adjusted to avoid premature close. Attempt %d.", 
+                                   r.mainTicket, r.recoveryAttempts + 1));
+                  r.recoveryAttempts++; // Count this as a recovery action
+                  r.SaveState(m_cfgCache.magicNum);
+                  return; // Don't close, let the position breathe
+               }
+            }
+            
+            // If no fakeout detected or adjustment failed, enter RECOVERY mode
             r.state = TRADE_STATE_RECOVERY;
             r.slHitPrice = curPrice; // Record actual SL hit price
             r.slHitTime = TimeCurrent();

@@ -184,13 +184,15 @@ input double InpRailroadWickRejectionMult = 0.3;     // Multiplier min rejection
 input double InpMarubozuMinATRRangeMult = 4.0;       // Multiplier untuk MomentumThresholdATR untuk range min Marubozu
 input double InpMarubozuStrongATRRangeMin = 1.2;     // Faktor ATR min untuk bonus ekstra pada Marubozu
 
-// [GROUP] RECOVERY MODE
-input bool InpUseRecoveryMode = false;               // Aktifkan mode recovery setelah SL hit
-input int InpRecoveryCooldownBars = 5;               // Cooldown bars setelah SL hit sebelum mencari re-entry
-input int InpMaxRecoveryAttempts = 1;                // Maksimal percobaan re-entry untuk satu posisi
+// [GROUP] RECOVERY MODE & FAKEOUT PROTECTION
+input bool InpUseRecoveryMode = true;                // Aktifkan mode recovery setelah SL hit (includes fakeout detection)
+input int InpRecoveryCooldownBars = 3;               // Cooldown bars setelah SL hit sebelum mencari re-entry
+input int InpMaxRecoveryAttempts = 2;                // Maksimal percobaan re-entry untuk satu posisi
 input double InpRecoveryLotMult = 1.0;               // Multiplier lot untuk re-entry
-input double InpRecoveryPatternScoreThreshold = 1.0; // Skor minimal pattern untuk re-entry
-input double InpRecoveryZoneToleranceATR = 0.5;      // Toleransi ATR dari SL hit price untuk mencari re-entry
+input double InpRecoveryPatternScoreThreshold = 0.8; // Skor minimal pattern untuk re-entry (lowered for more opportunities)
+input double InpRecoveryZoneToleranceATR = 0.7;      // Toleransi ATR dari SL hit price untuk mencari re-entry
+input double InpFakeoutDetectionSensitivity = 0.3;   // Sensitivitas deteksi fakeout (0.2-0.5, lower = more sensitive)
+input double InpFakeoutSLAdjustmentATR = 1.5;        // Adjustment SL saat fakeout terdeteksi (ATR multiplier)
 
 // [GROUP] COOLDOWNS & PROTECTION
 input int InpMaxOpenPositions = 3;            // Max Posisi Berjalan
@@ -290,13 +292,15 @@ struct StrategyConfig
    // NEW: Pattern-Specific Thresholds
    double PinbarWickToOppositeWickRatio;
    
-   // Recovery Mode
+   // Recovery Mode & Fakeout Protection
    bool UseRecoveryMode;
    int RecoveryCooldownBars;
    int MaxRecoveryAttempts;
    double RecoveryLotMult;
    double RecoveryPatternScoreThreshold;
    double RecoveryZoneToleranceATR;
+   double FakeoutDetectionSensitivity;
+   double FakeoutSLAdjustmentATR;
 
    int ReducedCooldownBars;
    bool UsePatternWeights;
@@ -432,13 +436,15 @@ void SetCommonDefaults()
    // NEW: Pattern-Specific Thresholds
    CFG.PinbarWickToOppositeWickRatio = InpPinbarWickToOppositeWickRatio;
 
-   // Recovery Mode
+   // Recovery Mode & Fakeout Protection
    CFG.UseRecoveryMode = InpUseRecoveryMode;
    CFG.RecoveryCooldownBars = InpRecoveryCooldownBars;
    CFG.MaxRecoveryAttempts = InpMaxRecoveryAttempts;
    CFG.RecoveryLotMult = InpRecoveryLotMult;
    CFG.RecoveryPatternScoreThreshold = InpRecoveryPatternScoreThreshold;
    CFG.RecoveryZoneToleranceATR = InpRecoveryZoneToleranceATR;
+   CFG.FakeoutDetectionSensitivity = InpFakeoutDetectionSensitivity;
+   CFG.FakeoutSLAdjustmentATR = InpFakeoutSLAdjustmentATR;
 
    CFG.UseDynamicCooldown = InpUseDynamicCooldown;
    CFG.ReducedCooldownBars = InpReducedCooldownBars;
