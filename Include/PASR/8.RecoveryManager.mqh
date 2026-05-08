@@ -59,6 +59,9 @@ private:
       double recoveryLotMult;
       double recoveryPatternScoreThreshold;
       double recoveryZoneToleranceATR;
+      // Fakeout Protection
+      double fakeoutDetectionSensitivity;
+      double fakeoutSLAdjustmentATR;
    } m_cfgCache;
 
    //+------------------------------------------------------------------+
@@ -88,6 +91,9 @@ private:
       m_cfgCache.recoveryLotMult = CFG.RecoveryLotMult;
       m_cfgCache.recoveryPatternScoreThreshold = CFG.RecoveryPatternScoreThreshold;
       m_cfgCache.recoveryZoneToleranceATR = CFG.RecoveryZoneToleranceATR;
+      // Fakeout Protection
+      m_cfgCache.fakeoutDetectionSensitivity = CFG.FakeoutDetectionSensitivity;
+      m_cfgCache.fakeoutSLAdjustmentATR = CFG.FakeoutSLAdjustmentATR;
 
       // Refresh RiskCalculator config
       m_riskCalc.LoadConfig();
