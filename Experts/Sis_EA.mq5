@@ -49,7 +49,7 @@ input group "── Visual ──" input bool ShowPanel = true;
 
 CTrade trade;
 
-string EA_NAME = "SIS EA";
+string EA_NAME = "SIS_EA";
 double g_anchor = 0.0;
 double g_start_balance = 0.0;
 datetime g_last_recenter = 0;
@@ -404,4 +404,25 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
 {
+}
+
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   // Cleanup objects on chart
+   ObjectDelete(0, EA_NAME + "_Panel");
+   
+   // Optional logging
+   string deinitReason = "";
+   switch(reason)
+   {
+      case INIT_REASON_PROGRAM: deinitReason = "User removed"; break;
+      case INIT_REASON_REMOVE: deinitReason = "Chart removed"; break;
+      case INIT_REASON_RECOMPILE: deinitReason = "Recompiled"; break;
+      case INIT_REASON_CHARTCHANGE: deinitReason = "Chart changed"; break;
+      default: deinitReason = "Other"; break;
+   }
+   Print("[SIS EA] Deinitialized: ", deinitReason);
 }

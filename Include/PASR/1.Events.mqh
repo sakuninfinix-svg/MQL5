@@ -2,6 +2,8 @@
 //|                                                   Events.mqh     |
 //|                                       Copyright 2026, Agsicentre |
 //+------------------------------------------------------------------+
+#property copyright "Copyright 2026, Agsicentre"
+
 #ifndef __EVENTS_MQH__
 #define __EVENTS_MQH__
 

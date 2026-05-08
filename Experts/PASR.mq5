@@ -57,6 +57,31 @@ int OnInit()
 }
 
 //+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   // Cleanup visual objects
+   ObjectDelete(0, "ResLine");
+   ObjectDelete(0, "SupLine");
+   
+   // Optional: Log deinit reason
+   if(InpSendPush)
+   {
+      string deinitReason = "";
+      switch(reason)
+      {
+         case INIT_REASON_PROGRAM: deinitReason = "User removed"; break;
+         case INIT_REASON_REMOVE: deinitReason = "Chart removed"; break;
+         case INIT_REASON_RECOMPILE: deinitReason = "Recompiled"; break;
+         case INIT_REASON_CHARTCHANGE: deinitReason = "Chart changed"; break;
+         default: deinitReason = "Other"; break;
+      }
+      SendNotification("EA PASR Deinitialized: " + deinitReason);
+   }
+}
+
+//+------------------------------------------------------------------+
 //| News Filter                                   |
 //+------------------------------------------------------------------+
 bool IsNewsTime()

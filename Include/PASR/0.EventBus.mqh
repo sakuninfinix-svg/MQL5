@@ -3,6 +3,10 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Event-Driven Core for PASR EA                         |
 //+------------------------------------------------------------------+
+#property copyright "Copyright 2026, Agsicentre"
+#property link "agsicentre.wordpress.com"
+#property version "1.00"
+
 #ifndef __EVENT_BUS_MQH__
 #define __EVENT_BUS_MQH__
 #include "2.Config.mqh" // Required for CFG.SafeMode

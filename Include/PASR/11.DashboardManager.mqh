@@ -3,6 +3,10 @@
 //|         Optimized by Agsicentre (agsicentre.wordpress.com)       |
 //+------------------------------------------------------------------+
 
+#property copyright "Copyright 2026, Agsicentre"
+#property link "agsicentre.wordpress.com"
+#property version "1.00"
+
 #ifndef __DASHBOARD_MANAGER_MQH__
 #define __DASHBOARD_MANAGER_MQH__
 
