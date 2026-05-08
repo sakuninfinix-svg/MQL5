@@ -1,11 +1,13 @@
 //+------------------------------------------------------------------+
-//|               Price Action & Support Ressistance V1              |
+//|               Price Action & Support Resistance V1               |
 //|         Optimized by Agsicentre (agsicentre.wordpress.com)       |
+//|         Modern Dashboard UI - Professional Trading Interface     |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
-#property link "agsicentre.wordpress.com"
-#property version "1.00"
+#property link      "agsicentre.wordpress.com"
+#property version   "2.00"
+#property description "Modern Professional Dashboard with Real-time Analytics"
 
 #ifndef __DASHBOARD_MANAGER_MQH__
 #define __DASHBOARD_MANAGER_MQH__
@@ -19,12 +21,27 @@
 #include <Controls/Dialog.mqh>
 #include <Controls/Button.mqh>
 #include <Controls/Label.mqh>
+#include <Controls/RectLabel.mqh>
+#include <Graphics/Graphic.mqh>
 
 // Custom Event IDs for UI synchronization
-#define DASHBOARD_REFRESH (CHARTEVENT_CUSTOM + 100)
+#define DASHBOARD_REFRESH   (CHARTEVENT_CUSTOM + 100)
 #define DASHBOARD_EMERGENCY (CHARTEVENT_CUSTOM + 101)
-#define DASHBOARD_PAUSE (CHARTEVENT_CUSTOM + 102)
-#define DASHBOARD_STATS (CHARTEVENT_CUSTOM + 103)
+#define DASHBOARD_PAUSE     (CHARTEVENT_CUSTOM + 102)
+#define DASHBOARD_STATS     (CHARTEVENT_CUSTOM + 103)
+#define DASHBOARD_CLOSEALL  (CHARTEVENT_CUSTOM + 104)
+
+// Color Scheme - Modern Dark Theme
+#define CLR_BG_PRIMARY      (C'25,27,32')        // Dark background
+#define CLR_BG_SECONDARY    (C'35,38,44')        // Panel background
+#define CLR_BG_ACCENT       (C'45,48,56')        // Highlight background
+#define CLR_TEXT_PRIMARY    (C'220,220,220')     // Primary text
+#define CLR_TEXT_SECONDARY  (C'150,150,160')     // Secondary text
+#define CLR_SUCCESS         (C'72,199,142')      // Green - Profit/Buy
+#define CLR_DANGER          (C'255,89,94')       // Red - Loss/Sell
+#define CLR_WARNING         (C'255,204,0')       // Yellow - Warning
+#define CLR_INFO            (C'64,156,255')      // Blue - Info
+#define CLR_ACCENT          (C'175,82,222')      // Purple - Accent
 
 class DashboardUI;
 
@@ -41,6 +58,13 @@ struct DataCacheUI
    PositionScanResult scanResult;
    PerformanceStats perfStats;
    datetime lastUpdate;
+   double equity;
+   double balance;
+   double dailyProfit;
+   double floatingProfit;
+   double drawdownPct;
+   int totalTrades;
+   int openPositions;
 };
 
 class DashboardManager : public IManager
@@ -54,10 +78,21 @@ private:
    {
       if (CheckPointer(m_data) == POINTER_INVALID)
          return;
+      
       m_cache.atrPoints = m_data.GetATRPoints();
+      m_cache.spread = MarketInfoInteger(_Symbol, SYMBOL_SPREAD);
       m_cache.scanResult = m_data.GetScanResult();
       m_cache.perfStats = m_data.GetPerformanceStats();
       m_cache.lastUpdate = TimeCurrent();
+      
+      // Update account info
+      m_cache.equity = AccountInfoDouble(ACCOUNT_EQUITY);
+      m_cache.balance = AccountInfoDouble(ACCOUNT_BALANCE);
+      m_cache.dailyProfit = m_cache.scanResult.dailyRealized;
+      m_cache.floatingProfit = m_cache.scanResult.floatingPnL;
+      m_cache.drawdownPct = m_cache.scanResult.dailyDrawdown;
+      m_cache.totalTrades = m_cache.perfStats.safeTotal + m_cache.perfStats.aggTotal;
+      m_cache.openPositions = PositionsTotal();
    }
 
 public:
@@ -156,8 +191,28 @@ class DashboardUI : public CAppDialog
 {
 private:
    DashboardManager *m_ctrl;
-   CLabel m_lblState, m_lblPnL, m_lblStats, m_lblAccount, m_lblMarket, m_lblSignal, m_lblNews, m_lblRiskBar;
-   CButton m_btnBuy, m_btnSell, m_btnStop;
+   
+   // Background panels
+   CRectLabel m_pnlHeader, m_pnlAccount, m_pnlMarket, m_pnlSignal, m_pnlStats, m_pnlControls;
+   
+   // Labels - Header Section
+   CLabel m_lblTitle, m_lblStatus, m_lblMode;
+   
+   // Labels - Account Section
+   CLabel m_lblBalance, m_lblEquity, m_lblProfitDaily, m_lblProfitFloat, m_lblDrawdown;
+   
+   // Labels - Market Section
+   CLabel m_lblSpread, m_lblATR, m_lblGate, m_lblPositions;
+   
+   // Labels - Signal Section
+   CLabel m_lblPattern, m_lblDirection, m_lblNews;
+   
+   // Labels - Stats Section
+   CLabel m_lblWinRate, m_lblTotalTrades, m_lblNetProfit;
+   
+   // Buttons - Controls
+   CButton m_btnPause, m_btnCloseAll, m_btnEmergency;
+   
    ulong m_magic;
 
 public:
@@ -167,84 +222,267 @@ public:
    virtual bool CreateDashboard(long chart, string name, int subwin, int x1, int y1, int x2, int y2)
    {
       m_magic = CFG.MagicNum;
+      
+      // Calculate dimensions
+      int width = x2 - x1;
+      int height = y2 - y1;
+      int sectionHeight = (height - 60) / 5; // 5 sections
+      
       if (!CAppDialog::Create(chart, name, subwin, x1, y1, x2, y2))
          return false;
-
-      int localWidth = x2 - x1; // Hitung lebar relatif dialog
-      int x = 10, y = 10;
-
-      // --- HEADER SECTION ---
-      m_lblState.Create(m_chart_id, m_name + "_st", m_subwin, x, y, localWidth - 20, y + 20);
-      m_lblState.Text("System: Initializing...");
-      m_lblState.FontSize(10);
-      m_lblState.Color(clrGold);
-      Add(m_lblState);
-
-      y += 30;
-      // Market Info (ATR & Spread)
-      m_lblMarket.Create(m_chart_id, m_name + "_mkt", m_subwin, x, y, localWidth - 20, y + 20);
-      m_lblMarket.Text("Market: Fetching...");
-      Add(m_lblMarket);
-
-      y += 25;
-      // News Info
-      m_lblNews.Create(m_chart_id, m_name + "_news", m_subwin, x, y, localWidth - 20, y + 20);
-      m_lblNews.Text("News: Monitoring...");
+      
+      // Set dialog background
+      ColorBackground(CLR_BG_PRIMARY);
+      BorderType(BORDER_FLAT);
+      BorderColor(CLR_BG_ACCENT);
+      
+      int yPos = 15;
+      
+      // === HEADER SECTION ===
+      CreatePanel(m_pnlHeader, "header", 10, yPos, width-20, 50, CLR_BG_SECONDARY);
+      Add(m_pnlHeader);
+      
+      // Title
+      m_lblTitle.Create(m_chart_id, m_name+"_title", m_subwin, 15, yPos+5, width-30, yPos+25);
+      m_lblTitle.Text("PASR MODULAR TRADING SYSTEM");
+      m_lblTitle.FontSize(11);
+      m_lblTitle.FontFlags(FONT_BOLD);
+      m_lblTitle.Color(CLR_TEXT_PRIMARY);
+      m_lblTitle.Align(ALIGN_CENTER);
+      Add(m_lblTitle);
+      
+      // Status and Mode
+      m_lblStatus.Create(m_chart_id, m_name+"_status", m_subwin, 15, yPos+28, width/2-10, yPos+45);
+      m_lblStatus.Text("● System Ready");
+      m_lblStatus.FontSize(9);
+      m_lblStatus.Color(CLR_SUCCESS);
+      Add(m_lblStatus);
+      
+      m_lblMode.Create(m_chart_id, m_name+"_mode", m_subwin, width/2+5, yPos+28, width-15, yPos+45);
+      m_lblMode.Text(MQLInfoInteger(MQL_TESTER) ? "◉ BACKTEST" : "◉ LIVE");
+      m_lblMode.FontSize(9);
+      m_lblMode.Color(CLR_INFO);
+      Add(m_lblMode);
+      
+      yPos += 60;
+      
+      // === ACCOUNT SECTION ===
+      CreatePanel(m_pnlAccount, "pnl_acc", 10, yPos, width-20, sectionHeight, CLR_BG_SECONDARY);
+      Add(m_pnlAccount);
+      
+      // Section title
+      CreateSectionTitle("ACCOUNT OVERVIEW", 15, yPos+5, width/2, yPos+20);
+      
+      // Balance & Equity
+      m_lblBalance.Create(m_chart_id, m_name+"_bal", m_subwin, 20, yPos+25, width/2-10, yPos+45);
+      m_lblBalance.Text("Balance: $0.00");
+      m_lblBalance.FontSize(10);
+      m_lblBalance.Color(CLR_TEXT_PRIMARY);
+      Add(m_lblBalance);
+      
+      m_lblEquity.Create(m_chart_id, m_name+"_eq", m_subwin, width/2+10, yPos+25, width-20, yPos+45);
+      m_lblEquity.Text("Equity: $0.00");
+      m_lblEquity.FontSize(10);
+      m_lblEquity.Color(CLR_TEXT_PRIMARY);
+      Add(m_lblEquity);
+      
+      // Daily P&L
+      m_lblProfitDaily.Create(m_chart_id, m_name+"_pnl_d", m_subwin, 20, yPos+50, width/2-10, yPos+70);
+      m_lblProfitDaily.Text("Daily P&L: $0.00");
+      m_lblProfitDaily.FontSize(9);
+      m_lblProfitDaily.Color(CLR_TEXT_SECONDARY);
+      Add(m_lblProfitDaily);
+      
+      // Floating P&L
+      m_lblProfitFloat.Create(m_chart_id, m_name+"_pnl_f", m_subwin, width/2+10, yPos+50, width-20, yPos+70);
+      m_lblProfitFloat.Text("Floating: $0.00");
+      m_lblProfitFloat.FontSize(9);
+      m_lblProfitFloat.Color(CLR_TEXT_SECONDARY);
+      Add(m_lblProfitFloat);
+      
+      // Drawdown
+      m_lblDrawdown.Create(m_chart_id, m_name+"_dd", m_subwin, 20, yPos+75, width-40, yPos+95);
+      m_lblDrawdown.Text("Drawdown: 0.00%");
+      m_lblDrawdown.FontSize(9);
+      m_lblDrawdown.Color(CLR_WARNING);
+      Add(m_lblDrawdown);
+      
+      yPos += sectionHeight + 10;
+      
+      // === MARKET SECTION ===
+      CreatePanel(m_pnlMarket, "pnl_mkt", 10, yPos, width-20, sectionHeight, CLR_BG_SECONDARY);
+      Add(m_pnlMarket);
+      
+      CreateSectionTitle("MARKET CONDITIONS", 15, yPos+5, width/2, yPos+20);
+      
+      m_lblSpread.Create(m_chart_id, m_name+"_spr", m_subwin, 20, yPos+25, width/2-10, yPos+45);
+      m_lblSpread.Text("Spread: 0.0 pts");
+      m_lblSpread.FontSize(10);
+      m_lblSpread.Color(CLR_TEXT_PRIMARY);
+      Add(m_lblSpread);
+      
+      m_lblATR.Create(m_chart_id, m_name+"_atr", m_subwin, width/2+10, yPos+25, width-20, yPos+45);
+      m_lblATR.Text("ATR: 0.0 pts");
+      m_lblATR.FontSize(10);
+      m_lblATR.Color(CLR_TEXT_PRIMARY);
+      Add(m_lblATR);
+      
+      m_lblGate.Create(m_chart_id, m_name+"_gate", m_subwin, 20, yPos+50, width/2-10, yPos+70);
+      m_lblGate.Text("Gate: CLOSED");
+      m_lblGate.FontSize(10);
+      m_lblGate.Color(CLR_DANGER);
+      Add(m_lblGate);
+      
+      m_lblPositions.Create(m_chart_id, m_name+"_pos", m_subwin, width/2+10, yPos+50, width-20, yPos+70);
+      m_lblPositions.Text("Open: 0");
+      m_lblPositions.FontSize(10);
+      m_lblPositions.Color(CLR_INFO);
+      Add(m_lblPositions);
+      
+      yPos += sectionHeight + 10;
+      
+      // === SIGNAL SECTION ===
+      CreatePanel(m_pnlSignal, "pnl_sig", 10, yPos, width-20, sectionHeight, CLR_BG_SECONDARY);
+      Add(m_pnlSignal);
+      
+      CreateSectionTitle("SIGNAL STATUS", 15, yPos+5, width/2, yPos+20);
+      
+      m_lblPattern.Create(m_chart_id, m_name+"_pat", m_subwin, 20, yPos+25, width-40, yPos+50);
+      m_lblPattern.Text("Pattern: WAITING");
+      m_lblPattern.FontSize(11);
+      m_lblPattern.FontFlags(FONT_BOLD);
+      m_lblPattern.Color(CLR_TEXT_PRIMARY);
+      Add(m_lblPattern);
+      
+      m_lblDirection.Create(m_chart_id, m_name+"_dir", m_subwin, 20, yPos+55, width/2-10, yPos+75);
+      m_lblDirection.Text("Direction: NEUTRAL");
+      m_lblDirection.FontSize(10);
+      m_lblDirection.Color(CLR_TEXT_SECONDARY);
+      Add(m_lblDirection);
+      
+      m_lblNews.Create(m_chart_id, m_name+"_news", m_subwin, width/2+10, yPos+55, width-20, yPos+75);
+      m_lblNews.Text("News: CLEAR");
+      m_lblNews.FontSize(10);
+      m_lblNews.Color(CLR_SUCCESS);
       Add(m_lblNews);
-
-      y += 30;
-      // Account Info (Balance & Equity)
-      m_lblAccount.Create(m_chart_id, m_name + "_acc", m_subwin, x, y, localWidth - 20, y + 20);
-      m_lblAccount.Text("EQUITY: Loading...");
-      Add(m_lblAccount);
-
-      y += 25;
-      // PnL Info (Daily & Floating)
-      m_lblPnL.Create(m_chart_id, m_name + "_pnl", m_subwin, x, y, localWidth - 20, y + 20);
-      m_lblPnL.Text("PNL: Calculating...");
-      Add(m_lblPnL);
-
-      y += 25;
-      // Risk Meter
-      m_lblRiskBar.Create(m_chart_id, m_name + "_risk", m_subwin, x, y, localWidth - 20, y + 20);
-      m_lblRiskBar.Text("RISK: [----------]");
-      Add(m_lblRiskBar);
-
-      y += 30;
-      // Last Signal Section
-      m_lblSignal.Create(m_chart_id, m_name + "_sig", m_subwin, x, y, localWidth - 20, y + 20);
-      m_lblSignal.Text("Signal: Watching...");
-      Add(m_lblSignal);
-
-      y += 30;
-      // Statistics (Win Rates)
-      m_lblStats.Create(m_chart_id, m_name + "_stats", m_subwin, x, y, localWidth - 20, y + 20);
-      m_lblStats.Text("Stats: No History");
-      Add(m_lblStats);
-
-      y += 45;
-      m_btnStop.Create(m_chart_id, m_name + "_stop", m_subwin, x, y, x + 160, y + 25);
-      m_btnStop.Text("EMERGENCY STOP");
-      m_btnStop.ColorBackground(clrFireBrick);
-      m_btnStop.Color(clrWhite);
-      Add(m_btnStop);
-
+      
+      yPos += sectionHeight + 10;
+      
+      // === STATS SECTION ===
+      CreatePanel(m_pnlStats, "pnl_stats", 10, yPos, width-20, sectionHeight, CLR_BG_SECONDARY);
+      Add(m_pnlStats);
+      
+      CreateSectionTitle("PERFORMANCE", 15, yPos+5, width/2, yPos+20);
+      
+      m_lblWinRate.Create(m_chart_id, m_name+"_wr", m_subwin, 20, yPos+25, width/2-10, yPos+45);
+      m_lblWinRate.Text("Win Rate: 0%");
+      m_lblWinRate.FontSize(10);
+      m_lblWinRate.Color(CLR_ACCENT);
+      Add(m_lblWinRate);
+      
+      m_lblTotalTrades.Create(m_chart_id, m_name+"_trd", m_subwin, width/2+10, yPos+25, width-20, yPos+45);
+      m_lblTotalTrades.Text("Trades: 0");
+      m_lblTotalTrades.FontSize(10);
+      m_lblTotalTrades.Color(CLR_TEXT_PRIMARY);
+      Add(m_lblTotalTrades);
+      
+      m_lblNetProfit.Create(m_chart_id, m_name"_net", m_subwin, 20, yPos+50, width-40, yPos+70);
+      m_lblNetProfit.Text("Net Profit: $0.00");
+      m_lblNetProfit.FontSize(10);
+      m_lblNetProfit.Color(CLR_TEXT_PRIMARY);
+      Add(m_lblNetProfit);
+      
+      yPos += sectionHeight + 10;
+      
+      // === CONTROLS SECTION ===
+      CreatePanel(m_pnlControls, "pnl_ctrl", 10, yPos, width-20, 70, CLR_BG_ACCENT);
+      Add(m_pnlControls);
+      
+      // Pause Button
+      m_btnPause.Create(m_chart_id, m_name+"_pause", m_subwin, 15, yPos+10, (width/3)-5, yPos+35);
+      m_btnPause.Text("⏸ PAUSE");
+      m_btnPause.ColorBackground(CLR_WARNING);
+      m_btnPause.Color(clrBlack);
+      m_btnPause.FontFlags(FONT_BOLD);
+      Add(m_btnPause);
+      
+      // Close All Button
+      m_btnCloseAll.Create(m_chart_id, m_name+"_close", m_subwin, (width/3)+5, yPos+10, (2*width/3)-5, yPos+35);
+      m_btnCloseAll.Text("✕ CLOSE ALL");
+      m_btnCloseAll.ColorBackground(CLR_INFO);
+      m_btnCloseAll.Color(clrWhite);
+      m_btnCloseAll.FontFlags(FONT_BOLD);
+      Add(m_btnCloseAll);
+      
+      // Emergency Stop Button
+      m_btnEmergency.Create(m_chart_id, m_name+"_emerg", m_subwin, (2*width/3)+5, yPos+10, width-15, yPos+35);
+      m_btnEmergency.Text("⚠ EMERGENCY");
+      m_btnEmergency.ColorBackground(CLR_DANGER);
+      m_btnEmergency.Color(clrWhite);
+      m_btnEmergency.FontFlags(FONT_BOLD);
+      Add(m_btnEmergency);
+      
       return true;
+   }
+   
+   // Helper function to create rounded panel
+   void CreatePanel(CRectLabel &panel, string name, int x1, int y1, int x2, int y2, color bg)
+   {
+      panel.Create(m_chart_id, m_name+"_"+name, m_subwin, x1, y1, x2, y2);
+      panel.ColorBackground(bg);
+      panel.BorderType(BORDER_FLAT);
+      panel.BorderColor(CLR_BG_ACCENT);
+      panel.Corner(0); // Rounded corners
+   }
+   
+   // Helper function to create section title
+   void CreateSectionTitle(string text, int x1, int y1, int x2, int y2)
+   {
+      CLabel *lbl = new CLabel();
+      if (CheckPointer(lbl) != POINTER_INVALID)
+      {
+         lbl.Create(m_chart_id, m_name+"_sec_"+text, m_subwin, x1, y1, x2, y2);
+         lbl.Text(text);
+         lbl.FontSize(9);
+         lbl.FontFlags(FONT_BOLD);
+         lbl.Color(CLR_TEXT_SECONDARY);
+         lbl.Align(ALIGN_CENTER);
+         Add(*lbl);
+      }
    }
 
    virtual bool OnEvent(const int id, const long &lparam, const double &dparam, const string &sparam) override
    {
-      if (id == CHARTEVENT_OBJECT_CLICK && sparam == m_btnStop.Name())
+      // Handle button clicks
+      if (id == CHARTEVENT_OBJECT_CLICK)
       {
-         OnStopClick();
-         return true;
+         if (sparam == m_btnPause.Name())
+         {
+            OnPauseClick();
+            return true;
+         }
+         if (sparam == m_btnCloseAll.Name())
+         {
+            OnCloseAllClick();
+            return true;
+         }
+         if (sparam == m_btnEmergency.Name())
+         {
+            OnEmergencyClick();
+            return true;
+         }
       }
+      
+      // Handle custom events
       if (id >= CHARTEVENT_CUSTOM)
       {
          if (id == DASHBOARD_REFRESH)
+         {
             UpdateUI();
-         return true;
+            return true;
+         }
       }
+      
       return CAppDialog::OnEvent(id, lparam, dparam, sparam);
    }
 
@@ -252,72 +490,142 @@ public:
    {
       if (CheckPointer(m_ctrl) == POINTER_INVALID)
          return;
+      
       const DataCacheUI cache = m_ctrl.GetCache();
-
-      // --- UPDATE HEADER & MARKET ---
-      string mode = MQLInfoInteger(MQL_TESTER) ? "BACKTEST" : "LIVE";
-      m_lblState.Text(StringFormat("PASR MODULAR [%s] | ID: %d", mode, (int)m_magic));
-
-      string gateStr = cache.gateOpen ? "READY" : "WAIT";
-      color gateClr = cache.gateOpen ? clrForestGreen : clrFireBrick;
-      m_lblMarket.Text(StringFormat("MARKET: [%s] | Spr: %.1f | ATR: %.1f", gateStr, cache.spread, cache.atrPoints));
-      m_lblMarket.Color(gateClr);
-
-      // --- UPDATE NEWS COUNTDOWN ---
+      
+      // === UPDATE HEADER ===
+      string mode = MQLInfoInteger(MQL_TESTER) ? "◉ BACKTEST" : "◉ LIVE";
+      m_lblMode.Text(mode);
+      m_lblStatus.Text("● System Active");
+      
+      // === UPDATE ACCOUNT SECTION ===
+      m_lblBalance.Text(StringFormat("Balance: $%.2f", cache.balance));
+      m_lblEquity.Text(StringFormat("Equity: $%.2f", cache.equity));
+      
+      // Daily P&L with color coding
+      double daily = cache.dailyProfit;
+      m_lblProfitDaily.Text(StringFormat("Daily P&L: $%.2f", daily));
+      m_lblProfitDaily.Color(daily >= 0 ? CLR_SUCCESS : CLR_DANGER);
+      
+      // Floating P&L with color coding
+      double floating = cache.floatingProfit;
+      m_lblProfitFloat.Text(StringFormat("Floating: $%.2f", floating));
+      m_lblProfitFloat.Color(floating >= 0 ? CLR_SUCCESS : CLR_DANGER);
+      
+      // Drawdown with warning levels
+      double dd = cache.drawdownPct;
+      m_lblDrawdown.Text(StringFormat("Drawdown: %.2f%%", dd));
+      if (dd > CFG.MaxDailyLossPct * 0.8)
+         m_lblDrawdown.Color(CLR_DANGER);
+      else if (dd > CFG.MaxDailyLossPct * 0.5)
+         m_lblDrawdown.Color(CLR_WARNING);
+      else
+         m_lblDrawdown.Color(CLR_TEXT_SECONDARY);
+      
+      // === UPDATE MARKET SECTION ===
+      m_lblSpread.Text(StringFormat("Spread: %.1f pts", cache.spread));
+      m_lblATR.Text(StringFormat("ATR: %.1f pts", cache.atrPoints));
+      
+      // Gate status
+      string gateStr = cache.gateOpen ? "OPEN ✓" : "CLOSED ✗";
+      m_lblGate.Text(StringFormat("Gate: %s", gateStr));
+      m_lblGate.Color(cache.gateOpen ? CLR_SUCCESS : CLR_DANGER);
+      
+      // Open positions count
+      m_lblPositions.Text(StringFormat("Open Positions: %d", cache.openPositions));
+      
+      // === UPDATE SIGNAL SECTION ===
+      string pattern = (cache.lastPattern != "" && cache.lastPattern != "NONE") ? cache.lastPattern : "WAITING FOR SIGNAL";
+      m_lblPattern.Text(StringFormat("Pattern: %s", pattern));
+      
+      // Direction with color
+      string direction = "NEUTRAL";
+      color dirColor = CLR_TEXT_SECONDARY;
+      if (cache.lastDir == 1)
+      {
+         direction = "BUY ↑";
+         dirColor = CLR_SUCCESS;
+      }
+      else if (cache.lastDir == -1)
+      {
+         direction = "SELL ↓";
+         dirColor = CLR_DANGER;
+      }
+      m_lblDirection.Text(StringFormat("Direction: %s", direction));
+      m_lblDirection.Color(dirColor);
+      
+      // News status
       if (CFG.UseNews)
       {
          long secondsToNews = (long)cache.nextNews - (long)TimeGMT();
-         if (secondsToNews > 0 && secondsToNews < 3600) // Jika kurang dari 1 jam
-            m_lblNews.Text(StringFormat("NEWS: IN %d MIN", secondsToNews / 60));
-         else if (secondsToNews <= 0 && secondsToNews > -3600)
-            m_lblNews.Text("NEWS: ACTIVE / RECENT");
+         if (secondsToNews > 0 && secondsToNews < 3600)
+         {
+            m_lblNews.Text(StringFormat("News: IN %d MIN ⚠", (int)(secondsToNews / 60)));
+            m_lblNews.Color(CLR_WARNING);
+         }
+         else if (secondsToNews <= 0 && secondsToNews > -1800)
+         {
+            m_lblNews.Text("News: ACTIVE ⛔");
+            m_lblNews.Color(CLR_DANGER);
+         }
          else
-            m_lblNews.Text("NEWS: CLEAR");
+         {
+            m_lblNews.Text("News: CLEAR ✓");
+            m_lblNews.Color(CLR_SUCCESS);
+         }
       }
       else
       {
-         m_lblNews.Text("NEWS: FILTER OFF");
+         m_lblNews.Text("News: OFF");
+         m_lblNews.Color(CLR_TEXT_SECONDARY);
       }
-
-      // --- UPDATE ACCOUNT ---
-      double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-      double dd = cache.scanResult.dailyDrawdown;
-      m_lblAccount.Text(StringFormat("EQUITY: %.2f | DD: %.2f%%", equity, dd));
-
-      // --- UPDATE RISK METER ---
-      int barCount = (int)MathMin(10, MathMax(0, (dd / CFG.MaxDailyLossPct) * 10));
-      string riskMeter = "[";
-      for (int i = 0; i < 10; i++)
-         riskMeter += (i < barCount) ? "|" : "-";
-      riskMeter += "]";
-      m_lblRiskBar.Text("RISK: " + riskMeter);
-      m_lblRiskBar.Color(dd > CFG.MaxDailyLossPct * 0.7 ? clrOrangeRed : clrDarkSlateGray);
-
-      double daily = cache.scanResult.dailyRealized;
-      double floating = cache.scanResult.floatingPnL;
-      m_lblPnL.Text(StringFormat("PNL: Daily %.2f | Float %.2f", daily, floating));
-      m_lblPnL.Color((daily + floating >= 0) ? clrForestGreen : clrCrimson);
-
-      // --- UPDATE SIGNAL ---
-      string pat = (cache.lastPattern != "" && cache.lastPattern != "NONE") ? cache.lastPattern : "WAITING";
-      color patClr = (cache.lastDir == 1) ? clrCornflowerBlue : (cache.lastDir == -1 ? clrLightCoral : clrGray);
-      m_lblSignal.Text(StringFormat("SIGNAL: %s [%s]", pat, (cache.lastDir == 1 ? "BUY" : (cache.lastDir == -1 ? "SELL" : "IDLE"))));
-      m_lblSignal.Color(patClr);
-
-      // --- UPDATE STATS ---
-      string safeRate = (cache.perfStats.safeTotal > 0) ? DoubleToString((double)cache.perfStats.safeWins / cache.perfStats.safeTotal * 100.0, 1) + "%" : "0%";
-      m_lblStats.Text(StringFormat("PERFORMANCE: Safe WR %s | Trades: %d",
-                                   safeRate, cache.perfStats.safeTotal + cache.perfStats.aggTotal));
-      m_lblStats.Color(clrDarkSlateGray);
-
-      // Crucial for Backtest visualization
+      
+      // === UPDATE STATS SECTION ===
+      int totalTrades = cache.perfStats.safeTotal + cache.perfStats.aggTotal;
+      double winRate = 0;
+      if (cache.perfStats.safeTotal > 0)
+         winRate = (double)cache.perfStats.safeWins / cache.perfStats.safeTotal * 100.0;
+      
+      m_lblWinRate.Text(StringFormat("Win Rate: %.1f%%", winRate));
+      m_lblWinRate.Color(winRate >= 50 ? CLR_SUCCESS : CLR_WARNING);
+      
+      m_lblTotalTrades.Text(StringFormat("Total Trades: %d", totalTrades));
+      
+      // Net profit calculation
+      double netProfit = cache.perfStats.safeWins - (cache.perfStats.safeTotal - cache.perfStats.safeWins);
+      m_lblNetProfit.Text(StringFormat("Net Profit: $%.2f", netProfit));
+      m_lblNetProfit.Color(netProfit >= 0 ? CLR_SUCCESS : CLR_DANGER);
+      
+      // Force chart redraw for backtest visualization
       ChartRedraw(m_chart_id);
    }
-
-   void OnStopClick()
+   
+   // Button click handlers
+   void OnPauseClick()
    {
-      GlobalVariableSet("PASR_EMERGENCY_" + (string)m_magic, 1);
-      EventBus::Instance().Dispatch(new EmergencyStopEvent("Manual UI Trigger"));
+      GlobalVariableSet("PASR_PAUSE_" + (string)m_magic, 1);
+      EventBus::Instance().Dispatch(new PauseToggleEvent(true, true));
+      m_btnPause.Text("▶ RESUME");
+      m_btnPause.ColorBackground(CLR_SUCCESS);
+   }
+   
+   void OnCloseAllClick()
+   {
+      if (MessageBox("Close all open positions?", "Confirm", MB_YESNO | MB_ICONQUESTION) == IDYES)
+      {
+         EventChartCustom(m_chart_id, DASHBOARD_CLOSEALL, 0, 0, "");
+         Print("[Dashboard] Close All Positions triggered");
+      }
+   }
+   
+   void OnEmergencyClick()
+   {
+      if (MessageBox("EMERGENCY STOP will close ALL positions and disable trading!", "WARNING", MB_YESNO | MB_ICONWARNING) == IDYES)
+      {
+         GlobalVariableSet("PASR_EMERGENCY_" + (string)m_magic, 1);
+         EventBus::Instance().Dispatch(new EmergencyStopEvent("Manual Emergency Stop from Dashboard"));
+         Print("[Dashboard] EMERGENCY STOP ACTIVATED");
+      }
    }
 };
 
