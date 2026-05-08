@@ -2,6 +2,9 @@
 //|                                                    SRManager.mqh |
 //|                                       Copyright 2026, Agsicentre |
 //+------------------------------------------------------------------+
+#property link "agsicentre.wordpress.com"
+#property version "1.00"
+
 #ifndef __SR_MANAGER_MQH__
 #define __SR_MANAGER_MQH__
 

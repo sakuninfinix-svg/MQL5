@@ -3,6 +3,10 @@
 //|                                       Copyright 2026, Agsicentre |
 //|               Risk & Lot Calculation Module for PASR EA          |
 //+------------------------------------------------------------------+
+#property copyright "Copyright 2026, Agsicentre"
+#property link "agsicentre.wordpress.com"
+#property version "1.00"
+
 #ifndef __RISK_CALCULATOR_MQH__
 #define __RISK_CALCULATOR_MQH__
 

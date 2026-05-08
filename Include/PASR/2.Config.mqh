@@ -3,6 +3,8 @@
 //|                                                       Config.mqh |
 //+------------------------------------------------------------------+
 
+#property copyright "Copyright 2026, Agsicentre"
+
 #ifndef __CONFIG_MQH__
 #define __CONFIG_MQH__
 
