@@ -150,6 +150,18 @@ public:
          if (CheckPointer(ev) != POINTER_INVALID)
             OnPositionUpdate(ev);
       }
+      else if (type == "RecoverySignal")
+      {
+         RecoverySignalEvent *ev = dynamic_cast<RecoverySignalEvent *>(e);
+         if (CheckPointer(ev) != POINTER_INVALID)
+            OnRecoverySignal(ev);
+      }
+      else if (type == "RecoveryOpportunity")
+      {
+         RecoveryOpportunityEvent *ev = dynamic_cast<RecoveryOpportunityEvent *>(e);
+         if (CheckPointer(ev) != POINTER_INVALID)
+            OnRecoveryOpportunity(ev);
+      }
       else
          OnCustomEvent(e);
    }
@@ -163,6 +175,8 @@ public:
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) {}
    virtual void OnOrderExecution(OrderExecutionEvent *e) {}
    virtual void OnPositionUpdate(PositionUpdateEvent *e) {}
+   virtual void OnRecoverySignal(RecoverySignalEvent *e) {}
+   virtual void OnRecoveryOpportunity(RecoveryOpportunityEvent *e) {}
    virtual void OnCustomEvent(Event *e) {} // Fallback for module-specific events
 
    // --- UTILITIES ---
