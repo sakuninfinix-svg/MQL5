@@ -12,7 +12,6 @@
 #ifndef __I_MANAGER_MQH__
 #define __I_MANAGER_MQH__
 
-#include "mql5_vscode_fix.h"
 #include "2.Config.mqh"
 #include "0.EventBus.mqh"
 #include "1.Events.mqh"

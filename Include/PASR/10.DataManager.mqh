@@ -10,7 +10,6 @@
 #define __DATA_MANAGER_MQH__
 
 #property strict
-#include "mql5_vscode_fix.h"
 #include "IManager.mqh"
 
 class DataManager : public IManager
