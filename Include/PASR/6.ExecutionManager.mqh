@@ -10,7 +10,6 @@
 #define __EXECUTION_MANAGER_MQH__
 
 #property strict
-#include "mql5_vscode_fix.h"
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
 

@@ -1,0 +1,79 @@
+# DEPENDENCY ANALYSIS REPORT - PASR MODULE
+
+## Current Dependency Graph (After Optimization)
+
+### Core Layer (No dependencies on other modules)
+- 0.EventBus.mqh         → Base event system
+- 2.Config.mqh           → Configuration & enums
+- mql5_vscode_fix.h      → IDE helper (optional)
+
+### Event Layer (Depends on Core)
+- 1.Events.mqh           → 0.EventBus + 2.Config
+
+### Base Manager Layer (Depends on Core + Event)
+- IManager.mqh           → 2.Config + 0.EventBus + 1.Events
+
+### Data Layer (Depends on Base Manager)
+- 10.DataManager.mqh     → IManager
+
+### Domain Managers (Depend on Data Layer)
+- 3.MarketManager.mqh    → IManager + 10.DataManager
+- 4.SRManager.mqh        → IManager + 10.DataManager
+- 6.ExecutionManager.mqh → IManager + 10.DataManager
+- 8.RecoveryManager.mqh  → IManager + 10.DataManager + 9.PatternManager
+- 11.DashboardManager.mqh→ IManager + 10.DataManager + MQL5 GUI libs
+
+### Specialized Managers
+- 9.PatternManager.mqh   → 2.Config only (stateless utility)
+- 5.SignalManager.mqh    → IManager + 9.PatternManager
+
+## Circular Dependency Check: PASSED ✓
+
+No circular dependencies detected. The dependency flow is strictly unidirectional:
+Core → Events → IManager → DataManager → Domain Managers
+
+## Redundancy Check: PASSED ✓
+
+1. Removed redundant #include "mql5_vscode_fix.h" from:
+   - 10.DataManager.mqh
+   - 11.DashboardManager.mqh
+   - 6.ExecutionManager.mqh
+   - IManager.mqh
+   
+   Reason: mql5_vscode_fix.h is only needed for VSCode IntelliSense, not for MQL5 compilation.
+   IManager already includes all necessary headers, so child classes inherit them.
+
+2. No duplicate class definitions found.
+
+3. No duplicate function implementations found.
+
+## Potential Issues Identified
+
+### 1. Forward Declaration Issue in IManager.mqh
+- Line 19: `class DataManager;` is a forward declaration
+- This is correct and necessary to avoid circular dependency
+
+### 2. RecoveryEngine in Config.mqh
+- RecoveryEngine class is defined in 2.Config.mqh (line 578)
+- This creates a conceptual coupling but no technical circular dependency
+- Consider moving to separate file if modularity is prioritized
+
+### 3. PatternManager as Stateless Utility
+- 9.PatternManager.mqh only includes 2.Config.mqh
+- Used by SignalManager and RecoveryManager
+- This is optimal design - no state, pure functions
+
+## Recommendations
+
+1. KEEP current structure - it's well-organized with clear separation of concerns
+2. Consider extracting RecoveryEngine to its own file for better modularity
+3. Add include guards verification script for CI/CD
+4. Document the dependency hierarchy in README
+
+## Summary
+
+✅ 0 Circular Dependencies
+✅ 0 Redundant Includes (after fix)
+✅ 0 Duplicate Definitions
+✅ Clean layered architecture
+✅ Follows MQL5 best practices

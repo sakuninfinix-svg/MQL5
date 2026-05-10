@@ -11,7 +11,6 @@
 #define __DASHBOARD_MANAGER_MQH__
 
 #property strict
-#include "mql5_vscode_fix.h"
 #include "2.Config.mqh"
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
