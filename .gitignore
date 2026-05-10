@@ -39,6 +39,8 @@ Thumbs.db
 *.a
 *.obj
 *.out
+*.ex5
+*.ex4
 
 # Coverage
 coverage/
@@ -64,4 +66,37 @@ htmlcov/
 *.Z
 *.lz
 *.lzo
-```
+
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+
+#MQL FOLDER
+.continue/
+Files/
+Images/
+Indicators/
+Profiles/
+Scripts/
+Experts/Advisors/
+Experts/Examples/
+Experts/Free Robots/
+Include/Arrays/
+Include/Canvas/
+Include/ChartObjects/
+Include/Charts/
+Include/Controls/
+Include/Expert/
+Include/Generic/
+Include/Math/
+Include/Graphics/
+Include/OpenCL/
+Include/Strings/
+Include/Trade/
+Include/Tools/
+Include/WinAPI
+Include/MovingAverages.mqh
+Include/VirtualKeys.mqh
+Include/StdLibErr.mqh
+Include/Object.mqh

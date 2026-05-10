@@ -93,6 +93,27 @@ enum ENUM_TRADE_STATE
 };
 
 //+------------------------------------------------------------------+
+//| CONSTANTS: Embedded Default Values                               |
+//+------------------------------------------------------------------+
+const string DEFAULT_NEWS_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml";
+const string DEFAULT_SESSION_SUN = "00:00-24:00";
+const string DEFAULT_SESSION_MON = "00:00-24:00";
+const string DEFAULT_SESSION_TUE = "00:00-24:00";
+const string DEFAULT_SESSION_WED = "00:00-24:00";
+const string DEFAULT_SESSION_THU = "00:00-24:00";
+const string DEFAULT_SESSION_FRI = "00:00-24:00";
+const string DEFAULT_SESSION_SAT = "0";
+
+// Default numeric values for key parameters
+const int DEFAULT_ATR_PERIOD = 14;
+const double DEFAULT_ATR_MIN = 150.0;
+const double DEFAULT_ATR_MAX = 4000.0;
+const double DEFAULT_RISK_PCT = 1.0;
+const double DEFAULT_LOT_SIZE = 0.01;
+const double DEFAULT_MAX_DAILY_LOSS_PCT = 5.0;
+const ulong DEFAULT_MAGIC_NUM = 20260403;
+
+//+------------------------------------------------------------------+
 //| STRUCTS: Data Containers                                         |
 //+------------------------------------------------------------------+
 
@@ -145,139 +166,160 @@ struct PerformanceStats
 //+------------------------------------------------------------------+
 
 // [GROUP] MARKET SESSIONS & NEWS
-input string InpSessionSun = "00:00-24:00";            // Sesi Minggu   (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionMon = "00:00-24:00";            // Sesi Senin    (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionTue = "00:00-24:00";            // Sesi Selasa   (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionWed = "00:00-24:00";            // Sesi Rabu     (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionThu = "00:00-24:00";            // Sesi Kamis    (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionFri = "00:00-24:00";            // Sesi Jumat    (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionSat = "0";                      // Sesi Sabtu    (0=Off JAM:MENIT-JJ:MM=on)
-input ENUM_NEWS_LEVEL InpNewsLevel = NEWS_HIGH_MEDIUM; // Filter Berita (NEWS_OFF = Nonaktif)
-input int InpNewsFreezeMinutes = 60;                   // News Freeze (Menit sebelum/sesudah)
-input string InpNewsWebURL = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml";
+input string InpSessionSun;            // Sesi Minggu   (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionMon;            // Sesi Senin    (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionTue;            // Sesi Selasa   (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionWed;            // Sesi Rabu     (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionThu;            // Sesi Kamis    (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionFri;            // Sesi Jumat    (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionSat;            // Sesi Sabtu    (0=Off JAM:MENIT-JJ:MM=on)
+input ENUM_NEWS_LEVEL InpNewsLevel; // Filter Berita (NEWS_OFF = Nonaktif)
+input int InpNewsFreezeMinutes;                   // News Freeze (Menit sebelum/sesudah)
 
 // [GROUP] RISK MANAGEMENT
-input bool InpUseAutoLot = true;       // Gunakan AutoLot (Risk %)
-input double InpRiskPct = 1.0;         // Risiko % per Trade
-input double InpLotSize = 0.01;        // Lot Statis (jika AutoLot OFF)
-input double InpMaxDailyLossPct = 5.0; // Batas Maksimal Loss Harian (%)
-input ulong InpMagicNum = 20260403;    // ID Transaksi Magic
-
-// [GROUP] STRATEGY MODE & MTF
-input ENUM_ENTRY_MODE InpEntryMode = MODE_SAFE; // Mode Entry (Safe/Aggressive)
-input ENUM_TPSL_MODE InpTPSLMode = TPSL_SR;     // Mode Penentuan TP/SL
-input bool InpUseMTF = false;                   // Gunakan Filter Multi-Timeframe (HTF)
-input ENUM_TIMEFRAMES InpHTF = PERIOD_H1;       // Higher Timeframe (HTF)
-input int InpHTFLookback = 50;                  // HTF Lookback (Candles)
-input double InpQualityLotMult = 0.5;           // Multiplier Lot Sinyal Lemah
+input bool InpUseAutoLot;       // Gunakan AutoLot (Risk %)
+input double InpRiskPct;         // Risiko % per Trade
+input double InpLotSize;        // Lot Statis (jika AutoLot OFF)
+input double InpMaxDailyLossPct; // Batas Maksimal Loss Harian (%)
+input ulong InpMagicNum;    // ID Transaksi Magic
+input ENUM_ENTRY_MODE InpEntryMode; // Mode Entry (Safe/Aggressive)
+input ENUM_TPSL_MODE InpTPSLMode;     // Mode Penentuan TP/SL
+input bool InpUseMTF;                   // Gunakan Filter Multi-Timeframe (HTF)
+input ENUM_TIMEFRAMES InpHTF;       // Higher Timeframe (HTF)
+input int InpHTFLookback;                  // HTF Lookback (Candles)
+input double InpQualityLotMult;           // Multiplier Lot Sinyal Lemah
 
 // [GROUP] SUPPORT & RESISTANCE (SR) ENGINE
-input ENUM_SR_MODE InpSRMode = SR_AUTO; // Mode Deteksi SR
-input int InpSRLookback = 20;           // SR Lookback (Candles)
-input int InpSwingLookback = 50;        // Swing/Fractal Lookback
-input double InpSRTouchBufferATR = 0.5; // Toleransi Sentuhan Zona (ATR x)
-input int InpSRMinTouchesStrong = 3;    // Min Sentuhan Zona Kuat
-input double InpMinSRRangeATR = 0.5;    // Min Range Antar Zona (ATR x)
-input double InpATRBufferMult = 0.5;    // Global ATR Buffer Mult
-input double InpBufferMultStrong = 0.3; // Strong Zone Buffer Mult
-input double InpBufferMultWeak = 0.8;   // Weak Zone Buffer Mult
+input ENUM_SR_MODE InpSRMode; // Mode Deteksi SR
+input int InpSRLookback;           // SR Lookback (Candles)
+input int InpSwingLookback;        // Swing/Fractal Lookback
+input double InpSRTouchBufferATR; // Toleransi Sentuhan Zona (ATR x)
+input int InpSRMinTouchesStrong;    // Min Sentuhan Zona Kuat
+input double InpMinSRRangeATR;    // Min Range Antar Zona (ATR x)
+input double InpATRBufferMult;    // Global ATR Buffer Mult
+input double InpBufferMultStrong; // Strong Zone Buffer Mult
+input double InpBufferMultWeak;   // Weak Zone Buffer Mult
 
 // [GROUP] SIGNAL DETECTION & PATTERNS
-input int InpSignalLookback = 5;             // Scan Pattern (Lookback Bar)
-input double InpMTFConfluenceBonus = 0.5;    // Bonus Skor Jika Searah/Aligned HTF
-input double InpStrongZoneBonus = 0.2;       // Bonus Skor di Zona Kuat
-input double InpStrongZoneThreshold = 0.4;   // Ambang Multiplier Zona Kuat
-input double InpMaxSignalATR = 1.8;          // Max Ukuran Candle Sinyal (ATR x)
-input double InpMomentumThresholdATR = 0.15; // Threshold Dorongan Momentum (ATR x)
-input bool InpUsePatternWeights = true;      // Gunakan Bobot Historis Pattern
-input double InpAntiBreakoutPct = 0.85;      // Batas Body Ratio (Anti-Breakout)
-input double InpMarubozuMinBodyPct = 0.90;   // Minimal Body Marubozu (0.9 = 90%)
-input double InpEngulfingBodyMult = 1.2;     // Rasio Tubuh Engulfing
-input double InpMinDominanceGap = 0.2;       // Minimal Selisih Skor Dominansi
-input double InpStrongZoneBufferMult = 0.7;  // Buffer multiplier untuk zona kuat
-input bool InpUseAdaptiveZoneBuffer = true;  // Buffer zona adaptif berdasarkan strength
-input double InpPatternSensitivityATR = 0.2; // Toleransi Gap & Aliansi Pattern (ATR x)
-input double InpStarMiddleBodyMult = 0.5;    // Rasio Maksimal Candle Tengah Star
-input double InpRailroadMinBodyRatio = 1.5;  // Min ratio body untuk Railroad Tracks
-input double InpZoneReuseATR = 0.20;         // Jarak Reuse Zona (ATR x)
+input int InpSignalLookback;             // Scan Pattern (Lookback Bar)
+input double InpMTFConfluenceBonus;    // Bonus Skor Jika Searah/Aligned HTF
+input double InpStrongZoneBonus;       // Bonus Skor di Zona Kuat
+input double InpStrongZoneThreshold;   // Ambang Multiplier Zona Kuat
+input double InpMaxSignalATR;          // Max Ukuran Candle Sinyal (ATR x)
+input double InpMomentumThresholdATR; // Threshold Dorongan Momentum (ATR x)
+input bool InpUsePatternWeights;      // Gunakan Bobot Historis Pattern
+input double InpAntiBreakoutPct;      // Batas Body Ratio (Anti-Breakout)
+input double InpMarubozuMinBodyPct;   // Minimal Body Marubozu (0.9 = 90%)
+input double InpEngulfingBodyMult;     // Rasio Tubuh Engulfing
+input double InpMinDominanceGap;       // Minimal Selisih Skor Dominansi
+input double InpStrongZoneBufferMult;  // Buffer multiplier untuk zona kuat
+input bool InpUseAdaptiveZoneBuffer;  // Buffer zona adaptif berdasarkan strength
+input double InpPatternSensitivityATR; // Toleransi Gap & Aliansi Pattern (ATR x)
+input double InpStarMiddleBodyMult;    // Rasio Maksimal Candle Tengah Star
+input double InpRailroadMinBodyRatio;  // Min ratio body untuk Railroad Tracks
+input double InpZoneReuseATR;         // Jarak Reuse Zona (ATR x)
 
 // NEW: Generic Pattern Scoring Parameters
-input double InpPatternBaseScore = 1.0;                  // Skor dasar untuk setiap pola valid
-input double InpPatternBonusStrongATRRange = 0.15;       // Bonus untuk candle dengan range ATR signifikan
-input double InpPatternBonusStrongBodyRatio = 0.10;      // Bonus untuk candle dengan rasio body signifikan (misal: body kecil untuk rejection)
-input double InpPatternBonusStrongWickRejection = 0.20;  // Bonus untuk candle dengan rejection wick signifikan
-input double InpPatternBonusFollowThrough = 0.10;        // Bonus untuk candle follow-through (misal: close searah dengan bias)
-input double InpPatternBonusGapConfirmation = 0.20;      // Bonus untuk konfirmasi gap (misal: pola Star)
-input double InpPatternBonusBreakoutConfirmation = 0.15; // Bonus untuk konfirmasi breakout (misal: pola Three Inside)
-input double InpPatternBonusSmall = 0.05;                // Bonus kecil untuk pengakuan pola dasar
+input double InpPatternBaseScore;                  // Skor dasar untuk setiap pola valid
+input double InpPatternBonusStrongATRRange;       // Bonus untuk candle dengan range ATR signifikan
+input double InpPatternBonusStrongBodyRatio;      // Bonus untuk candle dengan rasio body signifikan (misal: body kecil untuk rejection)
+input double InpPatternBonusStrongWickRejection;  // Bonus untuk candle dengan rejection wick signifikan
+input double InpPatternBonusFollowThrough;        // Bonus untuk candle follow-through (misal: close searah dengan bias)
+input double InpPatternBonusGapConfirmation;      // Bonus untuk konfirmasi gap (misal: pola Star)
+input double InpPatternBonusBreakoutConfirmation; // Bonus untuk konfirmasi breakout (misal: pola Three Inside)
+input double InpPatternBonusSmall;                // Bonus kecil untuk pengakuan pola dasar
 
 // NEW: Generic Pattern Thresholds
-input double InpPatternATRRangeThreshold = 0.6;   // Faktor ATR untuk candle dianggap "range signifikan" (misal: range > 0.6 * ATR)
-input double InpPatternBodyRatioThreshold = 0.35; // Rasio Body/Range untuk candle dianggap "body kecil" (misal: untuk rejection)
-input double InpPatternWickRatioThreshold = 0.5;  // Rasio Wick/Range untuk candle dianggap "rejection signifikan" (misal: wick > 0.5 * range)
+input double InpPatternATRRangeThreshold;   // Faktor ATR untuk candle dianggap "range signifikan" (misal: range > 0.6 * ATR)
+input double InpPatternBodyRatioThreshold; // Rasio Body/Range untuk candle dianggap "body kecil" (misal: untuk rejection)
+input double InpPatternWickRatioThreshold;  // Rasio Wick/Range untuk candle dianggap "rejection signifikan" (misal: wick > 0.5 * range)
 
 // NEW: Pattern-Specific Thresholds (hanya jika berbeda dari umum atau unik)
-input double InpPinbarWickToOppositeWickRatio = 2.0; // Rasio min wick utama terhadap wick berlawanan untuk Pinbar
-input double InpInsideBarChildMotherRangeMax = 0.65; // Rasio maks range child bar terhadap mother bar untuk Inside Bar
-input double InpStarClosePositionMin = 0.6;          // Posisi close min untuk pola Star (misal: close di 60% atas/bawah range)
-input double InpThreeInsideBodyRatioMin = 1.3;       // Rasio min body candle breakout terhadap body mother bar untuk Three Inside
-input double InpRailroadAvgBodyMinATR = 0.7;         // Ukuran body rata-rata min relatif terhadap ATR untuk Railroad Tracks
-input double InpRailroadWickRejectionMult = 0.3;     // Multiplier min rejection wick relatif terhadap body untuk Railroad Tracks
-input double InpMarubozuMinATRRangeMult = 4.0;       // Multiplier untuk MomentumThresholdATR untuk range min Marubozu
-input double InpMarubozuStrongATRRangeMin = 1.2;     // Faktor ATR min untuk bonus ekstra pada Marubozu
+input double InpPinbarWickToOppositeWickRatio; // Rasio min wick utama terhadap wick berlawanan untuk Pinbar
+input double InpInsideBarChildMotherRangeMax; // Rasio maks range child bar terhadap mother bar untuk Inside Bar
+input double InpStarClosePositionMin;          // Posisi close min untuk pola Star (misal: close di 60% atas/bawah range)
+input double InpThreeInsideBodyRatioMin;       // Rasio min body candle breakout terhadap body mother bar untuk Three Inside
+input double InpRailroadAvgBodyMinATR;         // Ukuran body rata-rata min relatif terhadap ATR untuk Railroad Tracks
+input double InpRailroadWickRejectionMult;     // Multiplier min rejection wick relatif terhadap body untuk Railroad Tracks
+input double InpMarubozuMinATRRangeMult;       // Multiplier untuk MomentumThresholdATR untuk range min Marubozu
+input double InpMarubozuStrongATRRangeMin;     // Faktor ATR min untuk bonus ekstra pada Marubozu
 
 // [GROUP] RECOVERY MODE & FAKEOUT PROTECTION
-input bool InpUseRecoveryMode = true;                // Aktifkan mode recovery setelah SL hit (includes fakeout detection)
-input int InpRecoveryCooldownBars = 3;               // Cooldown bars setelah SL hit sebelum mencari re-entry
-input int InpMaxRecoveryAttempts = 2;                // Maksimal percobaan re-entry untuk satu posisi
-input double InpRecoveryLotMult = 1.0;               // Multiplier lot untuk re-entry
-input double InpRecoveryPatternScoreThreshold = 0.8; // Skor minimal pattern untuk re-entry (lowered for more opportunities)
-input double InpRecoveryZoneToleranceATR = 0.7;      // Toleransi ATR dari SL hit price untuk mencari re-entry
-input double InpFakeoutDetectionSensitivity = 0.3;   // Sensitivitas deteksi fakeout (0.2-0.5, lower = more sensitive)
-input double InpFakeoutSLAdjustmentATR = 1.5;        // Adjustment SL saat fakeout terdeteksi (ATR multiplier)
+input bool InpUseRecoveryMode;                // Aktifkan mode recovery setelah SL hit (includes fakeout detection)
+input int InpRecoveryCooldownBars;               // Cooldown bars setelah SL hit sebelum mencari re-entry
+input int InpMaxRecoveryAttempts;                // Maksimal percobaan re-entry untuk satu posisi
+input double InpRecoveryLotMult;               // Multiplier lot untuk re-entry
+input double InpRecoveryPatternScoreThreshold; // Skor minimal pattern untuk re-entry (lowered for more opportunities)
+input double InpRecoveryZoneToleranceATR;      // Toleransi ATR dari SL hit price untuk mencari re-entry
+input double InpFakeoutDetectionSensitivity;   // Sensitivitas deteksi fakeout (0.2-0.5, lower = more sensitive)
+input double InpFakeoutSLAdjustmentATR;        // Adjustment SL saat fakeout terdeteksi (ATR multiplier)
 
 // [GROUP] PATTERN SPECIFIC VOLATILITY (SL MULTIPLIERS)
-input double InpDefaultSLMult = 1.0;                  // SL Mult Standar
-input double InpPinbarSLMult = 1.5;                   // SL Mult khusus Pinbar
-input double InpInsideBarSLMult = 1.2;                // SL Mult khusus Inside Bar
+input double InpDefaultSLMult;                  // SL Mult Standar
+input double InpPinbarSLMult;                   // SL Mult khusus Pinbar
+input double InpInsideBarSLMult;                // SL Mult khusus Inside Bar
 
 // [GROUP] COOLDOWNS & PROTECTION
-input int InpMaxOpenPositions = 3;            // Max Posisi Berjalan
-input int InpMaxConsecutiveLoss = 2;          // Batas Loss Beruntun
-input int InpMaxTradeDurationDays = 5;        // Durasi Maksimal Trade (Hari)
-input int InpEntryCooldownBars = 1;           // Cooldown Antar Entry (Bars)
-input int InpSignalCooldownBars = 5;          // Cooldown Sinyal Area (Bars)
-input int InpLossCooldownBars = 3;            // Cooldown Setelah Loss (Bars)
-input int InpPatternFailureCooldownBars = 10; // Cooldown Level Gagal (Bars)
-input double InpHighQualityThreshold = 1.8;   // Skor Setup Premium (Bypass Cooldown)
-input bool InpUseDynamicCooldown = true;      // Aktifkan Cooldown Adaptif HQ
-input int InpReducedCooldownBars = 2;         // Cooldown untuk HQ Setup
+input int InpMaxOpenPositions;            // Max Posisi Berjalan
+input int InpMaxConsecutiveLoss;          // Batas Loss Beruntun
+input int InpMaxTradeDurationDays;        // Durasi Maksimal Trade (Hari)
+input int InpEntryCooldownBars;           // Cooldown Antar Entry (Bars)
+input int InpSignalCooldownBars;          // Cooldown Sinyal Area (Bars)
+input int InpLossCooldownBars;            // Cooldown Setelah Loss (Bars)
+input int InpPatternFailureCooldownBars; // Cooldown Level Gagal (Bars)
+input double InpHighQualityThreshold;   // Skor Setup Premium (Bypass Cooldown)
+input bool InpUseDynamicCooldown;      // Aktifkan Cooldown Adaptif HQ
+input int InpReducedCooldownBars;         // Cooldown untuk HQ Setup
 
 // [GROUP] EXECUTION, TRAILING & RECOVERY
-input double InpMaxSpread = 300.0;        // Batas Maksimal Spread (Points)
-input int InpOrderThrottleMs = 2000;      // Throttle Eksekusi (ms)
-input bool InpUseTrailing = true;         // Aktifkan Trailing Stop
-input bool InpUsePartialClose = true;     // Aktifkan Partial Close
-input bool InpExitOnOpposite = true;      // Close Jika Muncul Sinyal Lawan
-input double InpTPBufferATR = 0.2;        // TP Buffer Dalam Zona (ATR x)
-input double InpSLBufferATR = 0.2;        // SL Buffer Luar Zona (ATR x)
-input double InpMinTPDistanceATR = 0.3;   // Min Jarak TP (ATR x)
-input double InpMaxTPDistanceATR = 3.0;   // Max Jarak TP (ATR x)
-input double InpTrailingStartATR = 0.5;   // Trailing Start (ATR x)
-input double InpTrailingBufferATR = 0.05; // Jarak Aman Buffer (ATR x)
-input double InpTrailActivationATR = 1.8; // Aktivasi Trailing (ATR x)
-input double InpTrailStepATR = 0.7;       // Trailing Step (ATR x)
-input double InpLockProfitATR = 1.2;      // Lock Profit Activation (ATR x)
-input double InpLockOffsetATR = 0.15;     // Profit Terkunci (ATR x)
-input double InpPartialCloseLotPct = 0.5; // % Lot Partial Close
-input double InpPartialCloseATR = 0.25;   // Target Partial TP (ATR x)
+input double InpMaxSpread;        // Batas Maksimal Spread (Points)
+input int InpOrderThrottleMs;      // Throttle Eksekusi (ms)
+input bool InpUseTrailing;         // Aktifkan Trailing Stop
+input bool InpUsePartialClose;     // Aktifkan Partial Close
+input bool InpExitOnOpposite;      // Close Jika Muncul Sinyal Lawan
+input double InpTPBufferATR;        // TP Buffer Dalam Zona (ATR x)
+input double InpSLBufferATR;        // SL Buffer Luar Zona (ATR x)
+input double InpMinTPDistanceATR;   // Min Jarak TP (ATR x)
+input double InpMaxTPDistanceATR;   // Max Jarak TP (ATR x)
+input double InpTrailingStartATR;   // Trailing Start (ATR x)
+input double InpTrailingBufferATR;  // Jarak Aman Buffer (ATR x)
+input double InpTrailActivationATR; // Aktivasi Trailing (ATR x)
+input double InpTrailStepATR;       // Trailing Step (ATR x)
+input double InpLockProfitATR;      // Lock Profit Activation (ATR x)
+input double InpLockOffsetATR;      // Profit Terkunci (ATR x)
+input double InpPartialCloseLotPct; // % Lot Partial Close
+input double InpPartialCloseATR;    // Target Partial TP (ATR x)
 
 // [GROUP] SYSTEM & DEBUG
-input bool InpDebugMode = true;  // Log Debug ke Konsol
-input bool InpSafeMode = true;   // Aktifkan Proteksi Safe Mode
-input int InpATRPeriod = 14;     // Periode ATR
-input double InpATRMin = 150.0;  // Batas Bawah Volatilitas (Points)
-input double InpATRMax = 4000.0; // Batas Atas Volatilitas (Points)
+input bool InpDebugMode;  // Log Debug ke Konsol
+input bool InpSafeMode;   // Aktifkan Proteksi Safe Mode
+input int InpATRPeriod;     // Periode ATR
+input double InpATRMin;  // Batas Bawah Volatilitas (Points)
+input double InpATRMax; // Batas Atas Volatilitas (Points)
+
+//+------------------------------------------------------------------+
+//| INITIALIZATION HELPER: Apply default values when input is empty  |
+//+------------------------------------------------------------------+
+void ApplyDefaultsIfEmpty()
+{
+   // Sessions: Use default if empty
+   if (InpSessionSun == "") InpSessionSun = DEFAULT_SESSION_SUN;
+   if (InpSessionMon == "") InpSessionMon = DEFAULT_SESSION_MON;
+   if (InpSessionTue == "") InpSessionTue = DEFAULT_SESSION_TUE;
+   if (InpSessionWed == "") InpSessionWed = DEFAULT_SESSION_WED;
+   if (InpSessionThu == "") InpSessionThu = DEFAULT_SESSION_THU;
+   if (InpSessionFri == "") InpSessionFri = DEFAULT_SESSION_FRI;
+   if (InpSessionSat == "") InpSessionSat = DEFAULT_SESSION_SAT;
+   
+   // Numeric: Use default if 0 (for most inputs)
+   if (InpATRPeriod <= 0) InpATRPeriod = DEFAULT_ATR_PERIOD;
+   if (InpATRMin <= 0) InpATRMin = DEFAULT_ATR_MIN;
+   if (InpATRMax <= 0) InpATRMax = DEFAULT_ATR_MAX;
+   if (InpRiskPct <= 0) InpRiskPct = DEFAULT_RISK_PCT;
+   if (InpLotSize <= 0) InpLotSize = DEFAULT_LOT_SIZE;
+   if (InpMaxDailyLossPct <= 0) InpMaxDailyLossPct = DEFAULT_MAX_DAILY_LOSS_PCT;
+   if (InpMagicNum == 0) InpMagicNum = DEFAULT_MAGIC_NUM;
+}
 
 //+------------------------------------------------------------------+
 //| STRATEGY CONFIG: Global Access Object                            |

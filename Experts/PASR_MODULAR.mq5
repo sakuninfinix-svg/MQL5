@@ -114,8 +114,8 @@ int OnInit()
             eng.LoadState(t, eaCfg.magicNum);
 
             // Dispatch event to notify listeners about current position state
-            g_eventBus.Dispatch(new PositionUpdateEvent(t, PositionGetDouble(POSITION_PRICE_CURRENT),
-                                                        PositionGetDouble(POSITION_PROFIT)));
+            DispatchEvent(new PositionUpdateEvent(t, PositionGetDouble(POSITION_PRICE_CURRENT),
+                                                  PositionGetDouble(POSITION_PROFIT)));
          }
       }
    }

@@ -552,7 +552,6 @@ void MarketManager::UpdateLossStreak(double netProfit)
    if (netProfit < 0)
    {
       m_consecutiveLosses++;
-      // MQL5 Best Practice: Gunakan CopyTime untuk async safety
       datetime times[];
       if (CopyTime(_Symbol, _Period, 0, 1, times) > 0)
          m_lastLossBarTime = times[0];

@@ -258,15 +258,15 @@ public:
 //+------------------------------------------------------------------+
 //| EVENT UTILITIES                                                  |
 //+------------------------------------------------------------------+
-template <typename T>
-void DispatchEvent(T *event)
-{
-   EventBus *bus = EventBus::Instance();
-   if (CheckPointer(bus) != POINTER_INVALID)
-      bus.Dispatch(event);
-   else if (CheckPointer(event) == POINTER_DYNAMIC)
-      delete event;
-}
+//template <typename T>
+//void DispatchEvent(T *event)
+//{
+//   EventBus *bus = EventBus::Instance();
+//   if (CheckPointer(bus) != POINTER_INVALID)
+//      bus.Dispatch(event);
+//   else if (CheckPointer(event) == POINTER_DYNAMIC)
+//      delete event;
+//}
 
 //+------------------------------------------------------------------+
 //| Replay Helper - Converts strings back to objects                 |
