@@ -11,6 +11,7 @@
 #define __DASHBOARD_MANAGER_MQH__
 
 #property strict
+#include "mql5_vscode_fix.h"
 #include "2.Config.mqh"
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
@@ -378,7 +379,7 @@ public:
 
       case DASHBOARD_RELOAD_CONFIG:
          Log("User triggered manual configuration reload.");
-         EventBus::Instance().Dispatch(new ConfigReloadEvent());
+         DispatchEvent(new ConfigReloadEvent());
          break;
       }
    }
@@ -442,8 +443,6 @@ class DashboardUI : public CAppDialog
 {
 private:
    DashboardManager *m_ctrl; ///< Controller reference
-   long m_chart_id;          ///< Chart ID (stored separately for reliability)
-   int m_subwin;             ///< Subwindow index
 
    // Background panels
    CPanel m_pnlHeader, m_pnlAccount, m_pnlMarket, m_pnlSignal, m_pnlStats, m_pnlControls;
@@ -475,7 +474,7 @@ public:
    /**
     * Constructor
     */
-   DashboardUI() : m_ctrl(NULL), m_magic(0), m_chart_id(0), m_subwin(0) {}
+   DashboardUI() : m_ctrl(NULL), m_magic(0) {}
 
    /**
     * Set controller reference
@@ -760,8 +759,7 @@ public:
          return;
 
       panel.Create(m_chart_id, m_name + "_" + name, m_subwin, x1, y1, x2, y2);
-      panel.BackgroundColor(bg);
-      panel.BorderType(BORDER_FLAT);
+      panel.ColorBackground(bg);
       panel.ColorBorder(CLR_BG_ACCENT);
    }
 
@@ -823,6 +821,13 @@ public:
       // === UPDATE HEADER ===
       string mode = MQLInfoInteger(MQL_TESTER) ? "◉ BACKTEST" : "◉ LIVE";
       m_lblMode.Text(mode);
+      
+      // Check emergency stop status
+      string emergencyGV = "PASR_EMERGENCY_" + (string)m_magic;
+      bool isEmergency = GlobalVariableCheck(emergencyGV);
+      
+      if (isEmergency)
+      {
          m_lblStatus.Text("● EMERGENCY STOP");
          m_lblStatus.Color(CLR_DANGER);
          
@@ -945,15 +950,13 @@ public:
       {
          GlobalVariableDelete("PASR_PAUSE_" + (string)m_magic);
          DispatchEvent(new PauseToggleEvent(true, false));
-         EventBus::Instance().Dispatch(new PauseToggleEvent(true, false));
       }
       else
+      {
          GlobalVariableSet("PASR_PAUSE_" + (string)m_magic, 1.0);
          DispatchEvent(new PauseToggleEvent(true, true));
-         EventBus::Instance().Dispatch(new PauseToggleEvent(true, true));
       }
    }
-    void SyncPauseButton(bool isBuy, bool state)
 
    void SyncPauseButton(bool isBuy, bool state)
    {
@@ -961,15 +964,15 @@ public:
       {
          m_btnPause.Text("▶ RESUME");
          m_btnPause.ColorBackground(CLR_SUCCESS);
-         m_btnPause.BackgroundColor(CLR_SUCCESS);
       }
       else
+      {
          m_btnPause.Text("⏸ PAUSE");
          m_btnPause.ColorBackground(CLR_WARNING);
-         m_btnPause.BackgroundColor(CLR_WARNING);
       }
    }
 
+   void OnCloseAllClick()
    {
       if (MessageBox("Close all open positions?", "Confirm", MB_YESNO | MB_ICONQUESTION) == IDYES)
       {
@@ -982,23 +985,24 @@ public:
    {
       string gvName = "PASR_EMERGENCY_" + (string)m_magic;
       if (GlobalVariableCheck(gvName))
-      if (MessageBox("EMERGENCY STOP will close ALL positions and disable trading!", "WARNING", MB_YESNO | MB_ICONWARNING) == IDYES)
       {
-         if (MessageBox("Emergency Stop sedang AKTIF. Apakah Anda ingin me-reset sistem dan mengizinkan trading kembali?", 
+         // Emergency stop is currently ACTIVE - offer to reset
+         if (MessageBox("Emergency Stop sedang AKTIF. Apakah Anda ingin me-reset sistem dan mengizinkan trading kembali?",
                         "Reset Emergency Stop", MB_YESNO | MB_ICONQUESTION) == IDYES)
+         {
             GlobalVariableDelete(gvName);
             Print("[Dashboard] Manual Emergency Stop di-reset oleh user. Sistem kembali normal.");
             UpdateUI();
          }
-         GlobalVariableSet("PASR_EMERGENCY_" + (string)m_magic, 1);
-         EventBus::Instance().Dispatch(new EmergencyStopEvent("Manual Emergency Stop from Dashboard"));
-         Print("[Dashboard] EMERGENCY STOP ACTIVATED");
       }
-         if (MessageBox("EMERGENCY STOP akan menutup SEMUA posisi dan menghentikan seluruh logika trading segera!\n\nApakah Anda yakin?", 
+      else
+      {
+         // Emergency stop is NOT active - offer to activate
+         if (MessageBox("EMERGENCY STOP akan menutup SEMUA posisi dan menghentikan seluruh logika trading segera!\n\nApakah Anda yakin?",
                         "⚠ PERINGATAN: EMERGENCY STOP", MB_YESNO | MB_ICONWARNING) == IDYES)
          {
             GlobalVariableSet(gvName, 1.0);
-            EventBus::Instance().Dispatch(new EmergencyStopEvent("Manual Emergency Stop from Dashboard"));
+            DispatchEvent(new EmergencyStopEvent("Manual Emergency Stop from Dashboard"));
             Print("[Dashboard] Manual Emergency Stop DIPICU. Semua posisi akan ditutup.");
          }
       }
