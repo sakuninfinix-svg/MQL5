@@ -19,6 +19,11 @@ private:
    int m_atrHandle;
    int m_fractalHandle;
 
+   struct DataConfigCache
+   {
+      int atrPeriod;
+   } m_cfgCache;
+
    struct CachedData
    {
       datetime barTime;
@@ -34,14 +39,17 @@ private:
    double m_dayStartBalance;
    datetime m_lastProfitUpdateDay;
    datetime m_lastScanTime;
+   int m_lastHistoryCount;   // REPAIR: Cache history count to prevent redundant scanning
    int m_consecutiveLosses; // NEW: Track consecutive losses
+   datetime m_lastLossTime;
 
 public:
    DataManager() : IManager("DataManager", 10),
                    m_atrHandle(INVALID_HANDLE), m_fractalHandle(INVALID_HANDLE),
                    m_realizedDailyProfit(0),
                    m_dayStartBalance(0), m_lastProfitUpdateDay(0), m_lastScanTime(0),
-                   m_consecutiveLosses(0)
+                   m_consecutiveLosses(0),
+                   m_lastLossTime(0)
    {
       m_cache.barTime = 0;
       m_cache.atr = 0;
@@ -49,6 +57,7 @@ public:
       ArraySetAsSeries(m_cache.fractalsUp, true);
       ArraySetAsSeries(m_cache.fractalsDown, true);
       ZeroMemory(m_scanCache);
+      m_lastHistoryCount = -1;
    }
 
    ~DataManager()
@@ -69,23 +78,26 @@ public:
 
    virtual void DeclareEvents() override
    {
-      AddEvent("NewBar");
-      AddEvent("Heartbeat");
+      AddEvent(EVENT_ID_NEW_BAR);
+      AddEvent(EVENT_ID_HEARTBEAT);
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
    {
       IManager::OnConfigReload(e);
+      RefreshConfigCache();
       ResetIndicators();
+   }
+
+   virtual void RefreshConfigCache() override
+   {
+      IManager::RefreshConfigCache();
+      m_cfgCache.atrPeriod = CFG.ATRPeriod;
    }
 
    bool ResetIndicators()
    {
-      if (m_atrHandle != INVALID_HANDLE)
-         IndicatorRelease(m_atrHandle);
-      if (m_fractalHandle != INVALID_HANDLE)
-         IndicatorRelease(m_fractalHandle);
-      m_atrHandle = iATR(_Symbol, _Period, CFG.ATRPeriod);
+      m_atrHandle = iATR(_Symbol, _Period, m_cfgCache.atrPeriod);
       m_fractalHandle = iFractals(_Symbol, _Period);
       if (m_atrHandle == INVALID_HANDLE || m_fractalHandle == INVALID_HANDLE)
          return false;
@@ -127,7 +139,6 @@ public:
    virtual void OnHeartbeat(HeartbeatEvent *e) override
    {
       UpdateAccountState(CFG.MagicNum);
-      ScavengePendingGVs();
    }
 
    // --- Getters & Business Logic ---
@@ -136,6 +147,86 @@ public:
    PositionScanResult GetScanResult() const { return m_scanCache; }
    PerformanceStats GetPerformanceStats() const { return m_perfStats; }
    double GetDayStartBalance() const { return m_dayStartBalance; }
+   int GetConsecutiveLosses() const { return m_consecutiveLosses; }
+   datetime GetLastLossTime() const { return m_lastLossTime; }
+
+   // --- Consolidated Risk Logic ---
+   
+   bool CanOpenTrade(double additionalRiskAmount)
+   {
+      double maxDailyLoss = AccountInfoDouble(ACCOUNT_EQUITY) * (CFG.MaxDailyLossPct / 100.0);
+      // Cek apakah profit harian yang terealisasi + floating loss + risiko trade baru melampaui batas
+      return (MathAbs(m_realizedDailyProfit) + additionalRiskAmount) < maxDailyLoss;
+   }
+
+   double CalculateLotSize(string symbol, double riskPct, double slDistancePoints, double qualityMultiplier = 1.0)
+   {
+      if (slDistancePoints <= 0) return 0.0;
+
+      double lot = 0.0;
+      if (CFG.UseAutoLot)
+      {
+         double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+         double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+         double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+
+         if (tickValue <= 0 || tickSize <= 0 || equity <= 0) return 0.0;
+
+         double riskMoney = equity * (riskPct / 100.0);
+         double lossPerLot = (slDistancePoints * _Point / tickSize) * tickValue;
+
+         if (lossPerLot > 0) lot = riskMoney / lossPerLot;
+      }
+      else lot = CFG.LotSize;
+
+      lot *= qualityMultiplier;
+      return NormalizeVolume(symbol, lot);
+   }
+
+   double CalculatePositionRisk(string symbol, double volume, double slDistancePoints)
+   {
+      double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+      if (tickValue <= 0 || tickSize <= 0 || volume <= 0) return 0.0;
+
+      return (slDistancePoints * _Point / tickSize) * tickValue * volume;
+   }
+
+   bool ValidateTradeDistances(double slDist, double tpDist, double atrPoints, string &reason)
+   {
+      if (slDist <= 0)
+      {
+         reason = "Invalid SL distance";
+         return false;
+      }
+
+      double minSL = 10.0; 
+      if (slDist < minSL)
+      {
+         reason = StringFormat("SL too close (%.1f < %.1f)", slDist, minSL);
+         return false;
+      }
+
+      if (tpDist > 0)
+      {
+         double minTP = atrPoints * CFG.MinTPDistanceATR;
+         if (tpDist < minTP)
+         {
+            reason = "TP too close to entry (Min ATR)";
+            return false;
+         }
+      }
+      return true;
+   }
+
+   double GetRiskPercentage(string symbol, double volume, double slDistancePoints)
+   {
+      double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+      if (equity <= 0) return 0.0;
+
+      double riskMoney = CalculatePositionRisk(symbol, volume, slDistancePoints);
+      return (riskMoney / equity) * 100.0;
+   }
 
    void RefreshDailyProfit()
    {
@@ -239,25 +330,6 @@ public:
       m_lastScanTime = TimeCurrent();
    }
 
-   void ScavengePendingGVs()
-   {
-      string prefix = "PASR_PEND_" + (string)CFG.MagicNum + "_" + _Symbol;
-      for (int i = GlobalVariablesTotal() - 1; i >= 0; i--)
-      {
-         string name = GlobalVariableName(i);
-         if (StringFind(name, prefix) == 0)
-         {
-            // Hanya proses jika ini adalah entry timestamp (_ts)
-            if (StringFind(name, "_ts") > 0)
-            {
-               datetime ts = (datetime)GlobalVariableGet(name);
-               if (TimeCurrent() - ts > 3600) // Jika lebih dari 1 jam
-                  GlobalVariablesDeleteAll(StringSubstr(name, 0, StringFind(name, "_ts") + 1));
-            }
-         }
-      }
-   }
-
    double NormalizePrice(string symbol, double price) const
    {
       return NormalizeDouble(price, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS));
@@ -277,11 +349,15 @@ public:
 
    void UpdatePerformanceStats()
    {
-      ZeroMemory(m_perfStats);
       if (!HistorySelect(0, TimeCurrent()))
          return;
 
       int total = HistoryDealsTotal();
+      if (total == m_lastHistoryCount) return; // REPAIR: Skip if no new deals
+      
+      m_lastHistoryCount = total;
+      ZeroMemory(m_perfStats);
+
       for (int i = 0; i < total; i++)
       {
          ulong t = HistoryDealGetTicket(i);
@@ -315,12 +391,14 @@ public:
    void UpdateConsecutiveLosses(double netProfit)
    {
       if (netProfit < 0)
+      {
          m_consecutiveLosses++;
+         m_lastLossTime = TimeCurrent();
+      }
       else
          m_consecutiveLosses = 0;
    }
 
-   int GetConsecutiveLosses() const { return m_consecutiveLosses; }
 
    int ParseHM(string hhmm) const
    {
@@ -330,20 +408,6 @@ public:
       int h = (int)StringToInteger(parts[0]);
       int m = (int)StringToInteger(parts[1]);
       return (h >= 0 && h <= 23 && m >= 0 && m <= 59) ? (h * 60 + m) : -1;
-   }
-
-   double CalculateAutoLot(string symbol, double riskPct, double slDistancePoints)
-   {
-      if (slDistancePoints <= 0)
-         return 0.0;
-      double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-      double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
-      double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
-      if (tickValue <= 0 || tickSize <= 0 || equity <= 0)
-         return 0.0;
-      double riskMoney = equity * (riskPct / 100.0);
-      double lossPerLot = (slDistancePoints * _Point / tickSize) * tickValue;
-      return (lossPerLot > 0) ? NormalizeVolume(symbol, riskMoney / lossPerLot) : 0.0;
    }
 
    string BuildComment(string type, int bias, ENUM_ENTRY_MODE mode) const

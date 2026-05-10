@@ -13,7 +13,6 @@
 #include "mql5_vscode_fix.h"
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
-#include "7.RiskCalculator.mqh"
 
 //+------------------------------------------------------------------+
 //| Subscribes: SignalGenerated, ConfigReload, EmergencyStop,        |
@@ -21,11 +20,8 @@
 //+------------------------------------------------------------------+
 class ExecutionManager : public IManager
 {
-   // PRIVATE: State & Cache                                         
 private:
-   RiskCalculator m_riskCalc; 
    ulong m_lastOrderTime;
-   uint m_orderThrottleMs;  
 
    struct ExecConfigCache
    {
@@ -34,36 +30,38 @@ private:
       double lotSize;
       double qualityLotMult;
       double minTPDistanceATR;
-      double atrBufferMult;
       double slBufferATR;
       double tpBufferATR;
       double maxTPDistanceATR;
       ulong magicNum;
-      bool debugMode;
       ENUM_ENTRY_MODE entryMode;
       ENUM_TPSL_MODE tpslMode;
+      double recoveryLotMult;
+      uint orderThrottleMs;
    } m_cfgCache;
 
    // SignalManager *m_signalManager; // Not needed, using events
-   //| PRIVATE: Core Logic                                             
+   //| PRIVATE: Core Logic
 private:
    virtual void RefreshConfigCache() override
    {
+      // 1. Sync basic state from IManager (m_debugMode)
+      IManager::RefreshConfigCache();
+
+      // 2. Sync Execution specific parameters from CFG
       m_cfgCache.useAutoLot = CFG.UseAutoLot;
       m_cfgCache.riskPct = CFG.RiskPct;
       m_cfgCache.lotSize = CFG.LotSize;
       m_cfgCache.qualityLotMult = CFG.QualityLotMult;
       m_cfgCache.minTPDistanceATR = CFG.MinTPDistanceATR;
       m_cfgCache.maxTPDistanceATR = CFG.MaxTPDistanceATR;
-      m_cfgCache.atrBufferMult = CFG.ATRBufferMult;
-      m_cfgCache.tpslMode = CFG.TPSLMode;
       m_cfgCache.slBufferATR = CFG.SLBufferATR;
       m_cfgCache.tpBufferATR = CFG.TPBufferATR;
-      m_cfgCache.magicNum = CFG.MagicNum;
-      m_cfgCache.debugMode = CFG.DebugMode;
-      m_cfgCache.entryMode = CFG.EntryMode;      
-      // Recovery Mode
-      m_riskCalc.LoadConfig();
+      m_cfgCache.magicNum = (ulong)CFG.MagicNum;
+      m_cfgCache.entryMode = CFG.EntryMode;
+      m_cfgCache.tpslMode = CFG.TPSLMode;
+      m_cfgCache.recoveryLotMult = CFG.RecoveryLotMult;
+      m_cfgCache.orderThrottleMs = (uint)CFG.OrderThrottleMs;
    }
 
    string MakePendingPrefix(const string symbol, ulong tsID) const
@@ -71,17 +69,18 @@ private:
       return "PASR_PEND_" + (string)m_cfgCache.magicNum + "_" + symbol + "_" + (string)tsID + "_";
    }
 
-   void SavePendingState(const OrderPlan &plan, double zonePrice, const string symbol, ulong tsID) const
+   void SavePendingState(const OrderPlan &plan, double zonePrice, double slMult, const string symbol, ulong tsID) const
    {
       string p = MakePendingPrefix(symbol, tsID);
-      string data = StringFormat("%.5f|%.2f|%.2f|%d|%.5f", zonePrice, plan.atrUsed, plan.lot, plan.type, plan.tp);
-      GlobalVariableSet(p + "data", 1.0); // Flag
       GlobalVariableSet(p + "ts", (double)TimeCurrent());
+      GlobalVariableSet(p + "tp", plan.tp);
+      GlobalVariableSet(p + "zp", zonePrice);
+      GlobalVariableSet(p + "sm", slMult);
    }
    void DeletePendingStateById(const string symbol, ulong tsID) const
    {
       string prefix = MakePendingPrefix(symbol, tsID);
-      GlobalVariablesDeleteAll(prefix); 
+      GlobalVariablesDeleteAll(prefix);
    }
 
    void ScavengePendingGVs()
@@ -99,7 +98,7 @@ private:
 
          datetime ts = (datetime)GlobalVariableGet(gvName);
          if (TimeCurrent() - ts <= 120)
-            continue; 
+            continue;
 
          int start = StringLen(pattern);
          int end = StringFind(gvName, "_ts");
@@ -131,7 +130,7 @@ private:
          if (!stillActive)
          {
             GlobalVariablesDeleteAll(pattern + tsID_str + "_");
-            if (m_cfgCache.debugMode)
+            if (m_debugMode)
                PrintFormat("[Execution] Cleaned orphaned GV: %s", tsID_str);
          }
       }
@@ -167,7 +166,7 @@ private:
          if (tp - price > maxTPDist)
          {
             reason = StringFormat("BUY TP too far: %.1f > max %.1f (ATR %.1f)",
-                                  (tp - price) / _Point, maxTPDist / _Point, CFG.MaxTPDistanceATR);
+                                  (tp - price) / _Point, maxTPDist / _Point, m_cfgCache.maxTPDistanceATR);
             return false;
          }
          if (sl > 0 && price - sl < stopLevel)
@@ -179,7 +178,7 @@ private:
          if (CheckPointer(m_data) != POINTER_INVALID && volume > 0)
          {
             double slDist = MathAbs(price - sl) / _Point;
-            double posRiskPct = m_riskCalc.GetRiskPercentage(volume, slDist);
+            double posRiskPct = m_data.GetRiskPercentage(_Symbol, volume, slDist);
             if (posRiskPct > 5.0)
             {
                reason = StringFormat("Position risk too high: %.2f%% > 5%%", posRiskPct);
@@ -214,7 +213,7 @@ private:
          if (CheckPointer(m_data) != POINTER_INVALID && volume > 0)
          {
             double slDist = MathAbs(sl - price) / _Point;
-            double posRiskPct = m_riskCalc.GetRiskPercentage(volume, slDist);
+            double posRiskPct = m_data.GetRiskPercentage(_Symbol, volume, slDist);
             if (posRiskPct > 5.0)
             {
                reason = StringFormat("Position risk too high: %.2f%% > 5%%", posRiskPct);
@@ -226,27 +225,26 @@ private:
       return true;
    }
 
-   //| PUBLIC: Event Handler Implementation                           
+   //| PUBLIC: Event Handler Implementation
 public:
    ExecutionManager() : IManager("ExecutionManager", 40)
    {
       m_lastOrderTime = 0;
-      m_orderThrottleMs = (uint)CFG.OrderThrottleMs;
    }
 
    virtual void DeclareEvents() override
    {
-      AddEvent("SignalGenerated");
-      AddEvent("RecoverySignal"); // Subscribe to recovery signals
+      AddEvent(EVENT_ID_SIGNAL_GENERATED);
+      AddEvent(EVENT_ID_RECOVERY_SIGNAL);
    }
 
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
       if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
          return;
-      if (GetTickCount64() - m_lastOrderTime < (ulong)m_orderThrottleMs)
+      if (GetTickCount64() - m_lastOrderTime < (ulong)m_cfgCache.orderThrottleMs)
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Execution] Order throttled. Skipping.");
          return;
       }
@@ -258,7 +256,7 @@ public:
       static datetime lastBarExecuted = 0;
       if (currBar == lastBarExecuted)
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Execution] Already executed this bar. Skipping.");
          return;
       }
@@ -269,7 +267,7 @@ public:
 
       if (atr <= 0 || sup <= 0 || res <= 0)
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Execution] Invalid market data. Skipping execution.");
          return;
       }
@@ -278,15 +276,15 @@ public:
       if (BuildOrderPlan(e.signal, plan, sup, res, atr))
       {
          double slDist = MathAbs(plan.entry - plan.brokerSL) / _Point;
-         double riskAmount = m_riskCalc.CalculatePositionRisk(plan.lot, slDist);
-         if (!m_riskCalc.CanOpenTrade(riskAmount))
+         double riskAmount = m_data.CalculatePositionRisk(_Symbol, plan.lot, slDist);
+         if (!m_data.CanOpenTrade(riskAmount))
          {
-            if (m_cfgCache.debugMode)
+            if (m_debugMode)
                PrintFormat("[Execution] Order blocked by daily loss limit. Risk amount: %.2f", riskAmount);
             return;
          }
 
-         ulong reqID = Open(plan, e.signal.zonePrice);
+         ulong reqID = Open(plan, e.signal.zonePrice, e.signal.slMultiplier);
          if (reqID > 0)
          {
             lastBarExecuted = currBar;
@@ -301,9 +299,9 @@ public:
    {
       if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
          return;
-      if (GetTickCount64() - m_lastOrderTime < (ulong)m_orderThrottleMs)
+      if (GetTickCount64() - m_lastOrderTime < (ulong)m_cfgCache.orderThrottleMs)
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Execution] Recovery order throttled. Skipping.");
          return;
       }
@@ -314,30 +312,33 @@ public:
 
       if (atr <= 0 || sup <= 0 || res <= 0)
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Execution] Invalid market data for recovery. Skipping execution.");
          return;
       }
 
       OrderPlan plan;
       // Pass original ticket and recovery lot multiplier
-      if (BuildOrderPlan(e.signal, plan, sup, res, atr, e.originalTicket, CFG.RecoveryLotMult))
+      if (BuildOrderPlan(e.signal, plan, sup, res, atr, e.originalTicket, m_cfgCache.recoveryLotMult))
       {
-         ulong reqID = Open(plan, e.signal.zonePrice);
+         ulong reqID = Open(plan, e.signal.zonePrice, e.signal.slMultiplier);
          if (reqID > 0)
          {
             m_lastOrderTime = GetTickCount64();
-            if (m_cfgCache.debugMode)
+            if (m_debugMode)
                PrintFormat("[Execution] Recovery order placed for original trade %d. New Request ID: %d", e.originalTicket, reqID);
          }
-      } else {
-         if (m_cfgCache.debugMode) PrintFormat("[Execution] Failed to build recovery order plan for original trade %d.", e.originalTicket);
+      }
+      else
+      {
+         if (m_debugMode)
+            PrintFormat("[Execution] Failed to build recovery order plan for original trade %d.", e.originalTicket);
       }
    }
 
    virtual void OnEmergencyStop(EmergencyStopEvent *e) override
    {
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
          Print("[Execution] EMERGENCY STOP: Halting new orders.");
       GlobalVariablesDeleteAll("PASR_PEND_" + (string)m_cfgCache.magicNum + "_" + _Symbol + "_");
    }
@@ -345,7 +346,7 @@ public:
    virtual void OnConfigReload(ConfigReloadEvent *e) override
    {
       RefreshConfigCache();
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
          Print("[Execution] Config cache refreshed.");
    }
 
@@ -354,7 +355,7 @@ public:
       ScavengePendingGVs();
    }
 
-   //| PUBLIC: Integration & Backward Compatible Methods               
+   //| PUBLIC: Integration & Backward Compatible Methods
 public:
    bool BuildOrderPlan(const SignalDecision &decision, OrderPlan &plan,
                        double support, double resistance, double atrPoints, ulong originalTicket = 0, double lotMultiplier = 1.0)
@@ -365,7 +366,7 @@ public:
 
       if (support <= 0 || resistance <= 0)
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Exec Build] Error: Invalid SR levels.");
          return false;
       }
@@ -374,7 +375,7 @@ public:
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       if (bid <= 0 || ask <= 0)
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Exec Build] Error: Invalid market prices.");
          return false;
       }
@@ -395,8 +396,8 @@ public:
 
          double tp = resistance - tpBuffer;
 
-         plan.brokerSL = m_data ? m_data.NormalizePrice(_Symbol, sl) : NormalizeDouble(sl, _Digits);
-         plan.tp = m_data ? m_data.NormalizePrice(_Symbol, tp) : NormalizeDouble(tp, _Digits);
+         plan.brokerSL = m_data.NormalizePrice(_Symbol, sl);
+         plan.tp = m_data.NormalizePrice(_Symbol, tp);
       }
       else
       {
@@ -405,17 +406,17 @@ public:
             sl = decision.signalPrice + slBuffer;
          else // TPSL_SR
             sl = resistance + (slBuffer * patternSLMult);
-         
+
          double tp = support + tpBuffer;
 
-         plan.brokerSL = m_data ? m_data.NormalizePrice(_Symbol, sl) : NormalizeDouble(sl, _Digits);
-         plan.tp = m_data ? m_data.NormalizePrice(_Symbol, tp) : NormalizeDouble(tp, _Digits);
+         plan.brokerSL = m_data.NormalizePrice(_Symbol, sl);
+         plan.tp = m_data.NormalizePrice(_Symbol, tp);
       }
 
       if ((plan.type == ORDER_TYPE_BUY && plan.entry < support - (atrPrice * 0.5)) ||
           (plan.type == ORDER_TYPE_SELL && plan.entry > resistance + (atrPrice * 0.5)))
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Exec Build] Abort: Price far past zone.");
          return false;
       }
@@ -426,16 +427,16 @@ public:
 
       string validationReason = "";
       double tpDistancePoints = (plan.tp > 0) ? MathAbs(plan.entry - plan.tp) / _Point : 0;
-      if (!m_riskCalc.ValidateDistances(slDistancePoints, tpDistancePoints, atrPoints, validationReason))
+      if (!m_data.ValidateTradeDistances(slDistancePoints, tpDistancePoints, atrPoints, validationReason))
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Exec Build] Risk validation failed: ", validationReason);
          return false;
       }
 
       int qualityScore = decision.orderType == ORDER_TYPE_BUY ? decision.bias : -decision.bias;
       double signalQuality = (qualityScore == 0) ? 1.5 : 1.0; // This might need adjustment for recovery signals
-      double baseLot = m_riskCalc.CalculateLotSize(slDistancePoints, signalQuality);
+      double baseLot = m_data.CalculateLotSize(_Symbol, m_cfgCache.riskPct, slDistancePoints, signalQuality);
 
       plan.lot = baseLot;
       plan.comment = m_data ? m_data.BuildComment(plan.type == ORDER_TYPE_BUY ? "BUY" : "SELL", decision.bias, m_cfgCache.entryMode) : "P_EXEC";
@@ -443,25 +444,26 @@ public:
       string reason;
       if (!ValidateOrderLevels(plan.type, plan.entry, plan.brokerSL, plan.tp, plan.lot, reason, atrPoints))
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Exec Build] Validation failed: ", reason);
          return false;
       }
-      
+
       // Apply recovery lot multiplier if this is a recovery trade
-      if (originalTicket > 0 && lotMultiplier > 0) {
-         plan.lot = m_riskCalc.NormalizeVolume(_Symbol, plan.lot * lotMultiplier);
+      if (originalTicket > 0 && lotMultiplier > 0)
+      {
+         plan.lot = m_data.NormalizeVolume(_Symbol, plan.lot * lotMultiplier);
          plan.comment = "RECOV_ORIG_" + (string)originalTicket + "_" + plan.comment;
       }
 
       return true;
    }
 
-   ulong Open(const OrderPlan &plan, double zonePrice)
+   ulong Open(const OrderPlan &plan, double zonePrice, double slMult)
    {
       if (plan.lot <= 0 || plan.entry <= 0 || plan.atrUsed <= 0)
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[Exec Open] Abort: Invalid parameters.");
          return 0;
       }
@@ -470,6 +472,17 @@ public:
       MqlTradeResult result;
       ZeroMemory(request);
       ZeroMemory(result);
+
+      // IMPROVE: Check free margin before sending request
+      double marginRequired = 0;
+      if (OrderCalcMargin(plan.type, _Symbol, plan.lot, plan.entry, marginRequired))
+      {
+         if (marginRequired > AccountInfoDouble(ACCOUNT_MARGIN_FREE))
+         {
+            Log("Insufficient margin for execution. Required: " + (string)marginRequired);
+            return 0;
+         }
+      }
 
       request.action = TRADE_ACTION_DEAL;
       request.symbol = _Symbol;
@@ -493,16 +506,16 @@ public:
       ulong tsID = GetTickCount64() % 10000000000;
       request.comment = plan.comment + "#" + (string)tsID;
 
-      SavePendingState(plan, zonePrice, _Symbol, tsID);
+      SavePendingState(plan, zonePrice, slMult, _Symbol, tsID);
       if (!OrderSendAsync(request, result))
       {
          DeletePendingStateById(_Symbol, tsID);
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             PrintFormat("[Exec Async] OrderSend failed: %d", GetLastError());
          return 0;
       }
 
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
          PrintFormat("[Exec Async] Request sent: %s %.2f @ %.5f | ID: %d",
                      EnumToString(plan.type), plan.lot, plan.entry, tsID);
 

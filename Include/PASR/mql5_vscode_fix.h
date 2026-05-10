@@ -14,6 +14,7 @@
 #define ulong unsigned long
 #define uint unsigned int
 #define uchar unsigned char
+#define NULL 0
 
 // Simulasi fungsi internal MQL5 agar tidak error di VS Code
 #define GetPointer(ptr) ptr
@@ -50,6 +51,13 @@
 #define PositionGetInteger(p) 0LL
 #define PositionGetDouble(p) 0.0
 
+// Global Variable Functions
+#define GlobalVariableCheck(n) true
+#define GlobalVariableDelete(n) true
+#define GlobalVariableSet(n, v) 0.0
+#define GlobalVariableGet(n) 0.0
+#define GlobalVariablesDeleteAll(p) 0
+
 // Position & Order Properties
 #define POSITION_MAGIC 0
 #define POSITION_SYMBOL 0
@@ -66,6 +74,4 @@
 
 // Casting dummy
 #define dynamic_cast static_cast
-#endif
-
 #endif

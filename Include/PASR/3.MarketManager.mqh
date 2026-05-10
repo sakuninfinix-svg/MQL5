@@ -32,7 +32,6 @@ private:
    int m_sessionEnds[7];
    datetime m_lastEntryBarTime;
    datetime m_lastLossBarTime;
-   int m_consecutiveLosses;
 
    bool m_gateOpen;
    bool m_entryAllowed;
@@ -41,21 +40,19 @@ private:
    MqlTick m_lastTick;
    bool m_hasLastTick;
 
-   // Config Cache
    struct MarketConfigCache
    {
-      string tradingSessions[7];
-      double maxSpread;
+      bool useNews;
       double atrMin;
       double atrMax;
-      bool useNews;
-      int newsFreeze;
+      double maxSpread;
       ENUM_NEWS_LEVEL newsLevel;
+      int newsFreeze;
       string newsWebURL;
       int entryCooldownBars;
       int maxConsecutiveLoss;
       int lossCooldownBars;
-      bool debugMode;
+      string tradingSessions[7];
    } m_cfgCache;
 
    void FetchWebNews();
@@ -73,19 +70,19 @@ public:
 
    virtual void RefreshConfigCache() override
    {
-      for (int i = 0; i < 7; i++)
-         m_cfgCache.tradingSessions[i] = CFG.TradingSessions[i];
-      m_cfgCache.maxSpread = CFG.MaxSpread;
+      IManager::RefreshConfigCache();
+      m_cfgCache.useNews = CFG.UseNews;
       m_cfgCache.atrMin = CFG.ATRMin;
       m_cfgCache.atrMax = CFG.ATRMax;
-      m_cfgCache.useNews = CFG.UseNews;
-      m_cfgCache.newsFreeze = CFG.NewsFreeze;
+      m_cfgCache.maxSpread = CFG.MaxSpread;
       m_cfgCache.newsLevel = CFG.NewsLevel;
+      m_cfgCache.newsFreeze = CFG.NewsFreeze;
       m_cfgCache.newsWebURL = CFG.NewsWebURL;
       m_cfgCache.entryCooldownBars = CFG.EntryCooldownBars;
       m_cfgCache.maxConsecutiveLoss = CFG.MaxConsecutiveLoss;
       m_cfgCache.lossCooldownBars = CFG.LossCooldownBars;
-      m_cfgCache.debugMode = CFG.DebugMode;
+      for (int i = 0; i < 7; i++)
+         m_cfgCache.tradingSessions[i] = CFG.TradingSessions[i];
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -95,9 +92,9 @@ public:
 
    virtual void DeclareEvents() override
    {
-      AddEvent("Heartbeat");
-      AddEvent("PriceUpdate");
-      AddEvent("NewBar");
+      AddEvent(EVENT_ID_HEARTBEAT);
+      AddEvent(EVENT_ID_PRICE_UPDATE);
+      AddEvent(EVENT_ID_NEW_BAR);
    }
 
    virtual void OnPriceUpdate(PriceUpdateEvent *e) override;
@@ -111,11 +108,9 @@ public:
    bool IsEntryCooldownActive();
    string GetNewsStatus() const { return m_newsStatus; }
    datetime GetNextNewsTime() const { return m_nextNewsTime; }
-   int GetConsecutiveLosses() const { return m_consecutiveLosses; }
 
    // --- Methods to update internal state ---
    void UpdateLastEntryBarTime(datetime time) { m_lastEntryBarTime = time; }
-   void UpdateLossStreak(double netProfit);
    void SetLastBarTime(datetime time) { m_lastBarTime = time; }
 
    virtual void OnHeartbeat(HeartbeatEvent *e) override
@@ -140,6 +135,7 @@ bool MarketManager::Init()
    if (!IManager::Init())
       return false;
 
+   // Cache is already refreshed by IManager::Init()
    for (int i = 0; i < 7; i++)
    {
       string session = m_cfgCache.tradingSessions[i];
@@ -195,7 +191,7 @@ bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, doubl
 {
    if (!IsTradingSession())
    {
-      m_data.DebugLog(m_cfgCache.debugMode, "Trading session is closed.");
+      m_data.DebugLog(m_debugMode, "Trading session is closed.");
       return false;
    }
 
@@ -204,13 +200,13 @@ bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, doubl
    currentSpread = (ask - bid) / _Point;
    if (currentSpread > m_cfgCache.maxSpread)
    {
-      m_data.DebugLog(m_cfgCache.debugMode, "Spread too high: " + DoubleToString(currentSpread, 1));
+      m_data.DebugLog(m_debugMode, "Spread too high: " + DoubleToString(currentSpread, 1));
       return false;
    }
 
    if (currentATR < m_cfgCache.atrMin || currentATR > m_cfgCache.atrMax)
    {
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
       {
          string reason = (currentATR < m_cfgCache.atrMin) ? "Too Low" : "Too High";
          PrintFormat("[%s] ATR Gate Blocked: Current %.1f (Min: %.1f, Max: %.1f) - %s",
@@ -237,7 +233,7 @@ void MarketManager::OnPriceUpdate(PriceUpdateEvent *e)
    if (currentATR <= 0)
    {
       gateOpen = false;
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
          PrintFormat("[%s] Market gate blocked: ATR unavailable.", m_name);
    }
    else
@@ -258,9 +254,9 @@ void MarketManager::OnPriceUpdate(PriceUpdateEvent *e)
    m_lastSpread = currentSpread;
    m_lastATR = currentATR;
 
-   if (stateChanged || m_cfgCache.debugMode)
+   if (stateChanged || m_debugMode)
    {
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
       {
          PrintFormat("[%s] MarketGate updated - gateOpen=%s entryAllowed=%s spread=%.1f atr=%.2f",
                      m_name,
@@ -270,7 +266,7 @@ void MarketManager::OnPriceUpdate(PriceUpdateEvent *e)
                      m_lastATR);
       }
       MarketGateEvent *evt = new MarketGateEvent(m_gateOpen, m_lastSpread, m_lastATR, m_entryAllowed);
-      EventBus::Instance().Dispatch(evt);
+      DispatchEvent(evt);
    }
 }
 
@@ -300,7 +296,7 @@ void MarketManager::OnNewBar(NewBarEvent *e)
    else if (currentATR <= 0)
    {
       recalculatedGate = false;
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
          PrintFormat("[%s] Market gate blocked on new bar: ATR unavailable.", m_name);
    }
 
@@ -315,9 +311,9 @@ void MarketManager::OnNewBar(NewBarEvent *e)
    m_lastSpread = currentSpread;
    m_lastATR = currentATR;
 
-   if (stateChanged || m_cfgCache.debugMode)
+   if (stateChanged || m_debugMode)
    {
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
          PrintFormat("[%s] MarketGate updated on NewBar - gateOpen=%s entryAllowed=%s spread=%.1f atr=%.2f",
                      m_name,
                      m_gateOpen ? "true" : "false",
@@ -325,7 +321,7 @@ void MarketManager::OnNewBar(NewBarEvent *e)
                      m_lastSpread,
                      m_lastATR);
       MarketGateEvent *evt = new MarketGateEvent(m_gateOpen, m_lastSpread, m_lastATR, m_entryAllowed);
-      EventBus::Instance().Dispatch(evt);
+      DispatchEvent(evt);
    }
 }
 
@@ -366,7 +362,7 @@ void MarketManager::FetchWebNews()
 
    if (res != 200)
    {
-      m_data.DebugLog(m_cfgCache.debugMode, "WebNews Fetch Failed. HTTP Status: " + (string)res + ", MQL Error: " + (string)GetLastError());
+      m_data.DebugLog(m_debugMode, "WebNews Fetch Failed. HTTP Status: " + (string)res + ", MQL Error: " + (string)GetLastError());
       return;
    }
 
@@ -459,8 +455,8 @@ bool MarketManager::IsNewsTime()
    datetime now = TimeGMT(); // Web feeds usually use GMT
    for (int i = 0; i < ArraySize(m_webNewsTimes); i++)
    {
-      if (now >= m_webNewsTimes[i] - (CFG.NewsFreeze * 60) &&
-          now <= m_webNewsTimes[i] + (CFG.NewsFreeze * 60))
+      if (now >= m_webNewsTimes[i] - (m_cfgCache.newsFreeze * 60) &&
+          now <= m_webNewsTimes[i] + (m_cfgCache.newsFreeze * 60))
       {
          m_nextNewsTime = m_webNewsTimes[i];
          m_newsStatus = "WEB NEWS ACTIVE";
@@ -501,7 +497,7 @@ bool MarketManager::IsNewsTime()
                {
                   m_nextNewsTime = values[i].time;
                   m_newsStatus = "NEWS ACTIVE: " + event.name;
-                  m_data.DebugLog(CFG.DebugMode, "News blocked: " + m_newsStatus);
+                  m_data.DebugLog(m_debugMode, "News blocked: " + m_newsStatus);
                   m_lastNewsResult = true;
                   return m_lastNewsResult;
                }
@@ -529,17 +525,18 @@ bool MarketManager::IsEntryCooldownActive()
       int barsSinceEntry = (int)((currBar - m_lastEntryBarTime) / PeriodSeconds(_Period));
       if (barsSinceEntry < m_cfgCache.entryCooldownBars)
       {
-         m_data.DebugLog(m_cfgCache.debugMode, "Entry cooldown active (bars: " + (string)barsSinceEntry + ")");
+         m_data.DebugLog(m_debugMode, "Entry cooldown active (bars: " + (string)barsSinceEntry + ")");
          return true;
       }
    }
 
-   if (m_consecutiveLosses >= m_cfgCache.maxConsecutiveLoss && m_lastLossBarTime > 0)
+   if (m_data.GetConsecutiveLosses() >= m_cfgCache.maxConsecutiveLoss)
    {
-      int barsSinceLoss = (int)((currBar - m_lastLossBarTime) / PeriodSeconds(_Period));
+      datetime lastLoss = m_data.GetLastLossTime();
+      int barsSinceLoss = (int)((currBar - lastLoss) / PeriodSeconds(_Period));
       if (barsSinceLoss < m_cfgCache.lossCooldownBars)
       {
-         m_data.DebugLog(m_cfgCache.debugMode, "Loss cooldown active (bars: " + (string)barsSinceLoss + ")");
+         m_data.DebugLog(m_debugMode, "Loss cooldown active (bars: " + (string)barsSinceLoss + ")");
          return true;
       }
    }
@@ -560,14 +557,14 @@ void MarketManager::UpdateLossStreak(double netProfit)
       if (CopyTime(_Symbol, _Period, 0, 1, times) > 0)
          m_lastLossBarTime = times[0];
 
-      m_data.DebugLog(m_cfgCache.debugMode, "Loss Detected! Net Profit: " + DoubleToString(netProfit, 2) +
-                                                " | Consecutive Losses: " + (string)m_consecutiveLosses +
-                                                " | Cooldown Active.");
+      m_data.DebugLog(m_debugMode, "Loss Detected! Net Profit: " + DoubleToString(netProfit, 2) +
+                                       " | Consecutive Losses: " + (string)m_consecutiveLosses +
+                                       " | Cooldown Active.");
    }
    else if (netProfit > 0)
    {
       m_consecutiveLosses = 0;
-      m_data.DebugLog(m_cfgCache.debugMode, "Profit Detected! Resetting loss counter.");
+      m_data.DebugLog(m_debugMode, "Profit Detected! Resetting loss counter.");
    }
 }
 

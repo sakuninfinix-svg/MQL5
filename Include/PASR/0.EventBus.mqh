@@ -9,7 +9,6 @@
 
 #ifndef __EVENT_BUS_MQH__
 #define __EVENT_BUS_MQH__
-#include "2.Config.mqh" // Required for CFG.SafeMode
 
 #property strict
 
@@ -30,7 +29,7 @@ public:
    }
 
    virtual ~Event() {}
-
+   virtual int ID() const = 0; // Required for static dispatch
    datetime Timestamp() const { return m_timestamp; }
    string Source() const { return m_source; }
 
@@ -104,9 +103,6 @@ public:
    string GetHistoryData(int i) { return m_history[i].data; }
 };
 
-// Initialize the global recorder pointer
-EventRecorder *g_recorder = NULL;
-
 //+------------------------------------------------------------------+
 //| Event Bus Singleton                                              |
 //+------------------------------------------------------------------+
@@ -117,7 +113,7 @@ private:
 
    struct HandlerRegistration
    {
-      string eventType;
+      int eventID;
       IEventHandler *handler;
       int priority;
    };
@@ -146,7 +142,7 @@ public:
    }
 
    // Register handler for specific event type
-   bool Subscribe(const string eventType, IEventHandler *handler, int priority = 100)
+   bool Subscribe(int eventID, IEventHandler *handler, int priority = 100)
    {
       if (CheckPointer(handler) == POINTER_INVALID)
          return false;
@@ -155,12 +151,12 @@ public:
       int total = ArraySize(m_registrations);
       for (int i = 0; i < total; i++)
       {
-         if (m_registrations[i].eventType == eventType && m_registrations[i].handler == handler)
+         if (m_registrations[i].eventID == eventID && m_registrations[i].handler == handler)
             return false;
       }
 
       ArrayResize(m_registrations, total + 1);
-      m_registrations[total].eventType = eventType;
+      m_registrations[total].eventID = eventID;
       m_registrations[total].handler = handler;
       m_registrations[total].priority = priority;
 
@@ -168,12 +164,12 @@ public:
    }
 
    // Unsubscribe handler
-   void Unsubscribe(const string eventType, IEventHandler *handler)
+   void Unsubscribe(int eventID, IEventHandler *handler)
    {
       int total = ArraySize(m_registrations);
       for (int i = 0; i < total; i++)
       {
-         if (m_registrations[i].eventType == eventType && m_registrations[i].handler == handler)
+         if (m_registrations[i].eventID == eventID && m_registrations[i].handler == handler)
          {
             for (int j = i; j < total - 1; j++)
             {
@@ -191,14 +187,14 @@ public:
       if (CheckPointer(e) == POINTER_INVALID)
          return;
 
-      string type = e.Type();
+      int id = e.ID();
       int total = ArraySize(m_registrations);
 
       // Collect and sort matches by priority
       int matches[];
       for (int i = 0; i < total; i++)
       {
-         if (m_registrations[i].eventType == type)
+         if (m_registrations[i].eventID == id)
          {
             int mSize = ArraySize(matches);
             ArrayResize(matches, mSize + 1);
@@ -222,7 +218,7 @@ public:
       }
 
       // Record event once before dispatching to subscribers
-      if (matchCount > 0 && g_recorder != NULL && g_recorder.IsRecording())
+      if (matchCount > 0 && CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
       {
          g_recorder.Record(e);
       }
@@ -247,6 +243,11 @@ public:
       ArrayFree(m_registrations);
    }
 };
+
+inline void DispatchEvent(Event *e)
+{
+   EventBus::Instance().Dispatch(e);
+}
 
 // Initialize static member
 EventBus *EventBus::m_instance = NULL;

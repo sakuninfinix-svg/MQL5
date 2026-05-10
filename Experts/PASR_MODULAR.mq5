@@ -14,14 +14,12 @@
 #include <PASR/4.SRManager.mqh>
 #include <PASR/5.SignalManager.mqh>
 #include <PASR/6.ExecutionManager.mqh>
-#include <PASR/7.RiskCalculator.mqh>
 #include <PASR/8.RecoveryManager.mqh>
 #include <PASR/9.PatternManager.mqh>
 #include <PASR/10.DataManager.mqh>
 #include <PASR/11.DashboardManager.mqh>
 
 // --- Global Pointers Declaration ---
-EventBus *g_eventBus = NULL;
 EventRecorder *g_recorder = NULL;
 DashboardManager *dashCtrl = NULL;
 DataManager *IManager::s_dataCache = NULL;
@@ -34,30 +32,39 @@ RecoveryManager recovery;
 DashboardUI dashboard;
 DataManager dta;
 
+// --- Internal Config Cache for the EA Script ---
+struct EAConfigCache
+{
+   ulong magicNum;
+   bool debugMode;
+} eaCfg;
+
 int OnInit()
 {
    // 1. Initialize Event Bus first
-   g_eventBus = EventBus::Instance();
-   if (CheckPointer(g_eventBus) == POINTER_INVALID)
+   if (CheckPointer(EventBus::Instance()) == POINTER_INVALID)
    {
       Print("[ERROR] Failed to initialize EventBus");
       return INIT_FAILED;
    }
 
-   if (CFG.DebugMode)
+   // 2. Initialize config & cache
+   SetCommonDefaults();
+   eaCfg.magicNum = CFG.MagicNum;
+   eaCfg.debugMode = CFG.DebugMode;
+
+   if (eaCfg.debugMode)
    {
       g_recorder = new EventRecorder();
       g_recorder.Start();
    }
 
-   // 2. Initialize config & managers
-   SetCommonDefaults();
    PrintConfigSummary();
 
    if (!dta.Init())
       return (INIT_FAILED);
 
-   IManager::SetGlobalDataManager(GetPointer(dta)); 
+   IManager::SetGlobalDataManager(GetPointer(dta));
 
    if (!signal.Init())
       return (INIT_FAILED);
@@ -88,7 +95,7 @@ int OnInit()
    {
       ulong t = PositionGetTicket(i);
       if (PositionSelectByTicket(t) &&
-          PositionGetInteger(POSITION_MAGIC) == CFG.MagicNum &&
+          PositionGetInteger(POSITION_MAGIC) == eaCfg.magicNum &&
           PositionGetString(POSITION_SYMBOL) == _Symbol)
       {
          double currentATR = dta.GetATRPoints();
@@ -98,23 +105,23 @@ int OnInit()
          {
             recovery.Register(t, (ENUM_ORDER_TYPE)PositionGetInteger(POSITION_TYPE),
                               PositionGetDouble(POSITION_PRICE_OPEN), PositionGetDouble(POSITION_TP),
-                              PositionGetDouble(POSITION_SL), currentATR, PositionGetDouble(POSITION_VOLUME), 0);
+                              PositionGetDouble(POSITION_SL), currentATR, PositionGetDouble(POSITION_VOLUME), 0, 1.0);
             eng = recovery.GetEngine(t);
          }
 
          if (CheckPointer(eng) != POINTER_INVALID)
          {
-            eng.LoadState(t, CFG.MagicNum);
+            eng.LoadState(t, eaCfg.magicNum);
 
             // Dispatch event to notify listeners about current position state
-            g_eventBus.Dispatch(new PositionUpdateEvent( t, PositionGetDouble(POSITION_PRICE_CURRENT),
-                PositionGetDouble(POSITION_PROFIT)));
+            g_eventBus.Dispatch(new PositionUpdateEvent(t, PositionGetDouble(POSITION_PRICE_CURRENT),
+                                                        PositionGetDouble(POSITION_PROFIT)));
          }
       }
    }
 
    // 7. Dispatch initial system ready event
-   g_eventBus.Dispatch(new HeartbeatEvent(0));
+   DispatchEvent(new HeartbeatEvent(0));
 
    return (INIT_SUCCEEDED);
 }
@@ -123,7 +130,7 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    EventBus::Release();
-   
+
    DashboardManagerFactory::Destroy(dashCtrl);
    if (CheckPointer(g_recorder) != POINTER_INVALID)
    {
@@ -146,14 +153,14 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 {
    if (trans.type == TRADE_TRANSACTION_DEAL_ADD && HistoryDealSelect(trans.deal))
    {
-      if (HistoryDealGetInteger(trans.deal, DEAL_MAGIC) == CFG.MagicNum &&
+      if (HistoryDealGetInteger(trans.deal, DEAL_MAGIC) == eaCfg.magicNum &&
           HistoryDealGetString(trans.deal, DEAL_SYMBOL) == _Symbol)
       {
          long entryType = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
          ulong positionID = trans.position;
 
          if (entryType == DEAL_ENTRY_IN)
-       { // New position opened
+         { // New position opened
             string comment = HistoryDealGetString(trans.deal, DEAL_COMMENT);
             int hashPos = StringFind(comment, "#");
             ulong tsID = 0;
@@ -165,8 +172,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             double volume = HistoryDealGetDouble(trans.deal, DEAL_VOLUME);
             double sl = HistoryDealGetDouble(trans.deal, DEAL_SL);
             double tp = HistoryDealGetDouble(trans.deal, DEAL_TP);
+            double slMult = 1.0;
 
-         // Robust SL/TP lookup: HistoryDeal might hve 0 if orders were modified async
+            // Robust SL/TP lookup: HistoryDeal might hve 0 if orders were modified async
             if (PositionSelectByTicket(positionID))
             {
                if (sl <= 0)
@@ -178,20 +186,25 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
             // Context from Global Variables (sent from ExecutionManager)
             if (tsID > 0)
             {
-               string p = "PASR_PEND_" + (string)CFG.MagicNum + "_" + _Symbol + "_" + (string)tsID + "_";
+               string p = "PASR_PEND_" + (string)eaCfg.magicNum + "_" + _Symbol + "_" + (string)tsID + "_";
                if (GlobalVariableCheck(p + "ts"))
                {
                   if (tp <= 0)
                      tp = GlobalVariableGet(p + "tp");
+                  if (GlobalVariableCheck(p + "sm"))
+                     slMult = GlobalVariableGet(p + "sm");
                   // Clean up the pending GV after successful confirmation
-                  GlobalVariablesDeleteAll("PASR_PEND_" + (string)CFG.MagicNum + "_" + _Symbol + "_" + (string)tsID);
+                  GlobalVariablesDeleteAll("PASR_PEND_" + (string)eaCfg.magicNum + "_" + _Symbol + "_" + (string)tsID);
                }
             }
 
             // Dispatch final confirmation event for RecoveryManager to register the position
             OrderExecutionEvent *confirm = new OrderExecutionEvent(
                 true, positionID, type, entry, sl, tp, volume, "Confirmed", comment);
-            EventBus::Instance().Dispatch(confirm);
+            DispatchEvent(confirm);
+
+            // Register with correct SLMult for Adaptive Recovery
+            recovery.Register(positionID, type, entry, tp, sl, dta.GetATRPoints(), volume, 0, slMult);
 
             datetime times[];
             if (CopyTime(_Symbol, _Period, 0, 1, times) > 0)
@@ -199,28 +212,25 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
          }
          else if (entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_INOUT)
          {
-            string comment = HistoryDealGetString(trans.deal, DEAL_COMMENT);
-            int recovPos = StringFind(comment, "RECOV_ORIG_");
-            if (recovPos == 0)
-            {
-                // This is a recovery trade closing. We need to mark the original RecoveryEngine as DONE.
-                int ticketStart = StringLen("RECOV_ORIG_");
-                int ticketEnd = StringFind(comment, "_P_", ticketStart);
-                if (ticketEnd > ticketStart) {
-                    ulong originalTicket = (ulong)StringToInteger(StringSubstr(comment, ticketStart, ticketEnd - ticketStart));
-                    recovery.NotifyRecoverySuccess(originalTicket); // New method in RecoveryManager
-                }
-            }
-            // Fall through to normal profit/loss tracking for all trades
-         }
-         else if (entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_INOUT)
-         {
+            // Refresh daily stats
             dta.RefreshDailyProfit();
             double netProfit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT) +
                                HistoryDealGetDouble(trans.deal, DEAL_COMMISSION) +
                                HistoryDealGetDouble(trans.deal, DEAL_SWAP);
-            market.UpdateLossStreak(netProfit);
-            dta.UpdateConsecutiveLosses(netProfit); // NEW: Track consecutive losses
+            dta.UpdateConsecutiveLosses(netProfit);
+
+            string comment = HistoryDealGetString(trans.deal, DEAL_COMMENT);
+            int recovPos = StringFind(comment, "RECOV_ORIG_");
+            if (recovPos == 0)
+            {
+               int ticketStart = StringLen("RECOV_ORIG_");
+               int ticketEnd = StringFind(comment, "_P_", ticketStart);
+               if (ticketEnd > ticketStart)
+               {
+                  ulong originalTicket = (ulong)StringToInteger(StringSubstr(comment, ticketStart, ticketEnd - ticketStart));
+                  recovery.NotifyRecoverySuccess(originalTicket);
+               }
+            }
          }
       }
    }
@@ -230,7 +240,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 void OnTimer()
 {
    // Dispatch heartbeat for periodic tasks (UI update, health checks, etc)
-   g_eventBus.Dispatch(new HeartbeatEvent(2));
+   DispatchEvent(new HeartbeatEvent(2));
 }
 
 void OnTick()
@@ -240,7 +250,7 @@ void OnTick()
       return;
 
    // Dispatch price update event (lightweight)
-   g_eventBus.Dispatch(new PriceUpdateEvent(tick));
+   DispatchEvent(new PriceUpdateEvent(tick));
 
    // Check for new bar -> dispatch NewBarEvent dengan CopyTime (MQL5 Best Practice)
    static datetime lastBarTime = 0;
@@ -259,7 +269,7 @@ void OnTick()
       ArraySetAsSeries(rates, true);
       if (CopyRates(_Symbol, _Period, 0, 1, rates) > 0)
       {
-         g_eventBus.Dispatch(new NewBarEvent(
+         DispatchEvent(new NewBarEvent(
              currentBar,
              rates[0].open,
              rates[0].high,

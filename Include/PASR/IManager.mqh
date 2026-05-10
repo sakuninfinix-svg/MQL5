@@ -13,9 +13,9 @@
 #define __I_MANAGER_MQH__
 
 #include "mql5_vscode_fix.h"
+#include "2.Config.mqh"
 #include "0.EventBus.mqh"
 #include "1.Events.mqh"
-#include "2.Config.mqh"
 
 class DataManager;
 
@@ -28,7 +28,7 @@ class IManager : public IEventHandler
 protected:
    string m_name;
    bool m_initialized;
-   string m_subscribedEvents[]; // Dipindahkan agar tidak di akhir layout instance
+   int m_subscribedIDs[];
    int m_priority;
    EventBus *m_bus;
    DataManager *m_data;
@@ -54,7 +54,7 @@ public:
    {
       if (m_initialized)
          Deinit();
-      ArrayFree(m_subscribedEvents);
+      ArrayFree(m_subscribedIDs);
    }
 
    virtual bool Init()
@@ -99,77 +99,61 @@ public:
 
    virtual void RefreshConfigCache()
    {
-      Log("⚠️ RefreshConfigCache() not overridden. Using default empty implementation.");
+      m_debugMode = CFG.DebugMode;
    }
 
    virtual void HandleEvent(Event *e) override
    {
       if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
          return;
-
-      string type = e.Type();
-      if (type == "Heartbeat")
+      switch (e.ID())
       {
-         HeartbeatEvent *ev = dynamic_cast<HeartbeatEvent *>(e);
-         if (CheckPointer(ev) != POINTER_INVALID)
-            OnHeartbeat(ev);
-      }
-      else if (type == "ConfigReload")
-      {
-         ConfigReloadEvent *ev = dynamic_cast<ConfigReloadEvent *>(e);
-         if (CheckPointer(ev) != POINTER_INVALID)
-            OnConfigReload(ev);
-      }
-      else if (type == "EmergencyStop")
-      {
-         EmergencyStopEvent *ev = dynamic_cast<EmergencyStopEvent *>(e);
-         if (CheckPointer(ev) != POINTER_INVALID)
-            OnEmergencyStop(ev);
-      }
-      else if (type == "PriceUpdate")
-      {
-         PriceUpdateEvent *ev = dynamic_cast<PriceUpdateEvent *>(e);
-         if (CheckPointer(ev) != POINTER_INVALID)
-            OnPriceUpdate(ev);
-      }
-      else if (type == "NewBar")
-      {
-         NewBarEvent *ev = dynamic_cast<NewBarEvent *>(e);
-         if (CheckPointer(ev) != POINTER_INVALID)
-            OnNewBar(ev);
-      }
-      else if (type == "SignalGenerated")
-      {
-         SignalGeneratedEvent *ev = dynamic_cast<SignalGeneratedEvent *>(e);
-         if (CheckPointer(ev) != POINTER_INVALID)
-            OnSignalGenerated(ev);
-      }
-      else if (type == "OrderExecution")
-      {
-         OrderExecutionEvent *ev = dynamic_cast<OrderExecutionEvent *>(e);
-         if (CheckPointer(ev) != POINTER_INVALID)
-            OnOrderExecution(ev);
-      }
-      else if (type == "PositionUpdate")
-      {
-         PositionUpdateEvent *ev = dynamic_cast<PositionUpdateEvent *>(e);
-         if (CheckPointer(ev) != POINTER_INVALID)
-            OnPositionUpdate(ev);
-      }
-      else if (type == "RecoverySignal")
-      {
-         RecoverySignalEvent *ev = dynamic_cast<RecoverySignalEvent *>(e);
-         if (CheckPointer(ev) != POINTER_INVALID)
-            OnRecoverySignal(ev);
-      }
-      else if (type == "RecoveryOpportunity")
-      {
-         RecoveryOpportunityEvent *ev = dynamic_cast<RecoveryOpportunityEvent *>(e);
-         if (CheckPointer(ev) != POINTER_INVALID)
-            OnRecoveryOpportunity(ev);
-      }
-      else
+      case EVENT_ID_PRICE_UPDATE:
+         OnPriceUpdate(CAST_EVENT(PriceUpdateEvent, e));
+         break;
+      case EVENT_ID_NEW_BAR:
+         OnNewBar(CAST_EVENT(NewBarEvent, e));
+         break;
+      case EVENT_ID_HEARTBEAT:
+         OnHeartbeat(CAST_EVENT(HeartbeatEvent, e));
+         break;
+      case EVENT_ID_CONFIG_RELOAD:
+         OnConfigReload(CAST_EVENT(ConfigReloadEvent, e));
+         break;
+      case EVENT_ID_EMERGENCY_STOP:
+         OnEmergencyStop(CAST_EVENT(EmergencyStopEvent, e));
+         break;
+      case EVENT_ID_SIGNAL_GENERATED:
+         OnSignalGenerated(CAST_EVENT(SignalGeneratedEvent, e));
+         break;
+      case EVENT_ID_RECOVERY_OPPORTUNITY:
+         OnRecoveryOpportunity(CAST_EVENT(RecoveryOpportunityEvent, e));
+         break;
+      case EVENT_ID_RECOVERY_SIGNAL:
+         OnRecoverySignal(CAST_EVENT(RecoverySignalEvent, e));
+         break;
+      case EVENT_ID_ORDER_EXECUTION:
+         OnOrderExecution(CAST_EVENT(OrderExecutionEvent, e));
+         break;
+      case EVENT_ID_POSITION_UPDATE:
+         OnPositionUpdate(CAST_EVENT(PositionUpdateEvent, e));
+         break;
+      case EVENT_ID_ZONE_UPDATE:
+         OnZoneUpdate(CAST_EVENT(ZoneUpdateEvent, e));
+         break;
+      case EVENT_ID_MARKET_GATE:
+         OnMarketGate(CAST_EVENT(MarketGateEvent, e));
+         break;
+      case EVENT_ID_PAUSE_TOGGLE:
+         OnPauseToggle(CAST_EVENT(PauseToggleEvent, e));
+         break;
+      case EVENT_ID_NEWS_ALERT:
+         OnNewsAlert(CAST_EVENT(NewsAlertEvent, e));
+         break;
+      default:
          OnCustomEvent(e);
+         break;
+      }
    }
 
    // --- VIRTUAL HOOKS (OVERRIDE AS NEEDED) ---
@@ -183,6 +167,10 @@ public:
    virtual void OnPositionUpdate(PositionUpdateEvent *e) {}
    virtual void OnRecoverySignal(RecoverySignalEvent *e) {}
    virtual void OnRecoveryOpportunity(RecoveryOpportunityEvent *e) {}
+   virtual void OnZoneUpdate(ZoneUpdateEvent *e) {}
+   virtual void OnNewsAlert(NewsAlertEvent *e) {}
+   virtual void OnMarketGate(MarketGateEvent *e) {}
+   virtual void OnPauseToggle(PauseToggleEvent *e) {}
    virtual void OnCustomEvent(Event *e) {} // Fallback for module-specific events
 
    // --- UTILITIES ---
@@ -191,15 +179,14 @@ public:
    int GetPriority() const { return m_priority; }
 
 protected:
-   // Auto-subscription logic
    void SubscribeToEvents()
    {
       if (CheckPointer(m_bus) == POINTER_INVALID)
          return;
       IEventHandler *self = GetPointer(this);
-      for (int i = 0; i < ArraySize(m_subscribedEvents); i++)
+      for (int i = 0; i < ArraySize(m_subscribedIDs); i++)
       {
-         m_bus.Subscribe(m_subscribedEvents[i], self, m_priority);
+         m_bus.Subscribe(m_subscribedIDs[i], self, m_priority);
       }
    }
 
@@ -208,28 +195,41 @@ protected:
       if (CheckPointer(m_bus) == POINTER_INVALID)
          return;
       IEventHandler *self = GetPointer(this);
-      for (int i = 0; i < ArraySize(m_subscribedEvents); i++)
+      for (int i = 0; i < ArraySize(m_subscribedIDs); i++)
       {
-         m_bus.Unsubscribe(m_subscribedEvents[i], self);
+         m_bus.Unsubscribe(m_subscribedIDs[i], self);
       }
    }
 
    // Child classes override this to add custom event types
    virtual void DeclareEvents() {}
 
-   void AddEvent(const string eventType)
+   void AddEvent(int eventID)
    {
-      int sz = ArraySize(m_subscribedEvents);
-      ArrayResize(m_subscribedEvents, sz + 1);
-      m_subscribedEvents[sz] = eventType;
+      int sz = ArraySize(m_subscribedIDs);
+      ArrayResize(m_subscribedIDs, sz + 1);
+      m_subscribedIDs[sz] = eventID;
    }
 
    void DeclareBaseEvents()
    {
-      AddEvent("Heartbeat");
-      AddEvent("ConfigReload");
-      AddEvent("EmergencyStop");
-      DeclareEvents(); // Hook for child-specific events
+      AddEvent(EVENT_ID_HEARTBEAT);
+      AddEvent(EVENT_ID_CONFIG_RELOAD);
+      AddEvent(EVENT_ID_EMERGENCY_STOP);
+      AddEvent(EVENT_ID_SESSION_CHANGE);
+      DeclareEvents();
+   }
+
+   /**
+    * Dispatch an event through the cached bus pointer (Performance Optimization)
+    * @param e Pointer to event object
+    */
+   void DispatchEvent(Event *e) const
+   {
+      if (CheckPointer(m_bus) != POINTER_INVALID)
+         m_bus.Dispatch(e);
+      else if (CheckPointer(e) == POINTER_DYNAMIC)
+         delete e;
    }
 
    void Log(const string msg) const

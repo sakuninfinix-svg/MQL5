@@ -35,15 +35,17 @@ private:
    {
       ENUM_SR_MODE srMode;
       int srLookback;
+      int swingLookback;
       ENUM_ENTRY_MODE entryMode;
       double bufferMultWeak;
       double bufferMultStrong;
       double atrBufferMult;
+      double srTouchBufferATR;
+      int srMinTouchesStrong;
       bool useMTF;
       ENUM_TIMEFRAMES htf;
       int htfLookback;
       double minSRRangeATR;
-      bool debugMode;
    } m_cfgCache;
 
    // Helper: Cek apakah zona ditembus 2x Close dalam X bar
@@ -71,7 +73,7 @@ private:
    {
       foundShift = -1;
       int available = MathMin(maxBars, ArraySize(highs) - 2);
-      
+
       for (int i = 2; i <= available; i++)
       {
          if (isSupport)
@@ -129,17 +131,21 @@ public:
 
    virtual void RefreshConfigCache() override
    {
+      IManager::RefreshConfigCache(); // Sync m_debugMode dari base class
+
       m_cfgCache.srMode = CFG.SRMode;
       m_cfgCache.srLookback = CFG.SRLookback;
+      m_cfgCache.swingLookback = CFG.SwingLookback;
       m_cfgCache.entryMode = CFG.EntryMode;
       m_cfgCache.bufferMultWeak = CFG.BufferMultWeak;
       m_cfgCache.bufferMultStrong = CFG.BufferMultStrong;
       m_cfgCache.atrBufferMult = CFG.ATRBufferMult;
+      m_cfgCache.srTouchBufferATR = CFG.SRTouchBufferATR;
+      m_cfgCache.srMinTouchesStrong = CFG.SRMinTouchesStrong;
       m_cfgCache.useMTF = CFG.UseMTF;
       m_cfgCache.htf = CFG.HTF;
       m_cfgCache.htfLookback = CFG.HTFLookback;
       m_cfgCache.minSRRangeATR = CFG.MinSRRangeATR;
-      m_cfgCache.debugMode = CFG.DebugMode;
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -149,7 +155,7 @@ public:
 
    virtual void DeclareEvents() override
    {
-      AddEvent("NewBar");
+      AddEvent(EVENT_ID_NEW_BAR);
    }
 
    virtual void OnNewBar(NewBarEvent *e) override
@@ -173,7 +179,7 @@ public:
 
       // 1. Ambil Data Extreme (HH/LL) dengan CopyHigh/CopyLow (MQL5 Best Practice)
       // Optimized: Fetch data once for both Extreme and Swing logic
-      int lookback = MathMax(CFG.SRLookback, CFG.SwingLookback) + 2;
+      int lookback = MathMax(m_cfgCache.srLookback, m_cfgCache.swingLookback) + 2;
       double highs[], lows[];
       ArraySetAsSeries(highs, true);
       ArraySetAsSeries(lows, true);
@@ -181,20 +187,20 @@ public:
       if (CopyHigh(_Symbol, _Period, 1, lookback, highs) <= 0 || CopyLow(_Symbol, _Period, 1, lookback, lows) <= 0)
          return;
 
-      extRes = highs[ArrayMaximum(highs, 0, CFG.SRLookback)];
-      extSup = lows[ArrayMinimum(lows, 0, CFG.SRLookback)];
+      extRes = highs[ArrayMaximum(highs, 0, m_cfgCache.srLookback)];
+      extSup = lows[ArrayMinimum(lows, 0, m_cfgCache.srLookback)];
 
       // 2. Ambil Data Swing (Fractal terdekat < 50 bar)
-      swRes = FindNearestSwing(false, CFG.SwingLookback, swResShift, highs, lows);
-      swSup = FindNearestSwing(true, CFG.SwingLookback, swSupShift, highs, lows);
+      swRes = FindNearestSwing(false, m_cfgCache.swingLookback, swResShift, highs, lows);
+      swSup = FindNearestSwing(true, m_cfgCache.swingLookback, swSupShift, highs, lows);
 
       // Logic Pemilihan berdasarkan Mode
-      if (CFG.SRMode == SR_EXTREME)
+      if (m_cfgCache.srMode == SR_EXTREME)
       {
          m_targetResistance = extRes;
          m_targetSupport = extSup;
       }
-      else if (CFG.SRMode == SR_SWING)
+      else if (m_cfgCache.srMode == SR_SWING)
       {
          m_targetResistance = (swRes > 0) ? swRes : extRes;
          m_targetSupport = (swSup > 0) ? swSup : extSup;
@@ -228,8 +234,7 @@ public:
           m_supHtfAlignment, m_resHtfAlignment,
           m_supStrength, m_resStrength,
           atrPoints);
-      if (CheckPointer(EventBus::Instance()) != POINTER_INVALID)
-         EventBus::Instance().Dispatch(zoneEvent);
+      DispatchEvent(zoneEvent);
    }
    void CheckZoneStatus(double atrPoints)
    {
@@ -239,29 +244,29 @@ public:
          return;
 
       // Filter "rusak" dinamis berdasarkan mode
-      int barsToCheck = (CFG.SRMode == SR_EXTREME) ? 10 : 5;
+      int barsToCheck = (m_cfgCache.srMode == SR_EXTREME) ? 10 : 5;
       m_isSupportBroken = IsBroken(m_targetSupport, true, barsToCheck);
       m_isResistanceBroken = IsBroken(m_targetResistance, false, barsToCheck);
 
       // Jika mode EXTREME, gunakan buffer statis agar lebih "Safe" sesuai filosofi Extreme SR
-      if (CFG.SRMode == SR_EXTREME)
+      if (m_cfgCache.srMode == SR_EXTREME)
       {
-         m_resBufferMult = m_supBufferMult = (CFG.EntryMode == MODE_SAFE) ? 0.5 : 0.8;
+         m_resBufferMult = m_supBufferMult = (m_cfgCache.entryMode == MODE_SAFE) ? 0.5 : 0.8;
          return;
       }
 
       // Hitung Touch Count untuk menentukan Buffer Mult dengan CopyHigh/CopyLow
       int supTouches = 0, resTouches = 0;
-      double touchZone = (atrPoints * CFG.SRTouchBufferATR) * _Point;
+      double touchZone = (atrPoints * m_cfgCache.srTouchBufferATR) * _Point;
 
       double lows[], highs[];
       ArraySetAsSeries(lows, true);
       ArraySetAsSeries(highs, true);
 
-      if (CopyLow(_Symbol, _Period, 1, CFG.SRLookback, lows) > 0 &&
-          CopyHigh(_Symbol, _Period, 1, CFG.SRLookback, highs) > 0)
+      if (CopyLow(_Symbol, _Period, 1, m_cfgCache.srLookback, lows) > 0 &&
+          CopyHigh(_Symbol, _Period, 1, m_cfgCache.srLookback, highs) > 0)
       {
-         for (int i = 0; i < CFG.SRLookback; i++)
+         for (int i = 0; i < m_cfgCache.srLookback; i++)
          {
             if (MathAbs(lows[i] - m_targetSupport) < touchZone)
                supTouches++;
@@ -276,21 +281,21 @@ public:
 
       // Tentukan Multiplier Dinamis untuk Support
       if (m_isSupportBroken)
-         m_supBufferMult = CFG.BufferMultWeak;
-      else if (supTouches >= CFG.SRMinTouchesStrong)
-         m_supBufferMult = CFG.BufferMultStrong;
+         m_supBufferMult = m_cfgCache.bufferMultWeak;
+      else if (supTouches >= m_cfgCache.srMinTouchesStrong)
+         m_supBufferMult = m_cfgCache.bufferMultStrong;
       else if (supTouches <= 1)
-         m_supBufferMult = CFG.ATRBufferMult;
+         m_supBufferMult = m_cfgCache.atrBufferMult;
       else
          m_supBufferMult = 0.65; // Normal/Intermediate
 
       // Tentukan Multiplier Dinamis untuk Resistance
       if (m_isResistanceBroken)
-         m_resBufferMult = CFG.BufferMultWeak;
-      else if (resTouches >= CFG.SRMinTouchesStrong)
-         m_resBufferMult = CFG.BufferMultStrong;
+         m_resBufferMult = m_cfgCache.bufferMultWeak;
+      else if (resTouches >= m_cfgCache.srMinTouchesStrong)
+         m_resBufferMult = m_cfgCache.bufferMultStrong;
       else if (resTouches <= 1)
-         m_resBufferMult = CFG.ATRBufferMult;
+         m_resBufferMult = m_cfgCache.atrBufferMult;
       else
          m_resBufferMult = 0.65;
 
@@ -298,9 +303,9 @@ public:
       m_supHtfAlignment = 0;
       m_resHtfAlignment = 0;
 
-      if (CFG.UseMTF && m_htfSupport > 0 && m_htfResistance > 0)
+      if (m_cfgCache.useMTF && m_htfSupport > 0 && m_htfResistance > 0)
       {
-         double htfZoneBuffer = (atrPoints * CFG.ATRBufferMult) * _Point;
+         double htfZoneBuffer = (atrPoints * m_cfgCache.atrBufferMult) * _Point;
 
          // Primary Support vs HTF Zones
          if (m_targetSupport <= m_htfSupport + htfZoneBuffer)
@@ -318,7 +323,7 @@ public:
 
    void UpdateHTFZones()
    {
-      if (!CFG.UseMTF)
+      if (!m_cfgCache.useMTF)
          return;
 
       // MQL5 Best Practice: Gunakan CopyHigh/CopyLow untuk HTF
@@ -326,8 +331,8 @@ public:
       ArraySetAsSeries(htfHighs, true);
       ArraySetAsSeries(htfLows, true);
 
-      if (CopyHigh(_Symbol, CFG.HTF, 1, CFG.HTFLookback, htfHighs) > 0 &&
-          CopyLow(_Symbol, CFG.HTF, 1, CFG.HTFLookback, htfLows) > 0)
+      if (CopyHigh(_Symbol, m_cfgCache.htf, 1, m_cfgCache.htfLookback, htfHighs) > 0 &&
+          CopyLow(_Symbol, m_cfgCache.htf, 1, m_cfgCache.htfLookback, htfLows) > 0)
       {
          m_htfResistance = htfHighs[ArrayMaximum(htfHighs)];
          m_htfSupport = htfLows[ArrayMinimum(htfLows)];
@@ -340,7 +345,7 @@ public:
          return false;
 
       double spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-      double minRange = MathMax(atrPoints * CFG.MinSRRangeATR, spread * 5.0);
+      double minRange = MathMax(atrPoints * m_cfgCache.minSRRangeATR, spread * 5.0);
       double rangePts = (m_targetResistance - m_targetSupport) / _Point;
 
       return (rangePts >= minRange);

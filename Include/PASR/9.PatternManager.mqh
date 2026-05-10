@@ -13,6 +13,15 @@
 
 #include "2.Config.mqh"
 
+struct FakeoutResult
+{
+   bool detected;         // Fakeout detected?
+   int level;             // 1=Penetration, 2=Reversal, 3=Confirmed
+   double penetrationPts; // Overshoot distance in points
+   double confidence;     // 0.0-1.0 confidence score
+   string reason;         // Diagnosis
+};
+
 class PatternManager
 {
 private:
@@ -113,6 +122,49 @@ public:
                   StringFormat(" | Score %.2f", totalScore);
 
       return true;
+   }
+
+   // Integrated Fakeout Detection Context
+   struct FakeoutContext
+   {
+      ulong originalTicket;
+      int direction;
+      double slHitPrice;
+      double entryPrice;
+      double atrPoints;
+      double slMultiplier; // Adaptive Overshoot Base
+      MqlTick currentTick;
+      MqlRates rates[];
+   };
+
+   // Integrated Fakeout Detection with Adaptive Zone
+   static bool DetectFakeout(const FakeoutContext &ctx, FakeoutResult &result)
+   {
+      result.detected = false;
+      result.level = 0;
+      result.confidence = 0.0;
+      
+      // Adaptive Overshoot: Toleransi berdasarkan SLMult pola tersebut
+      double maxOvershoot = ctx.atrPoints * ctx.slMultiplier * _Point;
+      double penetration = (ctx.direction == 1) ? (ctx.slHitPrice - ctx.currentTick.bid) : (ctx.currentTick.ask - ctx.slHitPrice);
+
+      if (penetration > maxOvershoot) 
+      {
+         result.reason = "Momentum Breakout (Overshoot too deep)";
+         return false;
+      }
+
+      // Body Reversal Check (TF M5 logic)
+      bool bodyReversal = (ctx.direction == 1) ? 
+         (ctx.rates[0].close > ctx.rates[0].open) : (ctx.rates[0].close < ctx.rates[0].open);
+
+      if (bodyReversal) result.level = 2;
+      
+      result.detected = (penetration > 0 && bodyReversal);
+      result.confidence = 0.5 + (bodyReversal ? 0.3 : 0);
+      result.reason = StringFormat("Fakeout Level %d | Pen: %.1f pts", result.level, penetration/_Point);
+      
+      return result.detected;
    }
 
 private:
@@ -712,7 +764,6 @@ private:
          return;
 
       int dir = IsBullish(rates, shift) ? 1 : -1;
-
       vote.valid = true;
       vote.type = PATTERN_MARUBOZU;
       vote.dir = dir;

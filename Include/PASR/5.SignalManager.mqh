@@ -59,6 +59,37 @@ private:
    double m_marketSpread;
    double m_marketATR;
 
+   // --- Consolidated Config Cache ---
+   struct SignalConfigCache
+   {
+      int signalLookback;
+      double zoneReuseATR;
+      int patternFailureCooldownBars;
+      int signalCooldownBars;
+      bool useMTF;
+      double atrBufferMult;
+      ENUM_ENTRY_MODE entryMode;
+      bool useAdaptiveZoneBuffer;
+      int srMinTouchesStrong;
+      double strongZoneBufferMult;
+      double maxSignalATR;
+      double antiBreakoutPct;
+      double momentumThresholdATR;
+      double mtfConfluenceBonus;
+      double strongZoneBonus;
+      double strongZoneThreshold;
+      double highQualityThreshold;
+      bool useDynamicCooldown;
+      int reducedCooldownBars;
+      double tpBufferATR;
+      double slBufferATR;
+      ENUM_TPSL_MODE tpslMode;
+      double minTPDistanceATR;
+      bool useRecoveryMode;
+      double recoveryPatternScoreThreshold;
+      double recoveryZoneToleranceATR;
+   } m_cfgCache;
+
    // --- Cached Market Data from Events ---
    struct CachedMarketData
    {
@@ -73,77 +104,40 @@ private:
       void Reset() { ZeroMemory(this); }
    } m_marketData;
 
-   // --- Config Cache (hindari repeated CFG access) ---
-   struct CachedConfig
-   {
-      int signalLookback;
-      bool useMTF;
-      bool exitOnOpposite;
-      ENUM_TPSL_MODE tpslMode;
-      double strongZoneBonus;
-      double strongZoneThreshold;
-      double zoneReuseATR;
-      int patternFailureCooldownBars;
-      ENUM_ENTRY_MODE entryMode;
-      double maxSignalATR;
-      double antiBreakoutPct;
-      double momentumThresholdATR;
-      double minTPDistanceATR;
-      double slBufferATR;
-      double tpBufferATR;
-      int signalCooldownBars;
-      double atrBufferMult;
-      bool debugMode;
-      // NEW: High Quality Entry Settings
-      double highQualityThreshold;
-      bool useDynamicCooldown;
-      int reducedCooldownBars;
-      double mtfConfluenceBonus;
-      bool usePatternWeights;
-      double recoveryPatternScoreThreshold;
-      double recoveryZoneToleranceATR;
-      bool useRecoveryMode;
-      double strongZoneBufferMult;
-      bool useAdaptiveZoneBuffer;
-      int srMinTouchesStrong;
-   } m_cfgCache;
-
    //+------------------------------------------------------------------+
    //| PRIVATE: Helper Methods                                         |
    //+------------------------------------------------------------------+
 private:
    virtual void RefreshConfigCache() override
    {
+      IManager::RefreshConfigCache(); // Update m_debugMode
+
       m_cfgCache.signalLookback = CFG.SignalLookback;
-      m_cfgCache.useMTF = CFG.UseMTF;
-      m_cfgCache.exitOnOpposite = CFG.ExitOnOpposite;
-      m_cfgCache.tpslMode = CFG.TPSLMode;
-      m_cfgCache.strongZoneBonus = CFG.StrongZoneBonus;
-      m_cfgCache.strongZoneThreshold = CFG.StrongZoneThreshold;
       m_cfgCache.zoneReuseATR = CFG.ZoneReuseATR;
       m_cfgCache.patternFailureCooldownBars = CFG.PatternFailureCooldownBars;
+      m_cfgCache.signalCooldownBars = CFG.SignalCooldownBars;
+      m_cfgCache.useMTF = CFG.UseMTF;
+      m_cfgCache.atrBufferMult = CFG.ATRBufferMult;
       m_cfgCache.entryMode = CFG.EntryMode;
+      m_cfgCache.useAdaptiveZoneBuffer = CFG.UseAdaptiveZoneBuffer;
+      m_cfgCache.srMinTouchesStrong = CFG.SRMinTouchesStrong;
+      m_cfgCache.strongZoneBufferMult = CFG.StrongZoneBufferMult;
       m_cfgCache.maxSignalATR = CFG.MaxSignalATR;
       m_cfgCache.antiBreakoutPct = CFG.AntiBreakoutPct;
       m_cfgCache.momentumThresholdATR = CFG.MomentumThresholdATR;
-      m_cfgCache.minTPDistanceATR = CFG.MinTPDistanceATR;
-      m_cfgCache.slBufferATR = CFG.SLBufferATR;
-      m_cfgCache.tpBufferATR = CFG.TPBufferATR;
-      m_cfgCache.signalCooldownBars = CFG.SignalCooldownBars;
-      m_cfgCache.atrBufferMult = CFG.ATRBufferMult;
-      m_cfgCache.debugMode = CFG.DebugMode;
-      // NEW: High Quality Entry Settings
+      m_cfgCache.mtfConfluenceBonus = CFG.MTFConfluenceBonus;
+      m_cfgCache.strongZoneBonus = CFG.StrongZoneBonus;
+      m_cfgCache.strongZoneThreshold = CFG.StrongZoneThreshold;
       m_cfgCache.highQualityThreshold = CFG.HighQualityThreshold;
       m_cfgCache.useDynamicCooldown = CFG.UseDynamicCooldown;
       m_cfgCache.reducedCooldownBars = CFG.ReducedCooldownBars;
-      m_cfgCache.mtfConfluenceBonus = CFG.MTFConfluenceBonus;
-      m_cfgCache.usePatternWeights = CFG.UsePatternWeights;
+      m_cfgCache.tpBufferATR = CFG.TPBufferATR;
+      m_cfgCache.slBufferATR = CFG.SLBufferATR;
+      m_cfgCache.tpslMode = CFG.TPSLMode;
+      m_cfgCache.minTPDistanceATR = CFG.MinTPDistanceATR;
+      m_cfgCache.useRecoveryMode = CFG.UseRecoveryMode;
       m_cfgCache.recoveryPatternScoreThreshold = CFG.RecoveryPatternScoreThreshold;
       m_cfgCache.recoveryZoneToleranceATR = CFG.RecoveryZoneToleranceATR;
-      m_cfgCache.useRecoveryMode = CFG.UseRecoveryMode;
-      m_cfgCache.strongZoneBufferMult = CFG.StrongZoneBufferMult;
-      m_cfgCache.useAdaptiveZoneBuffer = CFG.UseAdaptiveZoneBuffer;
-      m_cfgCache.srMinTouchesStrong = CFG.SRMinTouchesStrong;
    }
 
    bool FetchCandleBatch(int shiftStart, int count, MqlRates &outRates[])
@@ -226,7 +220,7 @@ private:
       m_failedZones[sz].price = zonePrice;
       m_failedZones[sz].expiry = TimeCurrent() + (m_cfgCache.patternFailureCooldownBars * PeriodSeconds(_Period));
 
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
          PrintFormat("[PASR Signal] Level %.5f registered as FAILED. Cooldown %d candles.",
                      zonePrice, m_cfgCache.patternFailureCooldownBars);
    }
@@ -264,7 +258,7 @@ private:
       m_signalCooldowns[sz].price = price;
       m_signalCooldowns[sz].expiry = TimeCurrent() + (m_cfgCache.signalCooldownBars * PeriodSeconds(_Period));
 
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
          PrintFormat("[PASR Signal] Signal cooldown registered @ %.5f for %d bars.",
                      price, m_cfgCache.signalCooldownBars);
    }
@@ -428,7 +422,7 @@ private:
       double projectedTP = (dir == 1) ? (target - tpBuffer) : (target + tpBuffer);
       double profitDist = MathAbs(entryPrice - projectedTP);
 
-      // 2. Hitung Proyeksi SL berdasarkan Mode
+      // 2. Hitung Proyeksi SL
       double slBuffer = m_cfgCache.slBufferATR * atrPoints * _Point;
       double baseSL = (m_cfgCache.tpslMode == TPSL_PATTERN) ? patternExtreme : ((dir == 1) ? support : resistance);
       double projectedSL = (dir == 1) ? (baseSL - slBuffer) : (baseSL + slBuffer);
@@ -494,7 +488,7 @@ private:
          double pScore = 0;
          double pSLMult = 1.0;
 
-         if (!m_patterns.Detect(rates, shift, atrPoints, pType, dir, signalPrice, pScore, patternReason))
+         if (!m_patterns.Detect(rates, shift, atrPoints, pType, dir, signalPrice, pScore, pSLMult, patternReason))
             continue;
 
          double zonePrice = (dir == 1) ? support : resistance;
@@ -578,7 +572,7 @@ private:
          // Register zone usage to prevent duplicate signals
          RegisterZoneUse(dir == 1, zonePrice);
 
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             PrintFormat("[PASR Signal] ✓ %s @ %.5f | Pattern: %s | %s",
                         (dir == 1 ? "BUY" : "SELL"), signalPrice, EnumToString(pType), decision.reason);
 
@@ -693,11 +687,11 @@ public:
 
    virtual void DeclareEvents() override
    {
-      AddEvent("PriceUpdate");
-      AddEvent("NewBar");
-      AddEvent("ZoneUpdate");
-      AddEvent("RecoveryOpportunity"); // Listen for recovery opportunities
-      AddEvent("MarketGate");
+      AddEvent(EVENT_ID_PRICE_UPDATE);
+      AddEvent(EVENT_ID_NEW_BAR);
+      AddEvent(EVENT_ID_ZONE_UPDATE);
+      AddEvent(EVENT_ID_RECOVERY_OPPORTUNITY);
+      AddEvent(EVENT_ID_MARKET_GATE);
    }
 
    //+------------------------------------------------------------------+
@@ -725,7 +719,7 @@ public:
 
       if (!m_marketGateOpen || !m_marketEntryAllowed)
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             PrintFormat("[SignalManager] Market gate closed or cooldown active. gateOpen=%s entryAllowed=%s",
                         m_marketGateOpen ? "true" : "false",
                         m_marketEntryAllowed ? "true" : "false");
@@ -750,7 +744,7 @@ public:
    virtual void OnEmergencyStop(EmergencyStopEvent *e) override
    {
       m_signalPending = false;
-      if (m_cfgCache.debugMode)
+      if (m_debugMode)
          Log("Emergency Stop: Clearing pending signals.");
    }
 
@@ -761,117 +755,70 @@ public:
       CleanupSignalCooldowns(); // FIX: Call cleanup for signal cooldowns
    }
 
+   // Handle specific events with static dispatch hooks
+   virtual void OnZoneUpdate(ZoneUpdateEvent *ze) override
+   {
+      m_marketData.atrPoints = ze.atrPoints;
+      m_marketData.support = ze.support;
+      m_marketData.resistance = ze.resistance;
+      m_marketData.htfSupport = ze.htfSupport;
+      m_marketData.htfResistance = ze.htfResistance;
+      m_marketData.isSupBroken = ze.isSupBroken;
+      m_marketData.isResBroken = ze.isResBroken;
+      m_marketData.supBufferMult = ze.supBufferMult;
+      m_marketData.resBufferMult = ze.resBufferMult;
+      m_marketData.supHtfAlign = ze.supHtfAlign;
+      m_marketData.resHtfAlign = ze.resHtfAlign;
+      m_marketData.supStrength = ze.supStrength;
+      m_marketData.resStrength = ze.resStrength;
+   }
+
+   virtual void OnMarketGate(MarketGateEvent *mg) override
+   {
+      m_marketGateOpen = mg.gateOpen;
+      m_marketEntryAllowed = mg.entryAllowed;
+      m_marketSpread = mg.spread;
+      m_marketATR = mg.atrPoints;
+   }
+
+   virtual void OnRecoveryOpportunity(RecoveryOpportunityEvent *roe) override
+   {
+      if (!m_cfgCache.useRecoveryMode)
+         return;
+
+      SignalDecision recoveryDecision;
+      if (DetectRecoverySignal(recoveryDecision,
+                               roe.originalTicket,
+                               roe.slHitPrice,
+                               roe.direction,
+                               roe.atrPoints,
+                               m_marketData.support, m_marketData.resistance,
+                               m_marketData.htfSupport, m_marketData.htfResistance,
+                               m_marketData.isSupBroken, m_marketData.isResBroken,
+                               m_marketData.supBufferMult, m_marketData.resBufferMult,
+                               m_marketData.supHtfAlign, m_marketData.resHtfAlign))
+      {
+         RecoverySignalEvent *recSigEvent = new RecoverySignalEvent(
+             roe.originalTicket, recoveryDecision, roe.atrPoints, m_marketData.support, m_marketData.resistance);
+         DispatchEvent(recSigEvent);
+         Log(StringFormat("Recovery signal detected for original trade %d: %s", roe.originalTicket, recoveryDecision.reason));
+      } else {
+         Log(StringFormat("No immediate recovery signal found for original trade %d.", roe.originalTicket));
+      }
+   }
+
    virtual void OnCustomEvent(Event *e) override
    {
-      if (e.Type() == "ZoneUpdate")
-      {
-         ZoneUpdateEvent *ze = dynamic_cast<ZoneUpdateEvent *>(e);
-         if (CheckPointer(ze) == POINTER_INVALID)
-            return;
-
-         m_marketData.atrPoints = ze.atrPoints;
-         m_marketData.support = ze.support;
-         m_marketData.resistance = ze.resistance;
-         m_marketData.htfSupport = ze.htfSupport;
-         m_marketData.htfResistance = ze.htfResistance;
-         m_marketData.isSupBroken = ze.isSupBroken;
-         m_marketData.isResBroken = ze.isResBroken;
-         m_marketData.supBufferMult = ze.supBufferMult;
-         m_marketData.resBufferMult = ze.resBufferMult;
-         m_marketData.supHtfAlign = ze.supHtfAlign;
-         m_marketData.resHtfAlign = ze.resHtfAlign;
-         m_marketData.supStrength = ze.supStrength; // NEW: Zone strength
-         m_marketData.resStrength = ze.resStrength;
-      }
-      else if (e.Type() == "MarketGate")
-      {
-         MarketGateEvent *mg = dynamic_cast<MarketGateEvent *>(e);
-         if (CheckPointer(mg) == POINTER_INVALID)
-            return;
-
-         m_marketGateOpen = mg.gateOpen;
-         m_marketEntryAllowed = mg.entryAllowed;
-         m_marketSpread = mg.spread;
-         m_marketATR = mg.atrPoints;
-      }
-      else if (e.Type() == "RecoveryOpportunity")
-      {
-         RecoveryOpportunityEvent *roe = dynamic_cast<RecoveryOpportunityEvent *>(e);
-         if (CheckPointer(roe) == POINTER_INVALID)
-            return;
-
-         if (!m_cfgCache.useRecoveryMode)
-            return;
-
-         // Attempt to detect a recovery signal immediately
-         SignalDecision recoveryDecision;
-         if (DetectRecoverySignal(recoveryDecision,
-                                  roe.originalTicket,
-                                  roe.slHitPrice,
-                                  roe.direction,
-                                  roe.atrPoints,
-                                  m_marketData.support, m_marketData.resistance,
-                                  m_marketData.htfSupport, m_marketData.htfResistance,
-                                  m_marketData.isSupBroken, m_marketData.isResBroken,
-                                  m_marketData.supBufferMult, m_marketData.resBufferMult,
-                                  m_marketData.supHtfAlign, m_marketData.resHtfAlign))
-         {
-            // Signal found! Dispatch to ExecutionManager via event
-            RecoverySignalEvent *recSigEvent = new RecoverySignalEvent(
-                roe.originalTicket, recoveryDecision, roe.atrPoints, m_marketData.support, m_marketData.resistance);
-            EventBus::Instance().Dispatch(recSigEvent);
-            Log(StringFormat("Recovery signal detected for original trade %d: %s", roe.originalTicket, recoveryDecision.reason));
-         } else {
-            Log(StringFormat("No immediate recovery signal found for original trade %d.", roe.originalTicket));
-         }
-      }
+      // Placeholder for other custom signals
    }
    //+------------------------------------------------------------------+
    //| PUBLIC: Integration Methods (for other modules)                 |
    //+------------------------------------------------------------------+
 public:
-   // Called by SRManager or similar to trigger signal check
-   // This is the "pull" interface for backward compatibility
-   bool TryGenerateSignal(SignalDecision &outDecision,
-                          double atrPoints,
-                          double support, double resistance,
-                          double htfSupport, double htfResistance,
-                          bool isSupBroken, bool isResBroken,
-                          double supBufferMult, double resBufferMult,
-                          int supHtfAlign, int resHtfAlign)
-   {
-      // Direct call to core detection logic
-      bool found = DetectSignalCore(outDecision, atrPoints, support, resistance,
-                                    htfSupport, htfResistance, isSupBroken, isResBroken,
-                                    supBufferMult, resBufferMult, supHtfAlign, resHtfAlign);
-
-      // If signal found, also dispatch event for other modules
-      if (found && outDecision.valid)
-      {
-         SignalGeneratedEvent *sigEvent = new SignalGeneratedEvent(
-             outDecision, atrPoints, support, resistance);
-         EventBus::Instance().Dispatch(sigEvent); // Auto-cleanup after dispatch
-      }
-
-      return found;
-   }
-
    // Register a failed zone externally (e.g., from TradeManager on loss)
    void NotifyPatternFailure(bool isBuy, double zonePrice)
    {
       RegisterFailure(isBuy, zonePrice);
-   }
-
-   // Get pending signal (if any) - for polling-style integration
-   bool HasPendingSignal(SignalDecision &outSignal)
-   {
-      if (m_signalPending)
-      {
-         outSignal = m_pendingSignal;
-         m_signalPending = false; // Consume the signal
-         return true;
-      }
-      return false;
    }
 
    //+------------------------------------------------------------------+
@@ -896,7 +843,7 @@ private:
 
       if (atrPoints <= 0 || support <= 0 || resistance <= 0)
       {
-         if (m_cfgCache.debugMode)
+         if (m_debugMode)
             Print("[SignalManager] Missing data for signal detection");
          return;
       }
@@ -910,7 +857,7 @@ private:
          // Signal found! Dispatch to ExecutionManager via event
          SignalGeneratedEvent *sigEvent = new SignalGeneratedEvent(
              decision, atrPoints, support, resistance);
-         EventBus::Instance().Dispatch(sigEvent); // Memory auto-managed
+         DispatchEvent(sigEvent); // Memory auto-managed
 
          RegisterSignalCooldown(decision.signalPrice, decision.orderType); // FIX: Register cooldown
          // Also buffer for polling-style access (backward compat)
