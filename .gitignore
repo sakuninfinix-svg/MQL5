@@ -1,3 +1,18 @@
+```
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+.env.
+
+# Editors
+.vscode/
+.idea/
+
 # Dependencies
 node_modules/
 venv/
@@ -10,27 +25,9 @@ build/
 target/
 .gradle/
 
-# Editor/IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# Logs
-*.log
-
 # System files
 .DS_Store
 Thumbs.db
-.env
-.env.local
-*.env.*
-
-# Coverage
-coverage/
-htmlcov/
-.coverage
 
 # Compiled files
 *.pyc
@@ -44,6 +41,11 @@ htmlcov/
 *.out
 *.ex5
 *.ex4
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
 # Compressed files
 *.zip
@@ -64,6 +66,7 @@ htmlcov/
 *.Z
 *.lz
 *.lzo
+
 *.tar.gz
 *.tar.bz2
 *.tar.xz
