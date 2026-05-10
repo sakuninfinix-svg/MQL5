@@ -170,6 +170,7 @@ public:
    virtual void OnZoneUpdate(ZoneUpdateEvent *e) {}
    virtual void OnNewsAlert(NewsAlertEvent *e) {}
    virtual void OnMarketGate(MarketGateEvent *e) {}
+   virtual void OnSessionChange(SessionChangeEvent *e) {}
    virtual void OnPauseToggle(PauseToggleEvent *e) {}
    virtual void OnCustomEvent(Event *e) {} // Fallback for module-specific events
 
