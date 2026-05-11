@@ -17,6 +17,7 @@
 #include <PASR/8.RecoveryManager.mqh>
 #include <PASR/9.PatternManager.mqh>
 #include <PASR/10.DataManager.mqh>
+#include <PASR/AIManager.mqh>
 #include <PASR/11.DashboardManager.mqh>
 
 // --- Global Pointers Declaration ---
@@ -27,6 +28,7 @@ DataManager *IManager::s_dataCache = NULL;
 MarketManager market;
 SRManager sr;
 SignalManager signal;
+AIManager ai;
 ExecutionManager exec;
 RecoveryManager recovery;
 DashboardUI dashboard;
@@ -50,8 +52,8 @@ int OnInit()
 
    // 2. Initialize config & cache
    SetCommonDefaults();
-   eaCfg.magicNum = CFG.MagicNum;
-   eaCfg.debugMode = CFG.DebugMode;
+   eaCfg.magicNum = CFG.risk.magic;
+   eaCfg.debugMode = CFG.system.debug;
 
    if (eaCfg.debugMode)
    {
@@ -67,6 +69,8 @@ int OnInit()
    IManager::SetGlobalDataManager(GetPointer(dta));
 
    if (!signal.Init())
+      return (INIT_FAILED);
+   if (!ai.Init())
       return (INIT_FAILED);
    if (!market.Init())
       return (INIT_FAILED);
@@ -111,7 +115,7 @@ int OnInit()
 
          if (CheckPointer(eng) != POINTER_INVALID)
          {
-            eng.LoadState(t, eaCfg.magicNum);
+            eng.LoadState(t);
 
             // Dispatch event to notify listeners about current position state
             DispatchEvent(new PositionUpdateEvent(t, PositionGetDouble(POSITION_PRICE_CURRENT),
@@ -231,6 +235,12 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                   recovery.NotifyRecoverySuccess(originalTicket);
                }
             }
+
+            // Notify AI and other listeners that a position has closed.
+            DispatchEvent(new PositionUpdateEvent(positionID,
+                                                  HistoryDealGetDouble(trans.deal, DEAL_PRICE),
+                                                  netProfit,
+                                                  true));
          }
       }
    }

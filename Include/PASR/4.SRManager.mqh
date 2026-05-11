@@ -2,15 +2,14 @@
 //|                                                    SRManager.mqh |
 //|                                       Copyright 2026, Agsicentre |
 //+------------------------------------------------------------------+
+#property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
 #property version "1.00"
 
 #ifndef __SR_MANAGER_MQH__
 #define __SR_MANAGER_MQH__
 
-#property copyright "Copyright 2026, Agsicentre"
 #property strict
-
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
 
@@ -133,19 +132,19 @@ public:
    {
       IManager::RefreshConfigCache(); // Sync m_debugMode dari base class
 
-      m_cfgCache.srMode = CFG.SRMode;
-      m_cfgCache.srLookback = CFG.SRLookback;
-      m_cfgCache.swingLookback = CFG.SwingLookback;
-      m_cfgCache.entryMode = CFG.EntryMode;
-      m_cfgCache.bufferMultWeak = CFG.BufferMultWeak;
-      m_cfgCache.bufferMultStrong = CFG.BufferMultStrong;
-      m_cfgCache.atrBufferMult = CFG.ATRBufferMult;
-      m_cfgCache.srTouchBufferATR = CFG.SRTouchBufferATR;
-      m_cfgCache.srMinTouchesStrong = CFG.SRMinTouchesStrong;
-      m_cfgCache.useMTF = CFG.UseMTF;
-      m_cfgCache.htf = CFG.HTF;
-      m_cfgCache.htfLookback = CFG.HTFLookback;
-      m_cfgCache.minSRRangeATR = CFG.MinSRRangeATR;
+      m_cfgCache.srMode = CFG.sr.mode;
+      m_cfgCache.srLookback = CFG.sr.lookback;
+      m_cfgCache.swingLookback = CFG.sr.swingLookback;
+      m_cfgCache.entryMode = CFG.risk.entryMode;
+      m_cfgCache.bufferMultWeak = CFG.sr.bufferMultWeak;
+      m_cfgCache.bufferMultStrong = CFG.sr.bufferMultStrong;
+      m_cfgCache.atrBufferMult = CFG.sr.atrBufferMult;
+      m_cfgCache.srTouchBufferATR = CFG.sr.touchBufferATR;
+      m_cfgCache.srMinTouchesStrong = CFG.sr.minTouchesStrong;
+      m_cfgCache.useMTF = CFG.risk.useMTF;
+      m_cfgCache.htf = CFG.risk.htf;
+      m_cfgCache.htfLookback = CFG.risk.htfLookback;
+      m_cfgCache.minSRRangeATR = CFG.sr.minRangeATR;
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override

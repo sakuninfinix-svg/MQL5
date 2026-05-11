@@ -10,8 +10,8 @@
 #ifndef __RECOVERY_MANAGER_MQH__
 #define __RECOVERY_MANAGER_MQH__
 
-#include <Trade/Trade.mqh>
 #property strict
+#include <Trade/Trade.mqh>
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
 #include "9.PatternManager.mqh"
@@ -61,22 +61,22 @@ private:
    virtual void RefreshConfigCache() override
    {
       IManager::RefreshConfigCache(); // Update inherited m_debugMode
-
-      m_cfgCache.magicNum = (ulong)CFG.MagicNum;
-      m_cfgCache.useRecovery = CFG.UseRecoveryMode;
-      m_cfgCache.maxRecoveryAttempts = CFG.MaxRecoveryAttempts;
-      m_cfgCache.recoveryCooldownBars = CFG.RecoveryCooldownBars;
-      m_cfgCache.fakeoutSLAdjustmentATR = CFG.FakeoutSLAdjustmentATR;
-      m_cfgCache.exitOnOpposite = CFG.ExitOnOpposite;
-      m_cfgCache.useTrailing = CFG.UseTrailing;
-      m_cfgCache.usePartialClose = CFG.UsePartialClose;
-      m_cfgCache.partialCloseLotPct = CFG.PartialCloseLotPct;
-      m_cfgCache.partialCloseATR = CFG.PartialCloseATR;
-      m_cfgCache.maxTradeDurationDays = CFG.MaxTradeDurationDays;
-      m_cfgCache.lockProfitATR = CFG.LockProfitATR;
-      m_cfgCache.lockOffsetATR = CFG.LockOffsetATR;
-      m_cfgCache.trailActivationATR = CFG.TrailActivationATR;
-      m_cfgCache.trailStepATR = CFG.TrailStepATR;
+      
+      m_cfgCache.magicNum = (ulong)CFG.risk.magic;
+      m_cfgCache.useRecovery = CFG.recovery.use;
+      m_cfgCache.maxRecoveryAttempts = CFG.recovery.maxAttempts;
+      m_cfgCache.recoveryCooldownBars = CFG.recovery.cooldownBars;
+      m_cfgCache.fakeoutSLAdjustmentATR = CFG.recovery.fakeoutSLAdjATR;
+      m_cfgCache.exitOnOpposite = CFG.exit.exitOnOpposite;
+      m_cfgCache.useTrailing = CFG.exit.useTrailing;
+      m_cfgCache.usePartialClose = CFG.exit.usePartial;
+      m_cfgCache.partialCloseLotPct = CFG.exit.partialLotPct;
+      m_cfgCache.partialCloseATR = CFG.exit.partialATR;
+      m_cfgCache.maxTradeDurationDays = CFG.risk.maxTradeDurationDays;
+      m_cfgCache.lockProfitATR = CFG.exit.lockProfitATR;
+      m_cfgCache.lockOffsetATR = CFG.exit.lockOffsetATR;
+      m_cfgCache.trailActivationATR = CFG.exit.trailActivationATR;
+      m_cfgCache.trailStepATR = CFG.exit.trailStepATR;
    }
 
    int FindEngineIndex(ulong ticket)
@@ -91,7 +91,7 @@ private:
 
    void ClearEngineGVs(ulong ticket)
    {
-      string prefix = "PASR_" + (string)m_cfgCache.magicNum + "_" + (string)ticket + "_";
+      string prefix = "PASR_" + (string)CFG.risk.magic + "_" + (string)ticket + "_";
       GlobalVariablesDeleteAll(prefix);
    }
 
@@ -219,7 +219,7 @@ private:
       {
          r.lastKnownATR = atrPoints;
          r.recoveryAttempts++;
-         r.SaveState(m_cfgCache.magicNum);
+         r.SaveState();
 
          if (m_debugMode)
             PrintFormat("[Fakeout] ✓ SL adjusted for %d: %.5f -> %.5f (Confidence: %.2f)",
@@ -333,7 +333,7 @@ private:
                      }
 
                      r.lastActionTick = GetTickCount64();
-                     r.SaveState(m_cfgCache.magicNum);
+                     r.SaveState();
                   }
                }
             }
@@ -368,9 +368,9 @@ private:
          if (newSL > slPrice + minModifyStep && (curPrice - newSL) > stopLevel)
          {
             newSL = NormalizeDouble(newSL, _Digits);
-            if (m_trade.PositionModify(r.mainTicket, newSL, tpPrice))
+            if (m_trade.PositionModify(r.mainTicket, newSL, tpPrice)) // This is fine
             {
-               r.SaveState(m_cfgCache.magicNum);
+               r.SaveState();
                m_lastTrailingUpdate = GetMicrosecondCount();
                if (m_debugMode)
                   PrintFormat("[Recovery] ✓ Trailing BUY %d: SL %.5f (Profit: %.2f ATR)", r.mainTicket, newSL, profitATR);
@@ -400,9 +400,9 @@ private:
          if (newSL > 0 && (slPrice <= 0 || newSL < slPrice - minModifyStep) && (newSL - curPrice) > stopLevel)
          {
             newSL = NormalizeDouble(newSL, _Digits);
-            if (m_trade.PositionModify(r.mainTicket, newSL, tpPrice))
+            if (m_trade.PositionModify(r.mainTicket, newSL, tpPrice)) // This is fine
             {
-               r.SaveState(m_cfgCache.magicNum);
+               r.SaveState();
                m_lastTrailingUpdate = GetMicrosecondCount();
                if (m_debugMode)
                   PrintFormat("[Recovery] ✓ Trailing SELL %d: SL %.5f (Profit: %.2f ATR)", r.mainTicket, newSL, profitATR);
@@ -444,8 +444,8 @@ private:
       // SignalManager will listen for RecoveryOpportunityEvent and provide recovery signals.
       // This method just manages state timeouts and validates position still exists.
       if (m_debugMode)
-         Log(StringFormat("Position %d ready for recovery signal. Attempts: %d/%d",
-                          r.mainTicket, r.recoveryAttempts, m_cfgCache.maxRecoveryAttempts));
+         Log(StringFormat("Position %d ready for recovery signal. Attempts: %d/%d", // Updated
+                          r.mainTicket, r.recoveryAttempts, CFG.recovery.maxAttempts)); // Updated
    }
 
    void VerifyAndCleanupEngines()
@@ -468,13 +468,13 @@ private:
             if (m_debugMode)
                PrintFormat("[Recovery] Position %d closed externally or no longer exists. Cleaning engine.", r.mainTicket);
             r.active = false;
-            ClearEngineGVs(r.mainTicket);
+            ClearEngineGVs(r.mainTicket); // Uses CFG.risk.magic now
             r.Reset();
             continue;
          }
 
          // Check max trade duration
-         if (m_cfgCache.maxTradeDurationDays > 0 && r.entryTime > 0)
+         if (CFG.risk.maxTradeDurationDays > 0 && r.entryTime > 0)
          {
             if (TimeCurrent() > r.entryTime + (m_cfgCache.maxTradeDurationDays * 86400))
             {
@@ -691,9 +691,9 @@ public:
       target.originalTP = originalTP;
       target.originalLot = lot;
       // Partial TP setup
-      double pcDist = target.lastKnownATR * m_cfgCache.partialCloseATR * _Point;
+      double pcDist = target.lastKnownATR * CFG.exit.partialATR * _Point;
       target.partialTP = NormalizeDouble(entry + ((type == ORDER_TYPE_BUY ? 1.0 : -1.0) * pcDist), _Digits);
-      target.SaveState(m_cfgCache.magicNum);
+      target.SaveState();
 
       if (m_debugMode)
          PrintFormat("[Recovery] Registered position %d | Type: %s | Lot: %.2f", ticket, (type == ORDER_TYPE_BUY ? "BUY" : "SELL"), lot);
@@ -717,9 +717,9 @@ public:
       if (idx != -1)
       {
          RecoveryEngine *r = engines[idx];
-         r.state = TRADE_STATE_DONE;
-         r.active = false;
-         ClearEngineGVs(originalTicket);
+         r.state = TRADE_STATE_DONE; // This is a state change, not a CFG parameter
+         r.active = false; // This is a state change, not a CFG parameter
+         ClearEngineGVs(originalTicket); // Uses CFG.risk.magic now
          if (m_debugMode)
             PrintFormat("[Recovery] Original position %d recovery cycle completed.", originalTicket);
       }

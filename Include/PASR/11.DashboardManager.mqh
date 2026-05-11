@@ -11,7 +11,6 @@
 #define __DASHBOARD_MANAGER_MQH__
 
 #property strict
-#include "mql5_vscode_fix.h"
 #include "2.Config.mqh"
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
@@ -32,16 +31,16 @@
 #define DASHBOARD_RELOAD_CONFIG (CHARTEVENT_CUSTOM + 106)
 
 // Color Scheme - Modern Dark Theme
-#define CLR_BG_PRIMARY   0x201B19            // Dark background (C'25,27,32')
-#define CLR_BG_SECONDARY 0x2C2623            // Panel background (C'35,38,44')
-#define CLR_BG_ACCENT    0x38302D            // Highlight background (C'45,48,56')
-#define CLR_TEXT_PRIMARY 0xDCDCDC            // Primary text (C'220,220,220')
-#define CLR_TEXT_SECONDARY 0xA09696          // Secondary text (C'150,150,160')
-#define CLR_SUCCESS      0x8EC748            // Green - Profit/Buy (C'72,199,142')
-#define CLR_DANGER       0x5E59FF            // Red - Loss/Sell (C'255,89,94')
-#define CLR_WARNING      0x00CCFF            // Yellow - Warning (C'255,204,0')
-#define CLR_INFO         0xFF9C40            // Blue - Info (C'64,156,255')
-#define CLR_ACCENT       0xDE52AF            // Purple - Accent (C'175,82,222')
+#define CLR_BG_PRIMARY 0x201B19     // Dark background (C'25,27,32')
+#define CLR_BG_SECONDARY 0x2C2623   // Panel background (C'35,38,44')
+#define CLR_BG_ACCENT 0x38302D      // Highlight background (C'45,48,56')
+#define CLR_TEXT_PRIMARY 0xDCDCDC   // Primary text (C'220,220,220')
+#define CLR_TEXT_SECONDARY 0xA09696 // Secondary text (C'150,150,160')
+#define CLR_SUCCESS 0x8EC748        // Green - Profit/Buy (C'72,199,142')
+#define CLR_DANGER 0x5E59FF         // Red - Loss/Sell (C'255,89,94')
+#define CLR_WARNING 0x00CCFF        // Yellow - Warning (C'255,204,0')
+#define CLR_INFO 0xFF9C40           // Blue - Info (C'64,156,255')
+#define CLR_ACCENT 0xDE52AF         // Purple - Accent (C'175,82,222')
 
 // UI Layout Constants
 #define DASHBOARD_HEADER_HEIGHT 50
@@ -97,10 +96,10 @@ struct DataCacheUI
 class DashboardManager : public IManager
 {
 private:
-   DashboardUI *m_ui;    ///< Pointer to UI component
-   long m_chart;         ///< Chart ID for custom events
-   DataCacheUI m_cache;  ///< Cached data for UI updates
-   CTrade m_trade;       ///< Trade helper for position operations
+   DashboardUI *m_ui;   ///< Pointer to UI component
+   long m_chart;        ///< Chart ID for custom events
+   DataCacheUI m_cache; ///< Cached data for UI updates
+   CTrade m_trade;      ///< Trade helper for position operations
 
    void RefreshCache()
    {
@@ -121,7 +120,7 @@ private:
       m_cache.drawdownPct = m_cache.scanResult.dailyDrawdown;
       m_cache.totalTrades = m_cache.perfStats.safeTotal + m_cache.perfStats.aggTotal;
       m_cache.openPositions = m_cache.scanResult.normalCount;
-      
+
       m_cache.lastUpdate = TimeCurrent();
    }
 
@@ -166,12 +165,12 @@ public:
     */
    virtual void RefreshConfigCache() override
    {
-      IManager::RefreshConfigCache(); 
-      
+      IManager::RefreshConfigCache();
+
       // Sinkronisasi config statis ke cache UI
-      m_cache.magicNum = CFG.MagicNum;
-      m_cache.maxDailyLossPct = CFG.MaxDailyLossPct;
-      m_cache.useNews = (CFG.NewsLevel != NEWS_OFF);
+      m_cache.magicNum = CFG.risk.magic;
+      m_cache.maxDailyLossPct = CFG.risk.maxDailyLoss;
+      m_cache.useNews = CFG.news.use;
    }
 
    /**
@@ -468,7 +467,7 @@ private:
 
    // Buttons - Controls
    CButton m_btnPause, m_btnCloseAll, m_btnEmergency;
-   ulong m_magic; ///< EA magic number
+   // ulong m_magic; ///< EA magic number - Removed, use CFG.risk.magic directly
 
 public:
    /**
@@ -476,7 +475,7 @@ public:
     */
    DashboardUI() : m_ctrl(NULL), m_magic(0) {}
 
-   /**
+   /** // Removed m_magic from constructor initializer list
     * Set controller reference
     * @param ctrl Pointer to DashboardManager
     */
@@ -509,10 +508,10 @@ public:
       if (CheckPointer(m_ctrl) != POINTER_INVALID)
       {
          m_ctrl.RefreshConfigCache();
-         m_magic = m_ctrl.GetCache().magicNum;
+         // m_magic = m_ctrl.GetCache().magicNum; // No longer needed
       }
       else
-         m_magic = 0;
+         // m_magic = 0; // No longer needed
 
       // Calculate dimensions
       int width = x2 - x1;
@@ -531,7 +530,7 @@ public:
       int yPos = DASHBOARD_MARGIN;
 
       // === HEADER SECTION ===
-      CreatePanel(m_pnlHeader,"header",DASHBOARD_MARGIN,yPos,width-DASHBOARD_MARGIN*2,DASHBOARD_HEADER_HEIGHT,CLR_BG_SECONDARY);
+      CreatePanel(m_pnlHeader, "header", DASHBOARD_MARGIN, yPos, width - DASHBOARD_MARGIN * 2, DASHBOARD_HEADER_HEIGHT, CLR_BG_SECONDARY);
       Add(m_pnlHeader);
 
       // Title
@@ -821,16 +820,16 @@ public:
       // === UPDATE HEADER ===
       string mode = MQLInfoInteger(MQL_TESTER) ? "◉ BACKTEST" : "◉ LIVE";
       m_lblMode.Text(mode);
-      
+
       // Check emergency stop status
-      string emergencyGV = "PASR_EMERGENCY_" + (string)m_magic;
+      string emergencyGV = "PASR_EMERGENCY_" + (string)CFG.risk.magic;
       bool isEmergency = GlobalVariableCheck(emergencyGV);
-      
+
       if (isEmergency)
       {
          m_lblStatus.Text("● EMERGENCY STOP");
          m_lblStatus.Color(CLR_DANGER);
-         
+
          m_btnEmergency.Text("🔓 RESET STOP");
          m_btnEmergency.ColorBackground(CLR_SUCCESS);
       }
@@ -838,7 +837,7 @@ public:
       {
          m_lblStatus.Text("● System Active");
          m_lblStatus.Color(CLR_SUCCESS);
-         
+
          m_btnEmergency.Text("⚠ EMERGENCY");
          m_btnEmergency.ColorBackground(CLR_DANGER);
       }
@@ -860,9 +859,9 @@ public:
       // Drawdown with warning levels
       double dd = cache.drawdownPct;
       m_lblDrawdown.Text(StringFormat("Drawdown: %.2f%%", dd));
-      if (dd > cache.maxDailyLossPct * 0.8)
+      if (dd > cache.maxDailyLossPct * 0.8 && cache.maxDailyLossPct > 0)
          m_lblDrawdown.Color(CLR_DANGER);
-      else if (dd > cache.maxDailyLossPct * 0.5)
+      else if (dd > cache.maxDailyLossPct * 0.5 && cache.maxDailyLossPct > 0)
          m_lblDrawdown.Color(CLR_WARNING);
       else
          m_lblDrawdown.Color(CLR_TEXT_SECONDARY);
@@ -873,7 +872,8 @@ public:
 
       // Gate status
       string gateStr = cache.gateOpen ? "OPEN ✓" : "CLOSED ✗";
-      if (cache.gateOpen && !cache.allowed) gateStr = "COOLDOWN ⏳";
+      if (cache.gateOpen && !cache.allowed)
+         gateStr = "COOLDOWN ⏳";
       m_lblGate.Text(StringFormat("Gate: %s", gateStr));
       m_lblGate.Color(cache.gateOpen ? CLR_SUCCESS : CLR_DANGER);
 
@@ -939,7 +939,6 @@ public:
       m_lblTotalTrades.Text(StringFormat("Total Trades: %d", totalTrades));
       m_lblNetProfit.Text(StringFormat("Daily Realized: $%.2f", cache.dailyProfit));
       m_lblNetProfit.Color(cache.dailyProfit >= 0 ? CLR_SUCCESS : CLR_DANGER);
-
    }
 
    // Button click handlers
@@ -983,7 +982,7 @@ public:
 
    void OnEmergencyClick()
    {
-      string gvName = "PASR_EMERGENCY_" + (string)m_magic;
+      string gvName = "PASR_EMERGENCY_" + (string)CFG.risk.magic;
       if (GlobalVariableCheck(gvName))
       {
          // Emergency stop is currently ACTIVE - offer to reset

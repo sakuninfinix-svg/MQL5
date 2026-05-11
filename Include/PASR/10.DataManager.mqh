@@ -91,7 +91,7 @@ public:
    virtual void RefreshConfigCache() override
    {
       IManager::RefreshConfigCache();
-      m_cfgCache.atrPeriod = CFG.ATRPeriod;
+      m_cfgCache.atrPeriod = CFG.market.atrPeriod;
    }
 
    bool ResetIndicators()
@@ -137,7 +137,7 @@ public:
 
    virtual void OnHeartbeat(HeartbeatEvent *e) override
    {
-      UpdateAccountState(CFG.MagicNum);
+      UpdateAccountState();
    }
 
    // --- Getters & Business Logic ---
@@ -153,7 +153,7 @@ public:
    
    bool CanOpenTrade(double additionalRiskAmount)
    {
-      double maxDailyLoss = AccountInfoDouble(ACCOUNT_EQUITY) * (CFG.MaxDailyLossPct / 100.0);
+      double maxDailyLoss = AccountInfoDouble(ACCOUNT_EQUITY) * (CFG.risk.maxDailyLoss / 100.0);
       // Cek apakah profit harian yang terealisasi + floating loss + risiko trade baru melampaui batas
       return (MathAbs(m_realizedDailyProfit) + additionalRiskAmount) < maxDailyLoss;
    }
@@ -208,7 +208,7 @@ public:
 
       if (tpDist > 0)
       {
-         double minTP = atrPoints * CFG.MinTPDistanceATR;
+         double minTP = atrPoints * CFG.exit.minTPDistATR;
          if (tpDist < minTP)
          {
             reason = "TP too close to entry (Min ATR)";
@@ -229,7 +229,7 @@ public:
 
    void RefreshDailyProfit()
    {
-      string gvName = "PASR_PROFIT_" + _Symbol + "_" + (string)CFG.MagicNum;
+      string gvName = "PASR_PROFIT_" + _Symbol + "_" + (string)CFG.risk.magic;
 
       // MQL5 Best Practice: Gunakan CopyTime untuk daily timeframe
       datetime times[];
@@ -243,7 +243,7 @@ public:
          for (int i = 0; i < HistoryDealsTotal(); i++)
          {
             ulong t = HistoryDealGetTicket(i);
-            if (t > 0 && HistoryDealGetInteger(t, DEAL_MAGIC) == CFG.MagicNum && (HistoryDealGetString(t, DEAL_SYMBOL) == _Symbol))
+            if (t > 0 && HistoryDealGetInteger(t, DEAL_MAGIC) == CFG.risk.magic && (HistoryDealGetString(t, DEAL_SYMBOL) == _Symbol))
             {
                dailySum += HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP) + HistoryDealGetDouble(t, DEAL_COMMISSION);
             }
@@ -268,7 +268,7 @@ public:
       m_lastProfitUpdateDay = today;
    }
 
-   void UpdateAccountState(ulong magic)
+   void UpdateAccountState() // Removed magic parameter
    {
       if (TimeCurrent() - m_lastScanTime < 1 && m_lastScanTime > 0)
          return;
@@ -297,7 +297,7 @@ public:
       for (int i = 0; i < PositionsTotal(); i++)
       {
          ulong ticket = PositionGetTicket(i);
-         if (ticket <= 0 || PositionGetInteger(POSITION_MAGIC) != magic || (PositionGetString(POSITION_SYMBOL) != _Symbol))
+         if (ticket <= 0 || PositionGetInteger(POSITION_MAGIC) != CFG.risk.magic || (PositionGetString(POSITION_SYMBOL) != _Symbol))
             continue;
          floatingTotal += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP) + PositionGetDouble(POSITION_COMMISSION);
          temp.normalCount++;
@@ -310,7 +310,7 @@ public:
       for (int i = 0; i < OrdersTotal(); i++)
       {
          ulong oTicket = OrderGetTicket(i);
-         if (oTicket > 0 && OrderGetInteger(ORDER_MAGIC) == magic && (OrderGetString(ORDER_SYMBOL) == _Symbol))
+         if (oTicket > 0 && OrderGetInteger(ORDER_MAGIC) == CFG.risk.magic && (OrderGetString(ORDER_SYMBOL) == _Symbol))
          {
             ENUM_ORDER_STATE oState = (ENUM_ORDER_STATE)OrderGetInteger(ORDER_STATE);
             if (oState == ORDER_STATE_STARTED || oState == ORDER_STATE_PLACED)
@@ -360,7 +360,7 @@ public:
       for (int i = 0; i < total; i++)
       {
          ulong t = HistoryDealGetTicket(i);
-         if (t <= 0 || HistoryDealGetInteger(t, DEAL_MAGIC) != CFG.MagicNum)
+         if (t <= 0 || HistoryDealGetInteger(t, DEAL_MAGIC) != CFG.risk.magic)
             continue;
          if (HistoryDealGetInteger(t, DEAL_ENTRY) != DEAL_ENTRY_OUT)
             continue;

@@ -1,3 +1,4 @@
+#property strict
 #ifndef __MQL5_VSCODE_FIX_H__
 #define __MQL5_VSCODE_FIX_H__
 
@@ -14,8 +15,10 @@
 #define ulong unsigned long
 #define uint unsigned int
 #define uchar unsigned char
-#define NULL 0
+#ifndef NULL
 
+#endif
+#define NULL 0
 // Simulasi fungsi internal MQL5 agar tidak error di VS Code
 #define GetPointer(ptr) ptr
 #define GetTickCount64() 0ULL
@@ -72,6 +75,7 @@
 #define ORDER_STATE_STARTED 0
 #define ORDER_STATE_PLACED 0
 
-// Casting dummy
 #define dynamic_cast static_cast
-#endif
+
+#endif // __cplusplus
+#endif // __MQL5_VSCODE_FIX_H__

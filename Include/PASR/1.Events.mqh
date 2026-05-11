@@ -3,17 +3,16 @@
 //|                                       Copyright 2026, Agsicentre |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
-
-#ifndef __EVENTS_MQH__
-#define __EVENTS_MQH__
-
 #property link "agsicentre.wordpress.com"
 #property version "1.00"
 #property strict
 
+#ifndef __EVENTS_MQH__
+#define __EVENTS_MQH__
+
 #include "0.EventBus.mqh"
 #include "2.Config.mqh"
-#define CAST_EVENT(className, eventPtr) (dynamic_cast<className *>(eventPtr))
+#define CAST_EVENT(className, eventPtr) ((className *)eventPtr)
 
 //+------------------------------------------------------------------+
 //| PRICE EVENTS                                                     |

@@ -32,6 +32,7 @@ private:
    int m_sessionEnds[7];
    datetime m_lastEntryBarTime;
    datetime m_lastLossBarTime;
+   int m_consecutiveLosses;
 
    bool m_gateOpen;
    bool m_entryAllowed;
@@ -71,18 +72,18 @@ public:
    virtual void RefreshConfigCache() override
    {
       IManager::RefreshConfigCache();
-      m_cfgCache.useNews = CFG.UseNews;
-      m_cfgCache.atrMin = CFG.ATRMin;
-      m_cfgCache.atrMax = CFG.ATRMax;
-      m_cfgCache.maxSpread = CFG.MaxSpread;
-      m_cfgCache.newsLevel = CFG.NewsLevel;
-      m_cfgCache.newsFreeze = CFG.NewsFreeze;
-      m_cfgCache.newsWebURL = CFG.NewsWebURL;
-      m_cfgCache.entryCooldownBars = CFG.EntryCooldownBars;
-      m_cfgCache.maxConsecutiveLoss = CFG.MaxConsecutiveLoss;
-      m_cfgCache.lossCooldownBars = CFG.LossCooldownBars;
+      m_cfgCache.useNews = CFG.news.use;
+      m_cfgCache.atrMin = CFG.market.atrMin;
+      m_cfgCache.atrMax = CFG.market.atrMax;
+      m_cfgCache.maxSpread = CFG.market.maxSpread;
+      m_cfgCache.newsLevel = CFG.news.level;
+      m_cfgCache.newsFreeze = CFG.news.freeze;
+      m_cfgCache.newsWebURL = CFG.news.url;
+      m_cfgCache.entryCooldownBars = CFG.risk.entryCooldownBars;
+      m_cfgCache.maxConsecutiveLoss = CFG.risk.maxConsecutiveLoss;
+      m_cfgCache.lossCooldownBars = CFG.risk.lossCooldownBars;
       for (int i = 0; i < 7; i++)
-         m_cfgCache.tradingSessions[i] = CFG.TradingSessions[i];
+         m_cfgCache.tradingSessions[i] = CFG.market.sessions[i];
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -106,6 +107,7 @@ public:
    bool IsTradingSession();
    bool IsNewsTime();
    bool IsEntryCooldownActive();
+   void UpdateLossStreak(double netProfit);
    string GetNewsStatus() const { return m_newsStatus; }
    datetime GetNextNewsTime() const { return m_nextNewsTime; }
 
@@ -530,10 +532,9 @@ bool MarketManager::IsEntryCooldownActive()
       }
    }
 
-   if (m_data.GetConsecutiveLosses() >= m_cfgCache.maxConsecutiveLoss)
+   if (m_consecutiveLosses >= m_cfgCache.maxConsecutiveLoss)
    {
-      datetime lastLoss = m_data.GetLastLossTime();
-      int barsSinceLoss = (int)((currBar - lastLoss) / PeriodSeconds(_Period));
+      int barsSinceLoss = (int)((currBar - m_lastLossBarTime) / PeriodSeconds(_Period));
       if (barsSinceLoss < m_cfgCache.lossCooldownBars)
       {
          m_data.DebugLog(m_debugMode, "Loss cooldown active (bars: " + (string)barsSinceLoss + ")");
@@ -556,14 +557,29 @@ void MarketManager::UpdateLossStreak(double netProfit)
       if (CopyTime(_Symbol, _Period, 0, 1, times) > 0)
          m_lastLossBarTime = times[0];
 
-      m_data.DebugLog(m_debugMode, "Loss Detected! Net Profit: " + DoubleToString(netProfit, 2) +
-                                       " | Consecutive Losses: " + (string)m_consecutiveLosses +
-                                       " | Cooldown Active.");
+      string msg = "Loss Detected! Net Profit: " + DoubleToString(netProfit, 2) +
+                   " | Consecutive Losses: " + (string)m_consecutiveLosses;
+      if (m_consecutiveLosses >= m_cfgCache.maxConsecutiveLoss)
+         msg += " | Cooldown Active.";
+      m_data.DebugLog(m_debugMode, msg);
    }
    else if (netProfit > 0)
    {
       m_consecutiveLosses = 0;
       m_data.DebugLog(m_debugMode, "Profit Detected! Resetting loss counter.");
+   }
+
+   // Update status izin entry dan kirim event jika terjadi perubahan state
+   bool entryAllowed = !IsEntryCooldownActive();
+   if (entryAllowed != m_entryAllowed)
+   {
+      m_entryAllowed = entryAllowed;
+      if (m_debugMode)
+         PrintFormat("[%s] Izin entry berubah menjadi %s akibat hasil trade terakhir.", 
+                     m_name, m_entryAllowed ? "DIIZINKAN" : "DIBLOKIR");
+                     
+      MarketGateEvent *evt = new MarketGateEvent(m_gateOpen, m_lastSpread, m_lastATR, m_entryAllowed);
+      DispatchEvent(evt);
    }
 }
 

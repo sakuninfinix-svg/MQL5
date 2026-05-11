@@ -112,32 +112,32 @@ private:
    {
       IManager::RefreshConfigCache(); // Update m_debugMode
 
-      m_cfgCache.signalLookback = CFG.SignalLookback;
-      m_cfgCache.zoneReuseATR = CFG.ZoneReuseATR;
-      m_cfgCache.patternFailureCooldownBars = CFG.PatternFailureCooldownBars;
-      m_cfgCache.signalCooldownBars = CFG.SignalCooldownBars;
-      m_cfgCache.useMTF = CFG.UseMTF;
-      m_cfgCache.atrBufferMult = CFG.ATRBufferMult;
-      m_cfgCache.entryMode = CFG.EntryMode;
-      m_cfgCache.useAdaptiveZoneBuffer = CFG.UseAdaptiveZoneBuffer;
-      m_cfgCache.srMinTouchesStrong = CFG.SRMinTouchesStrong;
-      m_cfgCache.strongZoneBufferMult = CFG.StrongZoneBufferMult;
-      m_cfgCache.maxSignalATR = CFG.MaxSignalATR;
-      m_cfgCache.antiBreakoutPct = CFG.AntiBreakoutPct;
-      m_cfgCache.momentumThresholdATR = CFG.MomentumThresholdATR;
-      m_cfgCache.mtfConfluenceBonus = CFG.MTFConfluenceBonus;
-      m_cfgCache.strongZoneBonus = CFG.StrongZoneBonus;
-      m_cfgCache.strongZoneThreshold = CFG.StrongZoneThreshold;
-      m_cfgCache.highQualityThreshold = CFG.HighQualityThreshold;
-      m_cfgCache.useDynamicCooldown = CFG.UseDynamicCooldown;
-      m_cfgCache.reducedCooldownBars = CFG.ReducedCooldownBars;
-      m_cfgCache.tpBufferATR = CFG.TPBufferATR;
-      m_cfgCache.slBufferATR = CFG.SLBufferATR;
-      m_cfgCache.tpslMode = CFG.TPSLMode;
-      m_cfgCache.minTPDistanceATR = CFG.MinTPDistanceATR;
-      m_cfgCache.useRecoveryMode = CFG.UseRecoveryMode;
-      m_cfgCache.recoveryPatternScoreThreshold = CFG.RecoveryPatternScoreThreshold;
-      m_cfgCache.recoveryZoneToleranceATR = CFG.RecoveryZoneToleranceATR;
+      m_cfgCache.signalLookback = CFG.pattern.lookback;
+      m_cfgCache.zoneReuseATR = CFG.sr.zoneReuseATR;
+      m_cfgCache.patternFailureCooldownBars = CFG.pattern.failureCooldownBars;
+      m_cfgCache.signalCooldownBars = CFG.risk.signalCooldownBars;
+      m_cfgCache.useMTF = CFG.risk.useMTF;
+      m_cfgCache.atrBufferMult = CFG.sr.atrBufferMult;
+      m_cfgCache.entryMode = CFG.risk.entryMode;
+      m_cfgCache.useAdaptiveZoneBuffer = CFG.pattern.useAdaptiveZoneBuffer;
+      m_cfgCache.srMinTouchesStrong = CFG.sr.minTouchesStrong;
+      m_cfgCache.strongZoneBufferMult = CFG.pattern.strongZoneBufferMult;
+      m_cfgCache.maxSignalATR = CFG.pattern.maxSignalATR;
+      m_cfgCache.antiBreakoutPct = CFG.pattern.antiBreakoutPct;
+      m_cfgCache.momentumThresholdATR = CFG.pattern.momentumThresholdATR;
+      m_cfgCache.mtfConfluenceBonus = CFG.pattern.mtfConfluenceBonus;
+      m_cfgCache.strongZoneBonus = CFG.pattern.strongZoneBonus;
+      m_cfgCache.strongZoneThreshold = CFG.pattern.strongZoneThreshold;
+      m_cfgCache.highQualityThreshold = CFG.pattern.hqThreshold;
+      m_cfgCache.useDynamicCooldown = CFG.pattern.useDynamicCooldown;
+      m_cfgCache.reducedCooldownBars = CFG.pattern.reducedCooldownBars;
+      m_cfgCache.tpBufferATR = CFG.exit.tpBufferATR;
+      m_cfgCache.slBufferATR = CFG.exit.slBufferATR;
+      m_cfgCache.tpslMode = CFG.risk.tpslMode;
+      m_cfgCache.minTPDistanceATR = CFG.exit.minTPDistATR;
+      m_cfgCache.useRecoveryMode = CFG.recovery.use;
+      m_cfgCache.recoveryPatternScoreThreshold = CFG.recovery.scoreThreshold;
+      m_cfgCache.recoveryZoneToleranceATR = CFG.recovery.zoneToleranceATR;
    }
 
    bool FetchCandleBatch(int shiftStart, int count, MqlRates &outRates[])

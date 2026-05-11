@@ -48,19 +48,19 @@ private:
       IManager::RefreshConfigCache();
 
       // 2. Sync Execution specific parameters from CFG
-      m_cfgCache.useAutoLot = CFG.UseAutoLot;
-      m_cfgCache.riskPct = CFG.RiskPct;
-      m_cfgCache.lotSize = CFG.LotSize;
-      m_cfgCache.qualityLotMult = CFG.QualityLotMult;
-      m_cfgCache.minTPDistanceATR = CFG.MinTPDistanceATR;
-      m_cfgCache.maxTPDistanceATR = CFG.MaxTPDistanceATR;
-      m_cfgCache.slBufferATR = CFG.SLBufferATR;
-      m_cfgCache.tpBufferATR = CFG.TPBufferATR;
-      m_cfgCache.magicNum = (ulong)CFG.MagicNum;
-      m_cfgCache.entryMode = CFG.EntryMode;
-      m_cfgCache.tpslMode = CFG.TPSLMode;
-      m_cfgCache.recoveryLotMult = CFG.RecoveryLotMult;
-      m_cfgCache.orderThrottleMs = (uint)CFG.OrderThrottleMs;
+      m_cfgCache.useAutoLot = CFG.risk.autoLot; // This was already correct
+      m_cfgCache.riskPct = CFG.risk.pct;
+      m_cfgCache.lotSize = CFG.risk.lot;
+      m_cfgCache.qualityLotMult = CFG.risk.qualityLotMult;
+      m_cfgCache.minTPDistanceATR = CFG.exit.minTPDistATR;
+      m_cfgCache.maxTPDistanceATR = CFG.exit.maxTPDistATR;
+      m_cfgCache.slBufferATR = CFG.exit.slBufferATR;
+      m_cfgCache.tpBufferATR = CFG.exit.tpBufferATR;
+      m_cfgCache.magicNum = (ulong)CFG.risk.magic;
+      m_cfgCache.entryMode = CFG.risk.entryMode;
+      m_cfgCache.tpslMode = CFG.risk.tpslMode;
+      m_cfgCache.recoveryLotMult = CFG.recovery.lotMult;
+      m_cfgCache.orderThrottleMs = (uint)CFG.system.orderThrottleMs;
    }
 
    string MakePendingPrefix(const string symbol, ulong tsID) const

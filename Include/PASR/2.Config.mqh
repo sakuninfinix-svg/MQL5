@@ -2,15 +2,13 @@
 //|                            Price Action & Support Ressistance V1 |
 //|                                                       Config.mqh |
 //+------------------------------------------------------------------+
-
 #property copyright "Copyright 2026, Agsicentre"
-
-#ifndef __CONFIG_MQH__
-#define __CONFIG_MQH__
-
 #property link "agsicentre.wordpress.com"
 #property version "1.00"
 #property strict
+
+#ifndef __CONFIG_MQH__
+#define __CONFIG_MQH__
 
 //+------------------------------------------------------------------+
 //| ENUMS: System & Strategy Definitions                             |
@@ -93,27 +91,6 @@ enum ENUM_TRADE_STATE
 };
 
 //+------------------------------------------------------------------+
-//| CONSTANTS: Embedded Default Values                               |
-//+------------------------------------------------------------------+
-const string DEFAULT_NEWS_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml";
-const string DEFAULT_SESSION_SUN = "00:00-24:00";
-const string DEFAULT_SESSION_MON = "00:00-24:00";
-const string DEFAULT_SESSION_TUE = "00:00-24:00";
-const string DEFAULT_SESSION_WED = "00:00-24:00";
-const string DEFAULT_SESSION_THU = "00:00-24:00";
-const string DEFAULT_SESSION_FRI = "00:00-24:00";
-const string DEFAULT_SESSION_SAT = "0";
-
-// Default numeric values for key parameters
-const int DEFAULT_ATR_PERIOD = 14;
-const double DEFAULT_ATR_MIN = 150.0;
-const double DEFAULT_ATR_MAX = 4000.0;
-const double DEFAULT_RISK_PCT = 1.0;
-const double DEFAULT_LOT_SIZE = 0.01;
-const double DEFAULT_MAX_DAILY_LOSS_PCT = 5.0;
-const ulong DEFAULT_MAGIC_NUM = 20260403;
-
-//+------------------------------------------------------------------+
 //| STRUCTS: Data Containers                                         |
 //+------------------------------------------------------------------+
 
@@ -166,77 +143,78 @@ struct PerformanceStats
 //+------------------------------------------------------------------+
 
 // [GROUP] MARKET SESSIONS & NEWS
-input string InpSessionSun;            // Sesi Minggu   (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionMon;            // Sesi Senin    (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionTue;            // Sesi Selasa   (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionWed;            // Sesi Rabu     (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionThu;            // Sesi Kamis    (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionFri;            // Sesi Jumat    (0=Off JAM:MENIT-JJ:MM=on)
-input string InpSessionSat;            // Sesi Sabtu    (0=Off JAM:MENIT-JJ:MM=on)
-input ENUM_NEWS_LEVEL InpNewsLevel; // Filter Berita (NEWS_OFF = Nonaktif)
-input int InpNewsFreezeMinutes;                   // News Freeze (Menit sebelum/sesudah)
+input string InpSessionSun;                                            // Minggu   (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionMon;                                           // Senin    (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionTue;                                            // Selasa   (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionWed;                                            // Rabu     (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionThu;                                            // Kamis    (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionFri;                                            // Jumat    (0=Off JAM:MENIT-JJ:MM=on)
+input string InpSessionSat;                                                      // Sabtu    (0=Off JAM:MENIT-JJ:MM=on)
+input ENUM_NEWS_LEVEL InpNewsLevel;                                                    // Filter Berita (NEWS_OFF = Nonaktif)
+input int InpNewsFreezeMinutes;                                                        // News Freeze (Menit sebelum/sesudah)
+input string InpNewsWebURL; // URL Kalender Berita ex "https://nfs.faireconomy.media/ff_calendar_thisweek.xml"
 
 // [GROUP] RISK MANAGEMENT
-input bool InpUseAutoLot;       // Gunakan AutoLot (Risk %)
-input double InpRiskPct;         // Risiko % per Trade
-input double InpLotSize;        // Lot Statis (jika AutoLot OFF)
-input double InpMaxDailyLossPct; // Batas Maksimal Loss Harian (%)
-input ulong InpMagicNum;    // ID Transaksi Magic
+input bool InpUseAutoLot;           // Gunakan AutoLot (Risk %)
+input double InpRiskPct;            // Risiko % per Trade
+input double InpLotSize;            // Lot Statis (jika AutoLot OFF)
+input double InpMaxDailyLossPct;    // Batas Maksimal Loss Harian (%)
+input ulong InpMagicNum;            // ID Transaksi Magic
 input ENUM_ENTRY_MODE InpEntryMode; // Mode Entry (Safe/Aggressive)
-input ENUM_TPSL_MODE InpTPSLMode;     // Mode Penentuan TP/SL
-input bool InpUseMTF;                   // Gunakan Filter Multi-Timeframe (HTF)
+input ENUM_TPSL_MODE InpTPSLMode;   // Mode Penentuan TP/SL
+input bool InpUseMTF;               // Gunakan Filter Multi-Timeframe (HTF)
 input ENUM_TIMEFRAMES InpHTF;       // Higher Timeframe (HTF)
-input int InpHTFLookback;                  // HTF Lookback (Candles)
-input double InpQualityLotMult;           // Multiplier Lot Sinyal Lemah
+input int InpHTFLookback;           // HTF Lookback (Candles)
+input double InpQualityLotMult;     // Multiplier Lot Sinyal Lemah
 
 // [GROUP] SUPPORT & RESISTANCE (SR) ENGINE
-input ENUM_SR_MODE InpSRMode; // Mode Deteksi SR
-input int InpSRLookback;           // SR Lookback (Candles)
-input int InpSwingLookback;        // Swing/Fractal Lookback
+input ENUM_SR_MODE InpSRMode;     // Mode Deteksi SR
+input int InpSRLookback;          // SR Lookback (Candles)
+input int InpSwingLookback;       // Swing/Fractal Lookback
 input double InpSRTouchBufferATR; // Toleransi Sentuhan Zona (ATR x)
-input int InpSRMinTouchesStrong;    // Min Sentuhan Zona Kuat
+input int InpSRMinTouchesStrong;  // Min Sentuhan Zona Kuat
 input double InpMinSRRangeATR;    // Min Range Antar Zona (ATR x)
 input double InpATRBufferMult;    // Global ATR Buffer Mult
 input double InpBufferMultStrong; // Strong Zone Buffer Mult
 input double InpBufferMultWeak;   // Weak Zone Buffer Mult
 
 // [GROUP] SIGNAL DETECTION & PATTERNS
-input int InpSignalLookback;             // Scan Pattern (Lookback Bar)
-input double InpMTFConfluenceBonus;    // Bonus Skor Jika Searah/Aligned HTF
-input double InpStrongZoneBonus;       // Bonus Skor di Zona Kuat
+input int InpSignalLookback;           // Scan Pattern (Lookback Bar)
+input double InpMTFConfluenceBonus;    // Skor Jika Searah/Aligned HTF
+input double InpStrongZoneBonus;       // Skor di Zona Kuat
 input double InpStrongZoneThreshold;   // Ambang Multiplier Zona Kuat
 input double InpMaxSignalATR;          // Max Ukuran Candle Sinyal (ATR x)
-input double InpMomentumThresholdATR; // Threshold Dorongan Momentum (ATR x)
-input bool InpUsePatternWeights;      // Gunakan Bobot Historis Pattern
-input double InpAntiBreakoutPct;      // Batas Body Ratio (Anti-Breakout)
-input double InpMarubozuMinBodyPct;   // Minimal Body Marubozu (0.9 = 90%)
+input double InpMomentumThresholdATR;  // Threshold Dorongan Momentum (ATR x)
+input bool InpUsePatternWeights;       // Gunakan Bobot Historis Pattern
+input double InpAntiBreakoutPct;       // Batas Body Ratio (Anti-Breakout)
+input double InpMarubozuMinBodyPct;    // Minimal Body Marubozu (0.9 = 90%)
 input double InpEngulfingBodyMult;     // Rasio Tubuh Engulfing
 input double InpMinDominanceGap;       // Minimal Selisih Skor Dominansi
 input double InpStrongZoneBufferMult;  // Buffer multiplier untuk zona kuat
-input bool InpUseAdaptiveZoneBuffer;  // Buffer zona adaptif berdasarkan strength
+input bool InpUseAdaptiveZoneBuffer;   // Buffer zona adaptif berdasarkan strength
 input double InpPatternSensitivityATR; // Toleransi Gap & Aliansi Pattern (ATR x)
 input double InpStarMiddleBodyMult;    // Rasio Maksimal Candle Tengah Star
 input double InpRailroadMinBodyRatio;  // Min ratio body untuk Railroad Tracks
-input double InpZoneReuseATR;         // Jarak Reuse Zona (ATR x)
+input double InpZoneReuseATR;          // Jarak Reuse Zona (ATR x)
 
 // NEW: Generic Pattern Scoring Parameters
-input double InpPatternBaseScore;                  // Skor dasar untuk setiap pola valid
-input double InpPatternBonusStrongATRRange;       // Bonus untuk candle dengan range ATR signifikan
-input double InpPatternBonusStrongBodyRatio;      // Bonus untuk candle dengan rasio body signifikan (misal: body kecil untuk rejection)
-input double InpPatternBonusStrongWickRejection;  // Bonus untuk candle dengan rejection wick signifikan
-input double InpPatternBonusFollowThrough;        // Bonus untuk candle follow-through (misal: close searah dengan bias)
-input double InpPatternBonusGapConfirmation;      // Bonus untuk konfirmasi gap (misal: pola Star)
-input double InpPatternBonusBreakoutConfirmation; // Bonus untuk konfirmasi breakout (misal: pola Three Inside)
-input double InpPatternBonusSmall;                // Bonus kecil untuk pengakuan pola dasar
+input double InpPatternBaseScore;                 // Skor dasar untuk setiap pola valid
+input double InpPatternBonusStrongATRRange;       // skor candle dengan range ATR signifikan
+input double InpPatternBonusStrongBodyRatio;      // skor candle dengan rasio body signifikan (misal: body kecil untuk rejection)
+input double InpPatternBonusStrongWickRejection;  // skor candle dengan rejection wick signifikan
+input double InpPatternBonusFollowThrough;        // skor candle follow-through (misal: close searah dengan bias)
+input double InpPatternBonusGapConfirmation;      // skor konfirmasi gap (misal: pola Star)
+input double InpPatternBonusBreakoutConfirmation; // skor konfirmasi breakout (misal: pola Three Inside)
+input double InpPatternBonusSmall;                // skor kecil untuk pengakuan pola dasar
 
 // NEW: Generic Pattern Thresholds
-input double InpPatternATRRangeThreshold;   // Faktor ATR untuk candle dianggap "range signifikan" (misal: range > 0.6 * ATR)
+input double InpPatternATRRangeThreshold;  // Faktor ATR untuk candle dianggap "range signifikan" (misal: range > 0.6 * ATR)
 input double InpPatternBodyRatioThreshold; // Rasio Body/Range untuk candle dianggap "body kecil" (misal: untuk rejection)
-input double InpPatternWickRatioThreshold;  // Rasio Wick/Range untuk candle dianggap "rejection signifikan" (misal: wick > 0.5 * range)
+input double InpPatternWickRatioThreshold; // Rasio Wick/Range untuk candle dianggap "rejection signifikan" (misal: wick > 0.5 * range)
 
 // NEW: Pattern-Specific Thresholds (hanya jika berbeda dari umum atau unik)
 input double InpPinbarWickToOppositeWickRatio; // Rasio min wick utama terhadap wick berlawanan untuk Pinbar
-input double InpInsideBarChildMotherRangeMax; // Rasio maks range child bar terhadap mother bar untuk Inside Bar
+input double InpInsideBarChildMotherRangeMax;  // Rasio maks range child bar terhadap mother bar untuk Inside Bar
 input double InpStarClosePositionMin;          // Posisi close min untuk pola Star (misal: close di 60% atas/bawah range)
 input double InpThreeInsideBodyRatioMin;       // Rasio min body candle breakout terhadap body mother bar untuk Three Inside
 input double InpRailroadAvgBodyMinATR;         // Ukuran body rata-rata min relatif terhadap ATR untuk Railroad Tracks
@@ -245,9 +223,9 @@ input double InpMarubozuMinATRRangeMult;       // Multiplier untuk MomentumThres
 input double InpMarubozuStrongATRRangeMin;     // Faktor ATR min untuk bonus ekstra pada Marubozu
 
 // [GROUP] RECOVERY MODE & FAKEOUT PROTECTION
-input bool InpUseRecoveryMode;                // Aktifkan mode recovery setelah SL hit (includes fakeout detection)
-input int InpRecoveryCooldownBars;               // Cooldown bars setelah SL hit sebelum mencari re-entry
-input int InpMaxRecoveryAttempts;                // Maksimal percobaan re-entry untuk satu posisi
+input bool InpUseRecoveryMode;                 // Aktifkan mode recovery setelah SL hit (includes fakeout detection)
+input int InpRecoveryCooldownBars;             // Cooldown bars setelah SL hit sebelum mencari re-entry
+input int InpMaxRecoveryAttempts;              // Maksimal percobaan re-entry untuk satu posisi
 input double InpRecoveryLotMult;               // Multiplier lot untuk re-entry
 input double InpRecoveryPatternScoreThreshold; // Skor minimal pattern untuk re-entry (lowered for more opportunities)
 input double InpRecoveryZoneToleranceATR;      // Toleransi ATR dari SL hit price untuk mencari re-entry
@@ -255,28 +233,28 @@ input double InpFakeoutDetectionSensitivity;   // Sensitivitas deteksi fakeout (
 input double InpFakeoutSLAdjustmentATR;        // Adjustment SL saat fakeout terdeteksi (ATR multiplier)
 
 // [GROUP] PATTERN SPECIFIC VOLATILITY (SL MULTIPLIERS)
-input double InpDefaultSLMult;                  // SL Mult Standar
-input double InpPinbarSLMult;                   // SL Mult khusus Pinbar
-input double InpInsideBarSLMult;                // SL Mult khusus Inside Bar
+input double InpDefaultSLMult;   // SL Mult Standar
+input double InpPinbarSLMult;    // SL Mult khusus Pinbar
+input double InpInsideBarSLMult; // SL Mult khusus Inside Bar
 
 // [GROUP] COOLDOWNS & PROTECTION
-input int InpMaxOpenPositions;            // Max Posisi Berjalan
-input int InpMaxConsecutiveLoss;          // Batas Loss Beruntun
-input int InpMaxTradeDurationDays;        // Durasi Maksimal Trade (Hari)
-input int InpEntryCooldownBars;           // Cooldown Antar Entry (Bars)
-input int InpSignalCooldownBars;          // Cooldown Sinyal Area (Bars)
-input int InpLossCooldownBars;            // Cooldown Setelah Loss (Bars)
+input int InpMaxOpenPositions;           // Max Posisi Berjalan
+input int InpMaxConsecutiveLoss;         // Batas Loss Beruntun
+input int InpMaxTradeDurationDays;       // Durasi Maksimal Trade (Hari)
+input int InpEntryCooldownBars;          // Cooldown Antar Entry (Bars)
+input int InpSignalCooldownBars;         // Cooldown Sinyal Area (Bars)
+input int InpLossCooldownBars;           // Cooldown Setelah Loss (Bars)
 input int InpPatternFailureCooldownBars; // Cooldown Level Gagal (Bars)
-input double InpHighQualityThreshold;   // Skor Setup Premium (Bypass Cooldown)
-input bool InpUseDynamicCooldown;      // Aktifkan Cooldown Adaptif HQ
-input int InpReducedCooldownBars;         // Cooldown untuk HQ Setup
+input double InpHighQualityThreshold;    // Skor Setup Premium (Bypass Cooldown)
+input bool InpUseDynamicCooldown;        // Aktifkan Cooldown Adaptif HQ
+input int InpReducedCooldownBars;        // Cooldown untuk HQ Setup
 
 // [GROUP] EXECUTION, TRAILING & RECOVERY
-input double InpMaxSpread;        // Batas Maksimal Spread (Points)
-input int InpOrderThrottleMs;      // Throttle Eksekusi (ms)
-input bool InpUseTrailing;         // Aktifkan Trailing Stop
-input bool InpUsePartialClose;     // Aktifkan Partial Close
-input bool InpExitOnOpposite;      // Close Jika Muncul Sinyal Lawan
+input double InpMaxSpread;          // Batas Maksimal Spread (Points)
+input int InpOrderThrottleMs;       // Throttle Eksekusi (ms)
+input bool InpUseTrailing;          // Aktifkan Trailing Stop
+input bool InpUsePartialClose;      // Aktifkan Partial Close
+input bool InpExitOnOpposite;       // Close Jika Muncul Sinyal Lawan
 input double InpTPBufferATR;        // TP Buffer Dalam Zona (ATR x)
 input double InpSLBufferATR;        // SL Buffer Luar Zona (ATR x)
 input double InpMinTPDistanceATR;   // Min Jarak TP (ATR x)
@@ -290,328 +268,317 @@ input double InpLockOffsetATR;      // Profit Terkunci (ATR x)
 input double InpPartialCloseLotPct; // % Lot Partial Close
 input double InpPartialCloseATR;    // Target Partial TP (ATR x)
 
-// [GROUP] SYSTEM & DEBUG
-input bool InpDebugMode;  // Log Debug ke Konsol
-input bool InpSafeMode;   // Aktifkan Proteksi Safe Mode
-input int InpATRPeriod;     // Periode ATR
-input double InpATRMin;  // Batas Bawah Volatilitas (Points)
-input double InpATRMax; // Batas Atas Volatilitas (Points)
+// [GROUP] AI / MACHINE LEARNING
+input bool InpUseAI;             // Aktifkan Penggunaan AI Filter
+input int InpAITrainingWindowBars; // Jendela Training (Bars)
+input double InpAIMinConfidence;  // Ambang Kepercayaan Minimum
+input double InpAIPatternBonus;   // Bonus pada Pola Valid
 
-//+------------------------------------------------------------------+
-//| INITIALIZATION HELPER: Apply default values when input is empty  |
-//+------------------------------------------------------------------+
-void ApplyDefaultsIfEmpty()
-{
-   // Sessions: Use default if empty
-   if (InpSessionSun == "") InpSessionSun = DEFAULT_SESSION_SUN;
-   if (InpSessionMon == "") InpSessionMon = DEFAULT_SESSION_MON;
-   if (InpSessionTue == "") InpSessionTue = DEFAULT_SESSION_TUE;
-   if (InpSessionWed == "") InpSessionWed = DEFAULT_SESSION_WED;
-   if (InpSessionThu == "") InpSessionThu = DEFAULT_SESSION_THU;
-   if (InpSessionFri == "") InpSessionFri = DEFAULT_SESSION_FRI;
-   if (InpSessionSat == "") InpSessionSat = DEFAULT_SESSION_SAT;
-   
-   // Numeric: Use default if 0 (for most inputs)
-   if (InpATRPeriod <= 0) InpATRPeriod = DEFAULT_ATR_PERIOD;
-   if (InpATRMin <= 0) InpATRMin = DEFAULT_ATR_MIN;
-   if (InpATRMax <= 0) InpATRMax = DEFAULT_ATR_MAX;
-   if (InpRiskPct <= 0) InpRiskPct = DEFAULT_RISK_PCT;
-   if (InpLotSize <= 0) InpLotSize = DEFAULT_LOT_SIZE;
-   if (InpMaxDailyLossPct <= 0) InpMaxDailyLossPct = DEFAULT_MAX_DAILY_LOSS_PCT;
-   if (InpMagicNum == 0) InpMagicNum = DEFAULT_MAGIC_NUM;
-}
+// [GROUP] SYSTEM & DEBUG
+input bool InpDebugMode; // Log Debug ke Konsol
+input bool InpSafeMode;  // Aktifkan Proteksi Safe Mode
+input int InpATRPeriod;  // Periode ATR
+input double InpATRMin;  // Batas Bawah Volatilitas (Points)
+input double InpATRMax;  // Batas Atas Volatilitas (Points)
 
 //+------------------------------------------------------------------+
 //| STRATEGY CONFIG: Global Access Object                            |
 //+------------------------------------------------------------------+
 struct StrategyConfig
 {
-   // --- Market & Account ---
-   int ATRPeriod;
-   double ATRMin;
-   double ATRMax;
-   string TradingSessions[7];
-   bool UseAutoLot;
-   double RiskPct;
-   double LotSize;
-   double MaxDailyLossPct;
+    struct Market {
+      int atrPeriod;
+      double atrMin;
+      double atrMax;
+      double maxSpread;
+      string sessions[7];
+   } market;
 
-   // --- News Filter ---
-   bool UseNews;
-   int NewsFreeze;
-   ENUM_NEWS_LEVEL NewsLevel;
-   string NewsWebURL;
+   struct News {
+      bool use; // Added missing parameter
+      ENUM_NEWS_LEVEL level;
+      int freeze;
+      string url;
+   } news;
 
-   ENUM_ENTRY_MODE EntryMode;
-   ENUM_TPSL_MODE TPSLMode;
-   int OrderThrottleMs;
-   bool UseMTF;
-   ENUM_TIMEFRAMES HTF;
-   int HTFLookback;
-   double QualityLotMult;
+   struct Risk {
+      bool autoLot;
+      double pct;
+      double lot;
+      double maxDailyLoss;
+      ulong magic;
+      ENUM_ENTRY_MODE entryMode;
+      ENUM_TPSL_MODE tpslMode;
+      bool useMTF;
+      ENUM_TIMEFRAMES htf;
+      int htfLookback;
+      double qualityLotMult;
+      int maxPositions;
+      int maxConsecutiveLoss;
+      int maxTradeDurationDays;
+      int entryCooldownBars;
+      int signalCooldownBars;
+      int lossCooldownBars;
+   } risk;
 
-   // --- SR Engine ---
-   ENUM_SR_MODE SRMode;
-   int SRLookback;
-   int SwingLookback;
-   double SRTouchBufferATR;
-   int SRMinTouchesStrong;
-   double MinSRRangeATR;
-   double ATRBufferMult;
-   double BufferMultStrong;
-   double BufferMultWeak;
+   struct SR {
+      ENUM_SR_MODE mode;
+      int lookback;
+      int swingLookback;
+      double touchBufferATR;
+      int minTouchesStrong;
+      double minRangeATR;
+      double atrBufferMult;
+      double bufferMultStrong;
+      double bufferMultWeak;
+      double zoneReuseATR;
+   } sr;
 
-   // --- Signal & Pattern Detection ---
-   int SignalLookback;
-   double MTFConfluenceBonus;
-   double StrongZoneBonus;
-   double StrongZoneThreshold;
-   double MaxSignalATR;
-   double MinDominanceGap;
-   double MomentumThresholdATR;
-   bool UsePatternWeights;
-   double AntiBreakoutPct;
-   double EngulfingBodyMult;
-   double MarubozuMinBodyPct;
-   double StrongZoneBufferMult;
-   bool UseAdaptiveZoneBuffer;
-   double PatternSensitivityATR;
-   double StarMiddleBodyMult;
-   // --- Generic Pattern Scoring ---
-   double PatternBaseScore;
-   double PatternBonusStrongATRRange;
-   double PatternBonusStrongBodyRatio;
-   double PatternBonusStrongWickRejection;
-   double PatternBonusFollowThrough;
-   double PatternBonusGapConfirmation;
-   double PatternBonusBreakoutConfirmation;
-   double PatternBonusSmall;
-   double PatternATRRangeThreshold;
-   double PatternBodyRatioThreshold;
-   double PatternWickRatioThreshold;
+   struct Pattern {
+      int lookback;
+      double mtfConfluenceBonus;
+      double strongZoneBonus;
+      double strongZoneThreshold;
+      double maxSignalATR;
+      double momentumThresholdATR;
+      bool useWeights;
+      double antiBreakoutPct;
+      double marubozuMinBodyPct;
+      double engulfingBodyMult;
+      double minDominanceGap;
+      double strongZoneBufferMult;
+      bool useAdaptiveZoneBuffer;
+      double sensitivityATR;
+      double starMiddleBodyMult;
+      double railroadMinBodyRatio;
+      int failureCooldownBars;
+      double hqThreshold;
+      bool useDynamicCooldown;
+      int reducedCooldownBars;
+      // Scoring
+      double baseScore;
+      double bonusStrongATR;
+      double bonusStrongBody;
+      double bonusStrongWick;
+      double bonusFollowThrough;
+      double bonusGapConfirm;
+      double bonusBreakoutConfirm;
+      double bonusSmall;
+      // Thresholds
+      double atrRangeThreshold;
+      double bodyRatioThreshold;
+      double wickRatioThreshold;
+      // Specifics
+      double pinbarWickRatio;
+      double insideBarRangeMax;
+      double starCloseMin;
+      double threeInsideBodyMin;
+      double railroadAvgBodyMin;
+      double railroadWickMult;
+      double marubozuMinATRMult;
+      double marubozuStrongATRMin;
+      // SL Multipliers
+      double defaultSLMult;
+      double pinbarSLMult;
+      double insideBarSLMult;
+   } pattern;
 
-   // --- Pattern Specific Thresholds ---
-   double PinbarWickToOppositeWickRatio;  
-   double InsideBarChildMotherRangeMax;
-   double StarClosePositionMin;
-   int StarMiddleBarLookback;
-   double ThreeInsideBodyRatioMin;
-   double RailroadAvgBodyMinATR;
-   double RailroadWickRejectionMult;
-   double RailroadMinBodyRatio;
-   double MarubozuMinATRRangeMult;
-   double MarubozuStrongATRRangeMin;
+   struct Recovery {
+      bool use;
+      int cooldownBars;
+      int maxAttempts;
+      double lotMult;
+      double scoreThreshold;
+      double zoneToleranceATR;
+      double fakeoutSensitivity;
+      double fakeoutSLAdjATR;
+   } recovery;
 
-   // --- Recovery & Fakeout ---
-   bool UseRecoveryMode;
-   int RecoveryCooldownBars;
-   int MaxRecoveryAttempts;
-   double RecoveryLotMult;
-   double RecoveryPatternScoreThreshold;
-   double RecoveryZoneToleranceATR;
-   double FakeoutDetectionSensitivity;
-   double FakeoutSLAdjustmentATR;
+   struct Exit {
+      bool useTrailing;
+      bool usePartial;
+      bool exitOnOpposite;
+      double tpBufferATR;
+      double slBufferATR;
+      double minTPDistATR;
+      double maxTPDistATR;
+      double trailingStartATR;
+      double trailingBufferATR;
+      double trailActivationATR;
+      double trailStepATR;
+      double lockProfitATR;
+      double lockOffsetATR;
+      double partialLotPct;
+      double partialATR;
+   } exit;
 
-   // --- SL Multipliers ---
-   double DefaultSLMult;
-   double PinbarSLMult;
-   double InsideBarSLMult;
+   struct AI {
+      bool use;
+      int trainingWindow;
+      double minConfidence;
+      double patternBonus;
+   } ai;
 
-   int MaxPositions;
-   int MaxTradeDurationDays;
-   int EntryCooldownBars;
-   int SignalCooldownBars;
-   int LossCooldownBars;
-   int PatternFailureCooldownBars;
-   int MaxConsecutiveLoss;
-   double HighQualityThreshold;
-   bool UseDynamicCooldown;
-   int ReducedCooldownBars;
-
-   // --- Execution & Exit ---
-   double MaxSpread;
-   bool UseTrailing;
-   bool UsePartialClose;
-   bool ExitOnOpposite;
-   double SLBufferATR;
-   double TPBufferATR;
-   double MinTPDistanceATR;
-   double MaxTPDistanceATR;
-   double TrailingStartATR;
-   double TrailingBufferATR;
-   double TrailActivationATR;
-   double TrailStepATR;
-   double LockProfitATR;
-   double LockOffsetATR;
-
-   double PartialCloseLotPct;
-   double PartialCloseATR;
-   double ZoneReuseATR;
-
-   // --- System ---
-   bool DebugMode;
-   bool SafeMode;
-   ulong MagicNum;
+   struct System {
+      bool debug;
+      bool safe;
+      int orderThrottleMs;
+   } system;
 };
 
 StrategyConfig CFG;
 
-// ------------------------------------------------------------
-//| INITIALIZATION: Map Inputs to Config Struct                      |
-//+------------------------------------------------------------------+
 void SetCommonDefaults()
 {
-   // --- Market & Risk ---
-   CFG.ATRPeriod = InpATRPeriod;
-   CFG.ATRMin = InpATRMin;
-   CFG.ATRMax = InpATRMax;
-   CFG.MaxSpread = InpMaxSpread;
-   CFG.UseAutoLot = InpUseAutoLot;
-   CFG.RiskPct = InpRiskPct;
-   CFG.LotSize = InpLotSize;
-   CFG.MaxDailyLossPct = InpMaxDailyLossPct;
-   CFG.MagicNum = InpMagicNum;
+// Market & Sessions
+   CFG.market.atrPeriod = InpATRPeriod;
+   CFG.market.atrMin = InpATRMin;
+   CFG.market.atrMax = InpATRMax;
+   CFG.market.maxSpread = InpMaxSpread;
+   CFG.market.sessions[0] = InpSessionSun;
+   CFG.market.sessions[1] = InpSessionMon;
+   CFG.market.sessions[2] = InpSessionTue;
+   CFG.market.sessions[3] = InpSessionWed;
+   CFG.market.sessions[4] = InpSessionThu;
+   CFG.market.sessions[5] = InpSessionFri;
+   CFG.market.sessions[6] = InpSessionSat;
 
-   // --- Sessions ---
-   CFG.TradingSessions[0] = InpSessionSun;
-   CFG.TradingSessions[1] = InpSessionMon;
-   CFG.TradingSessions[2] = InpSessionTue;
-   CFG.TradingSessions[3] = InpSessionWed;
-   CFG.TradingSessions[4] = InpSessionThu;
-   CFG.TradingSessions[5] = InpSessionFri;
-   CFG.TradingSessions[6] = InpSessionSat;
+   // News
+   CFG.news.use = (InpNewsLevel != NEWS_OFF); // Assigned here
+   CFG.news.level = InpNewsLevel;
+   CFG.news.freeze = InpNewsFreezeMinutes;
+   CFG.news.url = InpNewsWebURL;
 
-   // --- News Filter ---
-   CFG.NewsLevel = InpNewsLevel;
-   CFG.UseNews = (InpNewsLevel != NEWS_OFF);
-   CFG.NewsFreeze = InpNewsFreezeMinutes;
-   CFG.NewsWebURL = InpNewsWebURL;
+   // Risk & Account
+   CFG.risk.autoLot = InpUseAutoLot;
+   CFG.risk.pct = InpRiskPct;
+   CFG.risk.lot = InpLotSize;
+   CFG.risk.maxDailyLoss = InpMaxDailyLossPct;
+   CFG.risk.magic = InpMagicNum;
+   CFG.risk.entryMode = InpEntryMode;
+   CFG.risk.tpslMode = InpTPSLMode;
+   CFG.risk.useMTF = InpUseMTF;
+   CFG.risk.htf = InpHTF;
+   CFG.risk.htfLookback = InpHTFLookback;
+   CFG.risk.qualityLotMult = InpQualityLotMult;
+   CFG.risk.maxPositions = InpMaxOpenPositions;
+   CFG.risk.maxConsecutiveLoss = InpMaxConsecutiveLoss;
+   CFG.risk.maxTradeDurationDays = InpMaxTradeDurationDays;
+   CFG.risk.entryCooldownBars = InpEntryCooldownBars;
+   CFG.risk.signalCooldownBars = InpSignalCooldownBars;
+   CFG.risk.lossCooldownBars = InpLossCooldownBars;
 
-   // --- Core Strategy ---
-   CFG.EntryMode = InpEntryMode;
-   CFG.TPSLMode = InpTPSLMode;
-   CFG.UseMTF = InpUseMTF;
-   CFG.HTF = InpHTF;
-   CFG.HTFLookback = InpHTFLookback;
-   CFG.QualityLotMult = InpQualityLotMult;
+   // SR Engine
+   CFG.sr.mode = InpSRMode;
+   CFG.sr.lookback = InpSRLookback;
+   CFG.sr.swingLookback = InpSwingLookback;
+   CFG.sr.touchBufferATR = InpSRTouchBufferATR;
+   CFG.sr.minTouchesStrong = InpSRMinTouchesStrong;
+   CFG.sr.minRangeATR = InpMinSRRangeATR;
+   CFG.sr.atrBufferMult = InpATRBufferMult;
+   CFG.sr.bufferMultStrong = InpBufferMultStrong;
+   CFG.sr.bufferMultWeak = InpBufferMultWeak;
+   CFG.sr.zoneReuseATR = InpZoneReuseATR;
 
-   // --- SR Engine ---
-   CFG.SRMode = InpSRMode;
-   CFG.SRLookback = InpSRLookback;
-   CFG.SwingLookback = InpSwingLookback;
-   CFG.SRTouchBufferATR = InpSRTouchBufferATR;
-   CFG.SRMinTouchesStrong = InpSRMinTouchesStrong;
-   CFG.MinSRRangeATR = InpMinSRRangeATR;
-   CFG.ATRBufferMult = InpATRBufferMult;
-   CFG.BufferMultStrong = InpBufferMultStrong;
-   CFG.BufferMultWeak = InpBufferMultWeak;
+   // Patterns
+   CFG.pattern.lookback = InpSignalLookback;
+   CFG.pattern.mtfConfluenceBonus = InpMTFConfluenceBonus;
+   CFG.pattern.strongZoneBonus = InpStrongZoneBonus;
+   CFG.pattern.strongZoneThreshold = InpStrongZoneThreshold;
+   CFG.pattern.maxSignalATR = InpMaxSignalATR;
+   CFG.pattern.momentumThresholdATR = InpMomentumThresholdATR;
+   CFG.pattern.useWeights = InpUsePatternWeights;
+   CFG.pattern.antiBreakoutPct = InpAntiBreakoutPct;
+   CFG.pattern.marubozuMinBodyPct = InpMarubozuMinBodyPct;
+   CFG.pattern.engulfingBodyMult = InpEngulfingBodyMult;
+   CFG.pattern.minDominanceGap = InpMinDominanceGap;
+   CFG.pattern.strongZoneBufferMult = InpStrongZoneBufferMult;
+   CFG.pattern.useAdaptiveZoneBuffer = InpUseAdaptiveZoneBuffer;
+   CFG.pattern.sensitivityATR = InpPatternSensitivityATR;
+   CFG.pattern.starMiddleBodyMult = InpStarMiddleBodyMult;
+   CFG.pattern.railroadMinBodyRatio = InpRailroadMinBodyRatio;
+   CFG.pattern.failureCooldownBars = InpPatternFailureCooldownBars;
+   CFG.pattern.hqThreshold = InpHighQualityThreshold;
+   CFG.pattern.useDynamicCooldown = InpUseDynamicCooldown;
+   CFG.pattern.reducedCooldownBars = InpReducedCooldownBars;
+   // Scoring
+   CFG.pattern.baseScore = InpPatternBaseScore;
+   CFG.pattern.bonusStrongATR = InpPatternBonusStrongATRRange;
+   CFG.pattern.bonusStrongBody = InpPatternBonusStrongBodyRatio;
+   CFG.pattern.bonusStrongWick = InpPatternBonusStrongWickRejection;
+   CFG.pattern.bonusFollowThrough = InpPatternBonusFollowThrough;
+   CFG.pattern.bonusGapConfirm = InpPatternBonusGapConfirmation;
+   CFG.pattern.bonusBreakoutConfirm = InpPatternBonusBreakoutConfirmation;
+   CFG.pattern.bonusSmall = InpPatternBonusSmall;
+   // Thresholds
+   CFG.pattern.atrRangeThreshold = InpPatternATRRangeThreshold;
+   CFG.pattern.bodyRatioThreshold = InpPatternBodyRatioThreshold;
+   CFG.pattern.wickRatioThreshold = InpPatternWickRatioThreshold;
+   // Specifics
+   CFG.pattern.pinbarWickRatio = InpPinbarWickToOppositeWickRatio;
+   CFG.pattern.insideBarRangeMax = InpInsideBarChildMotherRangeMax;
+   CFG.pattern.starCloseMin = InpStarClosePositionMin;
+   CFG.pattern.threeInsideBodyMin = InpThreeInsideBodyRatioMin;
+   CFG.pattern.railroadAvgBodyMin = InpRailroadAvgBodyMinATR;
+   CFG.pattern.railroadWickMult = InpRailroadWickRejectionMult;
+   CFG.pattern.marubozuMinATRMult = InpMarubozuMinATRRangeMult;
+   CFG.pattern.marubozuStrongATRMin = InpMarubozuStrongATRRangeMin;
+   // SL Multipliers
+   CFG.pattern.defaultSLMult = InpDefaultSLMult;
+   CFG.pattern.pinbarSLMult = InpPinbarSLMult;
+   CFG.pattern.insideBarSLMult = InpInsideBarSLMult;
 
-   // --- Signal & Pattern Detection ---
-   CFG.SignalLookback = InpSignalLookback;
-   CFG.MTFConfluenceBonus = InpMTFConfluenceBonus;
-   CFG.StrongZoneBonus = InpStrongZoneBonus;
-   CFG.StrongZoneThreshold = InpStrongZoneThreshold;
-   CFG.MaxSignalATR = InpMaxSignalATR;
-   CFG.MomentumThresholdATR = InpMomentumThresholdATR;
-   CFG.UsePatternWeights = InpUsePatternWeights;
-   CFG.AntiBreakoutPct = InpAntiBreakoutPct;
-   CFG.MarubozuMinBodyPct = InpMarubozuMinBodyPct;
-   CFG.EngulfingBodyMult = InpEngulfingBodyMult;
-   CFG.MinDominanceGap = InpMinDominanceGap;
-   CFG.StrongZoneBufferMult = InpStrongZoneBufferMult;
-   CFG.UseAdaptiveZoneBuffer = InpUseAdaptiveZoneBuffer;
-   CFG.PatternSensitivityATR = InpPatternSensitivityATR;
-   CFG.StarMiddleBodyMult = InpStarMiddleBodyMult;
+   // Recovery
+   CFG.recovery.use = InpUseRecoveryMode;
+   CFG.recovery.cooldownBars = InpRecoveryCooldownBars;
+   CFG.recovery.maxAttempts = InpMaxRecoveryAttempts;
+   CFG.recovery.lotMult = InpRecoveryLotMult;
+   CFG.recovery.scoreThreshold = InpRecoveryPatternScoreThreshold;
+   CFG.recovery.zoneToleranceATR = InpRecoveryZoneToleranceATR;
+   CFG.recovery.fakeoutSensitivity = InpFakeoutDetectionSensitivity;
+   CFG.recovery.fakeoutSLAdjATR = InpFakeoutSLAdjustmentATR;
 
-   // --- Generic Pattern Scoring ---
-   CFG.PatternBaseScore = InpPatternBaseScore;
-   CFG.PatternBonusStrongATRRange = InpPatternBonusStrongATRRange;
-   CFG.PatternBonusStrongBodyRatio = InpPatternBonusStrongBodyRatio;
-   CFG.PatternBonusStrongWickRejection = InpPatternBonusStrongWickRejection;
-   CFG.PatternBonusFollowThrough = InpPatternBonusFollowThrough;
-   CFG.PatternBonusGapConfirmation = InpPatternBonusGapConfirmation;
-   CFG.PatternBonusBreakoutConfirmation = InpPatternBonusBreakoutConfirmation;
-   CFG.PatternBonusSmall = InpPatternBonusSmall;
-   CFG.PatternATRRangeThreshold = InpPatternATRRangeThreshold;
-   CFG.PatternBodyRatioThreshold = InpPatternBodyRatioThreshold;
-   CFG.PatternWickRatioThreshold = InpPatternWickRatioThreshold;
+   // Exit & Trailing
+   CFG.exit.useTrailing = InpUseTrailing;
+   CFG.exit.usePartial = InpUsePartialClose;
+   CFG.exit.exitOnOpposite = InpExitOnOpposite;
+   CFG.exit.tpBufferATR = InpTPBufferATR;
+   CFG.exit.slBufferATR = InpSLBufferATR;
+   CFG.exit.minTPDistATR = InpMinTPDistanceATR;
+   CFG.exit.maxTPDistATR = InpMaxTPDistanceATR;
+   CFG.exit.trailingStartATR = InpTrailingStartATR;
+   CFG.exit.trailingBufferATR = InpTrailingBufferATR;
+   CFG.exit.trailActivationATR = InpTrailActivationATR;
+   CFG.exit.trailStepATR = InpTrailStepATR;
+   CFG.exit.lockProfitATR = InpLockProfitATR;
+   CFG.exit.lockOffsetATR = InpLockOffsetATR;
+   CFG.exit.partialLotPct = InpPartialCloseLotPct;
+   CFG.exit.partialATR = InpPartialCloseATR;
 
-   // --- Pattern Specific Thresholds ---
-   CFG.PinbarWickToOppositeWickRatio = InpPinbarWickToOppositeWickRatio;
-   CFG.InsideBarChildMotherRangeMax = InpInsideBarChildMotherRangeMax;
-   CFG.StarClosePositionMin = InpStarClosePositionMin;
-   CFG.StarMiddleBodyMult = InpStarMiddleBodyMult;
-   CFG.StarMiddleBarLookback = 3;
-   CFG.ThreeInsideBodyRatioMin = InpThreeInsideBodyRatioMin;
-   CFG.RailroadAvgBodyMinATR = InpRailroadAvgBodyMinATR;
-   CFG.RailroadWickRejectionMult = InpRailroadWickRejectionMult;
-   CFG.RailroadMinBodyRatio = InpRailroadMinBodyRatio;
-   CFG.MarubozuMinATRRangeMult = InpMarubozuMinATRRangeMult;
-   CFG.MarubozuStrongATRRangeMin = InpMarubozuStrongATRRangeMin;
+   // AI
+   CFG.ai.use = InpUseAI;
+   CFG.ai.trainingWindow = InpAITrainingWindowBars;
+   CFG.ai.minConfidence = InpAIMinConfidence;
+   CFG.ai.patternBonus = InpAIPatternBonus;
 
-   // --- Recovery & Fakeout ---
-   CFG.UseRecoveryMode = InpUseRecoveryMode;
-   CFG.RecoveryCooldownBars = InpRecoveryCooldownBars;
-   CFG.MaxRecoveryAttempts = InpMaxRecoveryAttempts;
-   CFG.RecoveryLotMult = InpRecoveryLotMult;
-   CFG.RecoveryPatternScoreThreshold = InpRecoveryPatternScoreThreshold;
-   CFG.RecoveryZoneToleranceATR = InpRecoveryZoneToleranceATR;
-   CFG.FakeoutDetectionSensitivity = InpFakeoutDetectionSensitivity;
-   CFG.FakeoutSLAdjustmentATR = InpFakeoutSLAdjustmentATR;
-
-   // --- SL Multipliers ---
-   CFG.DefaultSLMult = InpDefaultSLMult;
-   CFG.PinbarSLMult = InpPinbarSLMult;
-   CFG.InsideBarSLMult = InpInsideBarSLMult;
-
-   // --- Protection & Cooldowns ---
-   CFG.MaxPositions = InpMaxOpenPositions;
-   CFG.MaxTradeDurationDays = InpMaxTradeDurationDays;
-   CFG.EntryCooldownBars = InpEntryCooldownBars;
-   CFG.SignalCooldownBars = InpSignalCooldownBars;
-   CFG.LossCooldownBars = InpLossCooldownBars;
-   CFG.PatternFailureCooldownBars = InpPatternFailureCooldownBars;
-   CFG.MaxConsecutiveLoss = InpMaxConsecutiveLoss;
-   CFG.HighQualityThreshold = InpHighQualityThreshold;
-   CFG.UseDynamicCooldown = InpUseDynamicCooldown;
-   CFG.ReducedCooldownBars = InpReducedCooldownBars;
-
-   // --- Execution & Exit ---
-   CFG.OrderThrottleMs = InpOrderThrottleMs;
-   CFG.UseTrailing = InpUseTrailing;
-   CFG.UsePartialClose = InpUsePartialClose;
-   CFG.ExitOnOpposite = InpExitOnOpposite;
-   CFG.TPBufferATR = InpTPBufferATR;
-   CFG.SLBufferATR = InpSLBufferATR;
-   CFG.MinTPDistanceATR = InpMinTPDistanceATR;
-   CFG.MaxTPDistanceATR = InpMaxTPDistanceATR;
-   CFG.TrailingStartATR = InpTrailingStartATR;
-   CFG.TrailingBufferATR = InpTrailingBufferATR;
-   CFG.TrailActivationATR = InpTrailActivationATR;
-   CFG.TrailStepATR = InpTrailStepATR;
-   CFG.LockProfitATR = InpLockProfitATR;
-   CFG.LockOffsetATR = InpLockOffsetATR;
-   CFG.PartialCloseLotPct = InpPartialCloseLotPct;
-   CFG.PartialCloseATR = InpPartialCloseATR;
-   CFG.ZoneReuseATR = InpZoneReuseATR;
-
-   // --- System ---
-   CFG.DebugMode = InpDebugMode;
-   CFG.SafeMode = InpSafeMode;
+   // System
+   CFG.system.debug = InpDebugMode;
+   CFG.system.safe = InpSafeMode;
+   CFG.system.orderThrottleMs = InpOrderThrottleMs;
 }
 
 void PrintConfigSummary()
 {
-   if (!CFG.DebugMode)
+   if (!CFG.system.debug)
       return;
 
    Print("=== PASR CONFIG ACTIVE ===");
-   Print("ATR Period       : ", CFG.ATRPeriod);
-   Print("ATR Range        : ", DoubleToString(CFG.ATRMin, 1), " - ", DoubleToString(CFG.ATRMax, 1));
-   Print("SR Mode          : ", (string)CFG.SRMode);
-   Print("Signal Lookback  : ", CFG.SignalLookback);
-   Print("Use MTF          : ", (CFG.UseMTF ? "true" : "false"));
-   Print("Use Trailing     : ", (CFG.UseTrailing ? "true" : "false"));
+   Print("ATR Period       : ", CFG.market.atrPeriod);
+   Print("ATR Range        : ", DoubleToString(CFG.market.atrMin, 1), " - ", DoubleToString(CFG.market.atrMax, 1));
+   Print("SR Mode          : ", (string)CFG.sr.mode);
+   Print("Signal Lookback  : ", CFG.pattern.lookback);
+   Print("Use MTF          : ", (CFG.risk.useMTF ? "true" : "false"));
+   Print("Use Trailing     : ", (CFG.exit.useTrailing ? "true" : "false"));
 }
 
 //+------------------------------------------------------------------+
@@ -648,11 +615,11 @@ public:
    int recoveryAttempts;
    datetime recoveryCooldownExpiry;
 
-   void SaveState(const ulong magic) const
+   void SaveState() const // Removed magic parameter, use CFG.risk.magic directly
    {
       if (mainTicket <= 0)
          return;
-      string p = "PASR_" + (string)magic + "_" + (string)mainTicket + "_";
+      string p = "PASR_" + (string)CFG.risk.magic + "_" + (string)mainTicket + "_";
       GlobalVariablesDeleteAll(p);
       GlobalVariableSet(p + "v2", 2.0);
       GlobalVariableSet(p + "st", (double)state);
@@ -681,9 +648,9 @@ public:
       GlobalVariableSet(p + "rc", (double)recoveryCooldownExpiry);
    }
 
-   void LoadState(ulong ticket, ulong magic)
+   void LoadState(ulong ticket) // Removed magic parameter
    {
-      string p = "PASR_" + (string)magic + "_" + (string)ticket + "_";
+      string p = "PASR_" + (string)CFG.risk.magic + "_" + (string)ticket + "_";
       if (GlobalVariableCheck(p + "v2"))
       {
          mainTicket = ticket;
@@ -712,7 +679,7 @@ public:
          recoveryAttempts = (int)GlobalVariableGet(p + "ra");
          recoveryCooldownExpiry = (datetime)GlobalVariableGet(p + "rc");
 
-         double pcDist = lastKnownATR * CFG.PartialCloseATR * _Point;
+         double pcDist = lastKnownATR * CFG.exit.partialATR * _Point;
          partialTP = NormalizeDouble(entryPrice + ((direction == 1 ? 1.0 : -1.0) * pcDist), _Digits);
          active = true;
       }

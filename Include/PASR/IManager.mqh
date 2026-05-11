@@ -3,15 +3,15 @@
 //|              Base Class for Event-Driven PASR EA Modules         |
 //|                                     Copyright 2026, Agsicentre   |
 //+------------------------------------------------------------------+
-#property strict
-#property version "1.00"
-#property link "agsicentre.wordpress.com"
-
 #property copyright "Copyright 2026, Agsicentre"
+#property link "agsicentre.wordpress.com"
+#property version "1.00"
+#property strict
 
 #ifndef __I_MANAGER_MQH__
 #define __I_MANAGER_MQH__
 
+#include "mql5_vscode_fix.h"
 #include "2.Config.mqh"
 #include "0.EventBus.mqh"
 #include "1.Events.mqh"
@@ -41,9 +41,9 @@ public:
       m_name = name;
       m_initialized = false;
       m_priority = priority;
-      m_debugMode = CFG.DebugMode;
+      m_debugMode = CFG.system.debug;
       m_bus = EventBus::Instance();
-      m_data = NULL;
+      // m_data initialized later in Init()
    }
 
    static void SetGlobalDataManager(DataManager *d) { s_dataCache = d; }
@@ -60,7 +60,7 @@ public:
    {
       if (m_initialized)
          return true;
-      if (m_data == NULL && m_name != "DataManager")
+      if (CheckPointer(m_data) == POINTER_INVALID && m_name != "DataManager")
       {
          if (CheckPointer(s_dataCache) == POINTER_INVALID)
          {
@@ -98,7 +98,7 @@ public:
 
    virtual void RefreshConfigCache()
    {
-      m_debugMode = CFG.DebugMode;
+      m_debugMode = CFG.system.debug;
    }
 
    virtual void HandleEvent(Event *e) override
@@ -238,5 +238,7 @@ protected:
          Print("[", m_name, "] ", TimeToString(TimeCurrent(), TIME_SECONDS), " | ", msg);
    }
 };
+
+DataManager *IManager::s_dataCache;
 
 #endif
