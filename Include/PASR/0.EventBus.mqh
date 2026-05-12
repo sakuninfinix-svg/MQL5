@@ -42,7 +42,7 @@ public:
 
 // Forward declaration for the recorder
 class EventRecorder;
-extern EventRecorder *g_recorder;
+EventRecorder *g_recorder = NULL;
 
 //+------------------------------------------------------------------+
 //| Generic Event Handler Interface                                   |
@@ -98,9 +98,19 @@ public:
 
    int HistorySize() const { return ArraySize(m_history); }
 
-   // Getter for Replay (implemented where events are defined)
-   string GetHistoryType(int i) { return m_history[i].type; }
-   string GetHistoryData(int i) { return m_history[i].data; }
+   // Getter for Replay with bounds checking
+   string GetHistoryType(int i)
+   {
+      if (i < 0 || i >= ArraySize(m_history))
+         return "";
+      return m_history[i].type;
+   }
+   string GetHistoryData(int i)
+   {
+      if (i < 0 || i >= ArraySize(m_history))
+         return "";
+      return m_history[i].data;
+   }
 };
 
 //+------------------------------------------------------------------+
@@ -144,7 +154,7 @@ public:
    // Register handler for specific event type
    bool Subscribe(int eventID, IEventHandler *handler, int priority = 100)
    {
-      if (CheckPointer(handler) == POINTER_INVALID)
+      if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
          return false;
 
       // Avoid duplicate subscriptions
@@ -155,7 +165,9 @@ public:
             return false;
       }
 
-      ArrayResize(m_registrations, total + 1);
+      if (ArrayResize(m_registrations, total + 1) == -1)
+         return false;
+
       m_registrations[total].eventID = eventID;
       m_registrations[total].handler = handler;
       m_registrations[total].priority = priority;
@@ -166,6 +178,9 @@ public:
    // Unsubscribe handler
    void Unsubscribe(int eventID, IEventHandler *handler)
    {
+      if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
+         return;
+
       int total = ArraySize(m_registrations);
       for (int i = 0; i < total; i++)
       {
@@ -184,8 +199,10 @@ public:
    // Dispatch event to all subscribed handlers
    void Dispatch(Event *e)
    {
-      if (CheckPointer(e) == POINTER_INVALID)
+      if (e == NULL || CheckPointer(e) == POINTER_INVALID)
          return;
+
+      bool isHeapAllocated = (CheckPointer(e) == POINTER_DYNAMIC);
 
       int id = e.ID();
       int total = ArraySize(m_registrations);
@@ -197,8 +214,8 @@ public:
          if (m_registrations[i].eventID == id)
          {
             int mSize = ArraySize(matches);
-            ArrayResize(matches, mSize + 1);
-            matches[mSize] = i;
+            if (ArrayResize(matches, mSize + 1) != -1)
+               matches[mSize] = i;
          }
       }
 
@@ -218,24 +235,28 @@ public:
       }
 
       // Record event once before dispatching to subscribers
-      if (matchCount > 0 && CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
+      if (matchCount > 0 && g_recorder != NULL && CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
       {
          g_recorder.Record(e);
       }
 
-      // Execute handlers
+      // Execute handlers with error handling
       for (int i = 0; i < matchCount; i++)
       {
          IEventHandler *h = m_registrations[matches[i]].handler;
-         if (CheckPointer(h) != POINTER_INVALID)
+         if (h != NULL && CheckPointer(h) != POINTER_INVALID)
          {
             h.HandleEvent(e);
          }
       }
 
-      // Clean up event memory after dispatch
-      if (CheckPointer(e) == POINTER_DYNAMIC)
+      // Clean up event memory only if it was heap-allocated
+      if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC)
+      {
          delete e;
+      }
+
+      ArrayFree(matches);
    }
 
    void Clear()
