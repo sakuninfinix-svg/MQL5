@@ -1,77 +1,50 @@
-```
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
+*.class
+*.dll
+*.so
+*.a
+*.out
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+.env
+.env.local
+.env.*
+
 # Logs and temp files
 *.log
 *.tmp
 *.swp
 
-# Environment
-.env
-.env.local
-.env.*
-
 # Editors
 .vscode/
 .idea/
 
-# Dependencies
-node_modules/
-.venv/
-venv/
-__pycache__/
-.mypy_cache/
-.pytest_cache/
-.julia/
-zig*/
-
-# Build artifacts
+# Build directories
 dist/
 build/
 target/
-*.o
-*.obj
-*.out
-*.exe
-*.so
-*.ex4
-*.ex5
+.gradle/
 
-# OS generated files
-.DS_Store
-Thumbs.db
+# Python specific
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+*.so
+.PyInstaller/
 
 # Coverage reports
 coverage/
 htmlcov/
 .coverage
-
-#MQL FOLDER
-.continue/
-Files/
-Images/
-Indicators/
-Profiles/
-Scripts/
-Experts/Advisors/
-Experts/Examples/
-Experts/Free Robots/
-Include/Arrays/
-Include/Canvas/
-Include/ChartObjects/
-Include/Charts/
-Include/Controls/
-Include/Expert/
-Include/Generic/
-Include/Math/
-Include/Graphics/
-Include/OpenCL/
-Include/Strings/
-Include/Trade/
-Include/Tools/
-Include/WinAPI
-Include/MovingAverages.mqh
-Include/VirtualKeys.mqh
-Include/StdLibErr.mqh
-Include/Object.mqh
 
 # Compressed files
 *.zip
@@ -97,4 +70,26 @@ Include/Object.mqh
 *.tar.xz
 *.tar.zst
 
-```
+# System files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# MyPy cache
+.mypy_cache/
+# Pytest cache
+.pytest_cache/
+
+# Julia
+julia-*/
+
+# Zig
+zig-out/
+zig-cache/
+
+# Temporary files
+*.tmp
+*~
+.DS_Store
+Thumbs.db

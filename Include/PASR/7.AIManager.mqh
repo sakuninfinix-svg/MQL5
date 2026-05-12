@@ -170,28 +170,28 @@ public:
 
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
-      if (!m_cfgCache.useAI || !e->signal.valid)
+      if (!m_cfgCache.useAI || !e.signal.valid)
          return;
 
-      double score = EvaluateSignal(e->signal, e->atrPoints, e->support, e->resistance);
+      double score = EvaluateSignal(e.signal, e.atrPoints, e.support, e.resistance);
       
       // Prediksi Adaptive Multiplier untuk SL (1.0 - 2.0)
       double aiSlAdjustment = 1.0 + (Logistic(score) * m_model.volNoiseWeight);
       
       bool accepted = score >= m_cfgCache.minConfidence;
-      Log("AI score=" + DoubleToString(score, 2) + " for signal " + IntegerToString((int)e->signal.patternType));
-      LogSignalSample(e->signal, e->atrPoints, e->support, e->resistance, score, accepted);
+      Log("AI score=" + DoubleToString(score, 2) + " for signal " + IntegerToString((int)e.signal.patternType));
+      LogSignalSample(e.signal, e.atrPoints, e.support, e.resistance, score, accepted);
 
       if (!accepted)
       {
-         e->signal.valid = false;
-         e->signal.reason = e->signal.reason + " | AI_REJECT(" + DoubleToString(score, 2) + ")";
+         e.signal.valid = false;
+         e.signal.reason = e.signal.reason + " | AI_REJECT(" + DoubleToString(score, 2) + ")";
          Log("Signal rejected by AI, score=" + DoubleToString(score, 2));
          return;
       }
 
-      e->signal.reason = e->signal.reason + " | AI_ACCEPT(" + DoubleToString(score, 2) + ") SL_ADJ:" + DoubleToString(aiSlAdjustment, 2);
-      e->signal.slMultiplier *= aiSlAdjustment; // Terapkan penyesuaian AI ke SL
+      e.signal.reason = e.signal.reason + " | AI_ACCEPT(" + DoubleToString(score, 2) + ") SL_ADJ:" + DoubleToString(aiSlAdjustment, 2);
+      e.signal.slMultiplier *= aiSlAdjustment; // Terapkan penyesuaian AI ke SL
       Log("Signal accepted by AI, score=" + DoubleToString(score, 2));
    }
 
@@ -199,9 +199,9 @@ public:
    {
       if (!m_cfgCache.useAI)
          return;
-      if (e->success)
+      if (e.success)
       {
-         AttachTicketToRecentSample(e->ticket);
+         AttachTicketToRecentSample(e.ticket);
       }
       else
       {
@@ -216,18 +216,18 @@ public:
    {
       if (!m_cfgCache.useAI)
          return;
-      if (e->isClosing)
+      if (e.isClosing)
       {
-         LabelSampleOutcome(e->ticket, e->unrealizedPnL);
+         LabelSampleOutcome(e.ticket, e.unrealizedPnL);
          return;
       }
 
-      if (e->unrealizedPnL < 0)
+      if (e.unrealizedPnL < 0)
       {
          m_model.bias = MathMax(0.25, m_model.bias - 0.002);
          m_modelDirty = true;
       }
-      else if (e->unrealizedPnL > 0)
+      else if (e.unrealizedPnL > 0)
       {
          m_model.bias = MathMin(0.85, m_model.bias + 0.002);
          m_modelDirty = true;
@@ -560,7 +560,7 @@ private:
    {
       if (CheckPointer(m_data) == POINTER_INVALID)
          return 0.0;
-      int losses = m_data->GetConsecutiveLosses();
+      int losses = m_data.GetConsecutiveLosses();
       return MathMax(0.0, 1.0 - MathMin(1.0, losses * 0.1));
    }
 
@@ -869,7 +869,7 @@ private:
       if (CheckPointer(m_data) == POINTER_INVALID)
          return;
 
-      PerformanceStats stats = m_data->GetPerformanceStats();
+      PerformanceStats stats = m_data.GetPerformanceStats();
       int total = stats.safeTotal + stats.aggTotal;
       if (total <= 0)
          return;
@@ -899,7 +899,7 @@ private:
       m_model.spreadWeight = NormalizeWeight(m_model.spreadWeight + error * 0.015);
       m_model.slWeight = NormalizeWeight(m_model.slWeight + error * 0.012);
       m_model.momentumWeight = NormalizeWeight(m_model.momentumWeight + error * 0.01);
-      m_model.lossStreakWeight = NormalizeWeight(m_model.lossStreakWeight - (m_data->GetConsecutiveLosses() * 0.005));
+      m_model.lossStreakWeight = NormalizeWeight(m_model.lossStreakWeight - (m_data.GetConsecutiveLosses() * 0.005));
       
       // Adapt ensemble weights based on performance
       if (driftDetected)
