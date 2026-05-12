@@ -343,7 +343,9 @@ public:
       if (m_targetResistance <= 0 || m_targetSupport <= 0)
          return false;
 
-      double spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+      double spread = GetGlobalSpread();
+      if(spread < 0) spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD); // Fallback
+      
       double minRange = MathMax(atrPoints * m_cfgCache.minSRRangeATR, spread * 5.0);
       double rangePts = (m_targetResistance - m_targetSupport) / _Point;
 
