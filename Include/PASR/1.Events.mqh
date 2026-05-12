@@ -1,10 +1,11 @@
 //+------------------------------------------------------------------+
-//|                                                   Events.mqh     |
+//|                                                  1.Events.mqh    |
 //|                                       Copyright 2026, Agsicentre |
+//|               OPTIMIZED: Lightweight Event Classes               |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.00"
+#property version "1.10"
 #property strict
 
 #ifndef __EVENTS_MQH__
@@ -12,25 +13,21 @@
 
 #include "0.EventBus.mqh"
 #include "2.Config.mqh"
+
+//--- Optimized cast macro with type safety
 #define CAST_EVENT(className, eventPtr) ((className *)eventPtr)
 
 //+------------------------------------------------------------------+
-//| PRICE EVENTS                                                     |
+//| PRICE EVENTS - OPTIMIZED                                         |
 //+------------------------------------------------------------------+
 class PriceUpdateEvent : public Event
 {
 public:
    MqlTick tick;
 
-   PriceUpdateEvent(const MqlTick &t) : Event("PriceFeed") { tick = t; }
+   PriceUpdateEvent(const MqlTick &t) : Event(1) { tick = t; }
    virtual int ID() const override { return EVENT_ID_PRICE_UPDATE; }
    virtual string Type() const override { return "PriceUpdate"; }
-
-   virtual string Serialize() const override
-   {
-      return StringFormat("%I64d;%f;%f;%f;%f",
-                          tick.time_msc, tick.bid, tick.ask, tick.last, tick.volume);
-   }
 };
 
 class NewBarEvent : public Event
@@ -41,15 +38,10 @@ public:
    int period;
 
    NewBarEvent(datetime time, double o, double h, double l, double c, int tf)
-       : Event("BarMonitor"), barOpenTime(time), open(o), high(h), low(l), close(c), period(tf) {}
+       : Event(2), barOpenTime(time), open(o), high(h), low(l), close(c), period(tf) {}
 
    virtual int ID() const override { return EVENT_ID_NEW_BAR; }
    virtual string Type() const override { return "NewBar"; }
-   virtual string Serialize() const override
-   {
-      return StringFormat("%I64d;%f;%f;%f;%f;%d",
-                          (long)barOpenTime, open, high, low, close, period);
-   }
 };
 
 //+------------------------------------------------------------------+
@@ -62,7 +54,7 @@ public:
    string sessionName;
 
    SessionChangeEvent(bool active, const string name)
-       : Event("MarketManager"), sessionActive(active), sessionName(name) {}
+       : Event(3), sessionActive(active), sessionName(name) {}
 
    virtual int ID() const override { return EVENT_ID_SESSION_CHANGE; }
    virtual string Type() const override { return "SessionChange"; }
@@ -73,10 +65,10 @@ class NewsAlertEvent : public Event
 public:
    string newsTitle;
    datetime eventTime;
-   int impact; // 1=High, 2=Medium, 3=Low
+   int impact;
 
    NewsAlertEvent(const string title, datetime time, int lvl)
-       : Event("NewsFilter"), newsTitle(title), eventTime(time), impact(lvl) {}
+       : Event(4), newsTitle(title), eventTime(time), impact(lvl) {}
 
    virtual int ID() const override { return EVENT_ID_NEWS_ALERT; }
    virtual string Type() const override { return "NewsAlert"; }
@@ -90,13 +82,13 @@ public:
    bool isSupBroken, isResBroken;
    double supBufferMult, resBufferMult;
    int supHtfAlign, resHtfAlign;
-   int supStrength, resStrength; // NEW: Zone strength for adaptive filtering
+   int supStrength, resStrength;
    double atrPoints;
 
    ZoneUpdateEvent(double sup, double res, double htfSup, double htfRes,
                    bool supBroken, bool resBroken, double supMult, double resMult,
                    int supAlign, int resAlign, int supStr, int resStr, double atr)
-       : Event("SRManager"), support(sup), resistance(res), htfSupport(htfSup), htfResistance(htfRes),
+       : Event(5), support(sup), resistance(res), htfSupport(htfSup), htfResistance(htfRes),
          isSupBroken(supBroken), isResBroken(resBroken), supBufferMult(supMult), resBufferMult(resMult),
          supHtfAlign(supAlign), resHtfAlign(resAlign), supStrength(supStr), resStrength(resStr), atrPoints(atr) {}
 
@@ -104,9 +96,6 @@ public:
    virtual string Type() const override { return "ZoneUpdate"; }
 };
 
-//+------------------------------------------------------------------+
-//| TRADING EVENTS                                                   |
-//+------------------------------------------------------------------+
 class SignalGeneratedEvent : public Event
 {
 public:
@@ -115,13 +104,12 @@ public:
    double support, resistance;
 
    SignalGeneratedEvent(const SignalDecision &sig, double atr, double sup, double res)
-       : Event("SignalManager"), signal(sig), atrPoints(atr), support(sup), resistance(res) {}
+       : Event(6), signal(sig), atrPoints(atr), support(sup), resistance(res) {}
 
    virtual int ID() const override { return EVENT_ID_SIGNAL_GENERATED; }
    virtual string Type() const override { return "SignalGenerated"; }
 };
 
-// NEW: Recovery Opportunity Event
 class RecoveryOpportunityEvent : public Event
 {
 public:
@@ -132,23 +120,22 @@ public:
    double originalLot;
 
    RecoveryOpportunityEvent(ulong ticket, double slPrice, int dir, double atr, double lot)
-       : Event("RecoveryManager"), originalTicket(ticket), slHitPrice(slPrice), direction(dir), atrPoints(atr), originalLot(lot) {}
+       : Event(7), originalTicket(ticket), slHitPrice(slPrice), direction(dir), atrPoints(atr), originalLot(lot) {}
 
    virtual int ID() const override { return EVENT_ID_RECOVERY_OPPORTUNITY; }
    virtual string Type() const override { return "RecoveryOpportunity"; }
 };
 
-// NEW: Recovery Signal Event
 class RecoverySignalEvent : public Event
 {
 public:
-   ulong originalTicket; // Link back to the original trade
+   ulong originalTicket;
    SignalDecision signal;
    double atrPoints;
    double support, resistance;
 
    RecoverySignalEvent(ulong originalT, const SignalDecision &sig, double atr, double sup, double res)
-       : Event("SignalManager"), originalTicket(originalT), signal(sig), atrPoints(atr), support(sup), resistance(res) {}
+       : Event(8), originalTicket(originalT), signal(sig), atrPoints(atr), support(sup), resistance(res) {}
 
    virtual int ID() const override { return EVENT_ID_RECOVERY_SIGNAL; }
    virtual string Type() const override { return "RecoverySignal"; }
@@ -157,7 +144,7 @@ public:
 class ConfigReloadEvent : public Event
 {
 public:
-   ConfigReloadEvent() : Event("System") {}
+   ConfigReloadEvent() : Event(9) {}
    virtual int ID() const override { return EVENT_ID_CONFIG_RELOAD; }
    virtual string Type() const override { return "ConfigReload"; }
 };
@@ -175,7 +162,7 @@ public:
    OrderExecutionEvent(bool ok, ulong t, ENUM_ORDER_TYPE type,
                        double entry, double stopLoss, double takeProfit, double vol,
                        const string reason = "", const string comment = "")
-       : Event("ExecutionManager"), success(ok), ticket(t), orderType(type),
+       : Event(13), success(ok), ticket(t), orderType(type),
          entryPrice(entry), sl(stopLoss), tp(takeProfit), volume(vol),
          rejectionReason(reason), orderComment(comment) {}
 
@@ -192,7 +179,7 @@ public:
    bool isClosing;
 
    PositionUpdateEvent(ulong t, double price, double pnl, bool closing = false)
-       : Event("RecoveryManager"), ticket(t), currentPrice(price),
+       : Event(14), ticket(t), currentPrice(price),
          unrealizedPnL(pnl), isClosing(closing) {}
 
    virtual int ID() const override { return EVENT_ID_POSITION_UPDATE; }
@@ -204,39 +191,33 @@ class PauseToggleEvent : public Event
 public:
    bool isBuy;
    bool newState;
-   PauseToggleEvent(bool buy, bool state) : Event("Dashboard"), isBuy(buy), newState(state) {}
+   
+   PauseToggleEvent(bool buy, bool state) : Event(15), isBuy(buy), newState(state) {}
    virtual int ID() const override { return EVENT_ID_PAUSE_TOGGLE; }
    virtual string Type() const override { return "PauseToggle"; }
 };
 
 //+------------------------------------------------------------------+
-//| SYSTEM EVENTS                                                    |
+//| SYSTEM EVENTS - OPTIMIZED                                        |
 //+------------------------------------------------------------------+
 class HeartbeatEvent : public Event
 {
 public:
    int intervalSeconds;
 
-   HeartbeatEvent(int secs = 5) : Event("System"), intervalSeconds(secs) {}
+   HeartbeatEvent(int secs = 5) : Event(10), intervalSeconds(secs) {}
    virtual int ID() const override { return EVENT_ID_HEARTBEAT; }
    virtual string Type() const override { return "Heartbeat"; }
-
-   virtual string Serialize() const override
-   {
-      return (string)intervalSeconds;
-   }
 };
 
 class EmergencyStopEvent : public Event
-{ // NEW EVENT
+{
 public:
    string reason;
 
-   EmergencyStopEvent(const string r = "Manual Trigger") : Event("System"), reason(r) {}
+   EmergencyStopEvent(const string r = "Manual Trigger") : Event(11), reason(r) {}
    virtual int ID() const override { return EVENT_ID_EMERGENCY_STOP; }
    virtual string Type() const override { return "EmergencyStop"; }
-
-   virtual string Serialize() const override { return reason; }
 };
 
 class MarketGateEvent : public Event
@@ -248,7 +229,7 @@ public:
    double atrPoints;
 
    MarketGateEvent(bool open, double spreadValue, double atrValue, bool allowed)
-       : Event("MarketManager"), gateOpen(open), entryAllowed(allowed), spread(spreadValue), atrPoints(atrValue) {}
+       : Event(12), gateOpen(open), entryAllowed(allowed), spread(spreadValue), atrPoints(atrValue) {}
 
    virtual int ID() const override { return EVENT_ID_MARKET_GATE; }
    virtual string Type() const override { return "MarketGate"; }
