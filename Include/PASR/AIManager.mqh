@@ -987,4 +987,4 @@ private:
    }
 };
 
-#endif // __AI_MANAGER_MQH__
+#endif
