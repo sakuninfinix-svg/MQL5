@@ -3,6 +3,7 @@
 //|              Base Class for Event-Driven PASR EA Modules         |
 //|                                     Copyright 2026, Agsicentre   |
 //+------------------------------------------------------------------+
+
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
 #property version "1.00"

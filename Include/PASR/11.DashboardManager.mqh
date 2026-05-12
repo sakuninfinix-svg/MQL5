@@ -6,20 +6,20 @@
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
 #property version "1.00"
+#property strict
 
 #ifndef __DASHBOARD_MANAGER_MQH__
 #define __DASHBOARD_MANAGER_MQH__
 
-#property strict
-#include "2.Config.mqh"
-#include "IManager.mqh"
-#include "10.DataManager.mqh"
-#include <Controls/Dialog.mqh>
 #include <Controls/Button.mqh>
+#include <Controls/Dialog.mqh>
 #include <Controls/Label.mqh>
 #include <Controls/Panel.mqh>
 #include <Graphics/Graphic.mqh>
 #include <Trade/Trade.mqh>
+#include "2.Config.mqh"
+#include "IManager.mqh"
+#include "10.DataManager.mqh"
 
 // Custom Event IDs for UI synchronization
 #define DASHBOARD_REFRESH (CHARTEVENT_CUSTOM + 100)

@@ -5,14 +5,14 @@
 //|                 OPTIMIZED FOR HIGH PERFORMANCE                   |
 //|                 VERSION 1.20 - ULTRA FAST                        |
 //+------------------------------------------------------------------+
+
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
 #property version "1.20"
+#property strict
 
 #ifndef __EVENT_BUS_MQH__
 #define __EVENT_BUS_MQH__
-
-#property strict
 
 //--- Performance optimization: Pre-allocated handler pool
 #define MAX_HANDLERS_PER_EVENT 16

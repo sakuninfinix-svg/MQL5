@@ -1,14 +1,15 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //|                                                   AIManager.mqh  |
 //|               Lightweight Adaptive AI Layer for PASR EA          |
 //|                          Copyright 2026, Agsicentre              |
 //|                                                                  |
 //|         DEEP LEARNING EDITION: Hybrid Ensemble + Neural Network  |
 //+------------------------------------------------------------------+
-#property strict
-#property version "2.00"
-#property link "agsicentre.wordpress.com"
+
 #property copyright "Copyright 2026, Agsicentre"
+#property link "agsicentre.wordpress.com"
+#property version "2.00"
+#property strict
 
 #ifndef __AI_MANAGER_MQH__
 #define __AI_MANAGER_MQH__

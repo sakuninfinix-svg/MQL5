@@ -2,13 +2,14 @@
 //|               Price Action & Support Resistance V1               |
 //|         Optimized by Agsicentre (agsicentre.wordpress.com)       |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026, Agsicentre"
-#ifndef __MARKET_MANAGER_MQH__
-#define __MARKET_MANAGER_MQH__
 
+#property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
 #property version "2.00"
 #property strict
+
+#ifndef __MARKET_MANAGER_MQH__
+#define __MARKET_MANAGER_MQH__
 
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
