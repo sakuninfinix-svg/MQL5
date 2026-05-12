@@ -185,7 +185,7 @@ void MarketManager::OnPriceUpdate(PriceUpdateEvent *e)
    if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
       return;
 
-   m_lastTick = e->tick;
+   m_lastTick = e.tick;
    m_hasLastTick = true;
    UpdateGateState(m_lastTick);
 }
