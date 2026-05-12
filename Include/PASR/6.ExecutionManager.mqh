@@ -2,14 +2,15 @@
 //|                                             ExecutionManager.mqh |
 //|                                       Copyright 2026, Agsicentre |
 //+------------------------------------------------------------------+
+
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
 #property version "1.00"
+#property strict
 
 #ifndef __EXECUTION_MANAGER_MQH__
 #define __EXECUTION_MANAGER_MQH__
 
-#property strict
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
 

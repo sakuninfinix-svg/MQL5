@@ -6,16 +6,15 @@
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
 #property version "1.00"
+#property strict
 
 #ifndef __RECOVERY_MANAGER_MQH__
 #define __RECOVERY_MANAGER_MQH__
 
-#property strict
 #include <Trade/Trade.mqh>
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
 #include "9.PatternManager.mqh"
-
 
 class RecoveryManager : public IManager
 {

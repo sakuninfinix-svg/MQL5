@@ -1,95 +1,48 @@
-# Compiled and build artifacts
+```
+# Compiled files
 *.pyc
-__pycache__/
+*.class
 *.o
 *.obj
-*.class
-*.dll
-*.so
-*.a
 *.out
 
 # Dependencies
 node_modules/
 venv/
 .venv/
-.env
-.env.local
-.env.*
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-
-# Editors
-.vscode/
-.idea/
-
-# Build directories
-dist/
-build/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
 target/
 .gradle/
 
-# Python specific
-*.pyc
-__pycache__/
-*.pyo
-*.pyd
-.Python
-*.so
-.PyInstaller/
-
-# Coverage reports
+# Build artifacts
+dist/
+build/
 coverage/
 htmlcov/
-.coverage
+*.so
+*.dll
+*.a
+*.exe
 
-# Compressed files
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# Logs
+*.log
+*.log.*
+
+# Environment
+.env
+.env.local
+*.env.*
 
 # System files
 .DS_Store
 Thumbs.db
-*.swp
-*.swo
-
-# MyPy cache
-.mypy_cache/
-# Pytest cache
-.pytest_cache/
-
-# Julia
-julia-*/
-
-# Zig
-zig-out/
-zig-cache/
-
-# Temporary files
-*.tmp
-*~
-.DS_Store
-Thumbs.db
+```
