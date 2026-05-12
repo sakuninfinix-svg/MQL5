@@ -77,6 +77,14 @@ struct EAConfigCache
 static datetime g_lastBarTime = 0;
 static bool     g_isInitialized = false;
 
+//+------------------------------------------------------------------+
+//| Global accessor function for spread cache                        |
+//+------------------------------------------------------------------+
+double GetGlobalSpread()
+{
+   return eaCfg.symbolSpread;
+}
+
 int OnInit()
 {
    //--- Validate symbol information first (fail-fast)
