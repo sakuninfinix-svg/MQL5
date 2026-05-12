@@ -3,10 +3,11 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Event-Driven Core for PASR EA                         |
 //|                 OPTIMIZED FOR HIGH PERFORMANCE                   |
+//|                 VERSION 1.20 - ULTRA FAST                        |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.10"
+#property version "1.20"
 
 #ifndef __EVENT_BUS_MQH__
 #define __EVENT_BUS_MQH__
@@ -18,7 +19,7 @@
 #define MAX_EVENT_TYPES 32
 
 //+------------------------------------------------------------------+
-//| Base Event Class - OPTIMIZED                                     |
+//| Base Event Class - OPTIMIZED V1.20                               |
 //+------------------------------------------------------------------+
 class Event
 {
@@ -56,7 +57,7 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Event Recorder (Debug Utility)                                   |
+//| Event Recorder (Debug Utility) - OPTIMIZED                       |
 //+------------------------------------------------------------------+
 class EventRecorder
 {
@@ -64,8 +65,8 @@ private:
    struct RecordedEvent
    {
       datetime timestamp;
-      string type;
-      string data;
+      int eventType; // Use int instead of string for faster comparison
+      int sourceId;
    };
 
    RecordedEvent m_history[];
@@ -94,24 +95,25 @@ public:
       int idx = ArraySize(m_history);
       ArrayResize(m_history, idx + 1);
       m_history[idx].timestamp = e.Timestamp();
-      m_history[idx].type = e.Type();
-      m_history[idx].data = e.Serialize();
+      m_history[idx].eventType = e.ID();
+      m_history[idx].sourceId = e.SourceId();
+      // Skip serialization - store only essential data
    }
 
    int HistorySize() const { return ArraySize(m_history); }
 
    // Getter for Replay with bounds checking
-   string GetHistoryType(int i)
+   int GetHistoryType(int i)
    {
       if (i < 0 || i >= ArraySize(m_history))
-         return "";
-      return m_history[i].type;
+         return 0;
+      return m_history[i].eventType;
    }
-   string GetHistoryData(int i)
+   int GetHistorySourceId(int i)
    {
       if (i < 0 || i >= ArraySize(m_history))
-         return "";
-      return m_history[i].data;
+         return 0;
+      return m_history[i].sourceId;
    }
 };
 
@@ -277,7 +279,10 @@ inline void DispatchEvent(Event *e)
    EventBus::Instance().Dispatch(e);
 }
 
-// Initialize static member
+// Initialize static members
 EventBus *EventBus::m_instance = NULL;
+Event *EventBus::m_eventPool[];
+int EventBus::m_eventPoolSize = 0;
+int EventBus::m_eventPoolIndex = 0;
 
 #endif

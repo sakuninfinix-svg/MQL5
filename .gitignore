@@ -1,5 +1,6 @@
 ```
-# Compiled and binary files
+# Compiled and build artifacts
+
 *.pyc
 *.class
 *.o
