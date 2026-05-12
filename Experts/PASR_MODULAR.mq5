@@ -25,7 +25,7 @@
 #include <PASR/11.DashboardManager.mqh>
 
 //--- Global Pointers Declaration
-EventRecorder      *g_recorder = NULL;
+EventRecorder      *g_recorder = NULL;  // Defined here, declared extern in EventBus.mqh
 DashboardManager   *dashCtrl   = NULL;
 DataManager        *IManager::s_dataCache = NULL;
 
@@ -53,8 +53,8 @@ struct EAConfigCache
       magicNum      = CFG.risk.magic;
       debugMode     = CFG.system.debug;
       symbolName    = _Symbol;
-      symbolDigits  = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-      symbolPoint   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      symbolDigits  = (int)SymbolInfoInteger(symbolName, SYMBOL_DIGITS);
+      symbolPoint   = SymbolInfoDouble(symbolName, SYMBOL_POINT);
    }
    
    bool IsValidSymbol() const
@@ -70,9 +70,9 @@ static bool     g_isInitialized = false;
 int OnInit()
 {
    //--- Validate symbol information first (fail-fast)
-   if(!SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE))
+   if(!SymbolInfoInteger(eaCfg.symbolName, SYMBOL_TRADE_MODE))
    {
-      Print("[ERROR] Invalid symbol or trading not allowed: ", _Symbol);
+      Print("[ERROR] Invalid symbol or trading not allowed: ", eaCfg.symbolName);
       return INIT_FAILED;
    }
    
@@ -183,7 +183,7 @@ int OnInit()
    DispatchEvent(new HeartbeatEvent(0));
    
    g_isInitialized = true;
-   Print("[INFO] PASR_MODULAR initialized successfully on ", _Symbol);
+   Print("[INFO] PASR_MODULAR initialized successfully on ", eaCfg.symbolName);
 
    return(INIT_SUCCEEDED);
 }

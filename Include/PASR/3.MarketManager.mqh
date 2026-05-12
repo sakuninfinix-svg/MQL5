@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|               Price Action & Support Ressistance V1              |
+//|               Price Action & Support Resistance V1               |
 //|         Optimized by Agsicentre (agsicentre.wordpress.com)       |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
