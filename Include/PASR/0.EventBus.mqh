@@ -40,8 +40,6 @@ public:
    int SourceId() const { return m_sourceId; }
 
    virtual string Type() const = 0;
-   
-   // Optimized: Only serialize when recording is active (debug mode)
    virtual string Serialize() const { return ""; }
 };
 
@@ -120,9 +118,8 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Event Bus Singleton - OPTIMIZED V1.20                            |
+//| Event Bus Singleton - OPTIMIZED                                  |
 //| Uses direct array indexing for O(1) event lookup                 |
-//| Zero memory allocation in hot path                               |
 //+------------------------------------------------------------------+
 class EventBus
 {
@@ -136,22 +133,12 @@ private:
       int priority;
    };
    
-   // Pre-allocated handler arrays to avoid dynamic resizing during runtime
-   HandlerRegistration m_handlersByType[MAX_EVENT_TYPES][MAX_HANDLERS_PER_EVENT];
+   HandlerRegistration m_handlersByType[MAX_EVENT_TYPES][];
    int m_handlerCount[MAX_EVENT_TYPES];
-   
-   // Pre-allocated event pool to reduce heap allocations
-   static Event *m_eventPool[];
-   static int m_eventPoolSize;
-   static int m_eventPoolIndex;
 
    EventBus() 
    {
       ArrayInitialize(m_handlerCount, 0);
-      // Initialize event pool (optional optimization)
-      m_eventPoolSize = 64; // Pool size for reusable events
-      ArrayResize(m_eventPool, m_eventPoolSize);
-      m_eventPoolIndex = 0;
    }
 
 public:
@@ -181,21 +168,21 @@ public:
       if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
          return false;
 
+      // Avoid duplicate subscriptions
       int total = m_handlerCount[eventID];
+      HandlerRegistration &handlers[] = m_handlersByType[eventID];
       
-      // Avoid duplicate subscriptions - O(n) but n is small (max 16)
       for (int i = 0; i < total; i++)
       {
-         if (m_handlersByType[eventID][i].handler == handler)
+         if (handlers[i].handler == handler)
             return false;
       }
 
-      // Use pre-allocated slots, no ArrayResize needed
-      if (total >= MAX_HANDLERS_PER_EVENT)
-         return false; // Pool full
+      if (ArrayResize(handlers, total + 1) == -1)
+         return false;
 
-      m_handlersByType[eventID][total].handler = handler;
-      m_handlersByType[eventID][total].priority = priority;
+      handlers[total].handler = handler;
+      handlers[total].priority = priority;
       m_handlerCount[eventID] = total + 1;
 
       return true;
@@ -210,23 +197,25 @@ public:
          return;
 
       int total = m_handlerCount[eventID];
+      HandlerRegistration &handlers[] = m_handlersByType[eventID];
       
       for (int i = 0; i < total; i++)
       {
-         if (m_handlersByType[eventID][i].handler == handler)
+         if (handlers[i].handler == handler)
          {
             // Shift remaining handlers
             for (int j = i; j < total - 1; j++)
             {
-               m_handlersByType[eventID][j] = m_handlersByType[eventID][j + 1];
+               handlers[j] = handlers[j + 1];
             }
+            ArrayResize(handlers, total - 1);
             m_handlerCount[eventID] = total - 1;
             return;
          }
       }
    }
 
-   // Dispatch event - OPTIMIZED V1.20: Zero allocation, direct execution
+   // Dispatch event - OPTIMIZED: No sorting, direct execution
    void Dispatch(Event *e)
    {
       if (e == NULL || CheckPointer(e) == POINTER_INVALID)
@@ -250,16 +239,18 @@ public:
          return;
       }
 
-      // Record event once before dispatching (only if recording)
+      HandlerRegistration &handlers[] = m_handlersByType[id];
+
+      // Record event once before dispatching
       if (g_recorder != NULL && CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
       {
          g_recorder.Record(e);
       }
 
-      // Execute handlers directly - zero allocation, cache-friendly
+      // Execute handlers directly without sorting (priority handled by subscription order)
       for (int i = 0; i < total; i++)
       {
-         IEventHandler *h = m_handlersByType[id][i].handler;
+         IEventHandler *h = handlers[i].handler;
          if (h != NULL && CheckPointer(h) != POINTER_INVALID)
          {
             h.HandleEvent(e);
@@ -273,42 +264,13 @@ public:
       }
    }
 
-   // Optimized: Get event from pool instead of allocating new one
-   Event* AcquireEvent()
-   {
-      if (m_eventPoolIndex < m_eventPoolSize && m_eventPool[m_eventPoolIndex] != NULL)
-      {
-         return m_eventPool[m_eventPoolIndex++];
-      }
-      // Fallback to heap if pool exhausted
-      return NULL;
-   }
-   
-   // Return event to pool for reuse
-   void ReleaseEvent(Event *e)
-   {
-      if (e == NULL || m_eventPoolIndex <= 0)
-         return;
-      m_eventPoolIndex--;
-      m_eventPool[m_eventPoolIndex] = e;
-   }
-
    void Clear()
    {
       for (int i = 0; i < MAX_EVENT_TYPES; i++)
       {
+         ArrayFree(m_handlersByType[i]);
          m_handlerCount[i] = 0;
       }
-      // Clear event pool
-      for (int i = 0; i < m_eventPoolSize; i++)
-      {
-         if (m_eventPool[i] != NULL)
-         {
-            delete m_eventPool[i];
-            m_eventPool[i] = NULL;
-         }
-      }
-      m_eventPoolIndex = 0;
    }
 };
 
