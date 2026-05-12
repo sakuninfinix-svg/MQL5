@@ -37,6 +37,7 @@ private:
       ENUM_TPSL_MODE tpslMode;
       double recoveryLotMult;
       uint orderThrottleMs;
+      long fillingMode; // Cached SYMBOL_FILLING_MODE
    } m_cfgCache;
 
    // SignalManager *m_signalManager; // Not needed, using events
@@ -61,6 +62,9 @@ private:
       m_cfgCache.tpslMode = CFG.risk.tpslMode;
       m_cfgCache.recoveryLotMult = CFG.recovery.lotMult;
       m_cfgCache.orderThrottleMs = (uint)CFG.system.orderThrottleMs;
+      
+      // 3. Cache symbol properties (one-time cost, used frequently)
+      m_cfgCache.fillingMode = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
    }
 
    string MakePendingPrefix(const string symbol, ulong tsID) const
@@ -494,10 +498,10 @@ public:
       request.deviation = 30;
       request.type_time = ORDER_TIME_GTC;
 
-      long filling = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
-      if ((filling & SYMBOL_FILLING_IOC) != 0)
+      // Use cached filling mode (cached in RefreshConfigCache)
+      if ((m_cfgCache.fillingMode & SYMBOL_FILLING_IOC) != 0)
          request.type_filling = ORDER_FILLING_IOC;
-      else if ((filling & SYMBOL_FILLING_FOK) != 0)
+      else if ((m_cfgCache.fillingMode & SYMBOL_FILLING_FOK) != 0)
          request.type_filling = ORDER_FILLING_FOK;
       else
          request.type_filling = ORDER_FILLING_RETURN;

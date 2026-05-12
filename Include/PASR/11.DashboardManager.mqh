@@ -338,7 +338,9 @@ public:
                }
                else if (m_debugMode)
                {
-                  PrintFormat("[Dashboard] Failed to close %d: %d", ticket, GetLastError());
+                  int err = GetLastError();
+                  PrintFormat("[Dashboard] Failed to close %d: Error %d (%s)", 
+                              ticket, err, m_trade.ResultRetcodeDescription());
                }
             }
          }
