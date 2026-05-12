@@ -68,3 +68,7 @@ Thumbs.db
 *.tar.bz2
 *.tar.xz
 *.tar.zst
+# OS specific
+.DS_Store
+Thumbs.db
+```
