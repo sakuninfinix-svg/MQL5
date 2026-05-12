@@ -1,1 +1,44 @@
-Nothing should be ignored based on the provided file changes. The modified file 'Include/PASR/AIManager.mqh' appears to be a source code file that should be tracked in version control.
+```
+# Compiled and binary files
+*.mqh
+*.mq4
+*.mq5
+*.ex4
+*.ex5
+*.fxt
+*.hst
+*.csv
+
+# Dependencies and build artifacts
+lib/
+libs/
+include/
+temp/
+tmp/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.local
+*.env.*
+
+# Coverage and testing
+coverage/
+htmlcov/
+.coverage
+
+# OS specific
+.DS_Store
+Thumbs.db
+```
