@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                            Price Action & Support Ressistance V1 |
+//|                            Price Action & Support Resistance V1  |
 //|                                                       Config.mqh |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"

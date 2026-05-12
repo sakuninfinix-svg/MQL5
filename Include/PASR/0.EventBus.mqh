@@ -45,7 +45,9 @@ public:
 
 // Forward declaration for the recorder
 class EventRecorder;
-EventRecorder *g_recorder = NULL;
+
+// Global recorder instance (defined in main EA file)
+extern EventRecorder *g_recorder;
 
 //+------------------------------------------------------------------+
 //| Generic Event Handler Interface                                   |
