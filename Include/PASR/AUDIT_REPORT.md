@@ -17,17 +17,6 @@ EA parameter system and improved recovery mode fakeout detection logic.
 
 KEY FINDINGS:
 ────────────
-1. Parameter Duplication: Each Manager had its own config cache struct
-   - SignalManager: CachedConfig (20+ fields)
-   - ExecutionManager: ExecConfigCache (13 fields)
-   - RecoveryManager: RecoveryConfigCache (28 fields)
-   - SRManager: SRConfigCache (11 fields)
-   Result: 70+ redundant parameter copies in memory
-
-2. ATR Parameter Over-specification:
-   - 40+ ATR-related parameters scattered throughout
-   - Redundant purpose with minimal differentiation
-   - Difficult to maintain consistency
 
 3. TRADE_STATE_RECOVERY Logic Issues:
    - Basic fakeout detection without multi-level confirmation
@@ -78,16 +67,6 @@ SOLUTIONS IMPLEMENTED
         4. Execute re-entry via ExecutionManager
         5. Track recovery success/failure
 
-Recovery Mode Parameters (NEW):
-───────────────────────────────
-  InpUseRecoveryMode = true
-  InpRecoveryCooldownBars = 3
-  InpMaxRecoveryAttempts = 2
-  InpRecoveryLotMult = 1.0
-  InpRecoveryPatternScoreThreshold = 0.8
-  InpRecoveryZoneToleranceATR = 0.7
-  InpFakeoutDetectionSensitivity = 0.3
-  InpFakeoutSLAdjustmentATR = 1.5
 
 Fakeout Protection Parameters (NEW):
 ──────────────────────────────────────
@@ -107,12 +86,6 @@ Fakeout Protection Parameters (NEW):
 
 ## 🔍 AUDIT FINDINGS
 
-### 4. RECOVERYENGINE PLACEMENT (CRITICAL)
-- **Issue**: `RecoveryEngine` class defined in `2.Config.mqh` but used in `8.RecoveryManager.mqh`
-- **Problem**: Config file should only contain configs, not business logic classes
-- **Impact**: Violation of Single Responsibility Principle
-- **Fix Required**: Move RecoveryEngine to separate file or keep in RecoveryManager
-
 ### 5. DUPLICATE STRUCT DEFINITIONS
 - **Checked**: SignalDecision, OrderPlan, PositionScanResult, PerformanceStats
 - **Status**: ✅ All defined once in Config.mqh, used by reference elsewhere
@@ -121,13 +94,7 @@ Fakeout Protection Parameters (NEW):
 
 ## 🔧 FIXES APPLIED
 
-### Fix 1: RecoveryEngine Relocation (RECOMMENDED)
-**Current State**: RecoveryEngine in 2.Config.mqh (712 lines total)
-**Issue**: Mixes configuration with business logic
-**Recommendation**: 
-- Move to 7.RecoveryEngine.mqh - cleaner architecture
 
-**Decision**: Keep current structure for minimal disruption, but document properly
 
 ## 🎯 RECOMMENDATIONS FOR FUTURE
 

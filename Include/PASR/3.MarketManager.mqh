@@ -41,28 +41,14 @@ private:
    MqlTick m_lastTick;
    bool m_hasLastTick;
 
-   struct MarketConfigCache
-   {
-      bool useNews;
-      double atrMin;
-      double atrMax;
-      double maxSpread;
-      ENUM_NEWS_LEVEL newsLevel;
-      int newsFreeze;
-      string newsWebURL;
-      int entryCooldownBars;
-      int maxConsecutiveLoss;
-      int lossCooldownBars;
-      string tradingSessions[7];
-   } m_cfgCache;
-
    void FetchWebNews();
+   void UpdateGateState(const MqlTick &tick);
 
 public:
    MarketManager() : IManager("MarketManager", 100), m_gateOpen(true), m_entryAllowed(true), m_lastSpread(0.0), m_lastATR(0.0), m_hasLastTick(false)
    {
-      m_baseCurr = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE);
-      m_profitCurr = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
+      m_baseCurr = SymbolInfoString(m_symbol, SYMBOL_CURRENCY_BASE);
+      m_profitCurr = SymbolInfoString(m_symbol, SYMBOL_CURRENCY_PROFIT);
       ZeroMemory(m_sessionStarts);
       ZeroMemory(m_sessionEnds);
       ZeroMemory(m_lastTick);
@@ -72,18 +58,6 @@ public:
    virtual void RefreshConfigCache() override
    {
       IManager::RefreshConfigCache();
-      m_cfgCache.useNews = CFG.news.use;
-      m_cfgCache.atrMin = CFG.market.atrMin;
-      m_cfgCache.atrMax = CFG.market.atrMax;
-      m_cfgCache.maxSpread = CFG.market.maxSpread;
-      m_cfgCache.newsLevel = CFG.news.level;
-      m_cfgCache.newsFreeze = CFG.news.freeze;
-      m_cfgCache.newsWebURL = CFG.news.url;
-      m_cfgCache.entryCooldownBars = CFG.risk.entryCooldownBars;
-      m_cfgCache.maxConsecutiveLoss = CFG.risk.maxConsecutiveLoss;
-      m_cfgCache.lossCooldownBars = CFG.risk.lossCooldownBars;
-      for (int i = 0; i < 7; i++)
-         m_cfgCache.tradingSessions[i] = CFG.market.sessions[i];
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -102,7 +76,6 @@ public:
    virtual void OnNewBar(NewBarEvent *e) override;
 
    virtual bool Init() override;
-   bool IsNewBar();
    bool PassesGate(const MqlTick &tick, double &currentSpread, double currentATR);
    bool IsTradingSession();
    bool IsNewsTime();
@@ -117,7 +90,7 @@ public:
 
    virtual void OnHeartbeat(HeartbeatEvent *e) override
    {
-      if (m_cfgCache.useNews)
+      if (CFG.news.use)
          FetchWebNews();
    }
 };
@@ -140,7 +113,7 @@ bool MarketManager::Init()
    // Cache is already refreshed by IManager::Init()
    for (int i = 0; i < 7; i++)
    {
-      string session = m_cfgCache.tradingSessions[i];
+      string session = CFG.market.sessions[i];
       if (session == "0" || session == "")
       {
          m_sessionStarts[i] = -1;
@@ -171,22 +144,6 @@ bool MarketManager::Init()
 }
 
 //+------------------------------------------------------------------+
-//| IsNewBar                                                         |
-//+------------------------------------------------------------------+
-bool MarketManager::IsNewBar()
-{
-   // MQL5 Best Practice: Gunakan CopyTime daripada iTime untuk async safety
-   datetime times[];
-   if (CopyTime(_Symbol, _Period, 0, 1, times) <= 0)
-      return false;
-
-   datetime currTime = times[0];
-   if (currTime == m_lastBarTime)
-      return false;
-   return true;
-}
-
-//+------------------------------------------------------------------+
 //| PassesGate - Combines all market filters                         |
 //+------------------------------------------------------------------+
 bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, double currentATR)
@@ -199,20 +156,20 @@ bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, doubl
 
    double bid = tick.bid;
    double ask = tick.ask;
-   currentSpread = (ask - bid) / _Point;
-   if (currentSpread > m_cfgCache.maxSpread)
+   currentSpread = (ask - bid) / SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+   if (currentSpread > CFG.market.maxSpread)
    {
       m_data.DebugLog(m_debugMode, "Spread too high: " + DoubleToString(currentSpread, 1));
       return false;
    }
 
-   if (currentATR < m_cfgCache.atrMin || currentATR > m_cfgCache.atrMax)
+   if (currentATR < CFG.market.atrMin || currentATR > CFG.market.atrMax)
    {
       if (m_debugMode)
       {
-         string reason = (currentATR < m_cfgCache.atrMin) ? "Too Low" : "Too High";
+         string reason = (currentATR < CFG.market.atrMin) ? "Too Low" : "Too High";
          PrintFormat("[%s] ATR Gate Blocked: Current %.1f (Min: %.1f, Max: %.1f) - %s",
-                     m_name, currentATR, m_cfgCache.atrMin, m_cfgCache.atrMax, reason);
+                     m_name, currentATR, CFG.market.atrMin, CFG.market.atrMax, reason);
       }
       return false;
    }
@@ -228,48 +185,9 @@ void MarketManager::OnPriceUpdate(PriceUpdateEvent *e)
    if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
       return;
 
-   double currentSpread = 0.0;
-   double currentATR = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
-   bool gateOpen = true;
-
-   if (currentATR <= 0)
-   {
-      gateOpen = false;
-      if (m_debugMode)
-         PrintFormat("[%s] Market gate blocked: ATR unavailable.", m_name);
-   }
-   else
-   {
-      gateOpen = PassesGate(e.tick, currentSpread, currentATR);
-   }
-
-   m_lastTick = e.tick;
+   m_lastTick = e->tick;
    m_hasLastTick = true;
-
-   bool entryAllowed = !IsEntryCooldownActive();
-   bool stateChanged = (gateOpen != m_gateOpen) || (entryAllowed != m_entryAllowed) ||
-                       (MathAbs(currentSpread - m_lastSpread) > 0.0001) ||
-                       (MathAbs(currentATR - m_lastATR) > 0.0001);
-
-   m_gateOpen = gateOpen;
-   m_entryAllowed = entryAllowed;
-   m_lastSpread = currentSpread;
-   m_lastATR = currentATR;
-
-   if (stateChanged || m_debugMode)
-   {
-      if (m_debugMode)
-      {
-         PrintFormat("[%s] MarketGate updated - gateOpen=%s entryAllowed=%s spread=%.1f atr=%.2f",
-                     m_name,
-                     m_gateOpen ? "true" : "false",
-                     m_entryAllowed ? "true" : "false",
-                     m_lastSpread,
-                     m_lastATR);
-      }
-      MarketGateEvent *evt = new MarketGateEvent(m_gateOpen, m_lastSpread, m_lastATR, m_entryAllowed);
-      DispatchEvent(evt);
-   }
+   UpdateGateState(m_lastTick);
 }
 
 void MarketManager::OnNewBar(NewBarEvent *e)
@@ -277,38 +195,31 @@ void MarketManager::OnNewBar(NewBarEvent *e)
    if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
       return;
 
-   bool recalculatedGate = m_gateOpen;
-   double currentSpread = m_lastSpread;
-   double currentATR = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
-
    if (!m_hasLastTick)
    {
-      MqlTick latestTick;
-      if (SymbolInfoTick(_Symbol, latestTick))
-      {
-         m_lastTick = latestTick;
-         m_hasLastTick = true;
-      }
+      if (!SymbolInfoTick(m_symbol, m_lastTick)) return;
+      m_hasLastTick = true;
    }
+   
+   UpdateGateState(m_lastTick);
+}
 
-   if (m_hasLastTick && currentATR > 0)
-   {
-      recalculatedGate = PassesGate(m_lastTick, currentSpread, currentATR);
-   }
-   else if (currentATR <= 0)
-   {
-      recalculatedGate = false;
-      if (m_debugMode)
-         PrintFormat("[%s] Market gate blocked on new bar: ATR unavailable.", m_name);
-   }
+//+------------------------------------------------------------------+
+//| Consolidated Market Gate Logic                                   |
+//+------------------------------------------------------------------+
+void MarketManager::UpdateGateState(const MqlTick &tick)
+{
+   double currentSpread = 0.0;
+   double currentATR = (CheckPointer(m_data) != POINTER_INVALID) ? m_data.GetATRPoints() : 0.0;
+   bool gateOpen = (currentATR > 0) ? PassesGate(tick, currentSpread, currentATR) : false;
 
    bool entryAllowed = !IsEntryCooldownActive();
-   bool stateChanged = (recalculatedGate != m_gateOpen) ||
+   bool stateChanged = (gateOpen != m_gateOpen) || 
                        (entryAllowed != m_entryAllowed) ||
-                       (MathAbs(currentSpread - m_lastSpread) > 0.0001) ||
-                       (MathAbs(currentATR - m_lastATR) > 0.0001);
+                       (MathAbs(currentSpread - m_lastSpread) > 0.1) ||
+                       (MathAbs(currentATR - m_lastATR) > 0.1);
 
-   m_gateOpen = recalculatedGate;
+   m_gateOpen = gateOpen;
    m_entryAllowed = entryAllowed;
    m_lastSpread = currentSpread;
    m_lastATR = currentATR;
@@ -360,7 +271,7 @@ void MarketManager::FetchWebNews()
       return; // Fetch every 30 mins
    char data[], result[];
    string headers;
-   int res = WebRequest("GET", m_cfgCache.newsWebURL, NULL, NULL, 5000, data, 0, result, headers);
+   int res = WebRequest("GET", CFG.news.url, NULL, NULL, 5000, data, 0, result, headers);
 
    if (res != 200)
    {
@@ -379,8 +290,8 @@ void MarketManager::FetchWebNews()
          break;
 
       string eventData = StringSubstr(content, pos, endPos - pos);
-      bool isHighImpact = (StringFind(eventData, "High") >= 0 ||
-                           (m_cfgCache.newsLevel >= NEWS_HIGH_MEDIUM && StringFind(eventData, "Medium") >= 0));
+      bool isHighImpact = (StringFind(eventData, "High") >= 0 || 
+                           (CFG.news.level >= NEWS_HIGH_MEDIUM && StringFind(eventData, "Medium") >= 0));
 
       bool isRelevant = (StringFind(eventData, m_baseCurr) >= 0 ||
                          StringFind(eventData, m_profitCurr) >= 0 ||
@@ -425,7 +336,7 @@ void MarketManager::FetchWebNews()
             if (eventTime > 0)
             {
                int sz = ArraySize(m_webNewsTimes);
-               ArrayResize(m_webNewsTimes, sz + 1);
+               ArrayResize(m_webNewsTimes, sz + 1, 10); // Use reserve to prevent O(N^2) allocations
                m_webNewsTimes[sz] = eventTime;
             }
          }
@@ -440,7 +351,7 @@ void MarketManager::FetchWebNews()
 //+------------------------------------------------------------------+
 bool MarketManager::IsNewsTime()
 {
-   if (m_cfgCache.newsLevel == NEWS_OFF)
+   if (CFG.news.level == NEWS_OFF)
    {
       m_newsStatus = "News filter OFF";
       return (m_lastNewsResult = false);
@@ -457,8 +368,8 @@ bool MarketManager::IsNewsTime()
    datetime now = TimeGMT(); // Web feeds usually use GMT
    for (int i = 0; i < ArraySize(m_webNewsTimes); i++)
    {
-      if (now >= m_webNewsTimes[i] - (m_cfgCache.newsFreeze * 60) &&
-          now <= m_webNewsTimes[i] + (m_cfgCache.newsFreeze * 60))
+      if (now >= m_webNewsTimes[i] - (CFG.news.freeze * 60) &&
+          now <= m_webNewsTimes[i] + (CFG.news.freeze * 60))
       {
          m_nextNewsTime = m_webNewsTimes[i];
          m_newsStatus = "WEB NEWS ACTIVE";
@@ -470,8 +381,8 @@ bool MarketManager::IsNewsTime()
    // 2. Jika Web tidak mendeteksi, gunakan Kalender Native sebagai lapis kedua
    m_nextNewsTime = 0;
    datetime gmtNow = TimeGMT(); // Native calendar also uses GMT
-   datetime timeFrom = gmtNow - (m_cfgCache.newsFreeze * 60);
-   datetime timeTo = gmtNow + (m_cfgCache.newsFreeze * 60);
+   datetime timeFrom = gmtNow - (CFG.news.freeze * 60);
+   datetime timeTo = gmtNow + (CFG.news.freeze * 60);
 
    MqlCalendarValue values[];
    string currencies[2] = {m_baseCurr, m_profitCurr};
@@ -488,11 +399,11 @@ bool MarketManager::IsNewsTime()
             if (CalendarEventById(values[i].event_id, event))
             {
                bool shouldBlock = false;
-               if ((int)m_cfgCache.newsLevel >= 1 && event.importance == CALENDAR_IMPORTANCE_HIGH)
+               if ((int)CFG.news.level >= 1 && event.importance == CALENDAR_IMPORTANCE_HIGH)
                   shouldBlock = true;
-               else if ((int)m_cfgCache.newsLevel >= 2 && event.importance == CALENDAR_IMPORTANCE_MODERATE)
+               else if ((int)CFG.news.level >= 2 && event.importance == CALENDAR_IMPORTANCE_MODERATE)
                   shouldBlock = true;
-               else if ((int)m_cfgCache.newsLevel >= 3 && event.importance == CALENDAR_IMPORTANCE_LOW)
+               else if ((int)CFG.news.level >= 3 && event.importance == CALENDAR_IMPORTANCE_LOW)
                   shouldBlock = true;
 
                if (shouldBlock)
@@ -516,26 +427,25 @@ bool MarketManager::IsNewsTime()
 //+------------------------------------------------------------------+
 bool MarketManager::IsEntryCooldownActive()
 {
-
-   datetime times[];
-   if (CopyTime(_Symbol, _Period, 0, 1, times) <= 0)
+   MqlRates rates[];
+   if (CopyRates(m_symbol, m_period, 0, 1, rates) <= 0)
       return false;
-   datetime currBar = times[0];
+   datetime currBar = rates[0].time;
 
    if (m_lastEntryBarTime > 0)
    {
-      int barsSinceEntry = (int)((currBar - m_lastEntryBarTime) / PeriodSeconds(_Period));
-      if (barsSinceEntry < m_cfgCache.entryCooldownBars)
+      int barsSinceEntry = (int)((currBar - m_lastEntryBarTime) / PeriodSeconds(m_period));
+      if (barsSinceEntry < CFG.risk.entryCooldownBars)
       {
          m_data.DebugLog(m_debugMode, "Entry cooldown active (bars: " + (string)barsSinceEntry + ")");
          return true;
       }
    }
 
-   if (m_consecutiveLosses >= m_cfgCache.maxConsecutiveLoss)
+   if (m_consecutiveLosses >= CFG.risk.maxConsecutiveLoss)
    {
-      int barsSinceLoss = (int)((currBar - m_lastLossBarTime) / PeriodSeconds(_Period));
-      if (barsSinceLoss < m_cfgCache.lossCooldownBars)
+      int barsSinceLoss = (int)((currBar - m_lastLossBarTime) / PeriodSeconds(m_period));
+      if (barsSinceLoss < CFG.risk.lossCooldownBars)
       {
          m_data.DebugLog(m_debugMode, "Loss cooldown active (bars: " + (string)barsSinceLoss + ")");
          return true;
@@ -553,13 +463,13 @@ void MarketManager::UpdateLossStreak(double netProfit)
    if (netProfit < 0)
    {
       m_consecutiveLosses++;
-      datetime times[];
-      if (CopyTime(_Symbol, _Period, 0, 1, times) > 0)
-         m_lastLossBarTime = times[0];
+      MqlRates rates[];
+      if (CopyRates(m_symbol, m_period, 0, 1, rates) > 0)
+         m_lastLossBarTime = rates[0].time;
 
       string msg = "Loss Detected! Net Profit: " + DoubleToString(netProfit, 2) +
                    " | Consecutive Losses: " + (string)m_consecutiveLosses;
-      if (m_consecutiveLosses >= m_cfgCache.maxConsecutiveLoss)
+      if (m_consecutiveLosses >= CFG.risk.maxConsecutiveLoss)
          msg += " | Cooldown Active.";
       m_data.DebugLog(m_debugMode, msg);
    }

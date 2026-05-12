@@ -21,24 +21,7 @@ class ExecutionManager : public IManager
 {
 private:
    ulong m_lastOrderTime;
-
-   struct ExecConfigCache
-   {
-      bool useAutoLot;
-      double riskPct;
-      double lotSize;
-      double qualityLotMult;
-      double minTPDistanceATR;
-      double slBufferATR;
-      double tpBufferATR;
-      double maxTPDistanceATR;
-      ulong magicNum;
-      ENUM_ENTRY_MODE entryMode;
-      ENUM_TPSL_MODE tpslMode;
-      double recoveryLotMult;
-      uint orderThrottleMs;
-      long fillingMode; // Cached SYMBOL_FILLING_MODE
-   } m_cfgCache;
+   long m_fillingMode;
 
    // SignalManager *m_signalManager; // Not needed, using events
    //| PRIVATE: Core Logic
@@ -48,49 +31,34 @@ private:
       // 1. Sync basic state from IManager (m_debugMode)
       IManager::RefreshConfigCache();
 
-      // 2. Sync Execution specific parameters from CFG
-      m_cfgCache.useAutoLot = CFG.risk.autoLot; // This was already correct
-      m_cfgCache.riskPct = CFG.risk.pct;
-      m_cfgCache.lotSize = CFG.risk.lot;
-      m_cfgCache.qualityLotMult = CFG.risk.qualityLotMult;
-      m_cfgCache.minTPDistanceATR = CFG.exit.minTPDistATR;
-      m_cfgCache.maxTPDistanceATR = CFG.exit.maxTPDistATR;
-      m_cfgCache.slBufferATR = CFG.exit.slBufferATR;
-      m_cfgCache.tpBufferATR = CFG.exit.tpBufferATR;
-      m_cfgCache.magicNum = (ulong)CFG.risk.magic;
-      m_cfgCache.entryMode = CFG.risk.entryMode;
-      m_cfgCache.tpslMode = CFG.risk.tpslMode;
-      m_cfgCache.recoveryLotMult = CFG.recovery.lotMult;
-      m_cfgCache.orderThrottleMs = (uint)CFG.system.orderThrottleMs;
-      
-      // 3. Cache symbol properties (one-time cost, used frequently)
-      m_cfgCache.fillingMode = SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+      // Cache symbol properties (one-time cost, used frequently)
+      m_fillingMode = SymbolInfoInteger(m_symbol, SYMBOL_FILLING_MODE);
    }
 
-   string MakePendingPrefix(const string symbol, ulong tsID) const
+   string MakePendingPrefix(ulong tsID) const
    {
-      return "PASR_PEND_" + (string)m_cfgCache.magicNum + "_" + symbol + "_" + (string)tsID + "_";
+      return "PASR_PEND_" + (string)CFG.risk.magic + "_" + m_symbol + "_" + (string)tsID + "_";
    }
 
-   void SavePendingState(const OrderPlan &plan, double zonePrice, double slMult, const string symbol, ulong tsID) const
+   void SavePendingState(const OrderPlan &plan, double zonePrice, double slMult, ulong tsID) const
    {
-      string p = MakePendingPrefix(symbol, tsID);
+      string p = MakePendingPrefix(tsID);
       GlobalVariableSet(p + "ts", (double)TimeCurrent());
       GlobalVariableSet(p + "tp", plan.tp);
       GlobalVariableSet(p + "zp", zonePrice);
       GlobalVariableSet(p + "sm", slMult);
    }
-   void DeletePendingStateById(const string symbol, ulong tsID) const
+   void DeletePendingStateById(ulong tsID) const
    {
-      string prefix = MakePendingPrefix(symbol, tsID);
+      string prefix = MakePendingPrefix(tsID);
       GlobalVariablesDeleteAll(prefix);
    }
 
    void ScavengePendingGVs()
    {
-      string pattern = "PASR_PEND_" + (string)m_cfgCache.magicNum + "_" + _Symbol + "_";
+      string pattern = "PASR_PEND_" + (string)CFG.risk.magic + "_" + m_symbol + "_";
       int total = GlobalVariablesTotal();
-
+      
       for (int i = total - 1; i >= 0; i--)
       {
          string gvName = GlobalVariableName(i);
@@ -113,7 +81,7 @@ private:
          for (int j = 0; j < OrdersTotal(); j++)
          {
             ulong o = OrderGetTicket(j);
-            if (o > 0 && StringFind(OrderGetString(ORDER_COMMENT), tsID_str) >= 0)
+            if (o > 0 && OrderGetInteger(ORDER_MAGIC) == CFG.risk.magic && StringFind(OrderGetString(ORDER_COMMENT), tsID_str) >= 0)
             {
                stillActive = true;
                break;
@@ -123,6 +91,7 @@ private:
          {
             ulong p = PositionGetTicket(j);
             if (p > 0 && PositionSelectByTicket(p) &&
+                PositionGetInteger(POSITION_MAGIC) == CFG.risk.magic &&
                 StringFind(PositionGetString(POSITION_COMMENT), tsID_str) >= 0)
             {
                stillActive = true;
@@ -142,20 +111,21 @@ private:
    bool ValidateOrderLevels(ENUM_ORDER_TYPE type, double price, double sl, double tp,
                             double volume, string &reason, double atrPoints) const
    {
-      double stopLevelPts = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-      double stopLevel = stopLevelPts * _Point;
-      double minTPDist = atrPoints * m_cfgCache.minTPDistanceATR * _Point;
-      double maxTPDist = atrPoints * m_cfgCache.maxTPDistanceATR * _Point;
+      double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double stopLevelPts = (double)SymbolInfoInteger(m_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      double stopLevel = stopLevelPts * point;
+      double minTPDist = atrPoints * CFG.exit.minTPDistATR * point;
+      double maxTPDist = atrPoints * CFG.exit.maxTPDistATR * point;
       double requiredTP = MathMax(stopLevel, minTPDist);
 
       if (type == ORDER_TYPE_BUY)
       {
-         if (tp <= price + _Point)
+         if (tp <= price + point)
          {
             reason = "BUY TP <= price";
             return false;
          }
-         if (sl > 0 && sl >= price - _Point)
+         if (sl > 0 && sl >= price - point)
          {
             reason = "BUY SL >= price";
             return false;
@@ -163,25 +133,25 @@ private:
          if (tp - price < requiredTP)
          {
             reason = StringFormat("BUY TP too close: %.1f < required %.1f (ATR %.1f)",
-                                  (tp - price) / _Point, requiredTP / _Point, minTPDist / _Point);
+                                  (tp - price) / point, requiredTP / point, minTPDist / point);
             return false;
          }
          if (tp - price > maxTPDist)
          {
             reason = StringFormat("BUY TP too far: %.1f > max %.1f (ATR %.1f)",
-                                  (tp - price) / _Point, maxTPDist / _Point, m_cfgCache.maxTPDistanceATR);
+                                  (tp - price) / point, maxTPDist / point, CFG.exit.maxTPDistATR);
             return false;
          }
          if (sl > 0 && price - sl < stopLevel)
          {
             reason = StringFormat("BUY SL violates stop level: %.1f < %.1f",
-                                  (price - sl) / _Point, stopLevel / _Point);
+                                  (price - sl) / point, stopLevel / point);
             return false;
          }
          if (CheckPointer(m_data) != POINTER_INVALID && volume > 0)
          {
-            double slDist = MathAbs(price - sl) / _Point;
-            double posRiskPct = m_data.GetRiskPercentage(_Symbol, volume, slDist);
+            double slDist = MathAbs(price - sl) / point;
+            double posRiskPct = m_data.GetRiskPercentage(m_symbol, volume, slDist);
             if (posRiskPct > 5.0)
             {
                reason = StringFormat("Position risk too high: %.2f%% > 5%%", posRiskPct);
@@ -191,12 +161,12 @@ private:
       }
       else
       {
-         if (tp >= price - _Point)
+         if (tp >= price - point)
          {
             reason = "SELL TP >= price";
             return false;
          }
-         if (sl > 0 && sl <= price + _Point)
+         if (sl > 0 && sl <= price + point)
          {
             reason = "SELL SL <= price";
             return false;
@@ -204,19 +174,19 @@ private:
          if (price - tp < requiredTP)
          {
             reason = StringFormat("SELL TP too close: %.1f < required %.1f (ATR %.1f)",
-                                  (price - tp) / _Point, requiredTP / _Point, minTPDist / _Point);
+                                  (price - tp) / point, requiredTP / point, minTPDist / point);
             return false;
          }
          if (sl > 0 && sl - price < stopLevel)
          {
             reason = StringFormat("SELL SL violates stop level: %.1f < %.1f",
-                                  (sl - price) / _Point, stopLevel / _Point);
+                                  (sl - price) / point, stopLevel / point);
             return false;
          }
          if (CheckPointer(m_data) != POINTER_INVALID && volume > 0)
          {
-            double slDist = MathAbs(sl - price) / _Point;
-            double posRiskPct = m_data.GetRiskPercentage(_Symbol, volume, slDist);
+            double slDist = MathAbs(sl - price) / point;
+            double posRiskPct = m_data.GetRiskPercentage(m_symbol, volume, slDist);
             if (posRiskPct > 5.0)
             {
                reason = StringFormat("Position risk too high: %.2f%% > 5%%", posRiskPct);
@@ -245,17 +215,17 @@ public:
    {
       if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
          return;
-      if (GetTickCount64() - m_lastOrderTime < (ulong)m_cfgCache.orderThrottleMs)
+      if (GetTickCount64() - m_lastOrderTime < (ulong)CFG.system.orderThrottleMs)
       {
          if (m_debugMode)
             Print("[Execution] Order throttled. Skipping.");
          return;
       }
 
-      datetime times[];
-      if (CopyTime(_Symbol, _Period, 0, 1, times) <= 0)
+      MqlRates rates_exec[];
+      if (CopyRates(m_symbol, m_period, 0, 1, rates_exec) <= 0)
          return;
-      datetime currBar = times[0];
+      datetime currBar = rates_exec[0].time;
       static datetime lastBarExecuted = 0;
       if (currBar == lastBarExecuted)
       {
@@ -278,8 +248,9 @@ public:
       OrderPlan plan;
       if (BuildOrderPlan(e.signal, plan, sup, res, atr))
       {
-         double slDist = MathAbs(plan.entry - plan.brokerSL) / _Point;
-         double riskAmount = m_data.CalculatePositionRisk(_Symbol, plan.lot, slDist);
+         double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+         double slDist = MathAbs(plan.entry - plan.brokerSL) / point; // Calculate SL distance in points
+         double riskAmount = m_data.CalculatePositionRisk(m_symbol, plan.lot, slDist); // Use m_symbol
          if (!m_data.CanOpenTrade(riskAmount))
          {
             if (m_debugMode)
@@ -287,7 +258,7 @@ public:
             return;
          }
 
-         ulong reqID = Open(plan, e.signal.zonePrice, e.signal.slMultiplier);
+         ulong reqID = Open(plan, e.signal.zonePrice, e.signal.slMultiplier); // Open trade
          if (reqID > 0)
          {
             lastBarExecuted = currBar;
@@ -302,7 +273,7 @@ public:
    {
       if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
          return;
-      if (GetTickCount64() - m_lastOrderTime < (ulong)m_cfgCache.orderThrottleMs)
+      if (GetTickCount64() - m_lastOrderTime < (ulong)CFG.system.orderThrottleMs)
       {
          if (m_debugMode)
             Print("[Execution] Recovery order throttled. Skipping.");
@@ -322,7 +293,7 @@ public:
 
       OrderPlan plan;
       // Pass original ticket and recovery lot multiplier
-      if (BuildOrderPlan(e.signal, plan, sup, res, atr, e.originalTicket, m_cfgCache.recoveryLotMult))
+      if (BuildOrderPlan(e.signal, plan, sup, res, atr, e.originalTicket, CFG.recovery.lotMult))
       {
          ulong reqID = Open(plan, e.signal.zonePrice, e.signal.slMultiplier);
          if (reqID > 0)
@@ -343,7 +314,7 @@ public:
    {
       if (m_debugMode)
          Print("[Execution] EMERGENCY STOP: Halting new orders.");
-      GlobalVariablesDeleteAll("PASR_PEND_" + (string)m_cfgCache.magicNum + "_" + _Symbol + "_");
+      GlobalVariablesDeleteAll("PASR_PEND_" + (string)CFG.risk.magic + "_" + m_symbol + "_");
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -374,8 +345,8 @@ public:
          return false;
       }
 
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
       if (bid <= 0 || ask <= 0)
       {
          if (m_debugMode)
@@ -384,36 +355,27 @@ public:
       }
 
       plan.entry = (plan.type == ORDER_TYPE_BUY) ? ask : bid;
-      double atrPrice = atrPoints * _Point;
-      double slBuffer = atrPoints * m_cfgCache.slBufferATR * _Point;
-      double tpBuffer = atrPoints * m_cfgCache.tpBufferATR * _Point;
-      double patternSLMult = decision.slMultiplier; // Get pattern-specific SL multiplier
+      double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double atrPrice = atrPoints * point;
+      double slBuffer = atrPoints * CFG.exit.slBufferATR * point;
+      double tpBuffer = atrPoints * CFG.exit.tpBufferATR * point;
+      double pSLMult = decision.slMultiplier;
 
       if (plan.type == ORDER_TYPE_BUY)
       {
-         double sl = 0;
-         if (m_cfgCache.tpslMode == TPSL_PATTERN)
-            sl = decision.signalPrice - (slBuffer * patternSLMult);
-         else
-            sl = support - (slBuffer * patternSLMult);
-
+         double sl = (CFG.risk.tpslMode == TPSL_PATTERN) ? decision.signalPrice - (slBuffer * pSLMult) : support - (slBuffer * pSLMult);
          double tp = resistance - tpBuffer;
 
-         plan.brokerSL = m_data.NormalizePrice(_Symbol, sl);
-         plan.tp = m_data.NormalizePrice(_Symbol, tp);
+         plan.brokerSL = m_data.NormalizePrice(m_symbol, sl);
+         plan.tp = m_data.NormalizePrice(m_symbol, tp);
       }
       else
       {
-         double sl = 0;
-         if (m_cfgCache.tpslMode == TPSL_PATTERN)
-            sl = decision.signalPrice + slBuffer;
-         else // TPSL_SR
-            sl = resistance + (slBuffer * patternSLMult);
-
+         double sl = (CFG.risk.tpslMode == TPSL_PATTERN) ? decision.signalPrice + (slBuffer * pSLMult) : resistance + (slBuffer * pSLMult);
          double tp = support + tpBuffer;
 
-         plan.brokerSL = m_data.NormalizePrice(_Symbol, sl);
-         plan.tp = m_data.NormalizePrice(_Symbol, tp);
+         plan.brokerSL = m_data.NormalizePrice(m_symbol, sl);
+         plan.tp = m_data.NormalizePrice(m_symbol, tp);
       }
 
       if ((plan.type == ORDER_TYPE_BUY && plan.entry < support - (atrPrice * 0.5)) ||
@@ -429,7 +391,7 @@ public:
          slDistancePoints = 10;
 
       string validationReason = "";
-      double tpDistancePoints = (plan.tp > 0) ? MathAbs(plan.entry - plan.tp) / _Point : 0;
+      double tpDistancePoints = (plan.tp > 0) ? MathAbs(plan.entry - plan.tp) / _Point : 0; // TP distance in points
       if (!m_data.ValidateTradeDistances(slDistancePoints, tpDistancePoints, atrPoints, validationReason))
       {
          if (m_debugMode)
@@ -438,24 +400,22 @@ public:
       }
 
       int qualityScore = decision.orderType == ORDER_TYPE_BUY ? decision.bias : -decision.bias;
-      double signalQuality = (qualityScore == 0) ? 1.5 : 1.0; // This might need adjustment for recovery signals
-      double baseLot = m_data.CalculateLotSize(_Symbol, m_cfgCache.riskPct, slDistancePoints, signalQuality);
-
+      double signalQuality = (qualityScore == 0) ? 1.5 : 1.0; 
+      double baseLot = m_data.CalculateLotSize(m_symbol, CFG.risk.pct, slDistancePoints, signalQuality);
       plan.lot = baseLot;
-      plan.comment = m_data ? m_data.BuildComment(plan.type == ORDER_TYPE_BUY ? "BUY" : "SELL", decision.bias, m_cfgCache.entryMode) : "P_EXEC";
+      plan.comment = m_data ? m_data.BuildComment(plan.type == ORDER_TYPE_BUY ? "BUY" : "SELL", decision.bias, CFG.risk.entryMode) : "P_EXEC";
 
-      string reason;
-      if (!ValidateOrderLevels(plan.type, plan.entry, plan.brokerSL, plan.tp, plan.lot, reason, atrPoints))
+      if (!ValidateOrderLevels(plan.type, plan.entry, plan.brokerSL, plan.tp, plan.lot, validationReason, atrPoints))
       {
          if (m_debugMode)
-            Print("[Exec Build] Validation failed: ", reason);
+            Print("[Exec Build] Validation failed: ", validationReason);
          return false;
       }
 
       // Apply recovery lot multiplier if this is a recovery trade
       if (originalTicket > 0 && lotMultiplier > 0)
       {
-         plan.lot = m_data.NormalizeVolume(_Symbol, plan.lot * lotMultiplier);
+         plan.lot = m_data.NormalizeVolume(m_symbol, plan.lot * lotMultiplier); // Use m_symbol
          plan.comment = "RECOV_ORIG_" + (string)originalTicket + "_" + plan.comment;
       }
 
@@ -478,7 +438,7 @@ public:
 
       // IMPROVE: Check free margin before sending request
       double marginRequired = 0;
-      if (OrderCalcMargin(plan.type, _Symbol, plan.lot, plan.entry, marginRequired))
+      if (OrderCalcMargin(plan.type, m_symbol, plan.lot, plan.entry, marginRequired))
       {
          if (marginRequired > AccountInfoDouble(ACCOUNT_MARGIN_FREE))
          {
@@ -488,20 +448,19 @@ public:
       }
 
       request.action = TRADE_ACTION_DEAL;
-      request.symbol = _Symbol;
-      request.magic = m_cfgCache.magicNum;
+      request.symbol = m_symbol; // Use m_symbol
+      request.magic = CFG.risk.magic;
       request.volume = plan.lot;
-      request.type = plan.type;
       request.price = plan.entry;
       request.sl = plan.brokerSL;
       request.tp = plan.tp;
       request.deviation = 30;
       request.type_time = ORDER_TIME_GTC;
 
-      // Use cached filling mode (cached in RefreshConfigCache)
-      if ((m_cfgCache.fillingMode & SYMBOL_FILLING_IOC) != 0)
+      // Use cached filling mode
+      if ((m_fillingMode & SYMBOL_FILLING_IOC) != 0)
          request.type_filling = ORDER_FILLING_IOC;
-      else if ((m_cfgCache.fillingMode & SYMBOL_FILLING_FOK) != 0)
+      else if ((m_fillingMode & SYMBOL_FILLING_FOK) != 0)
          request.type_filling = ORDER_FILLING_FOK;
       else
          request.type_filling = ORDER_FILLING_RETURN;
@@ -509,10 +468,10 @@ public:
       ulong tsID = GetTickCount64() % 10000000000;
       request.comment = plan.comment + "#" + (string)tsID;
 
-      SavePendingState(plan, zonePrice, slMult, _Symbol, tsID);
+      SavePendingState(plan, zonePrice, slMult, tsID); 
       if (!OrderSendAsync(request, result))
       {
-         DeletePendingStateById(_Symbol, tsID);
+         DeletePendingStateById(tsID); 
          if (m_debugMode)
             PrintFormat("[Exec Async] OrderSend failed: %d", GetLastError());
          return 0;

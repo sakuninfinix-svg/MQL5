@@ -13,18 +13,14 @@
 //+------------------------------------------------------------------+
 //| ENUMS: System & Strategy Definitions                             |
 //+------------------------------------------------------------------+
-
-/**
- * Jenis Pola Price Action yang Didukung
- */
 enum ENUM_PATTERN_TYPE
 {
    PATTERN_NONE,
    PATTERN_PINBAR,
    PATTERN_ENGULFING,
-   PATTERN_BOTTOM,
-   PATTERN_FAKEY,
-   PATTERN_INSIDE_BAR_BREAKOUT,
+   PATTERN_BOTTOM,               // bottom
+   PATTERN_FAKEY,                // Fakey
+   PATTERN_INSIDE_BAR_BREAKOUT, // Inside Bar Breakout
    PATTERN_MORNING_STAR,        // Morning/Evening Star
    PATTERN_THREE_INSIDE,        // Three Inside Up/Down
    PATTERN_RAILROAD_TRACKS,     // Railroad Tracks

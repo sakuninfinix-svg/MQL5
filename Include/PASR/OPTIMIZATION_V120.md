@@ -1,26 +1,8 @@
 # PASR Module Optimization V1.20 - Ultra Fast Performance
 
-## Executive Summary
 
-Optimisasi `/Include/PASR` untuk meningkatkan efisiensi dan performa `PASR_MODULAR.mq5` dengan fokus pada:
-- **Eksekusi 10x lebih cepat** melalui eliminasi alokasi memori dinamis
-- **Pengurangan memory allocation hingga 60%** dengan pre-allocated pools
-- **Performa stabil** tanpa garbage collection spikes
 
----
-
-## Perubahan Utama
-
-### 1. EventBus V1.20 - Zero Allocation Hot Path
-
-#### Sebelumnya (V1.10):
-```mql5
-HandlerRegistration m_handlersByType[MAX_EVENT_TYPES][]; // Dynamic array
-// Setiap Subscribe() memanggil ArrayResize() - alokasi heap
-// Setiap Dispatch() mengakses reference array - overhead pointer
-```
-
-#### Sekarang (V1.20):
+### 1. EventBus 
 ```mql5
 HandlerRegistration m_handlersByType[MAX_EVENT_TYPES][MAX_HANDLERS_PER_EVENT]; // Static 2D array
 // Zero allocation saat runtime
@@ -55,16 +37,6 @@ void ReleaseEvent(Event); // Kembalikan ke pool instead of delete
 ---
 
 ### 3. EventRecorder Optimized
-
-#### Sebelumnya:
-```mql5
-struct RecordedEvent {
-   datetime timestamp;
-   string type;    // String allocation per event
-   string data;    // String serialization overhead
-};
-```
-
 #### Sekarang:
 ```mql5
 struct RecordedEvent {
@@ -91,47 +63,7 @@ struct RecordedEvent {
 **Sebelum:** ~150 baris code dengan string parsing  
 **Sesudah:** ~40 baris code dengan switch-case
 
----
-
-## Performance Metrics
-
-### Benchmark Comparison (Estimated)
-
-| Metric | V1.10 | V1.20 | Improvement |
-|--------|-------|-------|-------------|
-| Event Dispatch Latency | ~50μs | ~5μs | **10x faster** |
-| Memory Alloc/Tick | ~200 bytes | ~20 bytes | **90% reduction** |
-| Handler Lookup | O(n) + resize | O(1) direct | **50% faster** |
-| Event Recording Overhead | ~100μs | ~15μs | **6.7x faster** |
-| Replay Speed | ~100 events/s | ~500 events/s | **5x faster** |
-
-### Memory Footprint
-
-| Component | V1.10 | V1.20 | Savings |
-|-----------|-------|-------|---------|
-| Handler Storage | Dynamic | 16KB static | Predictable |
-| Event Pool | N/A | 2KB pre-allocated | Reusable |
-| Recorder/Event | 64+ bytes | 16 bytes | **75%** |
-
----
-
-## Compatibility
-
-### Backward Compatible:
-- ✅ Semua event types tetap sama
-- ✅ Interface `IEventHandler` tidak berubah
-- ✅ API `Subscribe()`, `Unsubscribe()`, `Dispatch()` signature sama
-- ✅ `PASR_MODULAR.mq5` tidak perlu modifikasi
-
-### Breaking Changes (Debug Only):
-- ⚠️ `EventRecorder.GetHistoryType()` sekarang return `int` bukan `string`
-- ⚠️ `EventRecorder.GetHistoryData()` dihapus (diganti dengan `GetHistorySourceId()`)
-- ⚠️ Hanya impact jika menggunakan debug recording mode
-
----
-
 ## Implementation Details
-
 ### File Modified:
 1. **`0.EventBus.mqh`** - Core optimization
    - Pre-allocated handler arrays
@@ -142,16 +74,7 @@ struct RecordedEvent {
    - Integer-based event reconstruction
    - Eliminated string parsing
 
-### Code Quality:
-- ✅ No circular dependencies
-- ✅ Include guards maintained
-- ✅ Zero memory leaks
-- ✅ Thread-safe (single-threaded MQL5 context)
-
----
-
 ## Usage Example
-
 ### Standard Usage (No Change):
 ```mql5
 //OnInit()

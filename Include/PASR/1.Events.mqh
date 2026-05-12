@@ -27,7 +27,6 @@ public:
 
    PriceUpdateEvent(const MqlTick &t) : Event(1) { tick = t; }
    virtual int ID() const override { return EVENT_ID_PRICE_UPDATE; }
-   virtual string Type() const override { return "PriceUpdate"; }
 };
 
 class NewBarEvent : public Event
@@ -41,7 +40,6 @@ public:
        : Event(2), barOpenTime(time), open(o), high(h), low(l), close(c), period(tf) {}
 
    virtual int ID() const override { return EVENT_ID_NEW_BAR; }
-   virtual string Type() const override { return "NewBar"; }
 };
 
 //+------------------------------------------------------------------+
@@ -57,7 +55,6 @@ public:
        : Event(3), sessionActive(active), sessionName(name) {}
 
    virtual int ID() const override { return EVENT_ID_SESSION_CHANGE; }
-   virtual string Type() const override { return "SessionChange"; }
 };
 
 class NewsAlertEvent : public Event
@@ -71,7 +68,6 @@ public:
        : Event(4), newsTitle(title), eventTime(time), impact(lvl) {}
 
    virtual int ID() const override { return EVENT_ID_NEWS_ALERT; }
-   virtual string Type() const override { return "NewsAlert"; }
 };
 
 class ZoneUpdateEvent : public Event
@@ -93,7 +89,6 @@ public:
          supHtfAlign(supAlign), resHtfAlign(resAlign), supStrength(supStr), resStrength(resStr), atrPoints(atr) {}
 
    virtual int ID() const override { return EVENT_ID_ZONE_UPDATE; }
-   virtual string Type() const override { return "ZoneUpdate"; }
 };
 
 class SignalGeneratedEvent : public Event
@@ -107,7 +102,6 @@ public:
        : Event(6), signal(sig), atrPoints(atr), support(sup), resistance(res) {}
 
    virtual int ID() const override { return EVENT_ID_SIGNAL_GENERATED; }
-   virtual string Type() const override { return "SignalGenerated"; }
 };
 
 class RecoveryOpportunityEvent : public Event
@@ -123,7 +117,6 @@ public:
        : Event(7), originalTicket(ticket), slHitPrice(slPrice), direction(dir), atrPoints(atr), originalLot(lot) {}
 
    virtual int ID() const override { return EVENT_ID_RECOVERY_OPPORTUNITY; }
-   virtual string Type() const override { return "RecoveryOpportunity"; }
 };
 
 class RecoverySignalEvent : public Event
@@ -138,7 +131,6 @@ public:
        : Event(8), originalTicket(originalT), signal(sig), atrPoints(atr), support(sup), resistance(res) {}
 
    virtual int ID() const override { return EVENT_ID_RECOVERY_SIGNAL; }
-   virtual string Type() const override { return "RecoverySignal"; }
 };
 
 class ConfigReloadEvent : public Event
@@ -146,7 +138,6 @@ class ConfigReloadEvent : public Event
 public:
    ConfigReloadEvent() : Event(9) {}
    virtual int ID() const override { return EVENT_ID_CONFIG_RELOAD; }
-   virtual string Type() const override { return "ConfigReload"; }
 };
 
 class OrderExecutionEvent : public Event
@@ -167,7 +158,6 @@ public:
          rejectionReason(reason), orderComment(comment) {}
 
    virtual int ID() const override { return EVENT_ID_ORDER_EXECUTION; }
-   virtual string Type() const override { return "OrderExecution"; }
 };
 
 class PositionUpdateEvent : public Event
@@ -183,7 +173,6 @@ public:
          unrealizedPnL(pnl), isClosing(closing) {}
 
    virtual int ID() const override { return EVENT_ID_POSITION_UPDATE; }
-   virtual string Type() const override { return "PositionUpdate"; }
 };
 
 class PauseToggleEvent : public Event
@@ -194,7 +183,6 @@ public:
    
    PauseToggleEvent(bool buy, bool state) : Event(15), isBuy(buy), newState(state) {}
    virtual int ID() const override { return EVENT_ID_PAUSE_TOGGLE; }
-   virtual string Type() const override { return "PauseToggle"; }
 };
 
 //+------------------------------------------------------------------+
@@ -207,7 +195,6 @@ public:
 
    HeartbeatEvent(int secs = 5) : Event(10), intervalSeconds(secs) {}
    virtual int ID() const override { return EVENT_ID_HEARTBEAT; }
-   virtual string Type() const override { return "Heartbeat"; }
 };
 
 class EmergencyStopEvent : public Event
@@ -217,7 +204,6 @@ public:
 
    EmergencyStopEvent(const string r = "Manual Trigger") : Event(11), reason(r) {}
    virtual int ID() const override { return EVENT_ID_EMERGENCY_STOP; }
-   virtual string Type() const override { return "EmergencyStop"; }
 };
 
 class MarketGateEvent : public Event
@@ -232,7 +218,6 @@ public:
        : Event(12), gateOpen(open), entryAllowed(allowed), spread(spreadValue), atrPoints(atrValue) {}
 
    virtual int ID() const override { return EVENT_ID_MARKET_GATE; }
-   virtual string Type() const override { return "MarketGate"; }
 };
 
 //+------------------------------------------------------------------+
@@ -253,7 +238,7 @@ public:
 //+------------------------------------------------------------------+
 void ReplayRecordedEvents()
 {
-   if (g_recorder == NULL)
+   if (CheckPointer(g_recorder) == POINTER_INVALID)
       return;
 
    Print("Replaying ", g_recorder.HistorySize(), " events...");
@@ -307,16 +292,16 @@ void ReplayRecordedEvents()
    }
 }
 
-#define HANDLE_EVENT(className, eventType)                \
+#define HANDLE_EVENT(className, eventID)                  \
    virtual void HandleEvent(Event *e) override            \
    {                                                      \
-      if (e.Type() == eventType)                          \
+      if (e.ID() == eventID)                              \
       {                                                   \
          className *typed = dynamic_cast<className *>(e); \
          if (CheckPointer(typed) != POINTER_INVALID)      \
-            On##eventType(typed);                         \
+            On##className(typed);                         \
       }                                                   \
    }                                                      \
-   virtual void On##eventType(className *e) = 0;
+   virtual void On##className(className *e) = 0;
 
 #endif

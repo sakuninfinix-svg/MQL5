@@ -18,11 +18,6 @@ private:
    int m_atrHandle;
    int m_fractalHandle;
 
-   struct DataConfigCache
-   {
-      int atrPeriod;
-   } m_cfgCache;
-
    struct CachedData
    {
       datetime barTime;
@@ -38,8 +33,8 @@ private:
    double m_dayStartBalance;
    datetime m_lastProfitUpdateDay;
    datetime m_lastScanTime;
-   int m_lastHistoryCount;   // REPAIR: Cache history count to prevent redundant scanning
-   int m_consecutiveLosses; // NEW: Track consecutive losses
+   int m_lastHistoryCount;
+   int m_consecutiveLosses; 
    datetime m_lastLossTime;
 
 public:
@@ -84,20 +79,13 @@ public:
    virtual void OnConfigReload(ConfigReloadEvent *e) override
    {
       IManager::OnConfigReload(e);
-      RefreshConfigCache();
       ResetIndicators();
-   }
-
-   virtual void RefreshConfigCache() override
-   {
-      IManager::RefreshConfigCache();
-      m_cfgCache.atrPeriod = CFG.market.atrPeriod;
    }
 
    bool ResetIndicators()
    {
-      m_atrHandle = iATR(_Symbol, _Period, m_cfgCache.atrPeriod);
-      m_fractalHandle = iFractals(_Symbol, _Period);
+      m_atrHandle = iATR(m_symbol, m_period, CFG.market.atrPeriod);
+      m_fractalHandle = iFractals(m_symbol, m_period);
       if (m_atrHandle == INVALID_HANDLE || m_fractalHandle == INVALID_HANDLE)
          return false;
       UpdateIndicators();
@@ -106,22 +94,18 @@ public:
 
    void UpdateIndicators()
    {
-      datetime times[];
-      if (CopyTime(_Symbol, _Period, 0, 1, times) <= 0)
+      MqlRates rates[];
+      if (CopyRates(m_symbol, m_period, 0, 1, rates) <= 0)
          return;
-      datetime currentBar = times[0];
-
+      datetime currentBar = rates[0].time;
       if (m_cache.barTime == currentBar && !m_cache.dirty)
          return;
-
-      // Memastikan history terminal sudah tersinkronisasi
-      if (!SeriesInfoInteger(_Symbol, _Period, SERIES_SYNCHRONIZED))
+      if (!SeriesInfoInteger(m_symbol, m_period, SERIES_SYNCHRONIZED))
          return;
-
       double atrBuf[1];
       if (CopyBuffer(m_atrHandle, 0, 0, 1, atrBuf) > 0 && atrBuf[0] > 0)
       {
-         m_cache.atr = atrBuf[0] / _Point;
+         m_cache.atr = atrBuf[0] / SymbolInfoDouble(m_symbol, SYMBOL_POINT);
          if (CopyBuffer(m_fractalHandle, 0, 0, 100, m_cache.fractalsUp) < 100) return;
          if (CopyBuffer(m_fractalHandle, 1, 0, 100, m_cache.fractalsDown) < 100) return;
 
@@ -150,33 +134,30 @@ public:
    datetime GetLastLossTime() const { return m_lastLossTime; }
 
    // --- Consolidated Risk Logic ---
-   
    bool CanOpenTrade(double additionalRiskAmount)
    {
       double maxDailyLoss = AccountInfoDouble(ACCOUNT_EQUITY) * (CFG.risk.maxDailyLoss / 100.0);
-      // Cek apakah profit harian yang terealisasi + floating loss + risiko trade baru melampaui batas
       return (MathAbs(m_realizedDailyProfit) + additionalRiskAmount) < maxDailyLoss;
    }
 
    double CalculateLotSize(string symbol, double riskPct, double slDistancePoints, double qualityMultiplier = 1.0)
    {
       if (slDistancePoints <= 0) return 0.0;
-
       double lot = 0.0;
-      if (CFG.UseAutoLot)
+      if (CFG.risk.autoLot)
       {
          double equity = AccountInfoDouble(ACCOUNT_EQUITY);
          double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
          double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
 
          if (tickValue <= 0 || tickSize <= 0 || equity <= 0) return 0.0;
-
          double riskMoney = equity * (riskPct / 100.0);
-         double lossPerLot = (slDistancePoints * _Point / tickSize) * tickValue;
+         double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+         double lossPerLot = (slDistancePoints * point / tickSize) * tickValue;
 
          if (lossPerLot > 0) lot = riskMoney / lossPerLot;
       }
-      else lot = CFG.LotSize;
+      else lot = CFG.risk.lot;
 
       lot *= qualityMultiplier;
       return NormalizeVolume(symbol, lot);
@@ -188,7 +169,8 @@ public:
       double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
       if (tickValue <= 0 || tickSize <= 0 || volume <= 0) return 0.0;
 
-      return (slDistancePoints * _Point / tickSize) * tickValue * volume;
+      double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+      return (slDistancePoints * point / tickSize) * tickValue * volume;
    }
 
    bool ValidateTradeDistances(double slDist, double tpDist, double atrPoints, string &reason)
@@ -229,21 +211,18 @@ public:
 
    void RefreshDailyProfit()
    {
-      string gvName = "PASR_PROFIT_" + _Symbol + "_" + (string)CFG.risk.magic;
-
-      // MQL5 Best Practice: Gunakan CopyTime untuk daily timeframe
+      string gvName = "PASR_PROFIT_" + m_symbol + "_" + (string)CFG.risk.magic;
       datetime times[];
-      if (CopyTime(_Symbol, PERIOD_D1, 0, 1, times) <= 0)
+      if (CopyTime(m_symbol, PERIOD_D1, 0, 1, times) <= 0)
          return;
       datetime today = times[0];
-
       if (HistorySelect(today, TimeCurrent() + 1))
       {
          double dailySum = 0;
          for (int i = 0; i < HistoryDealsTotal(); i++)
          {
             ulong t = HistoryDealGetTicket(i);
-            if (t > 0 && HistoryDealGetInteger(t, DEAL_MAGIC) == CFG.risk.magic && (HistoryDealGetString(t, DEAL_SYMBOL) == _Symbol))
+            if (t > 0 && HistoryDealGetInteger(t, DEAL_MAGIC) == CFG.risk.magic && (HistoryDealGetString(t, DEAL_SYMBOL) == m_symbol))
             {
                dailySum += HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP) + HistoryDealGetDouble(t, DEAL_COMMISSION);
             }
@@ -256,39 +235,32 @@ public:
    void ResetDailyAnchor()
    {
       double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
-
-      // MQL5 Best Practice: Gunakan CopyTime untuk daily timeframe
       datetime times[];
-      if (CopyTime(_Symbol, PERIOD_D1, 0, 1, times) <= 0)
+      if (CopyTime(m_symbol, PERIOD_D1, 0, 1, times) <= 0)
          return;
       datetime today = times[0];
-
       RefreshDailyProfit();
       m_dayStartBalance = currentBalance - m_realizedDailyProfit;
       m_lastProfitUpdateDay = today;
    }
 
-   void UpdateAccountState() // Removed magic parameter
+   void UpdateAccountState() 
    {
       if (TimeCurrent() - m_lastScanTime < 1 && m_lastScanTime > 0)
          return;
-
-      // MQL5 Best Practice: Gunakan CopyTime untuk daily timeframe
       datetime times[];
-      if (CopyTime(_Symbol, PERIOD_D1, 0, 1, times) <= 0)
+      if (CopyTime(m_symbol, PERIOD_D1, 0, 1, times) <= 0)
          return;
       datetime today = times[0];
-
       if (today != m_lastProfitUpdateDay)
       {
          ResetDailyAnchor();
-         m_consecutiveLosses = 0; // Reset consecutive losses on new day
+         m_consecutiveLosses = 0; 
       }
       else
          RefreshDailyProfit();
 
       UpdatePerformanceStats();
-
       PositionScanResult temp;
       ZeroMemory(temp);
       temp.dailyRealized = m_realizedDailyProfit;
@@ -297,7 +269,7 @@ public:
       for (int i = 0; i < PositionsTotal(); i++)
       {
          ulong ticket = PositionGetTicket(i);
-         if (ticket <= 0 || PositionGetInteger(POSITION_MAGIC) != CFG.risk.magic || (PositionGetString(POSITION_SYMBOL) != _Symbol))
+         if (ticket <= 0 || PositionGetInteger(POSITION_MAGIC) != CFG.risk.magic || (PositionGetString(POSITION_SYMBOL) != m_symbol))
             continue;
          floatingTotal += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP) + PositionGetDouble(POSITION_COMMISSION);
          temp.normalCount++;
@@ -310,7 +282,7 @@ public:
       for (int i = 0; i < OrdersTotal(); i++)
       {
          ulong oTicket = OrderGetTicket(i);
-         if (oTicket > 0 && OrderGetInteger(ORDER_MAGIC) == CFG.risk.magic && (OrderGetString(ORDER_SYMBOL) == _Symbol))
+         if (oTicket > 0 && OrderGetInteger(ORDER_MAGIC) == CFG.risk.magic && (OrderGetString(ORDER_SYMBOL) == m_symbol))
          {
             ENUM_ORDER_STATE oState = (ENUM_ORDER_STATE)OrderGetInteger(ORDER_STATE);
             if (oState == ORDER_STATE_STARTED || oState == ORDER_STATE_PLACED)
@@ -322,7 +294,7 @@ public:
       temp.totalProfit = temp.dailyRealized + temp.floatingPnL;
 
       double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-      if (MathAbs(m_dayStartBalance) > _Point) // FIX: Avoid division by zero on small balance
+      if (MathAbs(m_dayStartBalance) > _Point) 
          temp.dailyDrawdown = ((m_dayStartBalance - equity) / m_dayStartBalance) * 100.0;
 
       m_scanCache = temp;
@@ -352,7 +324,7 @@ public:
          return;
 
       int total = HistoryDealsTotal();
-      if (total == m_lastHistoryCount) return; // REPAIR: Skip if no new deals
+      if (total == m_lastHistoryCount) return; 
       
       m_lastHistoryCount = total;
       ZeroMemory(m_perfStats);
@@ -386,7 +358,6 @@ public:
       }
    }
 
-   // NEW: Update consecutive losses counter
    void UpdateConsecutiveLosses(double netProfit)
    {
       if (netProfit < 0)

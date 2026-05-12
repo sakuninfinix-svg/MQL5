@@ -21,7 +21,7 @@
 #include <PASR/8.RecoveryManager.mqh>
 #include <PASR/9.PatternManager.mqh>
 #include <PASR/10.DataManager.mqh>
-#include <PASR/AIManager.mqh>
+#include <PASR/7.AIManager.mqh>
 #include <PASR/11.DashboardManager.mqh>
 
 //--- Global Pointers Declaration

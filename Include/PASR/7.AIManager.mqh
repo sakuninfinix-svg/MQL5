@@ -13,8 +13,6 @@
 #ifndef __AI_MANAGER_MQH__
 #define __AI_MANAGER_MQH__
 
-#include "mql5_vscode_fix.h"
-#include "2.Config.mqh"
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
 
@@ -56,6 +54,12 @@ private:
       double recentWinRate;
       double longTermWinRate;
       int driftDetectionWindow;
+      // Neural Network Weights
+      double nn_hidden1_w1, nn_hidden1_w2, nn_hidden1_w3, nn_hidden1_bias;
+      double nn_hidden2_w1, nn_hidden2_w2, nn_hidden2_w3, nn_hidden2_bias;
+      double nn_output_w1, nn_output_w2, nn_output_bias;
+      double nnLearningRate;
+      int nnTrainingSamples;
    } m_model;
 
    int m_lastHeartbeat;
@@ -98,6 +102,12 @@ public:
       m_model.recentWinRate = -1.0;
       m_model.longTermWinRate = -1.0;
       m_model.driftDetectionWindow = 50;
+      // Neural Network Initialization
+      m_model.nn_hidden1_w1 = 0.5; m_model.nn_hidden1_w2 = 0.5; m_model.nn_hidden1_w3 = 0.5; m_model.nn_hidden1_bias = 0.1;
+      m_model.nn_hidden2_w1 = 0.5; m_model.nn_hidden2_w2 = 0.5; m_model.nn_hidden2_w3 = 0.5; m_model.nn_hidden2_bias = 0.1;
+      m_model.nn_output_w1 = 0.5;  m_model.nn_output_w2 = 0.5;  m_model.nn_output_bias = 0.1;
+      m_model.nnLearningRate = 0.01;
+      m_model.nnTrainingSamples = 0;
    }
 
    virtual void RefreshConfigCache() override
@@ -160,10 +170,10 @@ public:
 
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
-      if (!m_cfgCache.useAI || !e.signal.valid)
+      if (!m_cfgCache.useAI || !e->signal.valid)
          return;
 
-      double score = EvaluateSignal(e.signal, e.atrPoints, e.support, e.resistance);
+      double score = EvaluateSignal(e->signal, e->atrPoints, e->support, e->resistance);
       
       // Prediksi Adaptive Multiplier untuk SL (1.0 - 2.0)
       double aiSlAdjustment = 1.0 + (Logistic(score) * m_model.volNoiseWeight);
@@ -252,7 +262,6 @@ private:
       double hybridScore = (1.0 - nnWeight) * ensembleScore + nnWeight * nnScore;
       
       return Logistic(hybridScore);
-      return Logistic(ensembleScore);
    }
    
    double EvaluateTrendExpert(const SignalDecision &signal, const double atrPoints,
@@ -549,7 +558,7 @@ private:
 
    double NormalizeLossStreak() const
    {
-      if (CheckPointer(m_data) == POINTER_INVALID || m_data == NULL)
+      if (CheckPointer(m_data) == POINTER_INVALID)
          return 0.0;
       int losses = m_data->GetConsecutiveLosses();
       return MathMax(0.0, 1.0 - MathMin(1.0, losses * 0.1));
@@ -770,7 +779,7 @@ private:
 
    void LogSignalSample(const SignalDecision &signal, double atrPoints, double support, double resistance, double score, bool accepted)
    {
-      string sampleId = CreateSampleId();
+      string sampleId = CreateSampleId(); // This function increments m_loggedSamples
       string zoneStrength = DoubleToString(NormalizeZoneFeature(signal.zonePrice, support, resistance), 2);
       string filepath = m_datasetFilename;
       int handle = FileOpen(filepath, FILE_READ | FILE_WRITE | FILE_CSV | FILE_ANSI);
@@ -786,7 +795,7 @@ private:
       }
 
       double spread = SymbolInfoDouble(_Symbol, SYMBOL_SPREAD);
-      int losses = (CheckPointer(m_data) != POINTER_INVALID && m_data != NULL) ? m_data.GetConsecutiveLosses() : 0;
+      int currentLosses = (CheckPointer(m_data) != POINTER_INVALID) ? m_data.GetConsecutiveLosses() : 0;
       
       // Calculate individual expert scores for logging
       double trendScore = EvaluateTrendExpert(signal, atrPoints, support, resistance);
@@ -807,7 +816,7 @@ private:
                 DoubleToString(spread, 2),
                 DoubleToString(signal.slMultiplier, 2),
                 zoneStrength,
-                losses,
+                IntegerToString(currentLosses),
                 DoubleToString(volatility, 4),
                 DoubleToString(timeOfDay, 2),
                 DoubleToString(mtConfluence, 4),
@@ -857,7 +866,7 @@ private:
 
    void AdaptModelToPerformance()
    {
-      if (CheckPointer(m_data) == POINTER_INVALID || m_data == NULL)
+      if (CheckPointer(m_data) == POINTER_INVALID)
          return;
 
       PerformanceStats stats = m_data->GetPerformanceStats();
@@ -946,7 +955,7 @@ private:
       m_model.mtConfluenceWeight = NormalizeWeight(m_model.mtConfluenceWeight * m_cfgCache.modelDecay);
       m_model.volumeWeight = NormalizeWeight(m_model.volumeWeight * m_cfgCache.modelDecay);
       // Neural Network weights decay (very slow to preserve learned patterns)
-      double Include/PASR/AIManager.mqh = 0.999; // Much slower than ensemble weights
+      double nnDecay = 0.999; // Much slower than ensemble weights
       m_model.nn_hidden1_w1 = NormalizeWeight(m_model.nn_hidden1_w1 * nnDecay);
       m_model.nn_hidden1_w2 = NormalizeWeight(m_model.nn_hidden1_w2 * nnDecay);
       m_model.nn_hidden1_w3 = NormalizeWeight(m_model.nn_hidden1_w3 * nnDecay);

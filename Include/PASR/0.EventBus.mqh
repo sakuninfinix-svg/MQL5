@@ -38,9 +38,6 @@ public:
    virtual int ID() const = 0;
    datetime Timestamp() const { return m_timestamp; }
    int SourceId() const { return m_sourceId; }
-
-   virtual string Type() const = 0;
-   virtual string Serialize() const { return ""; }
 };
 
 // Forward declaration for the recorder
@@ -165,7 +162,7 @@ private:
       int priority;
    };
    
-   HandlerRegistration m_handlersByType[MAX_EVENT_TYPES][];
+   HandlerRegistration m_handlersByType[MAX_EVENT_TYPES][MAX_HANDLERS_PER_EVENT];
    int m_handlerCount[MAX_EVENT_TYPES];
 
    EventBus() 
@@ -199,27 +196,38 @@ public:
          return false;
       if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
          return false;
+      
+      int total = m_handlerCount[eventID];
+      if (total >= MAX_HANDLERS_PER_EVENT)
+         return false;
 
       // Avoid duplicate subscriptions
-      int total = m_handlerCount[eventID];
-      HandlerRegistration &handlers[] = m_handlersByType[eventID];
-      
       for (int i = 0; i < total; i++)
       {
-         if (handlers[i].handler == handler)
+         if (m_handlersByType[eventID][i].handler == handler)
             return false;
       }
 
-      if (ArrayResize(handlers, total + 1) == -1)
-         return false;
+      // Insert based on priority (Descending: higher priority first)
+      int insertPos = total;
+      for (int i = 0; i < total; i++)
+      {
+         if (priority > m_handlersByType[eventID][i].priority)
+         {
+            insertPos = i;
+            break;
+         }
+      }
 
-      handlers[total].handler = handler;
-      handlers[total].priority = priority;
+      // Shift elements to the right to make room
+      for (int j = total; j > insertPos; j--)
+         m_handlersByType[eventID][j] = m_handlersByType[eventID][j - 1];
+
+      m_handlersByType[eventID][insertPos].handler = handler;
+      m_handlersByType[eventID][insertPos].priority = priority;
       m_handlerCount[eventID] = total + 1;
-
       return true;
    }
-
    // Unsubscribe handler - O(n) but rarely called
    void Unsubscribe(int eventID, IEventHandler *handler)
    {
@@ -229,18 +237,16 @@ public:
          return;
 
       int total = m_handlerCount[eventID];
-      HandlerRegistration &handlers[] = m_handlersByType[eventID];
       
       for (int i = 0; i < total; i++)
       {
-         if (handlers[i].handler == handler)
+         if (m_handlersByType[eventID][i].handler == handler)
          {
             // Shift remaining handlers
             for (int j = i; j < total - 1; j++)
             {
-               handlers[j] = handlers[j + 1];
+               m_handlersByType[eventID][j] = m_handlersByType[eventID][j + 1];
             }
-            ArrayResize(handlers, total - 1);
             m_handlerCount[eventID] = total - 1;
             return;
          }
@@ -258,23 +264,19 @@ public:
 
       if (id < 0 || id >= MAX_EVENT_TYPES)
       {
-         if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC)
-            delete e;
+         if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC) delete e;
          return;
       }
 
       int total = m_handlerCount[id];
       if (total == 0)
       {
-         if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC)
-            delete e;
+         if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC) delete e;
          return;
       }
 
-      HandlerRegistration &handlers[] = m_handlersByType[id];
-
       // Record event once before dispatching
-      if (g_recorder != NULL && CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
+      if (CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
       {
          g_recorder.Record(e);
       }
@@ -282,7 +284,7 @@ public:
       // Execute handlers directly without sorting (priority handled by subscription order)
       for (int i = 0; i < total; i++)
       {
-         IEventHandler *h = handlers[i].handler;
+         IEventHandler *h = m_handlersByType[id][i].handler;
          if (h != NULL && CheckPointer(h) != POINTER_INVALID)
          {
             h.HandleEvent(e);
@@ -300,7 +302,6 @@ public:
    {
       for (int i = 0; i < MAX_EVENT_TYPES; i++)
       {
-         ArrayFree(m_handlersByType[i]);
          m_handlerCount[i] = 0;
       }
    }
@@ -308,13 +309,14 @@ public:
 
 inline void DispatchEvent(Event *e)
 {
-   EventBus::Instance().Dispatch(e);
+   EventBus *bus = EventBus::Instance();
+   if (CheckPointer(bus) != POINTER_INVALID)
+      bus.Dispatch(e);
+   else if (CheckPointer(e) == POINTER_DYNAMIC)
+      delete e;
 }
 
 // Initialize static members
 EventBus *EventBus::m_instance = NULL;
-Event *EventBus::m_eventPool[];
-int EventBus::m_eventPoolSize = 0;
-int EventBus::m_eventPoolIndex = 0;
 
 #endif

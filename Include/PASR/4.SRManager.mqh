@@ -53,7 +53,7 @@ private:
       if (price <= 0)
          return true;
       double closePrices[];
-      if (CopyClose(_Symbol, _Period, 1, barsCount, closePrices) <= 0)
+      if (CopyClose(m_symbol, m_period, 1, barsCount, closePrices) <= 0)
          return false;
 
       int breach = 0;
@@ -101,7 +101,8 @@ private:
       // Performa: Cek apakah harga berubah sebelum update objek
       if (ObjectFind(0, name) >= 0)
       {
-         if (MathAbs(ObjectGetDouble(0, name, OBJPROP_PRICE) - price) < _Point)
+         double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+         if (MathAbs(ObjectGetDouble(0, name, OBJPROP_PRICE) - price) < point)
             return;
       }
 

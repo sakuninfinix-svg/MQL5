@@ -11,7 +11,6 @@
 #ifndef __I_MANAGER_MQH__
 #define __I_MANAGER_MQH__
 
-#include "mql5_vscode_fix.h"
 #include "2.Config.mqh"
 #include "0.EventBus.mqh"
 #include "1.Events.mqh"
@@ -33,6 +32,8 @@ protected:
    DataManager *m_data;
    bool m_debugMode;
 
+   string m_symbol;
+   ENUM_TIMEFRAMES m_period;
    static DataManager *s_dataCache;
 
 public:
@@ -43,6 +44,8 @@ public:
       m_priority = priority;
       m_debugMode = CFG.system.debug;
       m_bus = EventBus::Instance();
+      m_symbol = _Symbol;
+      m_period = _Period;
       // m_data initialized later in Init()
    }
 
@@ -176,6 +179,9 @@ public:
    // --- UTILITIES ---
    bool IsInitialized() const { return m_initialized; }
    string GetName() const { return m_name; }
+   string GetSymbol() const { return m_symbol; }
+   ENUM_TIMEFRAMES GetPeriod() const { return m_period; }
+
    int GetPriority() const { return m_priority; }
 
 protected:
