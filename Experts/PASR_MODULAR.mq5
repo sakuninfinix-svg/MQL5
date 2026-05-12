@@ -47,12 +47,14 @@ struct EAConfigCache
    string  symbolName;
    int     symbolDigits;
    double  symbolPoint;
+   ENUM_TIMEFRAMES timeframe;
    
    void Initialize()
    {
       magicNum      = CFG.risk.magic;
       debugMode     = CFG.system.debug;
       symbolName    = _Symbol;
+      timeframe     = _Period;
       symbolDigits  = (int)SymbolInfoInteger(symbolName, SYMBOL_DIGITS);
       symbolPoint   = SymbolInfoDouble(symbolName, SYMBOL_POINT);
    }
@@ -355,7 +357,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 
       // Update last entry bar time
       datetime times[];
-      if(CopyTime(eaCfg.symbolName, _Period, 0, 1, times) > 0)
+      if(CopyTime(eaCfg.symbolName, eaCfg.timeframe, 0, 1, times) > 0)
          market.UpdateLastEntryBarTime(times[0]);
    }
    //--- Handle position closed (DEAL_ENTRY_OUT or DEAL_ENTRY_INOUT)
@@ -416,7 +418,7 @@ void OnTick()
 
    //--- Check for new bar using CopyTime (MQL5 Best Practice)
    datetime times[];
-   if(CopyTime(eaCfg.symbolName, _Period, 0, 1, times) <= 0)
+   if(CopyTime(eaCfg.symbolName, eaCfg.timeframe, 0, 1, times) <= 0)
       return;
       
    datetime currentBar = times[0];
@@ -429,7 +431,7 @@ void OnTick()
       MqlRates rates[];
       ArraySetAsSeries(rates, true);
       
-      if(CopyRates(eaCfg.symbolName, _Period, 0, 1, rates) > 0)
+      if(CopyRates(eaCfg.symbolName, eaCfg.timeframe, 0, 1, rates) > 0)
       {
          DispatchEvent(new NewBarEvent(
              currentBar,
@@ -437,7 +439,7 @@ void OnTick()
              rates[0].high,
              rates[0].low,
              rates[0].close,
-             _Period));
+             eaCfg.timeframe));
       }
    }
 }
