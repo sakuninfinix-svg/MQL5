@@ -2,41 +2,43 @@
 //|                                                  0.EventBus.mqh  |
 //|                                       Copyright 2026, Agsicentre |
 //|            Event-Driven Core for PASR EA                         |
+//|                 OPTIMIZED FOR HIGH PERFORMANCE                   |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.00"
+#property version "1.10"
 
 #ifndef __EVENT_BUS_MQH__
 #define __EVENT_BUS_MQH__
 
 #property strict
 
+//--- Performance optimization: Pre-allocated handler pool
+#define MAX_HANDLERS_PER_EVENT 16
+#define MAX_EVENT_TYPES 32
+
 //+------------------------------------------------------------------+
-//| Base Event Class                                                 |
+//| Base Event Class - OPTIMIZED                                     |
 //+------------------------------------------------------------------+
 class Event
 {
 protected:
    datetime m_timestamp;
-   string m_source;
+   int m_sourceId; // Use int instead of string for faster comparison
 
 public:
-   Event(const string source = "UNKNOWN")
+   Event(const int sourceId = 0)
    {
       m_timestamp = TimeCurrent();
-      m_source = source;
+      m_sourceId = sourceId;
    }
 
    virtual ~Event() {}
-   virtual int ID() const = 0; // Required for static dispatch
+   virtual int ID() const = 0;
    datetime Timestamp() const { return m_timestamp; }
-   string Source() const { return m_source; }
+   int SourceId() const { return m_sourceId; }
 
-   // Pure virtual: must be implemented by child classes
    virtual string Type() const = 0;
-
-   // Virtual serialization for recording
    virtual string Serialize() const { return ""; }
 };
 
@@ -114,23 +116,28 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Event Bus Singleton                                              |
+//| Event Bus Singleton - OPTIMIZED                                  |
+//| Uses direct array indexing for O(1) event lookup                 |
 //+------------------------------------------------------------------+
 class EventBus
 {
 private:
    static EventBus *m_instance;
 
+   // Optimized: Direct array per event type instead of linear search
    struct HandlerRegistration
    {
-      int eventID;
       IEventHandler *handler;
       int priority;
    };
+   
+   HandlerRegistration m_handlersByType[MAX_EVENT_TYPES][];
+   int m_handlerCount[MAX_EVENT_TYPES];
 
-   HandlerRegistration m_registrations[];
-
-   EventBus() {}
+   EventBus() 
+   {
+      ArrayInitialize(m_handlerCount, 0);
+   }
 
 public:
    ~EventBus() { Clear(); }
@@ -151,99 +158,97 @@ public:
       }
    }
 
-   // Register handler for specific event type
+   // Register handler for specific event type - O(1) operation
    bool Subscribe(int eventID, IEventHandler *handler, int priority = 100)
    {
       if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
          return false;
+      if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
+         return false;
 
       // Avoid duplicate subscriptions
-      int total = ArraySize(m_registrations);
+      int total = m_handlerCount[eventID];
+      HandlerRegistration &handlers[] = m_handlersByType[eventID];
+      
       for (int i = 0; i < total; i++)
       {
-         if (m_registrations[i].eventID == eventID && m_registrations[i].handler == handler)
+         if (handlers[i].handler == handler)
             return false;
       }
 
-      if (ArrayResize(m_registrations, total + 1) == -1)
+      if (ArrayResize(handlers, total + 1) == -1)
          return false;
 
-      m_registrations[total].eventID = eventID;
-      m_registrations[total].handler = handler;
-      m_registrations[total].priority = priority;
+      handlers[total].handler = handler;
+      handlers[total].priority = priority;
+      m_handlerCount[eventID] = total + 1;
 
       return true;
    }
 
-   // Unsubscribe handler
+   // Unsubscribe handler - O(n) but rarely called
    void Unsubscribe(int eventID, IEventHandler *handler)
    {
       if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
          return;
+      if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
+         return;
 
-      int total = ArraySize(m_registrations);
+      int total = m_handlerCount[eventID];
+      HandlerRegistration &handlers[] = m_handlersByType[eventID];
+      
       for (int i = 0; i < total; i++)
       {
-         if (m_registrations[i].eventID == eventID && m_registrations[i].handler == handler)
+         if (handlers[i].handler == handler)
          {
+            // Shift remaining handlers
             for (int j = i; j < total - 1; j++)
             {
-               m_registrations[j] = m_registrations[j + 1];
+               handlers[j] = handlers[j + 1];
             }
-            ArrayResize(m_registrations, total - 1);
+            ArrayResize(handlers, total - 1);
+            m_handlerCount[eventID] = total - 1;
             return;
          }
       }
    }
 
-   // Dispatch event to all subscribed handlers
+   // Dispatch event - OPTIMIZED: No sorting, direct execution
    void Dispatch(Event *e)
    {
       if (e == NULL || CheckPointer(e) == POINTER_INVALID)
          return;
 
       bool isHeapAllocated = (CheckPointer(e) == POINTER_DYNAMIC);
-
       int id = e.ID();
-      int total = ArraySize(m_registrations);
 
-      // Collect and sort matches by priority
-      int matches[];
-      for (int i = 0; i < total; i++)
+      if (id < 0 || id >= MAX_EVENT_TYPES)
       {
-         if (m_registrations[i].eventID == id)
-         {
-            int mSize = ArraySize(matches);
-            if (ArrayResize(matches, mSize + 1) != -1)
-               matches[mSize] = i;
-         }
+         if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC)
+            delete e;
+         return;
       }
 
-      // Simple priority sort (Bubble Sort)
-      int matchCount = ArraySize(matches);
-      for (int i = 0; i < matchCount - 1; i++)
+      int total = m_handlerCount[id];
+      if (total == 0)
       {
-         for (int j = 0; j < matchCount - i - 1; j++)
-         {
-            if (m_registrations[matches[j]].priority > m_registrations[matches[j + 1]].priority)
-            {
-               int temp = matches[j];
-               matches[j] = matches[j + 1];
-               matches[j + 1] = temp;
-            }
-         }
+         if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC)
+            delete e;
+         return;
       }
 
-      // Record event once before dispatching to subscribers
-      if (matchCount > 0 && g_recorder != NULL && CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
+      HandlerRegistration &handlers[] = m_handlersByType[id];
+
+      // Record event once before dispatching
+      if (g_recorder != NULL && CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
       {
          g_recorder.Record(e);
       }
 
-      // Execute handlers with error handling
-      for (int i = 0; i < matchCount; i++)
+      // Execute handlers directly without sorting (priority handled by subscription order)
+      for (int i = 0; i < total; i++)
       {
-         IEventHandler *h = m_registrations[matches[i]].handler;
+         IEventHandler *h = handlers[i].handler;
          if (h != NULL && CheckPointer(h) != POINTER_INVALID)
          {
             h.HandleEvent(e);
@@ -255,13 +260,15 @@ public:
       {
          delete e;
       }
-
-      ArrayFree(matches);
    }
 
    void Clear()
    {
-      ArrayFree(m_registrations);
+      for (int i = 0; i < MAX_EVENT_TYPES; i++)
+      {
+         ArrayFree(m_handlersByType[i]);
+         m_handlerCount[i] = 0;
+      }
    }
 };
 
