@@ -56,12 +56,6 @@ private:
       double recentWinRate;
       double longTermWinRate;
       int driftDetectionWindow;
-      // Deep Learning Neural Network weights (2-layer)
-      double nn_hidden1_w1, nn_hidden1_w2, nn_hidden1_w3, nn_hidden1_bias;
-      double nn_hidden2_w1, nn_hidden2_w2, nn_hidden2_w3, nn_hidden2_bias;
-      double nn_output_w1, nn_output_w2, nn_output_bias;
-      double nnLearningRate;
-      int nnTrainingSamples;
    } m_model;
 
    int m_lastHeartbeat;
@@ -104,12 +98,6 @@ public:
       m_model.recentWinRate = -1.0;
       m_model.longTermWinRate = -1.0;
       m_model.driftDetectionWindow = 50;
-      // Neural Network initialization (Xavier-like initialization)
-      m_model.nn_hidden1_w1 = 0.5; m_model.nn_hidden1_w2 = -0.3; m_model.nn_hidden1_w3 = 0.4; m_model.nn_hidden1_bias = 0.1;
-      m_model.nn_hidden2_w1 = -0.4; m_model.nn_hidden2_w2 = 0.6; m_model.nn_hidden2_w3 = -0.2; m_model.nn_hidden2_bias = 0.0;
-      m_model.nn_output_w1 = 0.7; m_model.nn_output_w2 = -0.5; m_model.nn_output_bias = 0.3;
-      m_model.nnLearningRate = 0.01;
-      m_model.nnTrainingSamples = 0;
    }
 
    virtual void RefreshConfigCache() override
@@ -264,6 +252,7 @@ private:
       double hybridScore = (1.0 - nnWeight) * ensembleScore + nnWeight * nnScore;
       
       return Logistic(hybridScore);
+      return Logistic(ensembleScore);
    }
    
    double EvaluateTrendExpert(const SignalDecision &signal, const double atrPoints,
@@ -957,7 +946,7 @@ private:
       m_model.mtConfluenceWeight = NormalizeWeight(m_model.mtConfluenceWeight * m_cfgCache.modelDecay);
       m_model.volumeWeight = NormalizeWeight(m_model.volumeWeight * m_cfgCache.modelDecay);
       // Neural Network weights decay (very slow to preserve learned patterns)
-      double nnDecay = 0.999; // Much slower than ensemble weights
+      double Include/PASR/AIManager.mqh = 0.999; // Much slower than ensemble weights
       m_model.nn_hidden1_w1 = NormalizeWeight(m_model.nn_hidden1_w1 * nnDecay);
       m_model.nn_hidden1_w2 = NormalizeWeight(m_model.nn_hidden1_w2 * nnDecay);
       m_model.nn_hidden1_w3 = NormalizeWeight(m_model.nn_hidden1_w3 * nnDecay);

@@ -1,8 +1,8 @@
 ```
 # Compiled and binary files
-*.mqh
-*.mq4
-*.mq5
+
+
+
 *.ex4
 *.ex5
 *.fxt
