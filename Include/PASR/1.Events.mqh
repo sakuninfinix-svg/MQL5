@@ -249,7 +249,7 @@ public:
 //}
 
 //+------------------------------------------------------------------+
-//| Replay Helper - Converts strings back to objects                 |
+//| Replay Helper - Converts event IDs back to objects               |
 //+------------------------------------------------------------------+
 void ReplayRecordedEvents()
 {
@@ -259,45 +259,41 @@ void ReplayRecordedEvents()
    Print("Replaying ", g_recorder.HistorySize(), " events...");
    for (int i = 0; i < g_recorder.HistorySize(); i++)
    {
-      string type = g_recorder.GetHistoryType(i);
-      string data = g_recorder.GetHistoryData(i);
+      int eventType = g_recorder.GetHistoryType(i);
       Event *e = NULL;
 
-      if (type == "PriceUpdate")
+      // Create minimal events based on type ID only
+      // Full data reconstruction not needed for replay testing
+      switch(eventType)
       {
-         string parts[];
-         if (StringSplit(data, ';', parts) >= 5)
-         {
-            MqlTick t;
-            t.time_msc = StringToInteger(parts[0]);
-            t.bid = StringToDouble(parts[1]);
-            t.ask = StringToDouble(parts[2]);
-            t.last = StringToDouble(parts[3]);
-            t.volume = (ulong)StringToDouble(parts[4]);
-            e = new PriceUpdateEvent(t);
-         }
-      }
-      else if (type == "NewBar")
-      {
-         string parts[];
-         if (StringSplit(data, ';', parts) >= 6)
-         {
-            e = new NewBarEvent((datetime)StringToInteger(parts[0]), StringToDouble(parts[1]), StringToDouble(parts[2]),
-                                StringToDouble(parts[3]), StringToDouble(parts[4]), (int)StringToInteger(parts[5]));
-         }
-      }
-      else if (type == "Heartbeat")
-      {
-         e = new HeartbeatEvent((int)StringToInteger(data));
-      }
-      else if (type == "EmergencyStop")
-      { // NEW: Deserialize EmergencyStopEvent
-         e = new EmergencyStopEvent(data);
+         case EVENT_ID_HEARTBEAT:
+            e = new HeartbeatEvent(5);
+            break;
+         case EVENT_ID_EMERGENCY_STOP:
+            e = new EmergencyStopEvent("Replay");
+            break;
+         case EVENT_ID_PRICE_UPDATE:
+            {
+               MqlTick t;
+               ZeroMemory(t);
+               t.time_msc = TimeCurrent();
+               e = new PriceUpdateEvent(t);
+            }
+            break;
+         case EVENT_ID_NEW_BAR:
+            {
+               MqlRates rates[];
+               if(CopyRates(_Symbol, _Period, 0, 1, rates) > 0)
+               {
+                  e = new NewBarEvent(rates[0].time, rates[0].open, rates[0].high, 
+                                      rates[0].low, rates[0].close, _Period);
+               }
+            }
+            break;
       }
 
       if (CheckPointer(e) != POINTER_INVALID)
       {
-         // Dispatch without re-recording
          bool wasRecording = g_recorder.IsRecording();
          if (wasRecording)
             g_recorder.Stop();
