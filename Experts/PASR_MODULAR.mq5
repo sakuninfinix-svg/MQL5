@@ -4,7 +4,7 @@
 //|         Enhanced & Refactored for Performance & Efficiency       |
 //+------------------------------------------------------------------+
 #property link      "agsicentre.wordpress.com"
-#property version   "1.10"
+#property version   "1.20"
 #property strict
 #property description "Modular Price Action & SR Trading System"
 #property description "Optimized for efficiency, reduced latency, and better resource management"
@@ -48,6 +48,7 @@ struct EAConfigCache
    int     symbolDigits;
    double  symbolPoint;
    ENUM_TIMEFRAMES timeframe;
+   double  symbolSpread;
    
    void Initialize()
    {
@@ -57,17 +58,32 @@ struct EAConfigCache
       timeframe     = _Period;
       symbolDigits  = (int)SymbolInfoInteger(symbolName, SYMBOL_DIGITS);
       symbolPoint   = SymbolInfoDouble(symbolName, SYMBOL_POINT);
+      symbolSpread  = (double)SymbolInfoInteger(symbolName, SYMBOL_SPREAD);
    }
    
    bool IsValidSymbol() const
    {
       return (symbolName.Length() > 0 && symbolDigits > 0 && symbolPoint > 0);
    }
+   
+   void RefreshSpread()
+   {
+      long spread = SymbolInfoInteger(symbolName, SYMBOL_SPREAD);
+      if(spread >= 0) symbolSpread = (double)spread;
+   }
 } eaCfg;
 
 //--- Cached values for performance
 static datetime g_lastBarTime = 0;
 static bool     g_isInitialized = false;
+
+//+------------------------------------------------------------------+
+//| Global accessor function for spread cache                        |
+//+------------------------------------------------------------------+
+double GetGlobalSpread()
+{
+   return eaCfg.symbolSpread;
+}
 
 int OnInit()
 {
@@ -408,6 +424,9 @@ void OnTimer()
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   //--- Refresh spread cache (lightweight, called every tick)
+   eaCfg.RefreshSpread();
+   
    //--- Get current tick data
    MqlTick tick;
    if(!SymbolInfoTick(eaCfg.symbolName, tick))

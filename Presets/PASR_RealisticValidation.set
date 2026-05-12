@@ -1,0 +1,56 @@
+; PASR_MODULAR v1.30 - Realistic Validation Preset
+; Tujuan: Memastikan profit bertahan dalam kondisi pasar nyata
+; Mode Tester: "Every tick based on real ticks" (Wajib)
+; Cara Penggunaan: Load setelah menemukan parameter optimal dari FastOptimization
+
+[Input]
+// --- General Settings
+InpMagicNumber=889900
+InpCommentTrade="PASR_Live"
+InpLogLevel=1
+InpUseTimeFilter=true
+InpStartHour=2
+InpEndHour=22
+
+// --- Risk Management (Konservatif)
+InpRiskPercent=0.5
+InpMaxDailyLossPercent=3.0
+InpMaxDailyLossAmount=0.0
+InpMaxOpenOrders=1
+InpMinOrderDistancePoints=100
+
+// --- Strategy: Support & Resistance (Stabil)
+InpSR_Sensitivity=20
+InpSR_LookbackBars=100
+InpSR_MinTouchCount=3
+InpSR_DistancePoints=500
+InpSR_ZoneWidthPoints=75
+InpSR_IgnoreMinor=true
+
+// --- Entry Filters (Ketut)
+InpUseTrendFilter=true
+InpTrendPeriod=50
+InpTrendMethod=1
+InpUseSpreadFilter=true
+InpMaxSpreadPoints=15
+InpUseVolatilityFilter=true
+InpMinVolatilityPoints=50
+InpMaxVolatilityPoints=500
+
+// --- Exit Strategy
+InpUseDynamicTPSL=true
+InpATR_Period=14
+InpTP_Multiplier=2.5
+InpSL_Multiplier=1.2
+InpTrailingStopEnable=true
+InpTrailingStartPoints=300
+InpTrailingStepPoints=50
+InpBreakEvenEnable=true
+InpBreakEvenPoints=150
+InpBreakEvenMinimalProfit=50
+
+// --- Execution (Realistis)
+InpSlippagePoints=3
+InpOrderExpiration=0
+InpDeviationPoints=5
+InpUseMarketExecution=true

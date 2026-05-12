@@ -52,6 +52,7 @@ private:
       double lockOffsetATR;
       double trailActivationATR;
       double trailStepATR;
+      int stopLevel; // Cached SYMBOL_TRADE_STOPS_LEVEL for error handling
    } m_cfgCache;
 
    //+------------------------------------------------------------------+
@@ -77,6 +78,9 @@ private:
       m_cfgCache.lockOffsetATR = CFG.exit.lockOffsetATR;
       m_cfgCache.trailActivationATR = CFG.exit.trailActivationATR;
       m_cfgCache.trailStepATR = CFG.exit.trailStepATR;
+      
+      // Cache stop level for error handling optimization
+      m_cfgCache.stopLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
    }
 
    int FindEngineIndex(ulong ticket)
@@ -110,10 +114,10 @@ private:
             if (m_debugMode)
                PrintFormat("[Recovery] Position %d closed: %s", r.mainTicket, reason);
          }
-         else
+         else if (m_debugMode)
          {
-            if (m_debugMode)
-               PrintFormat("[Recovery] Failed to close %d: Error %d", r.mainTicket, GetLastError());
+            int err = GetLastError();
+            PrintFormat("[Recovery] Failed to close %d: Error %d (%s)", r.mainTicket, err, m_trade.ResultRetcodeDescription());
          }
       }
 
@@ -226,12 +230,14 @@ private:
                         r.mainTicket, currentSL, newSL, signal.confidence);
          return true; // Fakeout handled, position held
       }
-      else
+      else if (m_debugMode)
       {
-         if (m_debugMode)
-            PrintFormat("[Fakeout] ✗ Failed to adjust SL for %d: Error %d", r.mainTicket, GetLastError());
+         int err = GetLastError();
+         PrintFormat("[Fakeout] ✗ Failed to adjust SL for %d: Error %d (%s)", 
+                     r.mainTicket, err, m_trade.ResultRetcodeDescription());
          return false;
       }
+      return false;
    }
 
    void ProcessTrailingAndPartial(RecoveryEngine *r, const MqlTick &tick, double atrPoints)
@@ -375,11 +381,11 @@ private:
                if (m_debugMode)
                   PrintFormat("[Recovery] ✓ Trailing BUY %d: SL %.5f (Profit: %.2f ATR)", r.mainTicket, newSL, profitATR);
             }
-            else
+            else if (m_debugMode)
             {
                modifyError = GetLastError();
-               if (m_debugMode)
-                  PrintFormat("[Recovery] ✗ Trailing BUY %d failed: Error %d", r.mainTicket, modifyError);
+               PrintFormat("[Recovery] ✗ Trailing BUY %d failed: Error %d (%s)", 
+                           r.mainTicket, modifyError, m_trade.ResultRetcodeDescription());
             }
          }
       }
@@ -407,11 +413,11 @@ private:
                if (m_debugMode)
                   PrintFormat("[Recovery] ✓ Trailing SELL %d: SL %.5f (Profit: %.2f ATR)", r.mainTicket, newSL, profitATR);
             }
-            else
+            else if (m_debugMode)
             {
                modifyError = GetLastError();
-               if (m_debugMode)
-                  PrintFormat("[Recovery] ✗ Trailing SELL %d failed: Error %d", r.mainTicket, modifyError);
+               PrintFormat("[Recovery] ✗ Trailing SELL %d failed: Error %d (%s)", 
+                           r.mainTicket, modifyError, m_trade.ResultRetcodeDescription());
             }
          }
       }

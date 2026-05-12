@@ -110,7 +110,8 @@ private:
       m_cache.scanResult = m_data.GetScanResult();
       m_cache.perfStats = m_data.GetPerformanceStats();
       m_cache.atrPoints = m_data.GetATRPoints();
-      m_cache.spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+      // Spread will be passed from external cache (EAConfigCache.symbolSpread)
+      // m_cache.spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
 
       // 2. Kalkulasi variabel tampilan UI
       m_cache.equity = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -122,6 +123,11 @@ private:
       m_cache.openPositions = m_cache.scanResult.normalCount;
 
       m_cache.lastUpdate = TimeCurrent();
+   }
+   
+   void SetSpread(double spread)
+   {
+      m_cache.spread = spread;
    }
 
 public:
@@ -210,6 +216,10 @@ public:
       if (e == NULL)
          return;
       RefreshCache();
+      // Update spread from global EA config cache
+      double spread = GetGlobalSpread();
+      if(spread >= 0) SetSpread(spread);
+      
       if (m_chart > 0)
          EventChartCustom(m_chart, DASHBOARD_REFRESH, 0, 0, "");
    }
@@ -328,7 +338,9 @@ public:
                }
                else if (m_debugMode)
                {
-                  PrintFormat("[Dashboard] Failed to close %d: %d", ticket, GetLastError());
+                  int err = GetLastError();
+                  PrintFormat("[Dashboard] Failed to close %d: Error %d (%s)", 
+                              ticket, err, m_trade.ResultRetcodeDescription());
                }
             }
          }
