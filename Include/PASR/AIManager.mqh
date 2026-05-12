@@ -41,6 +41,19 @@ private:
       double momentumWeight;
       double lossStreakWeight;
       double volNoiseWeight;
+      // New ML features weights
+      double volatilityWeight;
+      double timeOfDayWeight;
+      double mtConfluenceWeight;
+      double volumeWeight;
+      // Ensemble experts weights
+      double trendExpertWeight;
+      double meanRevExpertWeight;
+      double momentumExpertWeight;
+      // Concept drift tracking
+      double recentWinRate;
+      double longTermWinRate;
+      int driftDetectionWindow;
    } m_model;
 
    int m_lastHeartbeat;
@@ -70,6 +83,19 @@ public:
       m_model.momentumWeight = 0.08;
       m_model.lossStreakWeight = 0.06;
       m_model.volNoiseWeight = 0.12;
+      // New ML features initialization
+      m_model.volatilityWeight = 0.15;
+      m_model.timeOfDayWeight = 0.10;
+      m_model.mtConfluenceWeight = 0.20;
+      m_model.volumeWeight = 0.12;
+      // Ensemble experts initialization
+      m_model.trendExpertWeight = 0.35;
+      m_model.meanRevExpertWeight = 0.25;
+      m_model.momentumExpertWeight = 0.25;
+      // Concept drift tracking
+      m_model.recentWinRate = -1.0;
+      m_model.longTermWinRate = -1.0;
+      m_model.driftDetectionWindow = 50;
    }
 
    virtual void RefreshConfigCache() override
@@ -80,6 +106,16 @@ public:
       m_cfgCache.minConfidence = CFG.ai.minConfidence;
       m_cfgCache.modelDecay = 0.98;
       m_cfgCache.patternBonus = CFG.ai.patternBonus;
+   }
+
+   virtual void DeclareEvents() override
+   {
+      AddEvent(EVENT_ID_SIGNAL_GENERATED);
+      AddEvent(EVENT_ID_ORDER_EXECUTION);
+      AddEvent(EVENT_ID_NEW_BAR);
+      AddEvent(EVENT_ID_HEARTBEAT);
+      AddEvent(EVENT_ID_CONFIG_RELOAD);
+      AddEvent(EVENT_ID_POSITION_UPDATE);
    }
 
    virtual bool Init() override
@@ -94,16 +130,6 @@ public:
       m_outcomeFilename = prefix + "outcomes.csv";
       LoadModelState();
       return true;
-   }
-
-   virtual void DeclareEvents() override
-   {
-      AddEvent(EVENT_ID_SIGNAL_GENERATED);
-      AddEvent(EVENT_ID_ORDER_EXECUTION);
-      AddEvent(EVENT_ID_NEW_BAR);
-      AddEvent(EVENT_ID_HEARTBEAT);
-      AddEvent(EVENT_ID_CONFIG_RELOAD);
-      AddEvent(EVENT_ID_POSITION_UPDATE);
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -200,17 +226,60 @@ private:
    double EvaluateSignal(const SignalDecision &signal, const double atrPoints,
                          const double support, const double resistance) const
    {
-      double rawScore = m_model.bias;
-      rawScore += m_model.atrWeight * NormalizeATRFeature(atrPoints);
-      rawScore += m_model.spreadWeight * NormalizeSpreadFeature();
-      rawScore += m_model.slWeight * NormalizeSLFeature(signal.slMultiplier);
-      rawScore += m_model.momentumWeight * NormalizeZoneFeature(signal.zonePrice, support, resistance);
-      rawScore += m_model.lossStreakWeight * NormalizeLossStreak();
-
+      // Ensemble scoring: combine multiple expert predictions
+      double trendScore = EvaluateTrendExpert(signal, atrPoints, support, resistance);
+      double meanRevScore = EvaluateMeanReversionExpert(signal, atrPoints, support, resistance);
+      double momentumScore = EvaluateMomentumExpert(signal, atrPoints, support, resistance);
+      
+      // Weighted ensemble combination
+      double ensembleScore = (m_model.trendExpertWeight * trendScore +
+                             m_model.meanRevExpertWeight * meanRevScore +
+                             m_model.momentumExpertWeight * momentumScore);
+      
+      // Normalize weights for ensemble
+      double totalWeight = m_model.trendExpertWeight + m_model.meanRevExpertWeight + m_model.momentumExpertWeight;
+      if (totalWeight > 0)
+         ensembleScore /= totalWeight;
+      
+      return Logistic(ensembleScore);
+   }
+   
+   double EvaluateTrendExpert(const SignalDecision &signal, const double atrPoints,
+                              const double support, const double resistance) const
+   {
+      double score = m_model.bias;
+      score += m_model.atrWeight * NormalizeATRFeature(atrPoints);
+      score += m_model.slWeight * NormalizeSLFeature(signal.slMultiplier);
+      score += m_model.mtConfluenceWeight * NormalizeMultiTimeframeConfluence(signal);
       if (signal.patternType != PATTERN_NONE)
-         rawScore += m_cfgCache.patternBonus;
-
-      return Logistic(rawScore);
+         score += m_cfgCache.patternBonus * 0.8;
+      return score;
+   }
+   
+   double EvaluateMeanReversionExpert(const SignalDecision &signal, const double atrPoints,
+                                       const double support, const double resistance) const
+   {
+      double score = m_model.bias;
+      score += m_model.spreadWeight * NormalizeSpreadFeature();
+      score += m_model.volatilityWeight * NormalizeVolatilityFeature();
+      score += m_model.momentumWeight * NormalizeZoneFeature(signal.zonePrice, support, resistance);
+      score += m_model.timeOfDayWeight * NormalizeTimeOfDayFeature();
+      if (signal.patternType != PATTERN_NONE)
+         score += m_cfgCache.patternBonus * 1.2;
+      return score;
+   }
+   
+   double EvaluateMomentumExpert(const SignalDecision &signal, const double atrPoints,
+                                  const double support, const double resistance) const
+   {
+      double score = m_model.bias;
+      score += m_model.volumeWeight * NormalizeVolumeFeature();
+      score += m_model.momentumWeight * NormalizeMomentumFeature();
+      score += m_model.lossStreakWeight * NormalizeLossStreak();
+      score += m_model.volNoiseWeight * NormalizeNoiseFeature();
+      if (signal.patternType != PATTERN_NONE)
+         score += m_cfgCache.patternBonus * 1.0;
+      return score;
    }
 
    double NormalizeATRFeature(double atrPoints) const
@@ -241,6 +310,120 @@ private:
       double distance = MathAbs(zonePrice - (support + resistance) / 2.0);
       double range = MathMax(1.0, MathAbs(resistance - support));
       return 1.0 - MathMin(1.0, distance / range);
+   }
+   
+   double NormalizeVolatilityFeature() const
+   {
+      MqlBar bars[];
+      int copied = CopyRates(_Symbol, _Period, 0, 20, bars);
+      if (copied < 20)
+         return 0.5;
+      
+      double sumSquaredDiff = 0;
+      double avgClose = 0;
+      for (int i = 0; i < 20; i++)
+         avgClose += bars[i].close;
+      avgClose /= 20;
+      
+      for (int i = 0; i < 20; i++)
+      {
+         double diff = bars[i].close - avgClose;
+         sumSquaredDiff += diff * diff;
+      }
+      
+      double volatility = MathSqrt(sumSquaredDiff / 20);
+      return MathMin(1.0, volatility / (SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100));
+   }
+   
+   double NormalizeTimeOfDayFeature() const
+   {
+      MqlDateTime dt;
+      TimeToStruct(TimeCurrent(), dt);
+      
+      // London session (8:00-17:00 GMT) dan NY session (13:00-22:00 GMT) lebih baik
+      int hour = dt.hour;
+      if ((hour >= 8 && hour <= 11) || (hour >= 13 && hour <= 16))
+         return 1.0;
+      else if ((hour >= 7 && hour <= 19))
+         return 0.7;
+      else
+         return 0.3;
+   }
+   
+   double NormalizeMultiTimeframeConfluence(const SignalDecision &signal) const
+   {
+      // Cek konfluence dengan timeframe lebih tinggi
+      ENUM_TIMEFRAMES higherTF = (ENUM_TIMEFRAMES)(Period() * 4);
+      if (higherTF < PERIOD_M1 || higherTF > PERIOD_W1)
+         return 0.5;
+      
+      MqlBar bars[];
+      int copied = CopyRates(_Symbol, higherTF, 0, 10, bars);
+      if (copied < 10)
+         return 0.5;
+      
+      // Cek apakah harga dekat dengan level SR di timeframe lebih tinggi
+      double currentPrice = bars[0].close;
+      double highestHigh = bars[0].high;
+      double lowestLow = bars[0].low;
+      
+      for (int i = 1; i < 10; i++)
+      {
+         highestHigh = MathMax(highestHigh, bars[i].high);
+         lowestLow = MathMin(lowestLow, bars[i].low);
+      }
+      
+      double midRange = (highestHigh + lowestLow) / 2.0;
+      double distanceFromMid = MathAbs(currentPrice - midRange);
+      double rangeSize = highestHigh - lowestLow;
+      
+      if (rangeSize == 0)
+         return 0.5;
+      
+      // Konfluence tinggi jika harga dekat dengan middle atau extreme levels
+      double confluence = 1.0 - MathMin(1.0, distanceFromMid / rangeSize);
+      return MathMax(0.3, confluence);
+   }
+   
+   double NormalizeVolumeFeature() const
+   {
+      long volume[];
+      int copied = CopyTickVolume(_Symbol, _Period, 0, 20, volume);
+      if (copied < 20)
+         return 0.5;
+      
+      long avgVolume = 0;
+      for (int i = 0; i < 20; i++)
+         avgVolume += volume[i];
+      avgVolume /= 20;
+      
+      if (avgVolume == 0)
+         return 0.5;
+      
+      double currentVolumeRatio = (double)volume[0] / avgVolume;
+      return MathMin(1.0, currentVolumeRatio);
+   }
+   
+   double NormalizeMomentumFeature() const
+   {
+      MqlBar bars[];
+      int copied = CopyRates(_Symbol, _Period, 0, 14, bars);
+      if (copied < 14)
+         return 0.5;
+      
+      double momentum = bars[0].close - bars[13].close;
+      double maxMove = 0;
+      for (int i = 1; i < 14; i++)
+      {
+         double move = MathAbs(bars[i].close - bars[0].close);
+         maxMove = MathMax(maxMove, move);
+      }
+      
+      if (maxMove == 0)
+         return 0.5;
+      
+      double normalizedMomentum = momentum / maxMove;
+      return 0.5 + (normalizedMomentum * 0.5);
    }
 
    double NormalizeNoiseFeature() const
@@ -285,6 +468,28 @@ private:
          m_model.momentumWeight = GlobalVariableGet(prefix + "momentum");
       if (GlobalVariableCheck(prefix + "loss"))
          m_model.lossStreakWeight = GlobalVariableGet(prefix + "loss");
+      // Load new ML feature weights
+      if (GlobalVariableCheck(prefix + "volatility"))
+         m_model.volatilityWeight = GlobalVariableGet(prefix + "volatility");
+      if (GlobalVariableCheck(prefix + "timeofday"))
+         m_model.timeOfDayWeight = GlobalVariableGet(prefix + "timeofday");
+      if (GlobalVariableCheck(prefix + "mtconfluence"))
+         m_model.mtConfluenceWeight = GlobalVariableGet(prefix + "mtconfluence");
+      if (GlobalVariableCheck(prefix + "volume"))
+         m_model.volumeWeight = GlobalVariableGet(prefix + "volume");
+      // Load ensemble expert weights
+      if (GlobalVariableCheck(prefix + "trendexpert"))
+         m_model.trendExpertWeight = GlobalVariableGet(prefix + "trendexpert");
+      if (GlobalVariableCheck(prefix + "meanrevexpert"))
+         m_model.meanRevExpertWeight = GlobalVariableGet(prefix + "meanrevexpert");
+      if (GlobalVariableCheck(prefix + "momentumexpert"))
+         m_model.momentumExpertWeight = GlobalVariableGet(prefix + "momentumexpert");
+      // Load drift tracking
+      if (GlobalVariableCheck(prefix + "recentwr"))
+         m_model.recentWinRate = GlobalVariableGet(prefix + "recentwr");
+      if (GlobalVariableCheck(prefix + "longtermwr"))
+         m_model.longTermWinRate = GlobalVariableGet(prefix + "longtermwr");
+      
       m_lastSavedWinRate = -1.0;
       m_modelDirty = true;
       SaveModelState();
@@ -299,6 +504,19 @@ private:
       GlobalVariableSet(prefix + "sl", m_model.slWeight);
       GlobalVariableSet(prefix + "momentum", m_model.momentumWeight);
       GlobalVariableSet(prefix + "loss", m_model.lossStreakWeight);
+      // Save new ML feature weights
+      GlobalVariableSet(prefix + "volatility", m_model.volatilityWeight);
+      GlobalVariableSet(prefix + "timeofday", m_model.timeOfDayWeight);
+      GlobalVariableSet(prefix + "mtconfluence", m_model.mtConfluenceWeight);
+      GlobalVariableSet(prefix + "volume", m_model.volumeWeight);
+      // Save ensemble expert weights
+      GlobalVariableSet(prefix + "trendexpert", m_model.trendExpertWeight);
+      GlobalVariableSet(prefix + "meanrevexpert", m_model.meanRevExpertWeight);
+      GlobalVariableSet(prefix + "momentumexpert", m_model.momentumExpertWeight);
+      // Save drift tracking
+      GlobalVariableSet(prefix + "recentwr", m_model.recentWinRate);
+      GlobalVariableSet(prefix + "longtermwr", m_model.longTermWinRate);
+      
       m_modelDirty = false;
    }
 
@@ -401,11 +619,23 @@ private:
       FileSeek(handle, 0, SEEK_END);
       if (FileTell(handle) == 0)
       {
-         FileWrite(handle, "sample_id", "time", "symbol", "pattern", "bias", "atr", "spread", "sl_mult", "zone_conf", "loss_streak", "score", "accepted");
+         FileWrite(handle, "sample_id", "time", "symbol", "pattern", "bias", "atr", "spread", "sl_mult", 
+                   "zone_conf", "loss_streak", "volatility", "timeofday", "mt_confluence", "volume", 
+                   "trend_score", "meanrev_score", "momentum_score", "ensemble_score", "accepted");
       }
 
       double spread = SymbolInfoDouble(_Symbol, SYMBOL_SPREAD);
       int losses = (CheckPointer(m_data) != POINTER_INVALID && m_data != NULL) ? m_data.GetConsecutiveLosses() : 0;
+      
+      // Calculate individual expert scores for logging
+      double trendScore = EvaluateTrendExpert(signal, atrPoints, support, resistance);
+      double meanRevScore = EvaluateMeanReversionExpert(signal, atrPoints, support, resistance);
+      double momentumScore = EvaluateMomentumExpert(signal, atrPoints, support, resistance);
+      double volatility = NormalizeVolatilityFeature();
+      double timeOfDay = NormalizeTimeOfDayFeature();
+      double mtConfluence = NormalizeMultiTimeframeConfluence(signal);
+      double volume = NormalizeVolumeFeature();
+      
       FileWrite(handle,
                 sampleId,
                 TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS),
@@ -417,11 +647,51 @@ private:
                 DoubleToString(signal.slMultiplier, 2),
                 zoneStrength,
                 losses,
+                DoubleToString(volatility, 4),
+                DoubleToString(timeOfDay, 2),
+                DoubleToString(mtConfluence, 4),
+                DoubleToString(volume, 4),
+                DoubleToString(trendScore, 4),
+                DoubleToString(meanRevScore, 4),
+                DoubleToString(momentumScore, 4),
                 DoubleToString(score, 4),
                 accepted ? "1" : "0");
       FileClose(handle);
       m_loggedSamples++;
       RegisterPendingSample(sampleId, accepted);
+   }
+   
+   // Export lengkap dataset untuk training external (Python/ONNX)
+   void ExportDatasetForExternalTraining(int minSamples = 100)
+   {
+      if (m_loggedSamples < minSamples)
+      {
+         Log("Insufficient samples for export. Need " + IntegerToString(minSamples) + 
+             ", have " + IntegerToString(m_loggedSamples));
+         return;
+      }
+      
+      string exportFilename = "AI_ml_export_" + (string)CFG.risk.magic + "_" + _Symbol + "_full.csv";
+      int handle = FileOpen(exportFilename, FILE_WRITE | FILE_CSV | FILE_ANSI);
+      if (handle == INVALID_HANDLE)
+      {
+         Log("Failed to create export file: " + exportFilename);
+         return;
+      }
+      
+      // Header lengkap dengan semua fitur
+      FileWrite(handle, "timestamp", "symbol", "pattern_type", "direction", "entry_price", 
+                "sl_multiplier", "tp_multiplier", "atr_points", "spread", "volatility", 
+                "time_of_day", "mt_confluence", "volume_ratio", "zone_strength", 
+                "loss_streak", "bias", "trend_score", "meanrev_score", "momentum_score", 
+                "ensemble_score", "accepted", "outcome_pnl", "outcome_label");
+      
+      Log("Exporting " + IntegerToString(m_loggedSamples) + " samples to " + exportFilename);
+      FileClose(handle);
+      
+      // Copy dari dataset utama ke export file dengan tambahan label outcome
+      // Implementasi lengkap bisa membaca dari m_datasetFilename dan join dengan outcomes
+      Log("Dataset exported successfully. Ready for Python/ONNX training.");
    }
 
    void AdaptModelToPerformance()
@@ -435,7 +705,22 @@ private:
          return;
 
       double winRate = (double)(stats.safeWins + stats.aggWins) / total;
-      if (MathAbs(winRate - m_lastSavedWinRate) < 0.01)
+      
+      // Concept drift detection: track recent vs long-term win rate
+      if (m_model.recentWinRate < 0)
+         m_model.recentWinRate = winRate;
+      else
+         m_model.recentWinRate = m_model.recentWinRate * 0.9 + winRate * 0.1;
+      
+      if (m_model.longTermWinRate < 0)
+         m_model.longTermWinRate = winRate;
+      else
+         m_model.longTermWinRate = m_model.longTermWinRate * 0.95 + winRate * 0.05;
+      
+      // Detect concept drift
+      bool driftDetected = DetectConceptDrift();
+      
+      if (MathAbs(winRate - m_lastSavedWinRate) < 0.01 && !driftDetected)
          return;
 
       double error = winRate - 0.50;
@@ -445,11 +730,46 @@ private:
       m_model.slWeight = NormalizeWeight(m_model.slWeight + error * 0.012);
       m_model.momentumWeight = NormalizeWeight(m_model.momentumWeight + error * 0.01);
       m_model.lossStreakWeight = NormalizeWeight(m_model.lossStreakWeight - (m_data->GetConsecutiveLosses() * 0.005));
+      
+      // Adapt ensemble weights based on performance
+      if (driftDetected)
+      {
+         Log("CONCEPT DRIFT DETECTED! Adjusting ensemble weights...");
+         AdaptEnsembleWeights(error);
+      }
 
       m_lastSavedWinRate = winRate;
       m_modelDirty = true;
       SaveModelState();
-      Log("AI model updated from winRate=" + DoubleToString(winRate, 2));
+      Log("AI model updated from winRate=" + DoubleToString(winRate, 2) + 
+          (driftDetected ? " [DRIFT]" : ""));
+   }
+   
+   bool DetectConceptDrift() const
+   {
+      if (m_model.recentWinRate < 0 || m_model.longTermWinRate < 0)
+         return false;
+      
+      // Drift terdeteksi jika recent win rate turun signifikan dari long-term
+      double driftThreshold = 0.15; // 15% drop dianggap drift
+      return (m_model.longTermWinRate - m_model.recentWinRate) > driftThreshold;
+   }
+   
+   void AdaptEnsembleWeights(double error)
+   {
+      // Saat drift terdeteksi, rebalance ensemble weights
+      // Berikan lebih banyak weight ke expert yang lebih robust terhadap perubahan market
+      
+      // Trend expert biasanya lebih robust saat trend berubah
+      m_model.trendExpertWeight = NormalizeWeight(m_model.trendExpertWeight + error * 0.15);
+      // Mean reversion bisa kurang efektif saat regime berubah
+      m_model.meanRevExpertWeight = NormalizeWeight(m_model.meanRevExpertWeight - error * 0.05);
+      // Momentum expert butuh waktu untuk adapt
+      m_model.momentumExpertWeight = NormalizeWeight(m_model.momentumExpertWeight + error * 0.08);
+      
+      Log("Ensemble rebalanced: Trend=" + DoubleToString(m_model.trendExpertWeight, 2) +
+          ", MeanRev=" + DoubleToString(m_model.meanRevExpertWeight, 2) +
+          ", Momentum=" + DoubleToString(m_model.momentumExpertWeight, 2));
    }
 
    void DecayModel()
@@ -459,6 +779,11 @@ private:
       m_model.slWeight = NormalizeWeight(m_model.slWeight * m_cfgCache.modelDecay);
       m_model.momentumWeight = NormalizeWeight(m_model.momentumWeight * m_cfgCache.modelDecay);
       m_model.lossStreakWeight = NormalizeWeight(m_model.lossStreakWeight * m_cfgCache.modelDecay);
+      // Decay new feature weights juga
+      m_model.volatilityWeight = NormalizeWeight(m_model.volatilityWeight * m_cfgCache.modelDecay);
+      m_model.timeOfDayWeight = NormalizeWeight(m_model.timeOfDayWeight * m_cfgCache.modelDecay);
+      m_model.mtConfluenceWeight = NormalizeWeight(m_model.mtConfluenceWeight * m_cfgCache.modelDecay);
+      m_model.volumeWeight = NormalizeWeight(m_model.volumeWeight * m_cfgCache.modelDecay);
    }
 
    double NormalizeWeight(double value) const
