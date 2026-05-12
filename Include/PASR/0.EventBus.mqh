@@ -59,7 +59,7 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Event Recorder (Debug Utility) - OPTIMIZED                       |
+//| Event Recorder (Debug Utility) - OPTIMIZED V1.21                 |
 //+------------------------------------------------------------------+
 class EventRecorder
 {
@@ -73,20 +73,34 @@ private:
 
    RecordedEvent m_history[];
    bool m_isRecording;
+   int m_maxHistory;        // Maximum history size (circular buffer)
+   int m_currentIndex;      // Current write position
 
 public:
-   EventRecorder() : m_isRecording(false) {}
+   EventRecorder() : m_isRecording(false), m_maxHistory(1000), m_currentIndex(0) {}
+
+   void SetMaxHistory(int size)
+   {
+      m_maxHistory = MathMax(100, MathMin(10000, size));
+      if(ArraySize(m_history) != m_maxHistory)
+         ArrayResize(m_history, m_maxHistory);
+   }
 
    void Start()
    {
       m_isRecording = true;
-      ArrayFree(m_history);
-      Print("Event Recording Started.");
+      m_currentIndex = 0;
+      // Pre-allocate once at startup
+      if(ArraySize(m_history) != m_maxHistory)
+         ArrayResize(m_history, m_maxHistory);
+      else
+         ArrayInitialize(m_history, 0);
+      Print("Event Recording Started (Max: ", m_maxHistory, " events).");
    }
    void Stop()
    {
       m_isRecording = false;
-      Print("Event Recording Stopped. Total: ", ArraySize(m_history));
+      Print("Event Recording Stopped. Captured: ", MathMin(m_currentIndex, m_maxHistory));
    }
    bool IsRecording() const { return m_isRecording; }
 
@@ -94,28 +108,44 @@ public:
    {
       if (!m_isRecording || CheckPointer(e) == POINTER_INVALID)
          return;
-      int idx = ArraySize(m_history);
-      ArrayResize(m_history, idx + 1);
+      
+      // Circular buffer - zero allocation
+      int idx = m_currentIndex % m_maxHistory;
       m_history[idx].timestamp = e.Timestamp();
       m_history[idx].eventType = e.ID();
       m_history[idx].sourceId = e.SourceId();
+      m_currentIndex++;
       // Skip serialization - store only essential data
    }
 
-   int HistorySize() const { return ArraySize(m_history); }
+   int HistorySize() const { return MathMin(m_currentIndex, m_maxHistory); }
+   
+   // Get actual count including overflow
+   int TotalRecorded() const { return m_currentIndex; }
 
    // Getter for Replay with bounds checking
    int GetHistoryType(int i)
    {
-      if (i < 0 || i >= ArraySize(m_history))
+      if (i < 0 || i >= HistorySize())
          return 0;
-      return m_history[i].eventType;
+      int idx = i % m_maxHistory;
+      return m_history[idx].eventType;
    }
+   
    int GetHistorySourceId(int i)
    {
-      if (i < 0 || i >= ArraySize(m_history))
+      if (i < 0 || i >= HistorySize())
          return 0;
-      return m_history[i].sourceId;
+      int idx = i % m_maxHistory;
+      return m_history[idx].sourceId;
+   }
+   
+   datetime GetHistoryTimestamp(int i)
+   {
+      if (i < 0 || i >= HistorySize())
+         return 0;
+      int idx = i % m_maxHistory;
+      return m_history[idx].timestamp;
    }
 };
 
