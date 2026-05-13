@@ -1,12 +1,12 @@
 //+------------------------------------------------------------------+
 //|                                              9.PatternManager.mqh |
 //|                                       Copyright 2026, Agsicentre |
-//|            Pattern Detection & Analysis Module                   |
+//|            Pattern Detection & Analysis Module (Static Utility)  |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.00"
+#property version "1.20"
 #property strict
 
 #ifndef __PATTERN_MANAGER_MQH__
@@ -24,6 +24,7 @@ struct FakeoutResult
    string reason;         // Diagnosis
 };
 
+// OPTIMIZATION V1.20: Converted to static class for memory efficiency
 class PatternManager
 {
 private:
@@ -39,7 +40,8 @@ private:
    };
 
 public:
-   bool Detect(ENUM_PATTERN_TYPE &outType,
+   // OPTIMIZATION V1.20: All methods converted to static for memory efficiency
+   static bool Detect(ENUM_PATTERN_TYPE &outType,
                const MqlRates &rates[],
                const int shift,
                const double _atrPoints,
@@ -169,18 +171,19 @@ public:
    }
 
 private:
-   void ResetVote(PatternVote &v)
+   // OPTIMIZATION V1.20: All private methods converted to static for consistency
+   static void ResetVote(PatternVote &v)
    {
       v.valid = false;
       v.type = PATTERN_NONE;
       v.dir = 0;
       v.extreme = 0.0;
       v.score = 0.0;
-      v.slMult = CFG.pattern.defaultSLMult; // Default SL multiplier
+      v.slMult = CFG.pattern.defaultSLMult;
       v.label = "";
    }
 
-   int FindBestVote(PatternVote &votes[], int dir)
+   static int FindBestVote(PatternVote &votes[], int dir)
    {
       int best = -1;
       double bestScore = 0.0;
@@ -199,7 +202,7 @@ private:
       return best;
    }
 
-   string BuildConfluenceLabel(const PatternVote &votes[], int dir)
+   static string BuildConfluenceLabel(const PatternVote &votes[], int dir)
    {
       string txt = "";
       for (int i = 0; i < ArraySize(votes); i++)
@@ -215,48 +218,48 @@ private:
       return txt;
    }
 
-   double CandleOpen(const MqlRates &rates[], int shift) { return rates[shift].open; }
-   double CandleHigh(const MqlRates &rates[], int shift) { return rates[shift].high; }
-   double CandleLow(const MqlRates &rates[], int shift) { return rates[shift].low; }
-   double CandleClose(const MqlRates &rates[], int shift) { return rates[shift].close; }
+   static double CandleOpen(const MqlRates &rates[], int shift) { return rates[shift].open; }
+   static double CandleHigh(const MqlRates &rates[], int shift) { return rates[shift].high; }
+   static double CandleLow(const MqlRates &rates[], int shift) { return rates[shift].low; }
+   static double CandleClose(const MqlRates &rates[], int shift) { return rates[shift].close; }
 
-   double CandleRange(const MqlRates &rates[], int shift)
+   static double CandleRange(const MqlRates &rates[], int shift)
    {
       return CandleHigh(rates, shift) - CandleLow(rates, shift);
    }
 
-   double CandleBody(const MqlRates &rates[], int shift)
+   static double CandleBody(const MqlRates &rates[], int shift)
    {
       return MathAbs(CandleClose(rates, shift) - CandleOpen(rates, shift));
    }
 
-   double UpperWick(const MqlRates &rates[], int shift)
+   static double UpperWick(const MqlRates &rates[], int shift)
    {
       return CandleHigh(rates, shift) - MathMax(CandleOpen(rates, shift), CandleClose(rates, shift));
    }
 
-   double LowerWick(const MqlRates &rates[], int shift)
+   static double LowerWick(const MqlRates &rates[], int shift)
    {
       return MathMin(CandleOpen(rates, shift), CandleClose(rates, shift)) - CandleLow(rates, shift);
    }
 
-   bool IsBullish(const MqlRates &rates[], int shift)
+   static bool IsBullish(const MqlRates &rates[], int shift)
    {
       return CandleClose(rates, shift) > CandleOpen(rates, shift);
    }
 
-   bool IsBearish(const MqlRates &rates[], int shift)
+   static bool IsBearish(const MqlRates &rates[], int shift)
    {
       return CandleClose(rates, shift) < CandleOpen(rates, shift);
    }
 
-   bool IsInsideBar(const MqlRates &rates[], int shift)
+   static bool IsInsideBar(const MqlRates &rates[], int shift)
    {
       return CandleHigh(rates, shift) < CandleHigh(rates, shift + 1) &&
              CandleLow(rates, shift) > CandleLow(rates, shift + 1);
    }
 
-   double NormalizeATRFactor(const double value, const double _atrPoints)
+   static double NormalizeATRFactor(const double value, const double _atrPoints)
    {
       double atrPrice = _atrPoints * _Point;
       if (atrPrice <= 0.0)
@@ -264,7 +267,7 @@ private:
       return value / atrPrice;
    }
 
-   void AddStrengthFromRejection(const MqlRates &rates[], const int shift, const double _atrPoints, const int dir, double &score)
+   static void AddStrengthFromRejection(const MqlRates &rates[], const int shift, const double _atrPoints, const int dir, double &score)
    {
       double range = CandleRange(rates, shift);
       if (range <= 0.0)
@@ -277,13 +280,13 @@ private:
 
       if (wickPct >= CFG.pattern.wickRatioThreshold)
          score += CFG.pattern.bonusStrongWick;
-      if (bodyPct <= CFG.pattern.bodyRatioThreshold) // Smaller body often indicates stronger rejection
+      if (bodyPct <= CFG.pattern.bodyRatioThreshold)
          score += CFG.pattern.bonusStrongBody;
       if (atrFactor >= CFG.pattern.atrRangeThreshold)
          score += CFG.pattern.bonusStrongATR;
    }
 
-   void AddStrengthFromFollowThrough(const MqlRates &rates[], const int shift, const int dir, double &score)
+   static void AddStrengthFromFollowThrough(const MqlRates &rates[], const int shift, const int dir, double &score)
    {
       double prevClose = CandleClose(rates, shift + 1);
       double curClose = CandleClose(rates, shift);
@@ -292,7 +295,7 @@ private:
          score += CFG.pattern.bonusFollowThrough;
    }
 
-   void EvaluatePinbar(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluatePinbar(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
    {
       double range = CandleRange(rates, shift);
       if (range <= 0.0)
@@ -330,7 +333,7 @@ private:
       AddStrengthFromFollowThrough(rates, shift, dir, vote.score);
    }
 
-   void EvaluateEngulfing(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateEngulfing(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
    {
       double o1 = CandleOpen(rates, shift), c1 = CandleClose(rates, shift);
       double o2 = CandleOpen(rates, shift + 1), c2 = CandleClose(rates, shift + 1);
@@ -372,7 +375,7 @@ private:
       AddStrengthFromFollowThrough(rates, shift, dir, vote.score);
    }
 
-   void EvaluateBottom(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateBottom(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
    {
       double h1 = CandleHigh(rates, shift);
       double l1 = CandleLow(rates, shift);
@@ -410,7 +413,7 @@ private:
       vote.label = (dir == 1) ? "Tweezer Bottom" : "Tweezer Top";
    }
 
-   void EvaluateFakey(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateFakey(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
    {
       // shift     : false-break candle
       double h0 = CandleHigh(rates, shift);
@@ -459,7 +462,7 @@ private:
       vote.label = (dir == 1) ? "Fakey Bull" : "Fakey Bear";
    }
 
-   void EvaluateInsideBar(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateInsideBar(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
    {
       if (!IsInsideBar(rates, shift))
          return;
@@ -501,7 +504,7 @@ private:
       vote.label = (dir == 1) ? "Inside Bull" : "Inside Bear";
    }
 
-   void EvaluateMorningStar(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateMorningStar(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
    {
       // Morning Star (Bullish): Bearish candle + Small middle candle (gap down) + Bullish candle (gap up, close > middle)
       // Evening Star (Bearish): Bullish candle + Small middle candle (gap up) + Bearish candle (gap down, close < middle)
@@ -573,7 +576,7 @@ private:
       vote.label = (dir == 1) ? "Morning Star" : "Evening Star";
    }
 
-   void EvaluateThreeInside(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateThreeInside(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
    {
       // Three Inside Up: Large bearish + Inside bar (bullish close) + Bullish breakout above bar 1 high
       // Three Inside Down: Large bullish + Inside bar (bearish close) + Bearish breakout below bar 1 low
@@ -635,7 +638,7 @@ private:
       vote.label = (dir == 1) ? "Three Inside Up" : "Three Inside Down";
    }
 
-   void EvaluateRailroadTracks(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateRailroadTracks(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
    {
       // Railroad Tracks Bullish: Long bearish candle followed by long bullish candle (similar body size, opposite direction)
       // Railroad Tracks Bearish: Long bullish candle followed by long bearish candle (similar body size, opposite direction)
@@ -706,7 +709,7 @@ private:
       vote.label = (dir == 1) ? "Railroad Bull" : "Railroad Bear";
    }
 
-   void EvaluateDarkCloudPiercing(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateDarkCloudPiercing(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
    {
       if (shift + 1 >= ArraySize(rates))
          return;
@@ -747,7 +750,7 @@ private:
       }
    }
 
-   void EvaluateMarubozu(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateMarubozu(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
    {
       double range = CandleRange(rates, shift);
       double body = CandleBody(rates, shift);
