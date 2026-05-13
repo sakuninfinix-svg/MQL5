@@ -243,6 +243,13 @@ public:
       else lot = m_cfgCache.lot_size;
 
       lot *= qualityMultiplier;
+      
+      // Apply Market Regime multiplier if enabled
+      if(m_cfgCache.use_regime && CheckPointer(g_regimeFilter) != POINTER_INVALID)
+      {
+         lot *= g_regimeFilter.GetLotMultiplier();
+      }
+      
       return NormalizeVolume(symbol, lot);
    }
 

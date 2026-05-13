@@ -24,6 +24,7 @@
 #include <PASR/10.DataManager.mqh>
 #include <PASR/7.AIManager.mqh>
 #include <PASR/11.DashboardManager.mqh>
+#include <PASR/12.MarketRegime.mqh>
 
 //--- Global Pointers Declaration
 EventRecorder      *g_recorder = NULL;  // Defined here, declared extern in EventBus.mqh
@@ -39,6 +40,7 @@ ExecutionManager   exec;
 RecoveryManager    recovery;
 DashboardUI        dashboard;
 DataManager        dta;
+MarketRegimeFilter regimeFilter;
 
 //--- Internal Config Cache for the EA Script
 struct EAConfigCache
@@ -175,6 +177,10 @@ int OnInit()
       Print("[ERROR] Failed to initialize RecoveryManager");
       return INIT_FAILED;
    }
+
+   // Initialize Market Regime Filter
+   regimeFilter.SetDataManager(GetPointer(dta));
+   regimeFilter.SetParameters(14, 20, 25.0, 15.0, 5.0, 1.5);
 
    // 7. Initialize Dashboard
    dashCtrl = DashboardManagerFactory::Create(GetPointer(dashboard), GetPointer(dta));
@@ -435,6 +441,12 @@ void OnTick()
 
    //--- Dispatch price update event (lightweight)
    DispatchEvent(new PriceUpdateEvent(tick));
+
+   //--- Update Market Regime on every tick (lightweight check)
+   if(CFG.market.useRegime)
+   {
+      regimeFilter.UpdateRegime(eaCfg.symbolName, eaCfg.timeframe);
+   }
 
    //--- Check for new bar using CopyTime (MQL5 Best Practice)
    datetime times[];
