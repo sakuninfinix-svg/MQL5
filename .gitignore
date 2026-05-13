@@ -1,48 +1,49 @@
 ```
 # Compiled files
-*.pyc
-*.class
-*.o
-*.obj
-*.out
-
-# Dependencies
-node_modules/
-venv/
-.venv/
-__pycache__/
-.mypy_cache/
-.pytest_cache/
-target/
-.gradle/
+*.mqh
+*.ex4
+*.ex5
+*.mq4
+*.mq5
 
 # Build artifacts
-dist/
-build/
-coverage/
-htmlcov/
-*.so
+*.o
+*.obj
 *.dll
+*.so
+*.lib
 *.a
-*.exe
 
-# Editor/IDE files
+# Dependencies
+Libraries/
+Include/
+
+# Logs
+*.log
+*.txt
+
+# Temp files
+*.tmp
+*.temp
+
+# Editor files
 .vscode/
 .idea/
 *.swp
 *.swo
-*.tmp
 
-# Logs
-*.log
-*.log.*
-
-# Environment
-.env
-.env.local
-*.env.*
-
-# System files
+# OS files
 .DS_Store
 Thumbs.db
+
+# Coverage and testing
+coverage/
+htmlcov/
+.coverage
+*.coverage
+
+# Distribution artifacts
+dist/
+build/
+target/
 ```

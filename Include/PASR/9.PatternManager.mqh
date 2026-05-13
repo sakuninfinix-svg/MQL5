@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
 //| PatternManager.mqh                                               |
-//| Copyright 2026, Agsicentre                                       |
+//|                                       Copyright 2026, Agsicentre |
+//|            Pattern Detection & Analysis Module                   |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"

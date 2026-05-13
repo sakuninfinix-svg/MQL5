@@ -1,9 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                   AIManager.mqh  |
-//|               Lightweight Adaptive AI Layer for PASR EA          |
-//|                          Copyright 2026, Agsicentre              |
-//|                                                                  |
-//|         DEEP LEARNING EDITION: Hybrid Ensemble + Neural Network  |
+//|                                       Copyright 2026, Agsicentre |
+//|            Adaptive AI & Signal Scoring Module                   |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"

@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              RecoveryManager.mqh |
 //|                                       Copyright 2026, Agsicentre |
+//|            Position Recovery & Fakeout Management Module         |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"

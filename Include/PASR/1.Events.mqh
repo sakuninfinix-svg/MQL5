@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                  1.Events.mqh    |
 //|                                       Copyright 2026, Agsicentre |
-//|               OPTIMIZED: Lightweight Event Classes               |
+//|            Event Class Definitions Module                        |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"

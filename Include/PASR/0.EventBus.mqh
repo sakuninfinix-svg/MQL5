@@ -2,8 +2,6 @@
 //|                                                  0.EventBus.mqh  |
 //|                                       Copyright 2026, Agsicentre |
 //|            Event-Driven Core for PASR EA                         |
-//|                 OPTIMIZED FOR HIGH PERFORMANCE                   |
-//|                 VERSION 1.20 - ULTRA FAST                        |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
