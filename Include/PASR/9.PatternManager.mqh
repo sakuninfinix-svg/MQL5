@@ -12,8 +12,8 @@
 #ifndef __PATTERN_MANAGER_MQH__
 #define __PATTERN_MANAGER_MQH__
 
-// Forward declarations only - no need for full IManager include
-// PatternManager is a plain utility class, not an IManager subclass
+// PatternManager membutuhkan akses ke CFG dan ENUM_PATTERN_TYPE
+#include "2.Config.mqh"
 
 struct FakeoutResult
 {
