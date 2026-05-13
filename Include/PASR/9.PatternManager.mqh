@@ -12,7 +12,8 @@
 #ifndef __PATTERN_MANAGER_MQH__
 #define __PATTERN_MANAGER_MQH__
 
-#include "IManager.mqh"
+// Forward declarations only - no need for full IManager include
+// PatternManager is a plain utility class, not an IManager subclass
 
 struct FakeoutResult
 {
