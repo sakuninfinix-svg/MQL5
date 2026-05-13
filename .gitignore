@@ -1,1 +1,1 @@
-Nothing to output - the change list contains only a markdown file (.md) which is a source/config file, and there are no build artifacts, dependencies, or temp files to ignore.
+Nothing should be ignored based on the provided file changes. The changes only include source files (.mqh) and a markdown documentation file, with no build artifacts, dependencies, or temporary files present in the change list.

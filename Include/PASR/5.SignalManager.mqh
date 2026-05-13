@@ -24,7 +24,8 @@ class SignalManager : public IManager
    //| PRIVATE: Internal State & Cache                                 |
    //+------------------------------------------------------------------+
 private:
-   PatternManager m_patterns;
+   // OPTIMIZATION V1.20: Removed instance - PatternManager is now static utility class
+   // No need to instantiate PatternManager anymore
 
    // --- Zone Tracking ---
    double m_lastBuyZonePrice;
@@ -423,7 +424,8 @@ private:
          double pScore = 0;
          double pSLMult = 1.0;
 
-         if (!m_patterns.Detect(rates, shift, atrPoints, pType, dir, signalPrice, pScore, pSLMult, patternReason))
+         // OPTIMIZATION V1.20: Call static method directly instead of instance method
+         if (!PatternManager::Detect(pType, rates, shift, atrPoints, dir, signalPrice, pScore, pSLMult, patternReason))
             continue;
 
          double zonePrice = (dir == 1) ? support : resistance;
@@ -559,7 +561,8 @@ private:
       double pScore = 0;
       double pSLMult = 1.0;
 
-      if (!m_patterns.Detect(rates, shift, atrPoints, pType, dir, signalPrice, pScore, pSLMult, patternReason))
+      // OPTIMIZATION V1.20: Call static method directly instead of instance method
+      if (!PatternManager::Detect(pType, rates, shift, atrPoints, dir, signalPrice, pScore, pSLMult, patternReason))
          return false;
 
       // Ensure pattern is in the target reversal direction
