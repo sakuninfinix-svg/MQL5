@@ -6,7 +6,7 @@
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.00"
+#property version "1.21"
 #property strict
 
 #ifndef __DATA_MANAGER_MQH__
@@ -14,7 +14,23 @@
 
 #include "IManager.mqh"
 
-class DataManager : public IManager
+//+------------------------------------------------------------------+
+//| Interface untuk Dependency Injection                             |
+//+------------------------------------------------------------------+
+interface IDataProvider
+{
+   double GetATRPoints() const;
+   PositionScanResult GetScanResult() const;
+   PerformanceStats GetPerformanceStats() const;
+   bool CanOpenTrade(double additionalRiskAmount);
+   double CalculateLotSize(string symbol, double riskPct, double slDistancePoints, double qualityMultiplier = 1.0);
+   double NormalizeVolume(string symbol, double vol) const;
+};
+
+//+------------------------------------------------------------------+
+//| DataManager - Implements IDataProvider                          |
+//+------------------------------------------------------------------+
+class DataManager : public IManager, public IDataProvider
 {
 private:
    int m_atrHandle;
