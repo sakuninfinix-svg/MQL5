@@ -8,19 +8,6 @@ Comprehensive performance optimization campaign completed for PASR_MODULAR EA, f
 
 ## 📊 Key Achievements
 
-### Performance Metrics
-
-| Metric | Before (v1.10) | After (v1.20) | Improvement |
-|--------|---------------|---------------|-------------|
-| `_Symbol` API calls per tick | 6+ | 1 (cached) | ✅ **83% reduction** |
-| `_Period` API calls per tick | 4+ | 0 (cached) | ✅ **100% elimination** |
-| `SYMBOL_SPREAD` calls per heartbeat | 2 | 0 | ✅ **100% elimination** |
-| Total API calls per tick | 12+ | 3 | ✅ **75% reduction** |
-| Memory allocation events | Dynamic | Circular buffer | ✅ **Zero runtime allocation** |
-| Code consistency score | 92/100 | 98/100 | ⬆️ **+6 points** |
-
----
-
 ## 🔧 Optimizations Implemented
 
 ### 1. **Timeframe Caching** (Commit: 0d4c583)
@@ -89,72 +76,7 @@ double GetGlobalSpread() {
   - Added `GetGlobalSpread()` global accessor function
   - Updated OnTick() to refresh spread cache
 
-### Include Files
-1. `Include/PASR/11.DashboardManager.mqh`
-   - Removed direct `SymbolInfoInteger(_Symbol, SYMBOL_SPREAD)` call
-   - Added `SetSpread()` method for external updates
-   - Modified `OnHeartbeat()` to use `GetGlobalSpread()`
-
-2. `Include/PASR/4.SRManager.mqh`
-   - Modified `IsTradableRange()` to use `GetGlobalSpread()`
-   - Added fallback to direct API call for robustness
-
-3. `Include/PASR/2.Config.mqh` (Typo fix)
-   - Fixed "Ressistance" → "Resistance" in header comment
-
-4. `Include/PASR/3.MarketManager.mqh` (Typo fix)
-   - Fixed "Ressistance" → "Resistance" in header comment
-
----
-
 ## 🎯 Architecture Improvements
-
-### Centralized Data Management Pattern
-
-```
-┌─────────────────────────────────────────────────────┐
-│              PASR_MODULAR.mq5 (Main EA)             │
-│  ┌───────────────────────────────────────────────┐  │
-│  │         EAConfigCache (Central Hub)           │  │
-│  │  - symbolName    - symbolDigits               │  │
-│  │  - symbolPoint   - symbolSpread ← UPDATED/tick│  │
-│  │  - timeframe     - magicNum                   │  │
-│  └───────────────────────────────────────────────┘  │
-│                    ↓ GetGlobalSpread()              │
-└─────────────────────────────────────────────────────┘
-                    ↓
-        ┌───────────┴───────────┐
-        ↓                       ↓
-┌──────────────────┐   ┌──────────────────┐
-│ DashboardManager │   │   SRManager      │
-│ - OnHeartbeat()  │   │ - IsTradableRange│
-│ - SetSpread()    │   │ - GetGlobalSpread│
-└──────────────────┘   └──────────────────┘
-```
-
-### Benefits of This Architecture:
-1. **Single Source of Truth**: All modules access same cached data
-2. **Reduced Coupling**: Modules don't need direct SymbolInfo* calls
-3. **Easy Testing**: Mock data can be injected via setter methods
-4. **Performance**: One API call per tick, shared by all consumers
-
----
-
-## 📈 Performance Impact Analysis
-
-### Before Optimization (v1.10)
-```
-Per Tick (assuming 10 ticks/sec):
-- SymbolInfoTick: 1x
-- CopyTime: 1x (new bar check)
-- _Period calls: 4x (redundant)
-- _Symbol calls: 6x (redundant)
-Total: ~12 API calls/tick × 10 ticks/sec = 120 calls/sec
-
-Per Heartbeat (every 2 sec):
-- SYMBOL_SPREAD: 2x (Dashboard + SRManager)
-Total: 1 call/sec
-```
 
 ### After Optimization (v1.20)
 ```
@@ -169,23 +91,12 @@ Per Heartbeat:
 Total: 0 API calls/sec
 ```
 
-**Net Reduction: 75% fewer API calls** 🎉
-
----
-
 ## ✅ Verification Checklist
 
 - [x] All `_Period` references replaced with `eaCfg.timeframe`
 - [x] All `_Symbol` references use `eaCfg.symbolName` (except initial cache)
 - [x] All `SYMBOL_SPREAD` calls use `GetGlobalSpread()` with fallback
-- [x] No duplicate global variable declarations
-- [x] No typos in header comments
-- [x] Git commits with descriptive messages
-- [x] Backward compatibility maintained
-- [x] Fallback mechanisms in place for robustness
-
----
-
+- 
 ## 🔮 Future Optimization Opportunities
 
 ### High Priority
@@ -201,27 +112,3 @@ Total: 0 API calls/sec
 5. **Memory Pool**: Pre-allocate event objects to eliminate new/delete overhead
 
 6. **Async Dashboard Updates**: Move UI rendering to separate thread (if MQL5 supports)
-
----
-
-## 🏆 Conclusion
-
-**PASR_MODULAR v1.20** represents a significant leap in performance optimization:
-
-- ✅ **75% reduction** in API calls per tick
-- ✅ **Zero runtime memory allocation** for event recording
-- ✅ **Centralized data management** pattern established
-- ✅ **Production-ready** with robust fallback mechanisms
-- ✅ **Maintainable** architecture for future enhancements
-
-The EA is now optimized for **low-latency execution** and **efficient resource utilization**, making it suitable for high-frequency trading environments and extended runtime periods.
-
----
-
-**Version History:**
-- v1.20: Spread caching & module integration (Current)
-- v1.10: Timeframe caching & typo fixes
-- v1.00: Initial modular release
-
-**Last Updated:** 2026
-**Optimized by:** Agsicentre Team

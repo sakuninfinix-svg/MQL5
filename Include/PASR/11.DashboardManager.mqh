@@ -22,6 +22,8 @@
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
 
+double GetGlobalSpread();
+
 // Custom Event IDs for UI synchronization
 #define DASHBOARD_REFRESH (CHARTEVENT_CUSTOM + 100)
 #define DASHBOARD_EMERGENCY (CHARTEVENT_CUSTOM + 101)
@@ -480,13 +482,12 @@ private:
 
    // Buttons - Controls
    CButton m_btnPause, m_btnCloseAll, m_btnEmergency;
-   // ulong m_magic; ///< EA magic number - Removed, use CFG.risk.magic directly
 
 public:
    /**
     * Constructor
     */
-   DashboardUI() : m_ctrl(NULL), m_magic(0) {}
+   DashboardUI() : m_ctrl(NULL) {}
 
    /** // Removed m_magic from constructor initializer list
     * Set controller reference
@@ -521,10 +522,11 @@ public:
       if (CheckPointer(m_ctrl) != POINTER_INVALID)
       {
          m_ctrl.RefreshConfigCache();
-         // m_magic = m_ctrl.GetCache().magicNum; // No longer needed
       }
       else
-         // m_magic = 0; // No longer needed
+      {
+         // no additional chart state required
+      }
 
       // Calculate dimensions
       int width = x2 - x1;
@@ -723,7 +725,7 @@ public:
       // Pause Button
       m_btnPause.Create(m_chart_id, m_name + "_pause", m_subwin, btnX1, btnTop, btnX1 + btnWidth - 5, btnBottom);
 
-      bool isPaused = GlobalVariableCheck("PASR_PAUSE_" + (string)m_magic);
+      bool isPaused = GlobalVariableCheck("PASR_PAUSE_" + (string)CFG.risk.magic);
       if (isPaused)
       {
          m_btnPause.Text("▶ RESUME");
@@ -957,15 +959,16 @@ public:
    // Button click handlers
    void OnPauseClick()
    {
-      bool isPaused = GlobalVariableCheck("PASR_PAUSE_" + (string)m_magic);
+      string pauseGV = "PASR_PAUSE_" + (string)CFG.risk.magic;
+      bool isPaused = GlobalVariableCheck(pauseGV);
       if (isPaused)
       {
-         GlobalVariableDelete("PASR_PAUSE_" + (string)m_magic);
+         GlobalVariableDel(pauseGV);
          DispatchEvent(new PauseToggleEvent(true, false));
       }
       else
       {
-         GlobalVariableSet("PASR_PAUSE_" + (string)m_magic, 1.0);
+         GlobalVariableSet(pauseGV, 1.0);
          DispatchEvent(new PauseToggleEvent(true, true));
       }
    }
@@ -1002,7 +1005,7 @@ public:
          if (MessageBox("Emergency Stop sedang AKTIF. Apakah Anda ingin me-reset sistem dan mengizinkan trading kembali?",
                         "Reset Emergency Stop", MB_YESNO | MB_ICONQUESTION) == IDYES)
          {
-            GlobalVariableDelete(gvName);
+            GlobalVariableDel(gvName);
             Print("[Dashboard] Manual Emergency Stop di-reset oleh user. Sistem kembali normal.");
             UpdateUI();
          }

@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                                   AIManager.mqh  |
 //|                                       Copyright 2026, Agsicentre |
 //|            Adaptive AI & Signal Scoring Module                   |
@@ -22,14 +22,6 @@
 class AIManager : public IManager
 {
 private:
-   struct AIConfigCache
-   {
-      bool useAI;
-      int trainingWindowBars;
-      double minConfidence;
-      double modelDecay;
-      double patternBonus;
-   } m_cfgCache;
 
    struct AIModelState
    {
@@ -61,7 +53,7 @@ private:
       int nnTrainingSamples;
    } m_model;
 
-   int m_lastHeartbeat;
+   datetime m_lastHeartbeat;
    double m_lastSavedWinRate;
    bool m_modelDirty;
    string m_datasetFilename;
@@ -112,11 +104,6 @@ public:
    virtual void RefreshConfigCache() override
    {
       IManager::RefreshConfigCache();
-      m_cfgCache.useAI = CFG.ai.use;
-      m_cfgCache.trainingWindowBars = CFG.ai.trainingWindow;
-      m_cfgCache.minConfidence = CFG.ai.minConfidence;
-      m_cfgCache.modelDecay = 0.98;
-      m_cfgCache.patternBonus = CFG.ai.patternBonus;
    }
 
    virtual void DeclareEvents() override
@@ -135,7 +122,7 @@ public:
          return false;
 
       m_data = IManager::GetGlobalDataManager();
-      string prefix = "AI_ml_" + (string)CFG.risk.magic + "_" + _Symbol + "_";
+      string prefix = "AI_ml_" + IntegerToString((*m_data).GetConfigCache().magic) + "_" + _Symbol + "_";
       m_datasetFilename = prefix + "data.csv";
       m_ticketMapFilename = prefix + "ticketmap.csv";
       m_outcomeFilename = prefix + "outcomes.csv";
@@ -152,14 +139,15 @@ public:
 
    virtual void OnNewBar(NewBarEvent *e) override
    {
-      if (!m_cfgCache.useAI)
+      if (!(*m_data).GetConfigCache().use_ai)
          return;
-      DecayModel();
+      DecayModel(0.98); // Use static decay or add to ConfigSnapshot
    }
 
    virtual void OnHeartbeat(HeartbeatEvent *e) override
    {
-      if (!m_cfgCache.useAI)
+      const ConfigSnapshot cfg = (*m_data).GetConfigCache();
+      if (!cfg.use_ai)
          return;
       if (TimeCurrent() - m_lastHeartbeat < 5)
          return;
@@ -169,7 +157,8 @@ public:
 
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
-      if (!m_cfgCache.useAI || !e.signal.valid)
+      const ConfigSnapshot cfg = (*m_data).GetConfigCache();
+      if (!cfg.use_ai || !e.signal.valid)
          return;
 
       double score = EvaluateSignal(e.signal, e.atrPoints, e.support, e.resistance);
@@ -177,7 +166,7 @@ public:
       // Prediksi Adaptive Multiplier untuk SL (1.0 - 2.0)
       double aiSlAdjustment = 1.0 + (Logistic(score) * m_model.volNoiseWeight);
 
-      bool accepted = score >= m_cfgCache.minConfidence;
+      bool accepted = score >= cfg.ai_min_confidence;
       Log("AI score=" + DoubleToString(score, 2) + " for signal " + IntegerToString((int)e.signal.patternType));
       LogSignalSample(e.signal, e.atrPoints, e.support, e.resistance, score, accepted);
 
@@ -196,7 +185,7 @@ public:
 
    virtual void OnOrderExecution(OrderExecutionEvent *e) override
    {
-      if (!m_cfgCache.useAI)
+      if (!(*m_data).GetConfigCache().use_ai)
          return;
       if (e.success)
       {
@@ -213,7 +202,7 @@ public:
 
    virtual void OnPositionUpdate(PositionUpdateEvent *e) override
    {
-      if (!m_cfgCache.useAI)
+      if (!(*m_data).GetConfigCache().use_ai)
          return;
       if (e.isClosing)
       {
@@ -271,7 +260,7 @@ private:
       score += m_model.slWeight * NormalizeSLFeature(signal.slMultiplier);
       score += m_model.mtConfluenceWeight * NormalizeMultiTimeframeConfluence(signal);
       if (signal.patternType != PATTERN_NONE)
-         score += m_cfgCache.patternBonus * 0.8;
+         score += (*m_data).GetConfigCache().ai_pattern_bonus * 0.8;
       return score;
    }
 
@@ -284,7 +273,7 @@ private:
       score += m_model.momentumWeight * NormalizeZoneFeature(signal.zonePrice, support, resistance);
       score += m_model.timeOfDayWeight * NormalizeTimeOfDayFeature();
       if (signal.patternType != PATTERN_NONE)
-         score += m_cfgCache.patternBonus * 1.2;
+         score += (*m_data).GetConfigCache().ai_pattern_bonus * 1.2;
       return score;
    }
 
@@ -297,7 +286,7 @@ private:
       score += m_model.lossStreakWeight * NormalizeLossStreak();
       score += m_model.volNoiseWeight * NormalizeNoiseFeature();
       if (signal.patternType != PATTERN_NONE)
-         score += m_cfgCache.patternBonus * 1.0;
+         score += (*m_data).GetConfigCache().ai_pattern_bonus * 1.0;
       return score;
    }
 
@@ -310,10 +299,10 @@ private:
 
    double NormalizeSpreadFeature() const
    {
-      double spreadPoints = SymbolInfoDouble(_Symbol, SYMBOL_SPREAD);
-      if (spreadPoints <= 0)
+      long spreadPoints = 0;
+      if (!SymbolInfoInteger(_Symbol, SYMBOL_SPREAD, spreadPoints) || spreadPoints <= 0)
          return 1.0;
-      double normalized = 1.0 - MathMin(1.0, spreadPoints / 10.0);
+      double normalized = 1.0 - MathMin(1.0, (double)spreadPoints / 10.0);
       return MathMax(0.0, normalized);
    }
 
@@ -333,7 +322,7 @@ private:
 
    double NormalizeVolatilityFeature() const
    {
-      MqlBar bars[];
+      MqlRates bars[20];
       int copied = CopyRates(_Symbol, _Period, 0, 20, bars);
       if (copied < 20)
          return 0.5;
@@ -376,7 +365,7 @@ private:
       if (higherTF < PERIOD_M1 || higherTF > PERIOD_W1)
          return 0.5;
 
-      MqlBar bars[];
+      MqlRates bars[10];
       int copied = CopyRates(_Symbol, higherTF, 0, 10, bars);
       if (copied < 10)
          return 0.5;
@@ -406,7 +395,7 @@ private:
 
    double NormalizeVolumeFeature() const
    {
-      long volume[];
+      long volume[20];
       int copied = CopyTickVolume(_Symbol, _Period, 0, 20, volume);
       if (copied < 20)
          return 0.5;
@@ -425,7 +414,7 @@ private:
 
    double NormalizeMomentumFeature() const
    {
-      MqlBar bars[];
+      MqlRates bars[14];
       int copied = CopyRates(_Symbol, _Period, 0, 14, bars);
       if (copied < 14)
          return 0.5;
@@ -559,7 +548,7 @@ private:
    {
       if (CheckPointer(m_data) == POINTER_INVALID)
          return 0.0;
-      int losses = m_data.GetConsecutiveLosses();
+      int losses = (*m_data).GetConsecutiveLosses();
       return MathMax(0.0, 1.0 - MathMin(1.0, losses * 0.1));
    }
 
@@ -570,7 +559,7 @@ private:
 
    string ModelGVPrefix() const
    {
-      return "PASR_AI_" + (string)CFG.risk.magic + "_" + _Symbol + "_";
+      return "PASR_AI_" + IntegerToString((*m_data).GetConfigCache().magic) + "_" + _Symbol + "_";
    }
 
    void LoadModelState()
@@ -761,8 +750,8 @@ private:
           " | Result=" + (actualOutcome ? "WIN" : "LOSS"));
    }
 
-   void AppendCsvRow(const string &filename, const string &h1, const string &h2, const string &h3, const string &h4,
-                     const string &v1, const string &v2, const string &v3, const string &v4)
+   void AppendCsvRow(const string filename, const string h1, const string h2, const string h3, const string h4,
+                     const string v1, const string v2, const string v3, const string v4)
    {
       int handle = FileOpen(filename, FILE_READ | FILE_WRITE | FILE_CSV | FILE_ANSI);
       if (handle == INVALID_HANDLE)
@@ -793,8 +782,11 @@ private:
                    "trend_score", "meanrev_score", "momentum_score", "ensemble_score", "accepted");
       }
 
-      double spread = SymbolInfoDouble(_Symbol, SYMBOL_SPREAD);
-      int currentLosses = (CheckPointer(m_data) != POINTER_INVALID) ? m_data.GetConsecutiveLosses() : 0;
+      long spreadInt = 0;
+      if (!SymbolInfoInteger(_Symbol, SYMBOL_SPREAD, spreadInt))
+         spreadInt = 0;
+      double spread = (double)spreadInt;
+      int currentLosses = (*m_data).GetConsecutiveLosses();
 
       // Calculate individual expert scores for logging
       double trendScore = EvaluateTrendExpert(signal, atrPoints, support, resistance);
@@ -840,7 +832,7 @@ private:
          return;
       }
 
-      string exportFilename = "AI_ml_export_" + (string)CFG.risk.magic + "_" + _Symbol + "_full.csv";
+      string exportFilename = "AI_ml_export_" + IntegerToString((*m_data).GetConfigCache().magic) + "_" + _Symbol + "_full.csv";
       int handle = FileOpen(exportFilename, FILE_WRITE | FILE_CSV | FILE_ANSI);
       if (handle == INVALID_HANDLE)
       {
@@ -868,7 +860,7 @@ private:
       if (CheckPointer(m_data) == POINTER_INVALID)
          return;
 
-      PerformanceStats stats = m_data.GetPerformanceStats();
+      PerformanceStats stats = (*m_data).GetPerformanceStats();
       int total = stats.safeTotal + stats.aggTotal;
       if (total <= 0)
          return;
@@ -898,7 +890,7 @@ private:
       m_model.spreadWeight = NormalizeWeight(m_model.spreadWeight + error * 0.015);
       m_model.slWeight = NormalizeWeight(m_model.slWeight + error * 0.012);
       m_model.momentumWeight = NormalizeWeight(m_model.momentumWeight + error * 0.01);
-      m_model.lossStreakWeight = NormalizeWeight(m_model.lossStreakWeight - (m_data.GetConsecutiveLosses() * 0.005));
+      m_model.lossStreakWeight = NormalizeWeight(m_model.lossStreakWeight - ((*m_data).GetConsecutiveLosses() * 0.005));
 
       // Adapt ensemble weights based on performance
       if (driftDetected)
@@ -941,18 +933,19 @@ private:
           ", Momentum=" + DoubleToString(m_model.momentumExpertWeight, 2));
    }
 
-   void DecayModel()
+   void DecayModel(double decay)
    {
-      m_model.atrWeight = NormalizeWeight(m_model.atrWeight * m_cfgCache.modelDecay);
-      m_model.spreadWeight = NormalizeWeight(m_model.spreadWeight * m_cfgCache.modelDecay);
-      m_model.slWeight = NormalizeWeight(m_model.slWeight * m_cfgCache.modelDecay);
-      m_model.momentumWeight = NormalizeWeight(m_model.momentumWeight * m_cfgCache.modelDecay);
-      m_model.lossStreakWeight = NormalizeWeight(m_model.lossStreakWeight * m_cfgCache.modelDecay);
+      double decayFactor = (decay > 0.0) ? decay : 0.98;
+      m_model.atrWeight = NormalizeWeight(m_model.atrWeight * decayFactor);
+      m_model.spreadWeight = NormalizeWeight(m_model.spreadWeight * decayFactor);
+      m_model.slWeight = NormalizeWeight(m_model.slWeight * decayFactor);
+      m_model.momentumWeight = NormalizeWeight(m_model.momentumWeight * decayFactor);
+      m_model.lossStreakWeight = NormalizeWeight(m_model.lossStreakWeight * decayFactor);
       // Decay new feature weights juga
-      m_model.volatilityWeight = NormalizeWeight(m_model.volatilityWeight * m_cfgCache.modelDecay);
-      m_model.timeOfDayWeight = NormalizeWeight(m_model.timeOfDayWeight * m_cfgCache.modelDecay);
-      m_model.mtConfluenceWeight = NormalizeWeight(m_model.mtConfluenceWeight * m_cfgCache.modelDecay);
-      m_model.volumeWeight = NormalizeWeight(m_model.volumeWeight * m_cfgCache.modelDecay);
+      m_model.volatilityWeight = NormalizeWeight(m_model.volatilityWeight * decayFactor);
+      m_model.timeOfDayWeight = NormalizeWeight(m_model.timeOfDayWeight * decayFactor);
+      m_model.mtConfluenceWeight = NormalizeWeight(m_model.mtConfluenceWeight * decayFactor);
+      m_model.volumeWeight = NormalizeWeight(m_model.volumeWeight * decayFactor);
       // Neural Network weights decay (very slow to preserve learned patterns)
       double nnDecay = 0.999; // Much slower than ensemble weights
       m_model.nn_hidden1_w1 = NormalizeWeight(m_model.nn_hidden1_w1 * nnDecay);
@@ -985,3 +978,5 @@ private:
 };
 
 #endif
+
+

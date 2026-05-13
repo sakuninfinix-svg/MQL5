@@ -27,46 +27,10 @@ private:
    ulong m_lastTrailingUpdate;
    int m_trailingThrottleMs;
 
-   struct RecoveryConfigCache
-   {
-      ulong magicNum;
-      bool useRecovery;
-      int maxRecoveryAttempts;
-      int recoveryCooldownBars;
-      double fakeoutSLAdjustmentATR;
-      bool exitOnOpposite;
-      bool useTrailing;
-      bool usePartialClose;
-      double partialCloseLotPct;
-      double partialCloseATR;
-      int maxTradeDurationDays;
-      double lockProfitATR;
-      double lockOffsetATR;
-      double trailActivationATR;
-      double trailStepATR;
-      int stopLevel;
-   } m_cfgCache;
-
 private:
    virtual void RefreshConfigCache() override
    {
       IManager::RefreshConfigCache();
-      m_cfgCache.magicNum = (ulong)CFG.risk.magic;
-      m_cfgCache.useRecovery = CFG.recovery.use;
-      m_cfgCache.maxRecoveryAttempts = CFG.recovery.maxAttempts;
-      m_cfgCache.recoveryCooldownBars = CFG.recovery.cooldownBars;
-      m_cfgCache.fakeoutSLAdjustmentATR = CFG.recovery.fakeoutSLAdjATR;
-      m_cfgCache.exitOnOpposite = CFG.exit.exitOnOpposite;
-      m_cfgCache.useTrailing = CFG.exit.useTrailing;
-      m_cfgCache.usePartialClose = CFG.exit.usePartial;
-      m_cfgCache.partialCloseLotPct = CFG.exit.partialLotPct;
-      m_cfgCache.partialCloseATR = CFG.exit.partialATR;
-      m_cfgCache.maxTradeDurationDays = CFG.risk.maxTradeDurationDays;
-      m_cfgCache.lockProfitATR = CFG.exit.lockProfitATR;
-      m_cfgCache.lockOffsetATR = CFG.exit.lockOffsetATR;
-      m_cfgCache.trailActivationATR = CFG.exit.trailActivationATR;
-      m_cfgCache.trailStepATR = CFG.exit.trailStepATR;
-      m_cfgCache.stopLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
    }
 
    int FindEngineIndex(ulong ticket)
@@ -82,7 +46,7 @@ private:
 
    void ClearEngineGVs(ulong ticket)
    {
-      string prefix = "PASR_" + (string)CFG.risk.magic + "_" + (string)ticket + "_";
+      string prefix = "PASR_" + IntegerToString(m_data.GetConfigCache().magic) + "_" + IntegerToString(ticket) + "_";
       GlobalVariablesDeleteAll(prefix);
    }
 
@@ -116,17 +80,18 @@ private:
       DispatchEvent(notify);
    }
 
-   bool DetectAndHandleFakeout(RecoveryEngine *r, const MqlTick &tick, double _atrPoints)
+   bool DetectAndHandleFakeout(RecoveryEngine *r, const MqlTick &tick, double atrvalue)
    {
       if (CheckPointer(r) == POINTER_INVALID || !r.active)
          return false;
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
 
       PatternManager::FakeoutContext ctx;
       ctx.originalTicket = r.mainTicket;
       ctx.direction = r.direction;
       ctx.slHitPrice = tick.bid;
       ctx.entryPrice = r.entryPrice;
-      ctx.atrPoints = _atrPoints;
+      ctx.atrPoints = atrvalue;
       ctx.currentTick = tick;
 
       ArraySetAsSeries(ctx.rates, true);
@@ -161,10 +126,10 @@ private:
       ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       double currentSL = PositionGetDouble(POSITION_SL);
       double currentTP = PositionGetDouble(POSITION_TP);
-      double atr = _atrPoints * _Point;
+      double atr = atrvalue * _Point;
 
       // Calculate new SL further away to avoid fakeout
-      double slAdjustmentPoints = atr * m_cfgCache.fakeoutSLAdjustmentATR;
+      double slAdjustmentPoints = atr * cfg.fakeout_sl_adjustment_atr;
       double newSL = 0;
       double newTP = currentTP;
 
@@ -196,7 +161,7 @@ private:
 
       if (m_trade.PositionModify(r.mainTicket, newSL, newTP))
       {
-         r.lastKnownATR = _atrPoints;
+         r.lastKnownATR = atrvalue;
          r.recoveryAttempts++;
          r.SaveState();
          if (m_debugMode)
@@ -213,8 +178,9 @@ private:
       return false;
    }
 
-   void ProcessTrailingAndPartial(RecoveryEngine *r, const MqlTick &tick, double _atrPoints)
+   void ProcessTrailingAndPartial(RecoveryEngine *r, const MqlTick &tick, double atrvalue)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       if (CheckPointer(r) == POINTER_INVALID || !r.active) return;
       if (!PositionSelectByTicket(r.mainTicket))
       {
@@ -230,7 +196,7 @@ private:
       double slPrice = PositionGetDouble(POSITION_SL);
       double tpPrice = PositionGetDouble(POSITION_TP);
       double curLot = PositionGetDouble(POSITION_VOLUME);
-      double atr = _atrPoints * _Point;
+      double atr = atrvalue * _Point;
       double curPrice = (type == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
       double profitATR = (type == POSITION_TYPE_BUY) ? (curPrice - openPrice) / atr : (openPrice - curPrice) / atr;
 
@@ -245,12 +211,12 @@ private:
 
       if (slHit)
       {
-         if (m_cfgCache.useRecovery && r.recoveryAttempts < m_cfgCache.maxRecoveryAttempts)
+         if (cfg.recovery_use && r.recoveryAttempts < cfg.max_recovery_attempts)
          {
-            if (DetectAndHandleFakeout(r, tick, _atrPoints))
+            if (DetectAndHandleFakeout(r, tick, atrvalue))
             {
                Log(StringFormat("Position %d: Fakeout detected and handled! SL/TP adjusted. Attempt %d of %d.",
-                                r.mainTicket, r.recoveryAttempts, m_cfgCache.maxRecoveryAttempts));
+                                r.mainTicket, r.recoveryAttempts, cfg.max_recovery_attempts));
                return;
             }
 
@@ -259,12 +225,12 @@ private:
             r.slHitPrice = curPrice;
             r.slHitTime = TimeCurrent();
             r.recoveryAttempts++;
-            r.recoveryCooldownExpiry = TimeCurrent() + (m_cfgCache.recoveryCooldownBars * PeriodSeconds(_Period));
-            r.SaveState(m_cfgCache.magicNum);
+            r.recoveryCooldownExpiry = TimeCurrent() + (cfg.recovery_cooldown_bars * PeriodSeconds(_Period));
+            r.SaveState();
 
             Log(StringFormat("Position %d entered TRADE_STATE_RECOVERY. Attempt %d of %d.",
-                             r.mainTicket, r.recoveryAttempts, m_cfgCache.maxRecoveryAttempts));
-            DispatchEvent(new RecoveryOpportunityEvent(r.mainTicket, r.slHitPrice, r.direction, _atrPoints, r.originalLot));
+                             r.mainTicket, r.recoveryAttempts, cfg.max_recovery_attempts));
+            DispatchEvent(new RecoveryOpportunityEvent(r.mainTicket, r.slHitPrice, r.direction, atrvalue, r.originalLot));
             return;
          }
 
@@ -273,20 +239,19 @@ private:
       }
 
       // === PARTIAL CLOSE LOGIC ===
-      if (m_cfgCache.usePartialClose && !r.partialClosed && curLot > 0)
       {
          bool touchPartial = (type == POSITION_TYPE_BUY) ? (curPrice >= r.partialTP) : (curPrice <= r.partialTP);
          if (touchPartial && !r.partialArmedNormal)
          {
             r.partialArmedNormal = true;
-            r.SaveState(m_cfgCache.magicNum);
+            r.SaveState();
          }
          if (r.partialArmedNormal)
          {
             bool recross = (type == POSITION_TYPE_BUY) ? (curPrice <= r.partialTP + atr * 0.1) : (curPrice >= r.partialTP - atr * 0.1);
             if (recross)
             {
-               double closeLot = m_data.NormalizeVolume(_Symbol, curLot * m_cfgCache.partialCloseLotPct);
+               double closeLot = m_data.NormalizeVolume(_Symbol, curLot * cfg.partial_close_lot_pct);
                double minVol = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
                if (closeLot >= minVol && closeLot < curLot)
                {
@@ -314,7 +279,7 @@ private:
       }
 
       // === TRAILING STOP LOGIC (Throttled) ===
-      if (!m_cfgCache.useTrailing || !r.active)
+      if (!cfg.use_trailing || !r.active)
          return;
 
       ulong now = GetMicrosecondCount();
@@ -333,10 +298,10 @@ private:
 
       if (type == POSITION_TYPE_BUY)
       {
-         if (profitATR >= m_cfgCache.lockProfitATR)
-            newSL = MathMax(newSL, openPrice + atr * m_cfgCache.lockOffsetATR);
-         if (profitATR >= m_cfgCache.trailActivationATR)
-            newSL = MathMax(newSL, curPrice - atr * m_cfgCache.trailStepATR);
+         if (profitATR >= cfg.lock_profit_atr)
+            newSL = MathMax(newSL, openPrice + atr * cfg.lock_offset_atr);
+         if (profitATR >= cfg.trail_activation_atr)
+            newSL = MathMax(newSL, curPrice - atr * cfg.trail_step_atr);
          if (newSL > slPrice + minModifyStep && (curPrice - newSL) > stopLevel)
          {
             newSL = NormalizeDouble(newSL, _Digits);
@@ -357,17 +322,16 @@ private:
       }
       else
       {
-         if (profitATR >= m_cfgCache.lockProfitATR)
+         if (profitATR >= cfg.lock_profit_atr)
          {
-            double trailBase = openPrice - atr * m_cfgCache.lockOffsetATR;
+            double trailBase = openPrice - atr * cfg.lock_offset_atr;
             if (newSL == 0 || trailBase < newSL)
                newSL = trailBase;
          }
-         if (profitATR >= m_cfgCache.trailActivationATR)
+         if (profitATR >= cfg.trail_activation_atr)
          {
-            double dynamicSL = curPrice + atr * m_cfgCache.trailStepATR;
-            if (newSL == 0 || dynamicSL < newSL)
-               newSL = dynamicSL;
+            double dynamicSL = NormalizeDouble(curPrice + atr * cfg.trail_step_atr, _Digits);
+            newSL = (newSL <= 0) ? dynamicSL : MathMin(newSL, dynamicSL);
          }
          if (newSL > 0 && (slPrice <= 0 || newSL < slPrice - minModifyStep) && (newSL - curPrice) > stopLevel)
          {
@@ -390,10 +354,11 @@ private:
    }
 
    // NEW: Process positions in TRADE_STATE_RECOVERY with sophisticated logic
-   void ProcessRecovery(RecoveryEngine *r, double _atrPoints)
+   void ProcessRecovery(RecoveryEngine *r, double atrvalue)
    {
       if (CheckPointer(r) == POINTER_INVALID || r.state != TRADE_STATE_RECOVERY)
          return;
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
 
       // Check if recovery cooldown is active
       if (TimeCurrent() < r.recoveryCooldownExpiry)
@@ -405,10 +370,10 @@ private:
       }
 
       // Check if max recovery attempts reached
-      if (r.recoveryAttempts >= m_cfgCache.maxRecoveryAttempts)
+      if (r.recoveryAttempts >= cfg.max_recovery_attempts)
       {
          CloseActivePosition(r, StringFormat("Max recovery attempts reached (%d/%d)",
-                                             r.recoveryAttempts, m_cfgCache.maxRecoveryAttempts));
+                                             r.recoveryAttempts, cfg.max_recovery_attempts));
          return;
       }
 
@@ -417,11 +382,12 @@ private:
       // This method just manages state timeouts and validates position still exists.
       if (m_debugMode)
          Log(StringFormat("Position %d ready for recovery signal. Attempts: %d/%d",
-                          r.mainTicket, r.recoveryAttempts, m_cfgCache.maxRecoveryAttempts)); // Updated
+                          r.mainTicket, r.recoveryAttempts, cfg.max_recovery_attempts)); // Updated
    }
 
    void VerifyAndCleanupEngines()
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       for (int i = ArraySize(engines) - 1; i >= 0; i--)
       {
          RecoveryEngine *r = engines[i];
@@ -446,12 +412,12 @@ private:
          }
 
          // Check max trade duration
-         if (CFG.risk.maxTradeDurationDays > 0 && r.entryTime > 0)
+         if (cfg.max_trade_duration_days > 0 && r.entryTime > 0)
          {
-            if (TimeCurrent() > r.entryTime + (m_cfgCache.maxTradeDurationDays * 86400))
+            if (TimeCurrent() > r.entryTime + (cfg.max_trade_duration_days * 86400))
             {
                CloseActivePosition(r, StringFormat("Max trade duration exceeded (%d days)",
-                                                   m_cfgCache.maxTradeDurationDays));
+                                                   cfg.max_trade_duration_days));
                continue;
             }
          }
@@ -501,10 +467,10 @@ public:
       if (CheckPointer(e) == POINTER_INVALID || ArraySize(engines) == 0 || !m_initialized)
          return;
 
-      double _atrPoints = 0;
+      double atrvalue = 0;
       if (CheckPointer(m_data) != POINTER_INVALID)
-         _atrPoints = m_data.GetATRPoints();
-      if (_atrPoints <= 0)
+         atrvalue = m_data.GetATRPoints();
+      if (atrvalue <= 0)
          return;
 
       for (int i = 0; i < ArraySize(engines); i++)
@@ -512,7 +478,7 @@ public:
          RecoveryEngine *r = engines[i];
          if (CheckPointer(r) != POINTER_INVALID && r.active)
          {
-            ProcessTrailingAndPartial(r, e.tick, _atrPoints);
+            ProcessTrailingAndPartial(r, e.tick, atrvalue);
          }
       }
    }
@@ -534,7 +500,7 @@ public:
 
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
-      if (CheckPointer(e) == POINTER_INVALID || !m_cfgCache.exitOnOpposite)
+      if (CheckPointer(e) == POINTER_INVALID || !m_data.GetConfigCache().exit_on_opposite)
          return;
       CloseOppositePositions(e.signal.orderType);
    }
@@ -590,7 +556,7 @@ public:
    {
       if (!IManager::Init())
          return false;
-      m_trade.SetExpertMagicNumber(m_cfgCache.magicNum);
+      m_trade.SetExpertMagicNumber(m_data.GetConfigCache().magic);
       return true;
    }
 
@@ -603,6 +569,7 @@ public:
    void Register(ulong ticket, ENUM_ORDER_TYPE type, double entry, double tp,
                  double brokerSL, double atr, double lot, double zonePrice, double slMult = 1.0)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       double originalEntry = entry;
       double originalSL = brokerSL;
       double originalTP = tp;
@@ -653,7 +620,7 @@ public:
       target.originalTP = originalTP;
       target.originalLot = lot;
       // Partial TP setup
-      double pcDist = target.lastKnownATR * CFG.exit.partialATR * _Point;
+      double pcDist = target.lastKnownATR * cfg.partial_close_atr * _Point;
       target.partialTP = NormalizeDouble(entry + ((type == ORDER_TYPE_BUY ? 1.0 : -1.0) * pcDist), _Digits);
       target.SaveState();
 
@@ -679,9 +646,9 @@ public:
       if (idx != -1)
       {
          RecoveryEngine *r = engines[idx];
-         r.state = TRADE_STATE_DONE; // This is a state change, not a CFG parameter
-         r.active = false; // This is a state change, not a CFG parameter
-         ClearEngineGVs(originalTicket); // Uses CFG.risk.magic now
+         r.state = TRADE_STATE_DONE; 
+         r.active = false; 
+         ClearEngineGVs(originalTicket); 
          if (m_debugMode)
             PrintFormat("[Recovery] Original position %d recovery cycle completed.", originalTicket);
       }

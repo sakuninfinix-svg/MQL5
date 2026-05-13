@@ -39,7 +39,7 @@ private:
 
    string MakePendingPrefix(ulong tsID) const
    {
-      return "PASR_PEND_" + (string)CFG.risk.magic + "_" + m_symbol + "_" + (string)tsID + "_";
+      return "PASR_PEND_" + IntegerToString(m_data.GetConfigCache().magic) + "_" + m_symbol + "_" + IntegerToString(tsID) + "_";
    }
 
    void SavePendingState(const OrderPlan &plan, double zonePrice, double slMult, ulong tsID) const
@@ -58,7 +58,8 @@ private:
 
    void ScavengePendingGVs()
    {
-      string pattern = "PASR_PEND_" + (string)CFG.risk.magic + "_" + m_symbol + "_";
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      string pattern = "PASR_PEND_" + IntegerToString(cfg.magic) + "_" + m_symbol + "_";
       int total = GlobalVariablesTotal();
 
       for (int i = total - 1; i >= 0; i--)
@@ -83,7 +84,7 @@ private:
          for (int j = 0; j < OrdersTotal(); j++)
          {
             ulong o = OrderGetTicket(j);
-            if (o > 0 && OrderGetInteger(ORDER_MAGIC) == CFG.risk.magic && StringFind(OrderGetString(ORDER_COMMENT), tsID_str) >= 0)
+            if (o > 0 && OrderGetInteger(ORDER_MAGIC) == cfg.magic && StringFind(OrderGetString(ORDER_COMMENT), tsID_str) >= 0)
             {
                stillActive = true;
                break;
@@ -93,7 +94,7 @@ private:
          {
             ulong p = PositionGetTicket(j);
             if (p > 0 && PositionSelectByTicket(p) &&
-                PositionGetInteger(POSITION_MAGIC) == CFG.risk.magic &&
+                PositionGetInteger(POSITION_MAGIC) == cfg.magic &&
                 StringFind(PositionGetString(POSITION_COMMENT), tsID_str) >= 0)
             {
                stillActive = true;
@@ -113,11 +114,12 @@ private:
    bool ValidateOrderLevels(ENUM_ORDER_TYPE type, double price, double sl, double tp,
                             double volume, string &reason, double atrPoints) const
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       double stopLevelPts = (double)SymbolInfoInteger(m_symbol, SYMBOL_TRADE_STOPS_LEVEL);
       double stopLevel = stopLevelPts * point;
-      double minTPDist = atrPoints * CFG.exit.minTPDistATR * point;
-      double maxTPDist = atrPoints * CFG.exit.maxTPDistATR * point;
+      double minTPDist = atrPoints * cfg.min_tp_distance_atr * point;
+      double maxTPDist = atrPoints * cfg.max_tp_distance_atr * point;
       double requiredTP = MathMax(stopLevel, minTPDist);
 
       if (type == ORDER_TYPE_BUY)
@@ -141,7 +143,7 @@ private:
          if (tp - price > maxTPDist)
          {
             reason = StringFormat("BUY TP too far: %.1f > max %.1f (ATR %.1f)",
-                                  (tp - price) / point, maxTPDist / point, CFG.exit.maxTPDistATR);
+                                  (tp - price) / point, maxTPDist / point, cfg.max_tp_distance_atr);
             return false;
          }
          if (sl > 0 && price - sl < stopLevel)
@@ -217,7 +219,8 @@ public:
    {
       if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
          return;
-      if (GetTickCount64() - m_lastOrderTime < (ulong)CFG.system.orderThrottleMs)
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      if (GetTickCount64() - m_lastOrderTime < (ulong)cfg.order_throttle_ms)
       {
          if (m_debugMode)
             Print("[Execution] Order throttled. Skipping.");
@@ -275,7 +278,8 @@ public:
    {
       if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
          return;
-      if (GetTickCount64() - m_lastOrderTime < (ulong)CFG.system.orderThrottleMs)
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      if (GetTickCount64() - m_lastOrderTime < (ulong)cfg.order_throttle_ms)
       {
          if (m_debugMode)
             Print("[Execution] Recovery order throttled. Skipping.");
@@ -295,7 +299,7 @@ public:
 
       OrderPlan plan;
       // Pass original ticket and recovery lot multiplier
-      if (BuildOrderPlan(e.signal, plan, sup, res, atr, e.originalTicket, CFG.recovery.lotMult))
+      if (BuildOrderPlan(e.signal, plan, sup, res, atr, e.originalTicket, cfg.recovery_lot_mult))
       {
          ulong reqID = Open(plan, e.signal.zonePrice, e.signal.slMultiplier);
          if (reqID > 0)
@@ -316,7 +320,7 @@ public:
    {
       if (m_debugMode)
          Print("[Execution] EMERGENCY STOP: Halting new orders.");
-      GlobalVariablesDeleteAll("PASR_PEND_" + (string)CFG.risk.magic + "_" + m_symbol + "_");
+      GlobalVariablesDeleteAll("PASR_PEND_" + IntegerToString(m_data.GetConfigCache().magic) + "_" + m_symbol + "_");
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -336,6 +340,7 @@ public:
    bool BuildOrderPlan(const SignalDecision &decision, OrderPlan &plan,
                        double support, double resistance, double atrPoints, ulong originalTicket = 0, double lotMultiplier = 1.0)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       ZeroMemory(plan);
       plan.type = decision.orderType;
       plan.atrUsed = atrPoints;
@@ -359,13 +364,13 @@ public:
       plan.entry = (plan.type == ORDER_TYPE_BUY) ? ask : bid;
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       double atrPrice = atrPoints * point;
-      double slBuffer = atrPoints * CFG.exit.slBufferATR * point;
-      double tpBuffer = atrPoints * CFG.exit.tpBufferATR * point;
+      double slBuffer = atrPoints * cfg.sl_buffer_atr * point;
+      double tpBuffer = atrPoints * cfg.tp_buffer_atr * point;
       double pSLMult = decision.slMultiplier;
 
       if (plan.type == ORDER_TYPE_BUY)
       {
-         double sl = (CFG.risk.tpslMode == TPSL_PATTERN) ? decision.signalPrice - (slBuffer * pSLMult) : support - (slBuffer * pSLMult);
+         double sl = (cfg.tpsl_mode == TPSL_PATTERN) ? decision.signalPrice - (slBuffer * pSLMult) : support - (slBuffer * pSLMult);
          double tp = resistance - tpBuffer;
 
          plan.brokerSL = m_data.NormalizePrice(m_symbol, sl);
@@ -373,7 +378,7 @@ public:
       }
       else
       {
-         double sl = (CFG.risk.tpslMode == TPSL_PATTERN) ? decision.signalPrice + (slBuffer * pSLMult) : resistance + (slBuffer * pSLMult);
+         double sl = (cfg.tpsl_mode == TPSL_PATTERN) ? decision.signalPrice + (slBuffer * pSLMult) : resistance + (slBuffer * pSLMult);
          double tp = support + tpBuffer;
 
          plan.brokerSL = m_data.NormalizePrice(m_symbol, sl);
@@ -403,9 +408,9 @@ public:
 
       int qualityScore = decision.orderType == ORDER_TYPE_BUY ? decision.bias : -decision.bias;
       double signalQuality = (qualityScore == 0) ? 1.5 : 1.0;
-      double baseLot = m_data.CalculateLotSize(m_symbol, CFG.risk.pct, slDistancePoints, signalQuality);
+      double baseLot = m_data.CalculateLotSize(m_symbol, cfg.risk_pct, slDistancePoints, signalQuality);
       plan.lot = baseLot;
-      plan.comment = m_data ? m_data.BuildComment(plan.type == ORDER_TYPE_BUY ? "BUY" : "SELL", decision.bias, CFG.risk.entryMode) : "P_EXEC";
+      plan.comment = m_data ? m_data.BuildComment(plan.type == ORDER_TYPE_BUY ? "BUY" : "SELL", decision.bias, cfg.entry_mode) : "P_EXEC";
 
       if (!ValidateOrderLevels(plan.type, plan.entry, plan.brokerSL, plan.tp, plan.lot, validationReason, atrPoints))
       {
@@ -426,6 +431,7 @@ public:
 
    ulong Open(const OrderPlan &plan, double zonePrice, double slMult)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       if (plan.lot <= 0 || plan.entry <= 0 || plan.atrUsed <= 0)
       {
          if (m_debugMode)
@@ -451,7 +457,7 @@ public:
 
       request.action = TRADE_ACTION_DEAL;
       request.symbol = m_symbol; // Use m_symbol
-      request.magic = CFG.risk.magic;
+      request.magic = cfg.magic;
       request.volume = plan.lot;
       request.price = plan.entry;
       request.sl = plan.brokerSL;

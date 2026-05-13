@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                                 DataManager.mqh  |
 //|                                       Copyright 2026, Agsicentre |
 //|            Data Management & Indicator Cache Module              |
@@ -26,14 +26,38 @@ interface IDataProvider
    bool CanOpenTrade(double additionalRiskAmount);
    double CalculateLotSize(string symbol, double riskPct, double slDistancePoints, double qualityMultiplier = 1.0);
    double NormalizeVolume(string symbol, double vol) const;
+   ConfigSnapshot GetConfigCache() const;
 };
 
 //+------------------------------------------------------------------+
 //| DataManager - Implements IDataProvider                          |
 //+------------------------------------------------------------------+
-class DataManager : public IManager, public IDataProvider
+class DataManager : public IManager
 {
 private:
+   // Fix Multiple Inheritance: Gunakan Proxy class untuk mengimplementasikan IDataProvider.
+   // MQL5 tidak mendukung inheritance dari dua class sekaligus.
+   class CDataProviderProxy : public IDataProvider
+   {
+   private:
+      DataManager *m_mgr;
+   public:
+      CDataProviderProxy(DataManager *mgr) : m_mgr(mgr) {}
+
+      virtual double GetATRPoints() const override { return m_mgr.GetATRPoints(); }
+      virtual PositionScanResult GetScanResult() const override { return m_mgr.GetScanResult(); }
+      virtual PerformanceStats GetPerformanceStats() const override { return m_mgr.GetPerformanceStats(); }
+      virtual bool CanOpenTrade(double additionalRiskAmount) override { return m_mgr.CanOpenTrade(additionalRiskAmount); }
+      virtual double CalculateLotSize(string symbol, double riskPct, double slDistancePoints, double qualityMultiplier = 1.0) override 
+      { 
+         return m_mgr.CalculateLotSize(symbol, riskPct, slDistancePoints, qualityMultiplier); 
+      }
+      virtual double NormalizeVolume(string symbol, double vol) const override { return m_mgr.NormalizeVolume(symbol, vol); }
+      virtual ConfigSnapshot GetConfigCache() const override { return m_mgr.GetConfigCache(); }
+   };
+
+   CDataProviderProxy *m_proxy;
+
    int m_atrHandle;
    int m_fractalHandle;
 
@@ -67,6 +91,7 @@ public:
                    m_realizedDailyProfit(0),
                    m_dayStartBalance(0), m_lastProfitUpdateDay(0), m_lastScanTime(0),
                    m_consecutiveLosses(0),
+                   m_proxy(NULL),
                    m_lastLossTime(0)
    {
       m_cache.barTime = 0;
@@ -76,10 +101,12 @@ public:
       ArraySetAsSeries(m_cache.fractalsDown, true);
       ZeroMemory(m_scanCache);
       m_lastHistoryCount = -1;
+      m_proxy = new CDataProviderProxy(GetPointer(this));
    }
 
    ~DataManager()
    {
+      if (CheckPointer(m_proxy) == POINTER_DYNAMIC) delete m_proxy;
       if (m_atrHandle != INVALID_HANDLE)
          IndicatorRelease(m_atrHandle);
       if (m_fractalHandle != INVALID_HANDLE)
@@ -93,8 +120,8 @@ public:
       m_cfgInitialized = true;
    }
 
-   // Get cached config reference
-   const ConfigSnapshot& GetConfigCache() const { return m_cfgCache; }
+   // Get cached config value
+   ConfigSnapshot GetConfigCache() const { return m_cfgCache; }
 
    // Refresh config cache on reload
    void RefreshConfigCache()
@@ -106,7 +133,7 @@ public:
    {
       if (!IManager::Init())
          return false;
-      m_data = GetPointer(this);
+      m_data = this;
       InitConfigCache();  // Initialize config cache
       return ResetIndicators();
    }
@@ -126,6 +153,13 @@ public:
 
    bool ResetIndicators()
    {
+      // Release old handles first to prevent resource/handle leaks
+      if (m_atrHandle != INVALID_HANDLE)
+         IndicatorRelease(m_atrHandle);
+      if (m_fractalHandle != INVALID_HANDLE)
+         IndicatorRelease(m_fractalHandle);
+
+      // Re-create handles with current parameters
       m_atrHandle = iATR(m_symbol, m_period, CFG.market.atrPeriod);
       m_fractalHandle = iFractals(m_symbol, m_period);
       if (m_atrHandle == INVALID_HANDLE || m_fractalHandle == INVALID_HANDLE)
@@ -142,11 +176,14 @@ public:
       datetime currentBar = rates[0].time;
       if (m_cache.barTime == currentBar && !m_cache.dirty)
          return;
+         
       if (!SeriesInfoInteger(m_symbol, m_period, SERIES_SYNCHRONIZED))
          return;
+         
       double atrBuf[1];
       if (CopyBuffer(m_atrHandle, 0, 0, 1, atrBuf) > 0 && atrBuf[0] > 0)
       {
+         // Convert ATR value to points
          m_cache.atr = atrBuf[0] / SymbolInfoDouble(m_symbol, SYMBOL_POINT);
          if (CopyBuffer(m_fractalHandle, 0, 0, 100, m_cache.fractalsUp) < 100) return;
          if (CopyBuffer(m_fractalHandle, 1, 0, 100, m_cache.fractalsDown) < 100) return;
@@ -167,39 +204,43 @@ public:
    }
 
    // --- Getters & Business Logic ---
-   double GetATRPoints() const { return m_cache.atr; }
+   virtual double GetATRPoints() const { return m_cache.atr; }
    void MarkDirty() { m_cache.dirty = true; }
-   PositionScanResult GetScanResult() const { return m_scanCache; }
-   PerformanceStats GetPerformanceStats() const { return m_perfStats; }
+   virtual PositionScanResult GetScanResult() const { return m_scanCache; }
+   virtual PerformanceStats GetPerformanceStats() const { return m_perfStats; }
    double GetDayStartBalance() const { return m_dayStartBalance; }
    int GetConsecutiveLosses() const { return m_consecutiveLosses; }
    datetime GetLastLossTime() const { return m_lastLossTime; }
 
    // --- Consolidated Risk Logic ---
-   bool CanOpenTrade(double additionalRiskAmount)
+   virtual bool CanOpenTrade(double additionalRiskAmount)
    {
-      double maxDailyLoss = AccountInfoDouble(ACCOUNT_EQUITY) * (CFG.risk.maxDailyLoss / 100.0);
+      double maxDailyLoss = AccountInfoDouble(ACCOUNT_EQUITY) * (m_cfgCache.max_daily_loss / 100.0);
       return (MathAbs(m_realizedDailyProfit) + additionalRiskAmount) < maxDailyLoss;
    }
 
-   double CalculateLotSize(string symbol, double riskPct, double slDistancePoints, double qualityMultiplier = 1.0)
+   virtual double CalculateLotSize(string symbol, double riskPct, double slDistancePoints, double qualityMultiplier = 1.0)
    {
       if (slDistancePoints <= 0) return 0.0;
       double lot = 0.0;
-      if (CFG.risk.autoLot)
+      if (m_cfgCache.auto_lot)
       {
          double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+         
+         // Cache symbol data to minimize API calls
+         MqlTick lastTick;
+         if(!SymbolInfoTick(symbol, lastTick)) return 0.0;
          double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
          double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
-
-         if (tickValue <= 0 || tickSize <= 0 || equity <= 0) return 0.0;
-         double riskMoney = equity * (riskPct / 100.0);
          double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+
+         if (tickValue <= 0 || tickSize <= 0 || equity <= 0 || point <= 0) return 0.0;
+         double riskMoney = equity * (riskPct / 100.0);
          double lossPerLot = (slDistancePoints * point / tickSize) * tickValue;
 
          if (lossPerLot > 0) lot = riskMoney / lossPerLot;
       }
-      else lot = CFG.risk.lot;
+      else lot = m_cfgCache.lot_size;
 
       lot *= qualityMultiplier;
       return NormalizeVolume(symbol, lot);
@@ -232,7 +273,7 @@ public:
 
       if (tpDist > 0)
       {
-         double minTP = atrPoints * CFG.exit.minTPDistATR;
+         double minTP = atrPoints * m_cfgCache.min_tp_distance_atr;
          if (tpDist < minTP)
          {
             reason = "TP too close to entry (Min ATR)";
@@ -253,7 +294,7 @@ public:
 
    void RefreshDailyProfit()
    {
-      string gvName = "PASR_PROFIT_" + m_symbol + "_" + (string)CFG.risk.magic;
+      string gvName = "PASR_PROFIT_" + m_symbol + "_" + (string)m_cfgCache.magic;
       datetime times[];
       if (CopyTime(m_symbol, PERIOD_D1, 0, 1, times) <= 0)
          return;
@@ -264,7 +305,7 @@ public:
          for (int i = 0; i < HistoryDealsTotal(); i++)
          {
             ulong t = HistoryDealGetTicket(i);
-            if (t > 0 && HistoryDealGetInteger(t, DEAL_MAGIC) == CFG.risk.magic && (HistoryDealGetString(t, DEAL_SYMBOL) == m_symbol))
+            if (t > 0 && HistoryDealGetInteger(t, DEAL_MAGIC) == m_cfgCache.magic && (HistoryDealGetString(t, DEAL_SYMBOL) == m_symbol))
             {
                dailySum += HistoryDealGetDouble(t, DEAL_PROFIT) + HistoryDealGetDouble(t, DEAL_SWAP) + HistoryDealGetDouble(t, DEAL_COMMISSION);
             }
@@ -311,7 +352,7 @@ public:
       for (int i = 0; i < PositionsTotal(); i++)
       {
          ulong ticket = PositionGetTicket(i);
-         if (ticket <= 0 || PositionGetInteger(POSITION_MAGIC) != CFG.risk.magic || (PositionGetString(POSITION_SYMBOL) != m_symbol))
+         if (ticket <= 0 || PositionGetInteger(POSITION_MAGIC) != m_cfgCache.magic || (PositionGetString(POSITION_SYMBOL) != m_symbol))
             continue;
          floatingTotal += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP) + PositionGetDouble(POSITION_COMMISSION);
          temp.normalCount++;
@@ -324,7 +365,7 @@ public:
       for (int i = 0; i < OrdersTotal(); i++)
       {
          ulong oTicket = OrderGetTicket(i);
-         if (oTicket > 0 && OrderGetInteger(ORDER_MAGIC) == CFG.risk.magic && (OrderGetString(ORDER_SYMBOL) == m_symbol))
+         if (oTicket > 0 && OrderGetInteger(ORDER_MAGIC) == m_cfgCache.magic && (OrderGetString(ORDER_SYMBOL) == m_symbol))
          {
             ENUM_ORDER_STATE oState = (ENUM_ORDER_STATE)OrderGetInteger(ORDER_STATE);
             if (oState == ORDER_STATE_STARTED || oState == ORDER_STATE_PLACED)
@@ -348,7 +389,7 @@ public:
       return NormalizeDouble(price, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS));
    }
 
-   double NormalizeVolume(string symbol, double vol) const
+   virtual double NormalizeVolume(string symbol, double vol) const
    {
       double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
       double minv = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
@@ -362,19 +403,23 @@ public:
 
    void UpdatePerformanceStats()
    {
-      if (!HistorySelect(0, TimeCurrent()))
+      // Optimization: Only select history since the last scan if possible. 
+      // Full history selection (0 to TimeCurrent) is extremely heavy.
+      datetime from = (m_lastHistoryCount > 0) ? (TimeCurrent() - 86400 * 7) : 0; 
+      
+      if (!HistorySelect(from, TimeCurrent()))
          return;
 
       int total = HistoryDealsTotal();
       if (total == m_lastHistoryCount) return;
 
       m_lastHistoryCount = total;
-      ZeroMemory(m_perfStats);
+      ZeroMemory(m_perfStats); // Recalculate stats
 
       for (int i = 0; i < total; i++)
       {
          ulong t = HistoryDealGetTicket(i);
-         if (t <= 0 || HistoryDealGetInteger(t, DEAL_MAGIC) != CFG.risk.magic)
+         if (t <= 0 || HistoryDealGetInteger(t, DEAL_MAGIC) != m_cfgCache.magic)
             continue;
          if (HistoryDealGetInteger(t, DEAL_ENTRY) != DEAL_ENTRY_OUT)
             continue;

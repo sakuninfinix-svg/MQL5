@@ -13,6 +13,7 @@
 #define __SIGNAL_MANAGER_MQH__
 
 #include "IManager.mqh"
+#include "10.DataManager.mqh"
 #include "9.PatternManager.mqh"
 
 //+------------------------------------------------------------------+
@@ -85,12 +86,13 @@ private:
    // --- Zone Reuse Check ---
    bool IsZoneReuseBlocked(bool isBuy, double zonePrice, double atrPoints)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       MqlRates rates[];
       if (CopyRates(m_symbol, m_period, 0, 1, rates) <= 0)
          return false;
       datetime currBar = rates[0].time;
 
-      double tol = atrPoints * CFG.sr.zoneReuseATR * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double tol = atrPoints * cfg.zone_reuse_atr * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
 
       if (isBuy)
          return (m_lastBuyZoneBar == currBar && MathAbs(zonePrice - m_lastBuyZonePrice) <= tol);
@@ -119,8 +121,9 @@ private:
    // --- Pattern Failure Cooldown ---
    bool IsPatternFailureBlocked(double zonePrice, double atrPoints)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       datetime now = TimeCurrent();
-      double tol = atrPoints * CFG.sr.zoneReuseATR * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double tol = atrPoints * cfg.zone_reuse_atr * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
 
       for (int i = ArraySize(m_failedZones) - 1; i >= 0; i--)
       {
@@ -141,42 +144,40 @@ private:
       for (int i = ArraySize(m_failedZones) - 1; i >= 0; i--)
       {
          if (now > m_failedZones[i].expiry)
-         {
-            for (int j = i; j < ArraySize(m_failedZones) - 1; j++)
-               m_failedZones[j] = m_failedZones[j + 1];
-            ArrayResize(m_failedZones, ArraySize(m_failedZones) - 1);
-         }
+            ArrayRemove(m_failedZones, i, 1);
       }
    }
 
    void RegisterFailure(double zonePrice)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       int sz = ArraySize(m_failedZones);
       ArrayResize(m_failedZones, sz + 1);
       m_failedZones[sz].price = zonePrice;
-      m_failedZones[sz].expiry = TimeCurrent() + (CFG.pattern.failureCooldownBars * PeriodSeconds(m_period));
+      m_failedZones[sz].expiry = TimeCurrent() + (cfg.failure_cooldown_bars * PeriodSeconds(m_period));
 
       if (m_debugMode)
          PrintFormat("[PASR Signal] Level %.5f registered as FAILED. Cooldown %d candles.",
-                     zonePrice, CFG.pattern.failureCooldownBars);
+                     zonePrice, cfg.failure_cooldown_bars);
    }
 
    // --- Signal Cooldown Management ---
    bool IsSignalCooldownActive(double price, double atrPoints)
    {
-      return IsSignalCooldownActiveWithCustomBars(price, atrPoints, CFG.risk.signalCooldownBars);
+      return IsSignalCooldownActiveWithCustomBars(price, atrPoints, m_data.GetConfigCache().signal_cooldown_bars);
    }
 
    // NEW: Signal Cooldown dengan custom bars untuk dynamic cooldown
    bool IsSignalCooldownActiveWithCustomBars(double price, double atrPoints, int cooldownBars)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       datetime now = TimeCurrent();
 
       for (int i = ArraySize(m_signalCooldowns) - 1; i >= 0; i--)
       {
          if (now > m_signalCooldowns[i].expiry)
             continue;
-         double tol = atrPoints * CFG.sr.zoneReuseATR * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+         double tol = atrPoints * cfg.zone_reuse_atr * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
          if (MathAbs(price - m_signalCooldowns[i].price) <= tol)
          {
             // Any signal in the zone within cooldown period blocks new signals
@@ -188,14 +189,15 @@ private:
 
    void RegisterSignalCooldown(double price)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       int sz = ArraySize(m_signalCooldowns);
       ArrayResize(m_signalCooldowns, sz + 1);
       m_signalCooldowns[sz].price = price;
-      m_signalCooldowns[sz].expiry = TimeCurrent() + (CFG.risk.signalCooldownBars * PeriodSeconds(m_period));
+      m_signalCooldowns[sz].expiry = TimeCurrent() + (cfg.signal_cooldown_bars * PeriodSeconds(m_period));
 
       if (m_debugMode)
          PrintFormat("[PASR Signal] Signal cooldown registered @ %.5f for %d bars.",
-                     price, CFG.risk.signalCooldownBars);
+                     price, cfg.signal_cooldown_bars);
    }
 
    void CleanupSignalCooldowns()
@@ -204,21 +206,18 @@ private:
       for (int i = ArraySize(m_signalCooldowns) - 1; i >= 0; i--)
       {
          if (now > m_signalCooldowns[i].expiry)
-         {
-            for (int j = i; j < ArraySize(m_signalCooldowns) - 1; j++)
-               m_signalCooldowns[j] = m_signalCooldowns[j + 1];
-            ArrayResize(m_signalCooldowns, ArraySize(m_signalCooldowns) - 1);
-         }
+            ArrayRemove(m_signalCooldowns, i, 1);
       }
    }
 
    // --- MTF Bias Helper ---
    int GetMTFBias(double price, double htfSupport, double htfResistance, double atrPoints)
    {
-      if (!CFG.risk.useMTF)
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      if (!cfg.use_mtf)
          return 0;
 
-      double zone = (atrPoints * CFG.sr.atrBufferMult) * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double zone = (atrPoints * cfg.atr_buffer_mult) * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       bool nearHtfSupport = (price <= htfSupport + zone);
       bool nearHtfResistance = (price >= htfResistance - zone);
 
@@ -239,14 +238,15 @@ private:
                             double atrPoints, double dynamicMult, string &reason,
                             const MqlRates &rates[], int zoneStrength = 0)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       double extreme = (dir == 1) ? rates[shift].low : rates[shift].high;
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       double zoneWidth = (atrPoints * dynamicMult) * point;
-      double multiplier = (CFG.risk.entryMode == MODE_SAFE) ? 0.5 : 1.0;
+      double multiplier = (cfg.entry_mode == MODE_SAFE) ? 0.5 : 1.0;
 
-      if (CFG.pattern.useAdaptiveZoneBuffer && zoneStrength >= CFG.sr.minTouchesStrong)
+      if (cfg.use_adaptive_zone_buffer && zoneStrength >= cfg.min_touches_strong)
       {
-         multiplier *= CFG.pattern.strongZoneBufferMult;
+         multiplier *= cfg.strong_zone_buffer_mult;
       }
 
       bool ok = (dir == 1) ? (extreme <= zonePrice + (zoneWidth * multiplier)) : (extreme >= zonePrice - (zoneWidth * multiplier));
@@ -259,6 +259,7 @@ private:
    bool PassContextFilter(int shift, double atrPoints, string &reason,
                           const MqlRates &rates[], int dir)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       double o = rates[shift].open, h = rates[shift].high;
       double l = rates[shift].low, c = rates[shift].close;
       double range = h - l;
@@ -268,19 +269,19 @@ private:
       if (range <= 0) return false;
 
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
-      double maxAllowedRange = CFG.pattern.maxSignalATR * atrPoints * point;
+      double maxAllowedRange = cfg.max_signal_atr * atrPoints * point;
       if (range > maxAllowedRange)
       {
          reason = "Signal too large";
          return false;
       }
-      if ((body / range) > CFG.pattern.antiBreakoutPct)
+      if ((body / range) > cfg.anti_breakout_pct)
       {
          reason = "Body too long";
          return false;
       }
 
-      double threshold = atrPoints * CFG.pattern.momentumThresholdATR * point;
+      double threshold = atrPoints * cfg.momentum_threshold_atr * point;
       int pushCount = 0;
 
       for (int i = 1; i <= 3; i++)
@@ -314,9 +315,10 @@ private:
                       double atrPoints, int supHtfAlign, int resHtfAlign,
                       int &bias, string &reason)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       bias = GetMTFBias(referencePrice, htfSupport, htfResistance, atrPoints);
 
-      if (!CFG.risk.useMTF)
+      if (!cfg.use_mtf)
          return true;
 
       // Block trades that are contra to HTF zone alignment
@@ -351,25 +353,26 @@ private:
                               double patternExtreme, string &reason,
                               const MqlRates &rates[])
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       double entryPrice = rates[shift].close;
       double target = (dir == 1) ? resistance : support;
 
       // 1. Hitung Proyeksi TP (Selalu ke SR lawan dengan buffer)
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
-      double tpBuffer = CFG.exit.tpBufferATR * atrPoints * point;
+      double tpBuffer = cfg.tp_buffer_atr * atrPoints * point;
       double projectedTP = (dir == 1) ? (target - tpBuffer) : (target + tpBuffer);
       double profitDist = MathAbs(entryPrice - projectedTP);
 
       // 2. Hitung Proyeksi SL
-      double slBuffer = CFG.exit.slBufferATR * atrPoints * point;
-      double baseSL = (CFG.risk.tpslMode == TPSL_PATTERN) ? patternExtreme : ((dir == 1) ? support : resistance);
+      double slBuffer = cfg.sl_buffer_atr * atrPoints * point;
+      double baseSL = (cfg.tpsl_mode == TPSL_PATTERN) ? patternExtreme : ((dir == 1) ? support : resistance);
       double projectedSL = (dir == 1) ? (baseSL - slBuffer) : (baseSL + slBuffer);
 
       // Pastikan riskDist minimal 1 point untuk menghindari pembagian nol
       double riskDist = MathMax(MathAbs(entryPrice - projectedSL), point);
 
       // 3. Validasi Jarak minimum TP
-      double minTPDist = (atrPoints * CFG.exit.minTPDistATR) * point;
+      double minTPDist = (atrPoints * cfg.min_tp_distance_atr) * point;
       if (profitDist < minTPDist)
       {
          reason = "TP distance < Min ATR";
@@ -396,11 +399,12 @@ private:
                          double supBufferMult, double resBufferMult,
                          int supHtfAlign, int resHtfAlign)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       ZeroMemory(decision);
       string reason = "No pattern detected";
 
       // Validate data availability
-      if (Bars(m_symbol, m_period) < CFG.pattern.lookback + 5)
+      if (Bars(m_symbol, m_period) < cfg.pattern_lookback + 5)
       {
          decision.reason = "Insufficient history data";
          return false;
@@ -408,13 +412,13 @@ private:
 
       // === OPTIMIZATION: Batch fetch candles once ===
       MqlRates rates[];
-      if (!FetchCandleBatch(1, CFG.pattern.lookback + 4, rates))
+      if (!FetchCandleBatch(1, cfg.pattern_lookback + 4, rates))
       {
          decision.reason = "Failed to fetch candle data";
          return false;
       }
 
-      for (int shift = 0; shift < CFG.pattern.lookback; shift++)
+      for (int shift = 0; shift < cfg.pattern_lookback; shift++)
       {
          string currentFilterReason = "";
          int dir = 0;
@@ -425,7 +429,7 @@ private:
          double pSLMult = 1.0;
 
          // OPTIMIZATION V1.20: Call static method directly instead of instance method
-         if (!PatternManager::Detect(pType, rates, shift, atrPoints, dir, signalPrice, pScore, pSLMult, patternReason))
+         if (!PatternManager::Detect(pType, cfg, rates, shift, atrPoints, dir, signalPrice, pScore, pSLMult, patternReason))
             continue;
 
          double zonePrice = (dir == 1) ? support : resistance;
@@ -469,24 +473,24 @@ private:
          double finalConfluenceScore = pScore;
 
          // Bonus jika searah MTF
-         if (CFG.risk.useMTF)
+         if (cfg.use_mtf)
          {
             if (((dir == 1 && bias > 0) || (dir == -1 && bias < 0)) ||
                 ((dir == 1 && supHtfAlign == 1) || (dir == -1 && resHtfAlign == 1)))
-               finalConfluenceScore += CFG.pattern.mtfConfluenceBonus;
+               finalConfluenceScore += cfg.mtf_confluence_bonus;
          }
 
          // Bonus jika selaras dengan HTF zone alignment
-         if (currentBufferMult < CFG.pattern.strongZoneThreshold)
-            finalConfluenceScore += CFG.pattern.strongZoneBonus;
+         if (currentBufferMult < cfg.strong_zone_threshold)
+            finalConfluenceScore += cfg.strong_zone_bonus;
 
          // 9. Signal Cooldown Filter - NEW: Dynamic Cooldown untuk HQ Setup
-         bool isHighQualitySetup = (finalConfluenceScore >= CFG.pattern.hqThreshold);
-         int effectiveCooldownBars = CFG.risk.signalCooldownBars;
+         bool isHighQualitySetup = (finalConfluenceScore >= cfg.hq_threshold);
+         int effectiveCooldownBars = cfg.signal_cooldown_bars;
 
-         if (CFG.pattern.useDynamicCooldown && isHighQualitySetup)
+         if (cfg.use_dynamic_cooldown && isHighQualitySetup)
          {
-            effectiveCooldownBars = CFG.pattern.reducedCooldownBars; // Bypass cooldown normal untuk HQ setup
+            effectiveCooldownBars = cfg.reduced_cooldown_bars; // Bypass cooldown normal untuk HQ setup
          }
 
          if (IsSignalCooldownActiveWithCustomBars(signalPrice, atrPoints, effectiveCooldownBars))
@@ -533,16 +537,17 @@ private:
                              double supBufferMult, double resBufferMult,
                              int supHtfAlign, int resHtfAlign)
    {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       ZeroMemory(decision);
       string reason = "No recovery pattern detected";
 
-      if (!CFG.recovery.use)
+      if (!cfg.recovery_use)
          return false;
 
       // Fetch candles around the SL hit price
       MqlRates rates[];
-      // Look for patterns on the last closed bar (shift 0)
-      if (!FetchCandleBatch(1, 4, rates)) // Need at least 3-4 bars for most patterns
+      // Look for patterns on the last closed bar (shift 0) and subsequent bars for context
+      if (!FetchCandleBatch(0, 5, rates)) // Need at least 5 bars for patterns that look at shift+4
       {
          decision.reason = "Failed to fetch candle data for recovery";
          return false;
@@ -562,7 +567,7 @@ private:
       double pSLMult = 1.0;
 
       // OPTIMIZATION V1.20: Call static method directly instead of instance method
-      if (!PatternManager::Detect(pType, rates, shift, atrPoints, dir, signalPrice, pScore, pSLMult, patternReason))
+      if (!PatternManager::Detect(pType, cfg, rates, shift, atrPoints, dir, signalPrice, pScore, pSLMult, patternReason))
          return false;
 
       // Ensure pattern is in the target reversal direction
@@ -570,14 +575,14 @@ private:
          return false;
 
       // Check if pattern score meets recovery threshold
-      if (pScore < CFG.recovery.scoreThreshold)
+      if (pScore < cfg.recovery_pattern_score_threshold)
       {
-         reason = StringFormat("Recovery pattern score too low (%.2f < %.2f)", pScore, CFG.recovery.scoreThreshold);
+         reason = StringFormat("Recovery pattern score too low (%.2f < %.2f)", pScore, cfg.recovery_pattern_score_threshold);
          return false;
       }
 
       // Check if the signal is near the SL hit price (within tolerance)
-      double tolerance = atrPoints * CFG.recovery.zoneToleranceATR * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double tolerance = atrPoints * cfg.recovery_zone_tolerance_atr * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       if (MathAbs(signalPrice - slHitPrice) > tolerance)
       {
          reason = StringFormat("Recovery signal too far from SL hit price (%.5f vs %.5f)", signalPrice, slHitPrice);
@@ -629,11 +634,6 @@ public:
    //| PUBLIC: Event Handler Methods                                   |
    //+------------------------------------------------------------------+
 public:
-   // --- PriceUpdate Event: Cache tick, don't process yet ---
-   virtual void OnPriceUpdate(PriceUpdateEvent *e) override
-   {
-   }
-
    // --- NewBar Event: MAIN SIGNAL DETECTION TRIGGER ---
    virtual void OnNewBar(NewBarEvent *e) override
    {
@@ -670,6 +670,8 @@ public:
    {
       if (m_debugMode)
          Log("Emergency Stop: Clearing pending signals.");
+      m_marketGateOpen = false;
+      m_marketEntryAllowed = false;
    }
 
    // --- Heartbeat Event ---
@@ -679,7 +681,6 @@ public:
       CleanupSignalCooldowns(); // FIX: Call cleanup for signal cooldowns
    }
 
-   // Handle specific events with static dispatch hooks
    virtual void OnZoneUpdate(ZoneUpdateEvent *ze) override
    {
       m_marketData.atrPoints = ze.atrPoints;
@@ -705,8 +706,21 @@ public:
 
    virtual void OnRecoveryOpportunity(RecoveryOpportunityEvent *roe) override
    {
-      if (!CFG.recovery.use)
+      if (CheckPointer(roe) == POINTER_INVALID || !m_initialized)
          return;
+      if (CheckPointer(m_data) == POINTER_INVALID)
+         return;
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      if (!cfg.recovery_use || !m_marketEntryAllowed)
+         return;
+
+      // Pastikan data zona SR sudah tersedia
+      if (m_marketData.support <= 0 || m_marketData.resistance <= 0)
+      {
+         if (m_debugMode)
+            Log(StringFormat("Recovery search aborted for ticket %d: Missing SR data.", roe.originalTicket));
+         return;
+      }
 
       SignalDecision recoveryDecision;
       if (DetectRecoverySignal(recoveryDecision,
@@ -723,8 +737,12 @@ public:
          RecoverySignalEvent *recSigEvent = new RecoverySignalEvent(
              roe.originalTicket, recoveryDecision, roe.atrPoints, m_marketData.support, m_marketData.resistance);
          DispatchEvent(recSigEvent);
-         Log(StringFormat("Recovery signal detected for original trade %d: %s", roe.originalTicket, recoveryDecision.reason));
-      } else {
+         
+         if (m_debugMode)
+            Log(StringFormat("Recovery signal detected for original trade %d: %s", roe.originalTicket, recoveryDecision.reason));
+      }
+      else if (m_debugMode)
+      {
          Log(StringFormat("No immediate recovery signal found for original trade %d.", roe.originalTicket));
       }
    }

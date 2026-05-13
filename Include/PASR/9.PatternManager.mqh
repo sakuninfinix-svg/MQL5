@@ -42,9 +42,10 @@ private:
 public:
    // OPTIMIZATION V1.20: All methods converted to static for memory efficiency
    static bool Detect(ENUM_PATTERN_TYPE &outType,
+               const ConfigSnapshot &cfg,
                const MqlRates &rates[],
                const int shift,
-               const double _atrPoints,
+               const double atrvalue,
                int &outDir,
                double &outExtreme,
                double &outScore,
@@ -58,7 +59,7 @@ public:
       outSLMult = 1.0;
       outReason = "";
 
-      if (shift < 1 || _atrPoints <= 0)
+      if (shift < 1 || atrvalue <= 0)
       {
          outReason = "Invalid shift/ATR";
          return false;
@@ -72,18 +73,18 @@ public:
 
       PatternVote votes[10];
       for (int i = 0; i < 10; i++)
-         ResetVote(votes[i]);
+         ResetVote(votes[i], cfg);
 
-      EvaluatePinbar(rates, shift, _atrPoints, votes[0]);
-      EvaluateEngulfing(rates, shift, _atrPoints, votes[1]);
-      EvaluateBottom(rates, shift, _atrPoints, votes[2]);
-      EvaluateFakey(rates, shift, _atrPoints, votes[3]);
-      EvaluateInsideBar(rates, shift, _atrPoints, votes[4]);
-      EvaluateMorningStar(rates, shift, _atrPoints, votes[5]);
-      EvaluateThreeInside(rates, shift, _atrPoints, votes[6]);
-      EvaluateRailroadTracks(rates, shift, _atrPoints, votes[7]);
-      EvaluateDarkCloudPiercing(rates, shift, _atrPoints, votes[8]);
-      EvaluateMarubozu(rates, shift, _atrPoints, votes[9]);
+      EvaluatePinbar(rates, shift, atrvalue, votes[0], cfg);
+      EvaluateEngulfing(rates, shift, atrvalue, votes[1], cfg);
+      EvaluateBottom(rates, shift, atrvalue, votes[2], cfg);
+      EvaluateFakey(rates, shift, atrvalue, votes[3], cfg);
+      EvaluateInsideBar(rates, shift, atrvalue, votes[4], cfg);
+      EvaluateMorningStar(rates, shift, atrvalue, votes[5], cfg);
+      EvaluateThreeInside(rates, shift, atrvalue, votes[6], cfg);
+      EvaluateRailroadTracks(rates, shift, atrvalue, votes[7], cfg);
+      EvaluateDarkCloudPiercing(rates, shift, atrvalue, votes[8], cfg);
+      EvaluateMarubozu(rates, shift, atrvalue, votes[9], cfg);
 
       double buyScore = 0.0;
       double sellScore = 0.0;
@@ -102,7 +103,7 @@ public:
       double conflictScore = MathMin(buyScore, sellScore);
       double dominanceGap = totalScore - conflictScore;
 
-      if (dominanceGap < CFG.pattern.minDominanceGap)
+      if (dominanceGap < cfg.min_dominance_gap)
       {
          outReason = StringFormat("Confluence conflict | buy=%.2f sell=%.2f", buyScore, sellScore);
          return false;
@@ -172,14 +173,14 @@ public:
 
 private:
    // OPTIMIZATION V1.20: All private methods converted to static for consistency
-   static void ResetVote(PatternVote &v)
+   static void ResetVote(PatternVote &v, const ConfigSnapshot &cfg)
    {
       v.valid = false;
       v.type = PATTERN_NONE;
       v.dir = 0;
       v.extreme = 0.0;
       v.score = 0.0;
-      v.slMult = CFG.pattern.defaultSLMult;
+      v.slMult = cfg.default_sl_mult;
       v.label = "";
    }
 
@@ -259,15 +260,15 @@ private:
              CandleLow(rates, shift) > CandleLow(rates, shift + 1);
    }
 
-   static double NormalizeATRFactor(const double value, const double _atrPoints)
+   static double NormalizeATRFactor(const double value, const double atrvalue)
    {
-      double atrPrice = _atrPoints * _Point;
+      double atrPrice = atrvalue * _Point;
       if (atrPrice <= 0.0)
          return 0.0;
       return value / atrPrice;
    }
 
-   static void AddStrengthFromRejection(const MqlRates &rates[], const int shift, const double _atrPoints, const int dir, double &score)
+   static void AddStrengthFromRejection(const MqlRates &rates[], const int shift, const double atrvalue, const int dir, double &score, const ConfigSnapshot &cfg)
    {
       double range = CandleRange(rates, shift);
       if (range <= 0.0)
@@ -276,26 +277,26 @@ private:
       double majorWick = (dir == 1) ? LowerWick(rates, shift) : UpperWick(rates, shift);
       double wickPct = majorWick / range;
       double bodyPct = CandleBody(rates, shift) / range;
-      double atrFactor = NormalizeATRFactor(range, _atrPoints);
+      double atrFactor = NormalizeATRFactor(range, atrvalue);
 
-      if (wickPct >= CFG.pattern.wickRatioThreshold)
-         score += CFG.pattern.bonusStrongWick;
-      if (bodyPct <= CFG.pattern.bodyRatioThreshold)
-         score += CFG.pattern.bonusStrongBody;
-      if (atrFactor >= CFG.pattern.atrRangeThreshold)
-         score += CFG.pattern.bonusStrongATR;
+      if (wickPct >= cfg.wick_ratio_threshold)
+         score += cfg.bonus_strong_wick;
+      if (bodyPct <= cfg.body_ratio_threshold)
+         score += cfg.bonus_strong_body;
+      if (atrFactor >= cfg.atr_range_threshold)
+         score += cfg.bonus_strong_atr;
    }
 
-   static void AddStrengthFromFollowThrough(const MqlRates &rates[], const int shift, const int dir, double &score)
+   static void AddStrengthFromFollowThrough(const MqlRates &rates[], const int shift, const int dir, double &score, const ConfigSnapshot &cfg)
    {
       double prevClose = CandleClose(rates, shift + 1);
       double curClose = CandleClose(rates, shift);
 
       if ((dir == 1 && curClose > prevClose) || (dir == -1 && curClose < prevClose))
-         score += CFG.pattern.bonusFollowThrough;
+         score += cfg.bonus_follow_through;
    }
 
-   static void EvaluatePinbar(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluatePinbar(const MqlRates &rates[], const int shift, const double atrvalue, PatternVote &vote, const ConfigSnapshot &cfg)
    {
       double range = CandleRange(rates, shift);
       if (range <= 0.0)
@@ -308,12 +309,12 @@ private:
       int dir = 0;
       double extreme = 0.0;
 
-      if (CandleClose(rates, shift) > bodyMid && lower > (upper > 0 ? upper * CFG.pattern.pinbarWickRatio : _Point))
+      if (CandleClose(rates, shift) > bodyMid && lower > (upper > 0 ? upper * cfg.pinbar_wick_ratio : _Point))
       {
          dir = 1;
          extreme = CandleLow(rates, shift);
       }
-      else if (CandleClose(rates, shift) < bodyMid && upper > (lower > 0 ? lower * CFG.pattern.pinbarWickRatio : _Point))
+      else if (CandleClose(rates, shift) < bodyMid && upper > (lower > 0 ? lower * cfg.pinbar_wick_ratio : _Point))
       {
          dir = -1;
          extreme = CandleHigh(rates, shift);
@@ -325,15 +326,15 @@ private:
       vote.type = PATTERN_PINBAR;
       vote.dir = dir;
       vote.extreme = extreme;
-      vote.score = CFG.pattern.baseScore;
-      vote.slMult = CFG.pattern.pinbarSLMult; // Pinbars get wider SL
+      vote.score = cfg.base_score;
+      vote.slMult = cfg.pinbar_sl_mult;
       vote.label = (dir == 1) ? "Pinbar Bull" : "Pinbar Bear";
 
-      AddStrengthFromRejection(rates, shift, _atrPoints, dir, vote.score);
-      AddStrengthFromFollowThrough(rates, shift, dir, vote.score);
+      AddStrengthFromRejection(rates, shift, atrvalue, dir, vote.score, cfg);
+      AddStrengthFromFollowThrough(rates, shift, dir, vote.score, cfg);
    }
 
-   static void EvaluateEngulfing(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateEngulfing(const MqlRates &rates[], const int shift, const double atrvalue, PatternVote &vote, const ConfigSnapshot &cfg)
    {
       double o1 = CandleOpen(rates, shift), c1 = CandleClose(rates, shift);
       double o2 = CandleOpen(rates, shift + 1), c2 = CandleClose(rates, shift + 1);
@@ -343,7 +344,7 @@ private:
 
       int dir = 0;
       double extreme = 0.0;
-      double score = CFG.pattern.baseScore;
+      double score = cfg.base_score;
 
       if (prevBearish && c1 > o1 && c1 > o2 && o1 < c2)
       {
@@ -360,31 +361,31 @@ private:
 
       double body1 = CandleBody(rates, shift);
       double body2 = CandleBody(rates, shift + 1);
-      if (body2 > 0.0 && body1 >= body2 * CFG.pattern.engulfingBodyMult)
-         score += CFG.pattern.bonusStrongBody;
-      if (NormalizeATRFactor(CandleRange(rates, shift), _atrPoints) >= CFG.pattern.atrRangeThreshold)
-         score += CFG.pattern.bonusStrongATR;
+      if (body2 > 0.0 && body1 >= body2 * cfg.engulfing_body_mult)
+         score += cfg.bonus_strong_body;
+      if (NormalizeATRFactor(CandleRange(rates, shift), atrvalue) >= cfg.atr_range_threshold)
+         score += cfg.bonus_strong_atr;
 
       vote.valid = true;
       vote.type = PATTERN_ENGULFING;
       vote.dir = dir;
       vote.extreme = extreme;
       vote.score = score;
-      vote.slMult = CFG.pattern.defaultSLMult; // Default SL multiplier
+      vote.slMult = cfg.default_sl_mult;
       vote.label = (dir == 1) ? "Engulf Bull" : "Engulf Bear";
-      AddStrengthFromFollowThrough(rates, shift, dir, vote.score);
+      AddStrengthFromFollowThrough(rates, shift, dir, vote.score, cfg);
    }
 
-   static void EvaluateBottom(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateBottom(const MqlRates &rates[], const int shift, const double atrvalue, PatternVote &vote, const ConfigSnapshot &cfg)
    {
       double h1 = CandleHigh(rates, shift);
       double l1 = CandleLow(rates, shift);
       double h2 = CandleHigh(rates, shift + 1);
       double l2 = CandleLow(rates, shift + 1);
-      double tol = MathMax(_atrPoints * CFG.pattern.sensitivityATR * _Point, 3 * _Point); // 3*_Point is a reasonable minimum
+      double tol = MathMax(atrvalue * cfg.sensitivity_atr * _Point, 3 * _Point); 
       int dir = 0;
       double extreme = 0.0;
-      double score = CFG.pattern.baseScore;
+      double score = cfg.base_score;
 
       if (MathAbs(l1 - l2) <= tol && IsBullish(rates, shift))
       {
@@ -399,21 +400,18 @@ private:
       else
          return;
 
-      if (NormalizeATRFactor(CandleRange(rates, shift), _atrPoints) >= CFG.pattern.atrRangeThreshold)
-         score += CFG.pattern.bonusStrongATR;
-      if (CandleBody(rates, shift) / MathMax(CandleRange(rates, shift), _Point) >= CFG.pattern.bodyRatioThreshold)
-         score += CFG.pattern.bonusStrongBody;
+      if (NormalizeATRFactor(CandleRange(rates, shift), atrvalue) >= cfg.atr_range_threshold)
+         score += cfg.bonus_strong_atr;
+      if (CandleBody(rates, shift) / MathMax(CandleRange(rates, shift), _Point) >= cfg.body_ratio_threshold)
+         score += cfg.bonus_strong_body;
 
       vote.valid = true;
       vote.type = PATTERN_BOTTOM;
-      vote.dir = dir;
-      vote.extreme = extreme;
-      vote.score = score;
-      vote.slMult = CFG.pattern.defaultSLMult; // Default SL multiplier
+      vote.slMult = cfg.default_sl_mult;
       vote.label = (dir == 1) ? "Tweezer Bottom" : "Tweezer Top";
    }
 
-   static void EvaluateFakey(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateFakey(const MqlRates &rates[], const int shift, const double atrvalue, PatternVote &vote, const ConfigSnapshot &cfg)
    {
       // shift     : false-break candle
       double h0 = CandleHigh(rates, shift);
@@ -433,7 +431,7 @@ private:
 
       int dir = 0;
       double extreme = 0.0;
-      double score = CFG.pattern.baseScore;
+      double score = cfg.base_score;
 
       if (l0 < l1 && c0 > l1 && c0 > o0)
       {
@@ -448,21 +446,21 @@ private:
       else
          return;
 
-      if (NormalizeATRFactor(CandleRange(rates, shift), _atrPoints) >= CFG.pattern.atrRangeThreshold)
-         score += CFG.pattern.bonusStrongATR;
-      if (CandleBody(rates, shift) / MathMax(CandleRange(rates, shift), _Point) >= CFG.pattern.bodyRatioThreshold)
-         score += CFG.pattern.bonusStrongBody;
+      if (NormalizeATRFactor(CandleRange(rates, shift), atrvalue) >= cfg.atr_range_threshold)
+         score += cfg.bonus_strong_atr;
+      if (CandleBody(rates, shift) / MathMax(CandleRange(rates, shift), _Point) >= cfg.body_ratio_threshold)
+         score += cfg.bonus_strong_body;
 
       vote.valid = true;
       vote.type = PATTERN_FAKEY;
       vote.dir = dir;
       vote.extreme = extreme;
       vote.score = score;
-      vote.slMult = CFG.pattern.defaultSLMult; // Default SL multiplier
+      vote.slMult = cfg.default_sl_mult;
       vote.label = (dir == 1) ? "Fakey Bull" : "Fakey Bear";
    }
 
-   static void EvaluateInsideBar(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateInsideBar(const MqlRates &rates[], const int shift, const double atrvalue, PatternVote &vote, const ConfigSnapshot &cfg)
    {
       if (!IsInsideBar(rates, shift))
          return;
@@ -473,7 +471,7 @@ private:
       double childClose = CandleClose(rates, shift);
       int dir = 0;
       double extreme = 0.0;
-      double score = CFG.pattern.baseScore;
+      double score = cfg.base_score;
       if (childClose > motherMid)
       {
          dir = 1;
@@ -490,21 +488,21 @@ private:
       double motherRange = CandleRange(rates, shift + 1);
       double childRange = CandleRange(rates, shift);
 
-      if (motherRange > 0.0 && childRange / motherRange <= CFG.pattern.insideBarRangeMax)
-         score += CFG.pattern.bonusStrongBody;
-      if (NormalizeATRFactor(motherRange, _atrPoints) >= CFG.pattern.atrRangeThreshold)
-         score += CFG.pattern.bonusStrongATR;
+      if (motherRange > 0.0 && childRange / motherRange <= cfg.inside_bar_range_max)
+         score += cfg.bonus_strong_body;
+      if (NormalizeATRFactor(motherRange, atrvalue) >= cfg.atr_range_threshold)
+         score += cfg.bonus_strong_atr;
 
       vote.valid = true;
       vote.type = PATTERN_INSIDE_BAR_BREAKOUT;
       vote.dir = dir;
       vote.extreme = extreme;
       vote.score = score;
-      vote.slMult = CFG.pattern.insideBarSLMult;
+      vote.slMult = cfg.inside_bar_sl_mult;
       vote.label = (dir == 1) ? "Inside Bull" : "Inside Bear";
    }
 
-   static void EvaluateMorningStar(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateMorningStar(const MqlRates &rates[], const int shift, const double atrvalue, PatternVote &vote, const ConfigSnapshot &cfg)
    {
       // Morning Star (Bullish): Bearish candle + Small middle candle (gap down) + Bullish candle (gap up, close > middle)
       // Evening Star (Bearish): Bullish candle + Small middle candle (gap up) + Bearish candle (gap down, close < middle)
@@ -520,16 +518,16 @@ private:
       double body1 = CandleBody(rates, shift + 1);
       double body2 = CandleBody(rates, shift + 2);
       double range1 = CandleRange(rates, shift + 1);
-      double gapThreshold = CFG.pattern.sensitivityATR * _atrPoints * _Point;
+      double gapThreshold = cfg.sensitivity_atr * atrvalue * _Point;
 
       // Check middle bar is small (star)
-      bool isSmallMiddle = (range1 > 0) && (body1 < body0 * CFG.pattern.starMiddleBodyMult) && (body1 < body2 * CFG.pattern.starMiddleBodyMult);
+      bool isSmallMiddle = (range1 > 0) && (body1 < body0 * cfg.star_middle_body_mult) && (body1 < body2 * cfg.star_middle_body_mult);
       if (!isSmallMiddle)
          return;
 
       int dir = 0;
       double extreme = 0.0;
-      double score = CFG.pattern.baseScore;
+      double score = cfg.base_score;
       // Morning Star: c2 < o2 (bearish) -> c1 small -> c0 > o0 (bullish) with gaps
       bool morningGap1 = (c2 < o2) && (MathMax(o1, c1) < c2 - gapThreshold);
       bool morningGap2 = (c0 > o0) && (MathMin(o0, c0) > MathMax(o1, c1) + gapThreshold);
@@ -539,7 +537,7 @@ private:
       {
          dir = 1;
          extreme = MathMin(CandleLow(rates, shift + 2), CandleLow(rates, shift + 1));
-         score += CFG.pattern.bonusGapConfirm;
+         score += cfg.bonus_gap_confirm;
       }
 
       // Evening Star: c2 > o2 (bullish) -> c1 small -> c0 < o0 (bearish) with gaps
@@ -551,32 +549,31 @@ private:
       {
          dir = -1;
          extreme = MathMax(CandleHigh(rates, shift + 2), CandleHigh(rates, shift + 1));
-         score += CFG.pattern.bonusGapConfirm;
+         score += cfg.bonus_gap_confirm;
       }
 
       if (dir == 0)
-         return;
 
       // Add strength from ATR
-      if (NormalizeATRFactor(CandleRange(rates, shift), _atrPoints) >= CFG.pattern.atrRangeThreshold)
-         score += CFG.pattern.bonusStrongATR;
+      if (NormalizeATRFactor(CandleRange(rates, shift), atrvalue) >= cfg.atr_range_threshold)
+         score += cfg.bonus_strong_atr;
 
       // Add strength from close position
       double closePosition = (dir == 1) ? (c0 - CandleLow(rates, shift)) / MathMax(CandleRange(rates, shift), _Point) : (CandleHigh(rates, shift) - c0) / MathMax(CandleRange(rates, shift), _Point);
 
-      if (closePosition >= CFG.pattern.starCloseMin)
-         score += CFG.pattern.bonusStrongBody;
+      if (closePosition >= cfg.star_close_min)
+         score += cfg.bonus_strong_body;
 
       vote.valid = true;
       vote.type = PATTERN_MORNING_STAR;
       vote.dir = dir;
       vote.extreme = extreme;
       vote.score = score;
-      vote.slMult = CFG.pattern.defaultSLMult; // Default SL multiplier
+      vote.slMult = cfg.default_sl_mult;
       vote.label = (dir == 1) ? "Morning Star" : "Evening Star";
    }
 
-   static void EvaluateThreeInside(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateThreeInside(const MqlRates &rates[], const int shift, const double atrvalue, PatternVote &vote, const ConfigSnapshot &cfg)
    {
       // Three Inside Up: Large bearish + Inside bar (bullish close) + Bullish breakout above bar 1 high
       // Three Inside Down: Large bullish + Inside bar (bearish close) + Bearish breakout below bar 1 low
@@ -597,7 +594,7 @@ private:
 
       int dir = 0;
       double extreme = 0.0;
-      double score = CFG.pattern.baseScore;
+      double score = cfg.base_score;
       // Three Inside Up
       bool insideUp_1 = IsBearish(rates, shift + 2) && body0 > 0;
       bool insideUp_2 = IsInsideBar(rates, shift + 1) && c1 > o1; // Inside bar with bullish close
@@ -607,7 +604,7 @@ private:
       {
          dir = 1;
          extreme = MathMin(l1, l2);
-         score += CFG.pattern.bonusBreakoutConfirm;
+         score += cfg.bonus_breakout_confirm;
       }
 
       // Three Inside Down
@@ -619,26 +616,26 @@ private:
       {
          dir = -1;
          extreme = MathMax(h1, h2);
-         score += CFG.pattern.bonusBreakoutConfirm;
+         score += cfg.bonus_breakout_confirm;
       }
 
       if (dir == 0)
          return;
-      if (NormalizeATRFactor(CandleRange(rates, shift), _atrPoints) >= CFG.pattern.atrRangeThreshold)
-         score += CFG.pattern.bonusStrongATR;
-      if (body2 > 0 && body0 / body2 >= CFG.pattern.threeInsideBodyMin)
-         score += CFG.pattern.bonusStrongBody;
+      if (NormalizeATRFactor(CandleRange(rates, shift), atrvalue) >= cfg.atr_range_threshold)
+         score += cfg.bonus_strong_atr;
+      if (body2 > 0 && body0 / body2 >= cfg.three_inside_body_min)
+         score += cfg.bonus_strong_body;
 
       vote.valid = true;
       vote.type = PATTERN_THREE_INSIDE;
       vote.dir = dir;
       vote.extreme = extreme;
       vote.score = score;
-      vote.slMult = CFG.pattern.defaultSLMult; // Default SL multiplier
+      vote.slMult = cfg.default_sl_mult;
       vote.label = (dir == 1) ? "Three Inside Up" : "Three Inside Down";
    }
 
-   static void EvaluateRailroadTracks(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateRailroadTracks(const MqlRates &rates[], const int shift, const double atrvalue, PatternVote &vote, const ConfigSnapshot &cfg)
    {
       // Railroad Tracks Bullish: Long bearish candle followed by long bullish candle (similar body size, opposite direction)
       // Railroad Tracks Bearish: Long bullish candle followed by long bearish candle (similar body size, opposite direction)
@@ -652,11 +649,11 @@ private:
       double body0 = CandleBody(rates, shift);
       double body1 = CandleBody(rates, shift + 1);
 
-      double minRatio = CFG.pattern.railroadMinBodyRatio;
+      double minRatio = cfg.railroad_min_body_ratio;
 
       int dir = 0;
       double extreme = 0.0;
-      double score = CFG.pattern.baseScore;
+      double score = cfg.base_score;
 
       // Both bodies must be significant
       if (body0 <= _Point || body1 <= _Point)
@@ -673,7 +670,7 @@ private:
       {
          dir = 1;
          extreme = MathMin(CandleLow(rates, shift + 1), CandleLow(rates, shift));
-         score += CFG.pattern.bonusSmall; // Generic small bonus for pattern recognition
+         score += cfg.bonus_small; 
       }
 
       // Railroad Tracks Bearish: Bar 2 bullish, Bar 1 bearish, similar bodies
@@ -682,7 +679,7 @@ private:
       {
          dir = -1;
          extreme = MathMax(CandleHigh(rates, shift + 1), CandleHigh(rates, shift));
-         score += CFG.pattern.bonusSmall; // Generic small bonus for pattern recognition
+         score += cfg.bonus_small;
       }
 
       if (dir == 0)
@@ -690,26 +687,23 @@ private:
 
       // Add strength from ATR
       double avgBody = (body0 + body1) / 2.0;
-      double atrPrice = _atrPoints * _Point;
-      if (atrPrice > 0 && avgBody >= atrPrice * CFG.pattern.railroadAvgBodyMin)
-         score += CFG.pattern.bonusStrongATR;
+      double atrPrice = atrvalue * _Point;
+      if (atrPrice > 0 && avgBody >= atrPrice * cfg.railroad_avg_body_min)
+         score += cfg.bonus_strong_atr;
 
       // Add strength from wick rejection
-      if (dir == 1 && LowerWick(rates, shift + 1) > body1 * CFG.pattern.railroadWickMult)
-         score += CFG.pattern.bonusStrongWick;
-      if (dir == -1 && UpperWick(rates, shift + 1) > body1 * CFG.pattern.railroadWickMult)
-         score += CFG.pattern.bonusStrongWick;
+      if (dir == 1 && LowerWick(rates, shift + 1) > body1 * cfg.railroad_wick_mult)
+         score += cfg.bonus_strong_wick;
+      if (dir == -1 && UpperWick(rates, shift + 1) > body1 * cfg.railroad_wick_mult)
+         score += cfg.bonus_strong_wick;
 
       vote.valid = true;
       vote.type = PATTERN_RAILROAD_TRACKS;
-      vote.dir = dir;
-      vote.extreme = extreme;
-      vote.score = score;
-      vote.slMult = CFG.pattern.defaultSLMult; // Default SL multiplier
+      vote.slMult = cfg.default_sl_mult;
       vote.label = (dir == 1) ? "Railroad Bull" : "Railroad Bear";
    }
 
-   static void EvaluateDarkCloudPiercing(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateDarkCloudPiercing(const MqlRates &rates[], const int shift, const double atrvalue, PatternVote &vote, const ConfigSnapshot &cfg)
    {
       if (shift + 1 >= ArraySize(rates))
          return;
@@ -722,7 +716,7 @@ private:
       double mid1 = (o1 + c1) / 2.0;
 
       int dir = 0;
-      double score = CFG.pattern.baseScore;
+      double score = cfg.base_score;
 
       // Piercing Line (Bullish Reversal)
       if (IsBearish(rates, shift + 1) && IsBullish(rates, shift) && o0 < l1 && c0 > mid1 && c0 < o1)
@@ -745,12 +739,12 @@ private:
          vote.type = PATTERN_DARK_CLOUD_PIERCING;
          vote.dir = dir;
          vote.score = score;
-         vote.slMult = CFG.pattern.defaultSLMult; // Default SL multiplier
-         AddStrengthFromFollowThrough(rates, shift, dir, vote.score);
+         vote.slMult = cfg.default_sl_mult;
+         AddStrengthFromFollowThrough(rates, shift, dir, vote.score, cfg);
       }
    }
 
-   static void EvaluateMarubozu(const MqlRates &rates[], const int shift, const double _atrPoints, PatternVote &vote)
+   static void EvaluateMarubozu(const MqlRates &rates[], const int shift, const double atrvalue, PatternVote &vote, const ConfigSnapshot &cfg)
    {
       double range = CandleRange(rates, shift);
       double body = CandleBody(rates, shift);
@@ -758,11 +752,11 @@ private:
          return;
 
       double bodyRatio = body / range;
-      if (bodyRatio < CFG.pattern.marubozuMinBodyPct)
+      if (bodyRatio < cfg.marubozu_min_body_pct)
          return;
 
-      double atrFactor = NormalizeATRFactor(range, _atrPoints);
-      if (atrFactor < CFG.pattern.momentumThresholdATR * CFG.pattern.marubozuMinATRMult)
+      double atrFactor = NormalizeATRFactor(range, atrvalue);
+      if (atrFactor < cfg.momentum_threshold_atr * cfg.marubozu_min_atr_mult)
          return;
 
       int dir = IsBullish(rates, shift) ? 1 : -1;
@@ -770,12 +764,12 @@ private:
       vote.type = PATTERN_MARUBOZU;
       vote.dir = dir;
       vote.extreme = (dir == 1) ? CandleLow(rates, shift) : CandleHigh(rates, shift);
-      vote.slMult = CFG.pattern.defaultSLMult;                     // Default SL multiplier
-      vote.score = CFG.pattern.baseScore + CFG.pattern.bonusSmall; // Marubozu has a slightly higher base score
+      vote.slMult = cfg.default_sl_mult;
+      vote.score = cfg.base_score + cfg.bonus_small; 
       vote.label = (dir == 1) ? "Marubozu Bull" : "Marubozu Bear";
 
-      if (atrFactor > CFG.pattern.marubozuStrongATRMin)
-         vote.score += CFG.pattern.bonusStrongATR;
+      if (atrFactor > cfg.marubozu_strong_atr_min)
+         vote.score += cfg.bonus_strong_atr;
    }
 };
 

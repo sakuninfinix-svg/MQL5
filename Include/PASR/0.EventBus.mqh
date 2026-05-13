@@ -83,7 +83,7 @@ private:
    RecordedEvent m_history[];
    bool m_isRecording;
    int m_maxHistory;        // Maximum history size (circular buffer)
-   int m_currentIndex;      // Current write position
+   uint m_currentIndex;     // Current write position
 
 public:
    EventRecorder() : m_isRecording(false), m_maxHistory(1000), m_currentIndex(0) {}
@@ -98,18 +98,24 @@ public:
    void Start()
    {
       m_isRecording = true;
-      m_currentIndex = 0;
+      m_currentIndex = 0; // Reset counter agar rekaman dimulai dari index 0
+
       // Pre-allocate once at startup
       if(ArraySize(m_history) != m_maxHistory)
          ArrayResize(m_history, m_maxHistory);
-      else
-         ArrayInitialize(m_history, 0);
+
+      for(int i = 0; i < ArraySize(m_history); i++)
+      {
+         m_history[i].timestamp = 0;
+         m_history[i].eventType = 0;
+         m_history[i].sourceId = 0;
+      }
       Print("Event Recording Started (Max: ", m_maxHistory, " events).");
    }
    void Stop()
    {
       m_isRecording = false;
-      Print("Event Recording Stopped. Captured: ", MathMin(m_currentIndex, m_maxHistory));
+      Print("Event Recording Stopped. Captured: ", MathMin((int)m_currentIndex, m_maxHistory));
    }
    bool IsRecording() const { return m_isRecording; }
 
@@ -119,7 +125,7 @@ public:
          return;
 
       // Circular buffer - zero allocation
-      int idx = m_currentIndex % m_maxHistory;
+      uint idx = m_currentIndex % (uint)m_maxHistory;
       m_history[idx].timestamp = e.Timestamp();
       m_history[idx].eventType = e.ID();
       m_history[idx].sourceId = e.SourceId();
@@ -127,34 +133,41 @@ public:
       // Skip serialization - store only essential data
    }
 
-   int HistorySize() const { return MathMin(m_currentIndex, m_maxHistory); }
+   int HistorySize() const { return MathMin((int)m_currentIndex, m_maxHistory); }
 
    // Get actual count including overflow
-   int TotalRecorded() const { return m_currentIndex; }
+   uint TotalRecorded() const { return m_currentIndex; }
 
    // Getter for Replay with bounds checking
+   // Index 0 always returns the oldest available event
    int GetHistoryType(int i)
    {
-      if (i < 0 || i >= HistorySize())
+      int size = HistorySize();
+      if (i < 0 || i >= size)
          return 0;
-      int idx = i % m_maxHistory;
-      return m_history[idx].eventType;
+      uint startOffset = (m_currentIndex >= (uint)m_maxHistory) ? (m_currentIndex % (uint)m_maxHistory) : 0;
+      uint idx = (startOffset + (uint)i) % (uint)m_maxHistory;
+      return m_history[(int)idx].eventType;
    }
 
    int GetHistorySourceId(int i)
    {
-      if (i < 0 || i >= HistorySize())
+      int size = HistorySize();
+      if (i < 0 || i >= size)
          return 0;
-      int idx = i % m_maxHistory;
-      return m_history[idx].sourceId;
+      uint startOffset = (m_currentIndex >= (uint)m_maxHistory) ? (m_currentIndex % (uint)m_maxHistory) : 0;
+      uint idx = (startOffset + (uint)i) % (uint)m_maxHistory;
+      return m_history[(int)idx].sourceId;
    }
 
    datetime GetHistoryTimestamp(int i)
    {
-      if (i < 0 || i >= HistorySize())
+      int size = HistorySize();
+      if (i < 0 || i >= size)
          return 0;
-      int idx = i % m_maxHistory;
-      return m_history[idx].timestamp;
+      uint startOffset = (m_currentIndex >= (uint)m_maxHistory) ? (m_currentIndex % (uint)m_maxHistory) : 0;
+      uint idx = (startOffset + (uint)i) % (uint)m_maxHistory;
+      return m_history[(int)idx].timestamp;
    }
 };
 
@@ -212,9 +225,9 @@ public:
       
       // Priority validation with warnings for critical events
       #ifdef __DEBUG__
-      if (eventID == 0 && !IS_CRITICAL_PRIORITY(priority)) // EVENT_ID_EMERGENCY_STOP assumed as 0
+      if (eventID == 5 && !IS_CRITICAL_PRIORITY(priority)) // EVENT_ID_EMERGENCY_STOP is 5
          Print("WARNING: Emergency stop event should have CRITICAL priority (0-10). Current: ", priority);
-      if (eventID == 1 && !IS_HIGH_PRIORITY(priority)) // EVENT_ID_PRICE_UPDATE assumed as 1
+      if (eventID == 1 && !IS_HIGH_PRIORITY(priority)) // EVENT_ID_PRICE_UPDATE is 1
          Print("WARNING: Price update event should have HIGH priority (11-50). Current: ", priority);
       #endif
 
@@ -230,10 +243,11 @@ public:
       }
 
       // Insert based on priority (Descending: higher priority first)
-      int insertPos = total;
+      int insertPos = total; // Default to end
       for (int i = 0; i < total; i++)
       {
-         if (priority > m_handlersByType[eventID][i].priority)
+         // Perbaikan: Urutkan Ascending (Nilai angka kecil/Kritis dieksekusi lebih dulu)
+         if (priority < m_handlersByType[eventID][i].priority)
          {
             insertPos = i;
             break;
@@ -320,11 +334,11 @@ public:
       }
    }
    
-   // OPTIMIZATION V1.30: Batch dispatch for high-frequency events
+   // 
    // Reduces overhead when firing multiple events of same type
-   void DispatchBatch(int eventID, Event *events[], int count)
+   void DispatchBatch(int eventID, Event *&events[], int count)
    {
-      if (count <= 0 || events == NULL)
+      if (count <= 0)
          return;
       if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
          return;
@@ -336,7 +350,10 @@ public:
          for (int i = 0; i < count; i++)
          {
             if (events[i] != NULL && CheckPointer(events[i]) == POINTER_DYNAMIC)
+            {
                delete events[i];
+               events[i] = NULL;
+            }
          }
          return;
       }

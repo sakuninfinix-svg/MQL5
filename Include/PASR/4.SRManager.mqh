@@ -30,43 +30,22 @@ private:
    int m_resHtfAlignment;
    int m_supStrength; // NEW: Zone strength (touch count)
    int m_resStrength;
-
-   // Config Cache
-   struct SRConfigCache
+   
+   // Helper: Cek apakah level sudah ditembus oleh harga Close bar yang sudah tertutup
+   bool IsBroken(double price, bool isSupport, int bars)
    {
-      ENUM_SR_MODE srMode;
-      int srLookback;
-      int swingLookback;
-      ENUM_ENTRY_MODE entryMode;
-      double bufferMultWeak;
-      double bufferMultStrong;
-      double atrBufferMult;
-      double srTouchBufferATR;
-      int srMinTouchesStrong;
-      bool useMTF;
-      ENUM_TIMEFRAMES htf;
-      int htfLookback;
-      double minSRRangeATR;
-   } m_cfgCache;
+      if (price <= 0) return false;
+      MqlRates rates[];
+      ArraySetAsSeries(rates, true);
+      // Mengambil bar yang sudah tertutup (mulai dari shift 1)
+      if (CopyRates(m_symbol, m_period, 1, bars, rates) < bars) return false;
 
-   // Helper: Cek apakah zona ditembus 2x Close dalam X bar
-   bool IsBroken(double price, bool isSupport, int barsCount)
-   {
-      if (price <= 0)
-         return true;
-      double closePrices[];
-      if (CopyClose(m_symbol, m_period, 1, barsCount, closePrices) <= 0)
-         return false;
-
-      int breach = 0;
-      for (int i = 0; i < barsCount; i++)
+      for (int i = 0; i < bars; i++)
       {
-         if (isSupport && closePrices[i] < price)
-            breach++;
-         if (!isSupport && closePrices[i] > price)
-            breach++;
+         if (isSupport && rates[i].close < price) return true;
+         if (!isSupport && rates[i].close > price) return true;
       }
-      return (breach >= 2);
+      return false;
    }
 
    // Helper: Mencari Swing Fractal terdekat dengan CopyHigh/CopyLow (MQL5 Best Practice)
@@ -134,20 +113,6 @@ public:
    virtual void RefreshConfigCache() override
    {
       IManager::RefreshConfigCache(); // Sync m_debugMode dari base class
-
-      m_cfgCache.srMode = CFG.sr.mode;
-      m_cfgCache.srLookback = CFG.sr.lookback;
-      m_cfgCache.swingLookback = CFG.sr.swingLookback;
-      m_cfgCache.entryMode = CFG.risk.entryMode;
-      m_cfgCache.bufferMultWeak = CFG.sr.bufferMultWeak;
-      m_cfgCache.bufferMultStrong = CFG.sr.bufferMultStrong;
-      m_cfgCache.atrBufferMult = CFG.sr.atrBufferMult;
-      m_cfgCache.srTouchBufferATR = CFG.sr.touchBufferATR;
-      m_cfgCache.srMinTouchesStrong = CFG.sr.minTouchesStrong;
-      m_cfgCache.useMTF = CFG.risk.useMTF;
-      m_cfgCache.htf = CFG.risk.htf;
-      m_cfgCache.htfLookback = CFG.risk.htfLookback;
-      m_cfgCache.minSRRangeATR = CFG.sr.minRangeATR;
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -162,59 +127,46 @@ public:
 
    virtual void OnNewBar(NewBarEvent *e) override
    {
-      // Lazy evaluation: hanya hitung ulang jika ada new bar
-      // MQL5 Best Practice: Gunakan CopyTime untuk async safety
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       datetime times[];
-      if (CopyTime(_Symbol, _Period, 0, 1, times) <= 0)
+      if (CopyTime(m_symbol, m_period, 0, 1, times) <= 0)
          return;
-      datetime currentBar = times[0];
-
-      UpdateHTFZones();
-      UpdateMainZones(m_data.GetATRPoints());
-   }
-
-   void UpdateMainZones(double atrPoints)
-   {
-      double extRes = 0, extSup = 0;
-      double swRes = 0, swSup = 0;
+      
+      double extRes = 0, extSup = 0, swRes = 0, swSup = 0;
       int swResShift = -1, swSupShift = -1;
-
-      // 1. Ambil Data Extreme (HH/LL) dengan CopyHigh/CopyLow (MQL5 Best Practice)
-      // Optimized: Fetch data once for both Extreme and Swing logic
-      int lookback = MathMax(m_cfgCache.srLookback, m_cfgCache.swingLookback) + 2;
+      int lookback = MathMax(cfg.sr_lookback, cfg.swing_lookback) + 2;
       double highs[], lows[];
       ArraySetAsSeries(highs, true);
       ArraySetAsSeries(lows, true);
 
-      if (CopyHigh(_Symbol, _Period, 1, lookback, highs) <= 0 || CopyLow(_Symbol, _Period, 1, lookback, lows) <= 0)
+      if (CopyHigh(m_symbol, m_period, 1, lookback, highs) <= 0 || CopyLow(m_symbol, m_period, 1, lookback, lows) <= 0)
          return;
 
-      extRes = highs[ArrayMaximum(highs, 0, m_cfgCache.srLookback)];
-      extSup = lows[ArrayMinimum(lows, 0, m_cfgCache.srLookback)];
+      extRes = highs[ArrayMaximum(highs, 0, cfg.sr_lookback)];
+      extSup = lows[ArrayMinimum(lows, 0, cfg.sr_lookback)];
 
       // 2. Ambil Data Swing (Fractal terdekat < 50 bar)
-      swRes = FindNearestSwing(false, m_cfgCache.swingLookback, swResShift, highs, lows);
-      swSup = FindNearestSwing(true, m_cfgCache.swingLookback, swSupShift, highs, lows);
+      swRes = FindNearestSwing(false, cfg.swing_lookback, swResShift, highs, lows);
+      swSup = FindNearestSwing(true, cfg.swing_lookback, swSupShift, highs, lows);
 
       // Logic Pemilihan berdasarkan Mode
-      if (m_cfgCache.srMode == SR_EXTREME)
+      if (cfg.sr_mode == SR_EXTREME)
       {
          m_targetResistance = extRes;
          m_targetSupport = extSup;
       }
-      else if (m_cfgCache.srMode == SR_SWING)
+      else if (cfg.sr_mode == SR_SWING)
       {
          m_targetResistance = (swRes > 0) ? swRes : extRes;
          m_targetSupport = (swSup > 0) ? swSup : extSup;
       }
-      else // SR_AUTO (EA urus sendiri)
+      else
       {
          // Evaluasi Resistance
          if (swRes > 0 && !IsBroken(swRes, false, 5) && (IsBroken(extRes, false, 10) || swResShift < 15))
             m_targetResistance = swRes;
          else
             m_targetResistance = extRes;
-
          // Evaluasi Support
          if (swSup > 0 && !IsBroken(swSup, true, 5) && (IsBroken(extSup, true, 10) || swSupShift < 15))
             m_targetSupport = swSup;
@@ -222,53 +174,53 @@ public:
             m_targetSupport = extSup;
       }
 
-      DrawOrMoveHLine("ResLine", m_targetResistance, clrRed);
-      DrawOrMoveHLine("SupLine", m_targetSupport, clrAqua);
+      UpdateHTFZones();
+      CheckZoneStatus(m_data.GetATRPoints());
 
-      CheckZoneStatus(atrPoints);
+      if(m_debugMode) {
+         DrawOrMoveHLine("ResLine", m_targetResistance, clrRed);
+         DrawOrMoveHLine("SupLine", m_targetSupport, clrBlue);
+      }
 
-      // Setelah zone dihitung, kirim event:
       ZoneUpdateEvent *zoneEvent = new ZoneUpdateEvent(
-          m_targetSupport, m_targetResistance,
-          m_htfSupport, m_htfResistance,
+          m_targetSupport, m_targetResistance, m_htfSupport, m_htfResistance,
           m_isSupportBroken, m_isResistanceBroken,
           m_supBufferMult, m_resBufferMult,
           m_supHtfAlignment, m_resHtfAlignment,
           m_supStrength, m_resStrength,
-          atrPoints);
+          m_data.GetATRPoints());
       DispatchEvent(zoneEvent);
    }
    void CheckZoneStatus(double atrPoints)
    {
-      m_isSupportBroken = false;
-      m_isResistanceBroken = false;
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       if (m_targetSupport <= 0 || m_targetResistance <= 0)
          return;
 
       // Filter "rusak" dinamis berdasarkan mode
-      int barsToCheck = (m_cfgCache.srMode == SR_EXTREME) ? 10 : 5;
+      int barsToCheck = (cfg.sr_mode == SR_EXTREME) ? 10 : 5;
       m_isSupportBroken = IsBroken(m_targetSupport, true, barsToCheck);
       m_isResistanceBroken = IsBroken(m_targetResistance, false, barsToCheck);
 
       // Jika mode EXTREME, gunakan buffer statis agar lebih "Safe" sesuai filosofi Extreme SR
-      if (m_cfgCache.srMode == SR_EXTREME)
+      if (cfg.sr_mode == SR_EXTREME)
       {
-         m_resBufferMult = m_supBufferMult = (m_cfgCache.entryMode == MODE_SAFE) ? 0.5 : 0.8;
+         m_resBufferMult = m_supBufferMult = (cfg.entry_mode == MODE_SAFE) ? 0.5 : 0.8;
          return;
       }
 
       // Hitung Touch Count untuk menentukan Buffer Mult dengan CopyHigh/CopyLow
       int supTouches = 0, resTouches = 0;
-      double touchZone = (atrPoints * m_cfgCache.srTouchBufferATR) * _Point;
+      double touchZone = (atrPoints * cfg.touch_buffer_atr) * _Point;
 
       double lows[], highs[];
       ArraySetAsSeries(lows, true);
       ArraySetAsSeries(highs, true);
 
-      if (CopyLow(_Symbol, _Period, 1, m_cfgCache.srLookback, lows) > 0 &&
-          CopyHigh(_Symbol, _Period, 1, m_cfgCache.srLookback, highs) > 0)
+      if (CopyLow(m_symbol, m_period, 1, cfg.sr_lookback, lows) > 0 &&
+          CopyHigh(m_symbol, m_period, 1, cfg.sr_lookback, highs) > 0)
       {
-         for (int i = 0; i < m_cfgCache.srLookback; i++)
+         for (int i = 0; i < cfg.sr_lookback; i++)
          {
             if (MathAbs(lows[i] - m_targetSupport) < touchZone)
                supTouches++;
@@ -282,59 +234,55 @@ public:
       m_resStrength = resTouches;
 
       // Tentukan Multiplier Dinamis untuk Support
-      if (m_isSupportBroken)
-         m_supBufferMult = m_cfgCache.bufferMultWeak;
-      else if (supTouches >= m_cfgCache.srMinTouchesStrong)
-         m_supBufferMult = m_cfgCache.bufferMultStrong;
-      else if (supTouches <= 1)
-         m_supBufferMult = m_cfgCache.atrBufferMult;
-      else
-         m_supBufferMult = 0.65; // Normal/Intermediate
+      if (m_isSupportBroken) m_supBufferMult = cfg.buffer_mult_weak;
+      else if (supTouches >= cfg.min_touches_strong) m_supBufferMult = cfg.buffer_mult_strong;
+      else if (supTouches <= 1) m_supBufferMult = cfg.atr_buffer_mult;
+      else m_supBufferMult = 0.65;
 
       // Tentukan Multiplier Dinamis untuk Resistance
-      if (m_isResistanceBroken)
-         m_resBufferMult = m_cfgCache.bufferMultWeak;
-      else if (resTouches >= m_cfgCache.srMinTouchesStrong)
-         m_resBufferMult = m_cfgCache.bufferMultStrong;
+      if (m_isResistanceBroken) m_resBufferMult = cfg.buffer_mult_weak;
+      else if (resTouches >= cfg.min_touches_strong) m_resBufferMult = cfg.buffer_mult_strong;
       else if (resTouches <= 1)
-         m_resBufferMult = m_cfgCache.atrBufferMult;
+         m_resBufferMult = cfg.atr_buffer_mult;
       else
          m_resBufferMult = 0.65;
 
-      // --- HTF Alignment Integration ---
-      m_supHtfAlignment = 0;
+      // --- HTF Alignment Integration -
       m_resHtfAlignment = 0;
 
-      if (m_cfgCache.useMTF && m_htfSupport > 0 && m_htfResistance > 0)
+      if (cfg.use_mtf && m_htfSupport > 0 && m_htfResistance > 0)
       {
-         double htfZoneBuffer = (atrPoints * m_cfgCache.atrBufferMult) * _Point;
-
-         // Primary Support vs HTF Zones
-         if (m_targetSupport <= m_htfSupport + htfZoneBuffer)
-            m_supHtfAlignment = 1; // Aligned with HTF Support
+         double htfZoneBuffer = (atrPoints * cfg.atr_buffer_mult) * _Point;
+         
+         // Support Alignment
+         if (m_targetSupport <= m_htfSupport + htfZoneBuffer && m_targetSupport >= m_htfSupport - htfZoneBuffer)
+            m_supHtfAlignment = 1;
          else if (m_targetSupport >= m_htfResistance - htfZoneBuffer)
-            m_supHtfAlignment = -1; // Contra: At HTF Resistance
+            m_supHtfAlignment = -1;
+         else
+            m_supHtfAlignment = 0;
 
-         // Primary Resistance vs HTF Zones
-         if (m_targetResistance >= m_htfResistance - htfZoneBuffer)
-            m_resHtfAlignment = 1; // Aligned with HTF Resistance
+         // Resistance Alignment
+         if (m_targetResistance >= m_htfResistance - htfZoneBuffer && m_targetResistance <= m_htfResistance + htfZoneBuffer)
+            m_resHtfAlignment = 1;
          else if (m_targetResistance <= m_htfSupport + htfZoneBuffer)
-            m_resHtfAlignment = -1; // Contra: At HTF Support
+            m_resHtfAlignment = -1;
+         else
+            m_resHtfAlignment = 0;
       }
    }
 
    void UpdateHTFZones()
    {
-      if (!m_cfgCache.useMTF)
-         return;
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      if (!cfg.use_mtf) return;
 
-      // MQL5 Best Practice: Gunakan CopyHigh/CopyLow untuk HTF
       double htfHighs[], htfLows[];
       ArraySetAsSeries(htfHighs, true);
       ArraySetAsSeries(htfLows, true);
 
-      if (CopyHigh(_Symbol, m_cfgCache.htf, 1, m_cfgCache.htfLookback, htfHighs) > 0 &&
-          CopyLow(_Symbol, m_cfgCache.htf, 1, m_cfgCache.htfLookback, htfLows) > 0)
+      if (CopyHigh(m_symbol, cfg.htf, 1, cfg.htf_lookback, htfHighs) > 0 &&
+          CopyLow(m_symbol, cfg.htf, 1, cfg.htf_lookback, htfLows) > 0)
       {
          m_htfResistance = htfHighs[ArrayMaximum(htfHighs)];
          m_htfSupport = htfLows[ArrayMinimum(htfLows)];
@@ -343,13 +291,11 @@ public:
 
    bool IsTradableRange(double atrPoints)
    {
-      if (m_targetResistance <= 0 || m_targetSupport <= 0)
-         return false;
-
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
       double spread = GetGlobalSpread();
       if(spread < 0) spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD); // Fallback
 
-      double minRange = MathMax(atrPoints * m_cfgCache.minSRRangeATR, spread * 5.0);
+      double minRange = MathMax(atrPoints * cfg.min_range_atr, spread * 5.0);
       double rangePts = (m_targetResistance - m_targetSupport) / _Point;
 
       return (rangePts >= minRange);

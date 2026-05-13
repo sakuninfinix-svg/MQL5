@@ -92,7 +92,7 @@ public:
 
    virtual void OnHeartbeat(HeartbeatEvent *e) override
    {
-      if (CFG.news.use)
+      if (m_data.GetConfigCache().news_use)
          FetchWebNews();
    }
 };
@@ -112,10 +112,11 @@ bool MarketManager::Init()
    if (!IManager::Init())
       return false;
 
+   ConfigSnapshot cfg = m_data.GetConfigCache();
    // Cache is already refreshed by IManager::Init()
    for (int i = 0; i < 7; i++)
    {
-      string session = CFG.market.sessions[i];
+      string session = cfg.sessions[i];
       if (session == "0" || session == "")
       {
          m_sessionStarts[i] = -1;
@@ -150,6 +151,7 @@ bool MarketManager::Init()
 //+------------------------------------------------------------------+
 bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, double currentATR)
 {
+   ConfigSnapshot cfg = m_data.GetConfigCache();
    if (!IsTradingSession())
    {
       m_data.DebugLog(m_debugMode, "Trading session is closed.");
@@ -159,19 +161,19 @@ bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, doubl
    double bid = tick.bid;
    double ask = tick.ask;
    currentSpread = (ask - bid) / SymbolInfoDouble(m_symbol, SYMBOL_POINT);
-   if (currentSpread > CFG.market.maxSpread)
+   if (currentSpread > cfg.max_spread)
    {
       m_data.DebugLog(m_debugMode, "Spread too high: " + DoubleToString(currentSpread, 1));
       return false;
    }
 
-   if (currentATR < CFG.market.atrMin || currentATR > CFG.market.atrMax)
+   if (currentATR < cfg.atr_min || currentATR > cfg.atr_max)
    {
       if (m_debugMode)
       {
-         string reason = (currentATR < CFG.market.atrMin) ? "Too Low" : "Too High";
+         string reason = (currentATR < cfg.atr_min) ? "Too Low" : "Too High";
          PrintFormat("[%s] ATR Gate Blocked: Current %.1f (Min: %.1f, Max: %.1f) - %s",
-                     m_name, currentATR, CFG.market.atrMin, CFG.market.atrMax, reason);
+                     m_name, currentATR, cfg.atr_min, cfg.atr_max, reason);
       }
       return false;
    }
@@ -267,13 +269,14 @@ bool MarketManager::IsTradingSession()
 //+------------------------------------------------------------------+
 void MarketManager::FetchWebNews()
 {
+   const ConfigSnapshot cfg = m_data.GetConfigCache();
    if (MQLInfoInteger(MQL_TESTER))
       return;
    if (TimeCurrent() < m_lastWebFetch + 1800)
       return; // Fetch every 30 mins
    char data[], result[];
    string headers;
-   int res = WebRequest("GET", CFG.news.url, NULL, NULL, 5000, data, 0, result, headers);
+   int res = WebRequest("GET", cfg.news_url, NULL, NULL, 5000, data, 0, result, headers);
 
    if (res != 200)
    {
@@ -353,7 +356,8 @@ void MarketManager::FetchWebNews()
 //+------------------------------------------------------------------+
 bool MarketManager::IsNewsTime()
 {
-   if (CFG.news.level == NEWS_OFF)
+   ConfigSnapshot cfg = m_data.GetConfigCache();
+   if (cfg.news_level == NEWS_OFF)
    {
       m_newsStatus = "News filter OFF";
       return (m_lastNewsResult = false);
@@ -370,8 +374,8 @@ bool MarketManager::IsNewsTime()
    datetime now = TimeGMT(); // Web feeds usually use GMT
    for (int i = 0; i < ArraySize(m_webNewsTimes); i++)
    {
-      if (now >= m_webNewsTimes[i] - (CFG.news.freeze * 60) &&
-          now <= m_webNewsTimes[i] + (CFG.news.freeze * 60))
+      if (now >= m_webNewsTimes[i] - (cfg.news_freeze * 60) &&
+          now <= m_webNewsTimes[i] + (cfg.news_freeze * 60))
       {
          m_nextNewsTime = m_webNewsTimes[i];
          m_newsStatus = "WEB NEWS ACTIVE";
@@ -383,8 +387,8 @@ bool MarketManager::IsNewsTime()
    // 2. Jika Web tidak mendeteksi, gunakan Kalender Native sebagai lapis kedua
    m_nextNewsTime = 0;
    datetime gmtNow = TimeGMT(); // Native calendar also uses GMT
-   datetime timeFrom = gmtNow - (CFG.news.freeze * 60);
-   datetime timeTo = gmtNow + (CFG.news.freeze * 60);
+   datetime timeFrom = gmtNow - (cfg.news_freeze * 60);
+   datetime timeTo = gmtNow + (cfg.news_freeze * 60);
 
    MqlCalendarValue values[];
    string currencies[2] = {m_baseCurr, m_profitCurr};
@@ -401,11 +405,11 @@ bool MarketManager::IsNewsTime()
             if (CalendarEventById(values[i].event_id, event))
             {
                bool shouldBlock = false;
-               if ((int)CFG.news.level >= 1 && event.importance == CALENDAR_IMPORTANCE_HIGH)
+               if ((int)cfg.news_level >= 1 && event.importance == CALENDAR_IMPORTANCE_HIGH)
                   shouldBlock = true;
-               else if ((int)CFG.news.level >= 2 && event.importance == CALENDAR_IMPORTANCE_MODERATE)
+               else if ((int)cfg.news_level >= 2 && event.importance == CALENDAR_IMPORTANCE_MODERATE)
                   shouldBlock = true;
-               else if ((int)CFG.news.level >= 3 && event.importance == CALENDAR_IMPORTANCE_LOW)
+               else if ((int)cfg.news_level >= 3 && event.importance == CALENDAR_IMPORTANCE_LOW)
                   shouldBlock = true;
 
                if (shouldBlock)
@@ -429,6 +433,7 @@ bool MarketManager::IsNewsTime()
 //+------------------------------------------------------------------+
 bool MarketManager::IsEntryCooldownActive()
 {
+   ConfigSnapshot cfg = m_data.GetConfigCache();
    MqlRates rates[];
    if (CopyRates(m_symbol, m_period, 0, 1, rates) <= 0)
       return false;
@@ -437,17 +442,17 @@ bool MarketManager::IsEntryCooldownActive()
    if (m_lastEntryBarTime > 0)
    {
       int barsSinceEntry = (int)((currBar - m_lastEntryBarTime) / PeriodSeconds(m_period));
-      if (barsSinceEntry < CFG.risk.entryCooldownBars)
+      if (barsSinceEntry < cfg.entry_cooldown_bars)
       {
          m_data.DebugLog(m_debugMode, "Entry cooldown active (bars: " + (string)barsSinceEntry + ")");
          return true;
       }
    }
 
-   if (m_consecutiveLosses >= CFG.risk.maxConsecutiveLoss)
+   if (m_consecutiveLosses >= cfg.max_consecutive_loss)
    {
       int barsSinceLoss = (int)((currBar - m_lastLossBarTime) / PeriodSeconds(m_period));
-      if (barsSinceLoss < CFG.risk.lossCooldownBars)
+      if (barsSinceLoss < cfg.loss_cooldown_bars)
       {
          m_data.DebugLog(m_debugMode, "Loss cooldown active (bars: " + (string)barsSinceLoss + ")");
          return true;
