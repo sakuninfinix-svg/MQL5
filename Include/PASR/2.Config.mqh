@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//|                            Price Action & Support Resistance V1  |
-//|                                                       Config.mqh |
+//|                                                       2.Config.mqh |
+//|                                       Copyright 2026, Agsicentre |
 //|            Core Configuration & System Definitions               |
 //+------------------------------------------------------------------+
 

@@ -24,8 +24,8 @@ private:
    CTrade m_trade;
 
    // Event-Driven State
-   ulong m_lastTrailingUpdate; 
-   int m_trailingThrottleMs;   
+   ulong m_lastTrailingUpdate;
+   int m_trailingThrottleMs;
 
    struct RecoveryConfigCache
    {
@@ -44,13 +44,13 @@ private:
       double lockOffsetATR;
       double trailActivationATR;
       double trailStepATR;
-      int stopLevel; 
+      int stopLevel;
    } m_cfgCache;
 
 private:
    virtual void RefreshConfigCache() override
    {
-      IManager::RefreshConfigCache();       
+      IManager::RefreshConfigCache();
       m_cfgCache.magicNum = (ulong)CFG.risk.magic;
       m_cfgCache.useRecovery = CFG.recovery.use;
       m_cfgCache.maxRecoveryAttempts = CFG.recovery.maxAttempts;
@@ -124,7 +124,7 @@ private:
       PatternManager::FakeoutContext ctx;
       ctx.originalTicket = r.mainTicket;
       ctx.direction = r.direction;
-      ctx.slHitPrice = tick.bid; 
+      ctx.slHitPrice = tick.bid;
       ctx.entryPrice = r.entryPrice;
       ctx.atrPoints = _atrPoints;
       ctx.currentTick = tick;
@@ -150,14 +150,14 @@ private:
       {
          if (m_debugMode)
             Log(StringFormat("Fakeout detected but low confidence (%.2f). Continuing to recovery mode.", signal.confidence));
-         return false; 
+         return false;
       }
 
       if (!PositionSelectByTicket(r.mainTicket))
       {
          return false;
       }
-      
+
       ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       double currentSL = PositionGetDouble(POSITION_SL);
       double currentTP = PositionGetDouble(POSITION_TP);
@@ -202,12 +202,12 @@ private:
          if (m_debugMode)
             PrintFormat("[Fakeout] ✓ SL adjusted for %d: %.5f -> %.5f (Confidence: %.2f)",
                         r.mainTicket, currentSL, newSL, signal.confidence);
-         return true; 
+         return true;
       }
       else if (m_debugMode)
       {
          int err = GetLastError();
-         PrintFormat("[Fakeout] ✗ Failed to adjust SL for %d: Error %d (%s)", 
+         PrintFormat("[Fakeout] ✗ Failed to adjust SL for %d: Error %d (%s)",
                      r.mainTicket, err, m_trade.ResultRetcodeDescription());
       }
       return false;
@@ -350,7 +350,7 @@ private:
             else if (m_debugMode)
             {
                modifyError = GetLastError();
-               PrintFormat("[Recovery] ✗ Trailing BUY %d failed: Error %d (%s)", 
+               PrintFormat("[Recovery] ✗ Trailing BUY %d failed: Error %d (%s)",
                            r.mainTicket, modifyError, m_trade.ResultRetcodeDescription());
             }
          }
@@ -382,7 +382,7 @@ private:
             else if (m_debugMode)
             {
                modifyError = GetLastError();
-               PrintFormat("[Recovery] ✗ Trailing SELL %d failed: Error %d (%s)", 
+               PrintFormat("[Recovery] ✗ Trailing SELL %d failed: Error %d (%s)",
                            r.mainTicket, modifyError, m_trade.ResultRetcodeDescription());
             }
          }
@@ -399,7 +399,7 @@ private:
       if (TimeCurrent() < r.recoveryCooldownExpiry)
       {
          int remainingSeconds = (int)(r.recoveryCooldownExpiry - TimeCurrent());
-         if (m_debugMode && remainingSeconds % 10 == 0) 
+         if (m_debugMode && remainingSeconds % 10 == 0)
             Log(StringFormat("Position %d in RECOVERY cooldown. Remaining: %d sec", r.mainTicket, remainingSeconds));
          return;
       }
@@ -416,7 +416,7 @@ private:
       // SignalManager will listen for RecoveryOpportunityEvent and provide recovery signals.
       // This method just manages state timeouts and validates position still exists.
       if (m_debugMode)
-         Log(StringFormat("Position %d ready for recovery signal. Attempts: %d/%d", 
+         Log(StringFormat("Position %d ready for recovery signal. Attempts: %d/%d",
                           r.mainTicket, r.recoveryAttempts, m_cfgCache.maxRecoveryAttempts)); // Updated
    }
 
@@ -438,7 +438,7 @@ private:
          if (!PositionSelectByTicket(r.mainTicket))
          {
             if (m_debugMode)
-               PrintFormat("[Recovery] Position %d closed externally or no longer exists. Cleaning engine.", r.mainTicket);               
+               PrintFormat("[Recovery] Position %d closed externally or no longer exists. Cleaning engine.", r.mainTicket);
             r.active = false;
             ClearEngineGVs(r.mainTicket); // Uses CFG.risk.magic now
             r.Reset();

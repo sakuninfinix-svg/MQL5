@@ -61,7 +61,7 @@ private:
       bool isSupBroken, isResBroken;
       double supBufferMult, resBufferMult;
       int supHtfAlign, resHtfAlign;
-      int supStrength, resStrength; 
+      int supStrength, resStrength;
       void Reset() { ZeroMemory(this); }
    } m_marketData;
 
@@ -71,7 +71,7 @@ private:
 private:
    virtual void RefreshConfigCache() override
    {
-      IManager::RefreshConfigCache(); 
+      IManager::RefreshConfigCache();
    }
 
    bool FetchCandleBatch(int shiftStart, int count, MqlRates &outRates[])
@@ -165,12 +165,12 @@ private:
    {
       return IsSignalCooldownActiveWithCustomBars(price, atrPoints, CFG.risk.signalCooldownBars);
    }
-   
+
    // NEW: Signal Cooldown dengan custom bars untuk dynamic cooldown
    bool IsSignalCooldownActiveWithCustomBars(double price, double atrPoints, int cooldownBars)
    {
       datetime now = TimeCurrent();
-      
+
       for (int i = ArraySize(m_signalCooldowns) - 1; i >= 0; i--)
       {
          if (now > m_signalCooldowns[i].expiry)
@@ -242,10 +242,10 @@ private:
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       double zoneWidth = (atrPoints * dynamicMult) * point;
       double multiplier = (CFG.risk.entryMode == MODE_SAFE) ? 0.5 : 1.0;
-      
+
       if (CFG.pattern.useAdaptiveZoneBuffer && zoneStrength >= CFG.sr.minTouchesStrong)
       {
-         multiplier *= CFG.pattern.strongZoneBufferMult; 
+         multiplier *= CFG.pattern.strongZoneBufferMult;
       }
 
       bool ok = (dir == 1) ? (extreme <= zonePrice + (zoneWidth * multiplier)) : (extreme >= zonePrice - (zoneWidth * multiplier));
@@ -352,7 +352,7 @@ private:
    {
       double entryPrice = rates[shift].close;
       double target = (dir == 1) ? resistance : support;
-      
+
       // 1. Hitung Proyeksi TP (Selalu ke SR lawan dengan buffer)
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       double tpBuffer = CFG.exit.tpBufferATR * atrPoints * point;
@@ -363,7 +363,7 @@ private:
       double slBuffer = CFG.exit.slBufferATR * atrPoints * point;
       double baseSL = (CFG.risk.tpslMode == TPSL_PATTERN) ? patternExtreme : ((dir == 1) ? support : resistance);
       double projectedSL = (dir == 1) ? (baseSL - slBuffer) : (baseSL + slBuffer);
-      
+
       // Pastikan riskDist minimal 1 point untuk menghindari pembagian nol
       double riskDist = MathMax(MathAbs(entryPrice - projectedSL), point);
 
@@ -376,7 +376,7 @@ private:
       }
 
       // 4. Validasi Risk:Reward (Minimal 1:1)
-      if (profitDist < riskDist * 1.0) 
+      if (profitDist < riskDist * 1.0)
       {
          reason = StringFormat("Poor R:R (Risk:%.1fpt TP:%.1fpt)", riskDist/point, profitDist/point);
          return false;
@@ -481,12 +481,12 @@ private:
          // 9. Signal Cooldown Filter - NEW: Dynamic Cooldown untuk HQ Setup
          bool isHighQualitySetup = (finalConfluenceScore >= CFG.pattern.hqThreshold);
          int effectiveCooldownBars = CFG.risk.signalCooldownBars;
-         
+
          if (CFG.pattern.useDynamicCooldown && isHighQualitySetup)
          {
             effectiveCooldownBars = CFG.pattern.reducedCooldownBars; // Bypass cooldown normal untuk HQ setup
          }
-         
+
          if (IsSignalCooldownActiveWithCustomBars(signalPrice, atrPoints, effectiveCooldownBars))
          {
             reason = "Signal cooldown active";

@@ -1,8 +1,9 @@
 //+------------------------------------------------------------------+
-//|               Price Action & Support Resistance V1               |
-//|         Optimized by Agsicentre (agsicentre.wordpress.com)       |
+//|                                                 PASR_MODULAR.mq5 |
+//|                                       Copyright 2026, Agsicentre |
 //|         Enhanced & Refactored for Performance & Efficiency       |
 //+------------------------------------------------------------------+
+#property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
 #property version   "1.20"
 #property strict
