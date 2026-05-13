@@ -68,6 +68,11 @@ private:
       datetime timestamp;
       bool accepted;
       bool labeled;
+      // Store original features for consistent training
+      double atrPoints;
+      double support;
+      double resistance;
+      SignalDecision signal;
    } m_pendingSamples[];
 
 public:
@@ -657,12 +662,16 @@ private:
       m_modelDirty = false;
    }
 
-   string CreateSampleId() const
+   string CreateSampleId()
    {
-      return "S" + IntegerToString(m_loggedSamples + 1) + "_" + IntegerToString((int)TimeCurrent());
+      // Increment m_loggedSamples to ensure unique sample IDs
+      m_loggedSamples++;
+      return "S" + IntegerToString(m_loggedSamples) + "_" + IntegerToString((int)TimeCurrent());
    }
 
-   void RegisterPendingSample(const string &sampleId, bool accepted)
+   void RegisterPendingSample(const string &sampleId, bool accepted, 
+                              double atrPoints, double support, double resistance,
+                              const SignalDecision &signal)
    {
       AISignalSample sample;
       sample.sampleId = sampleId;
@@ -670,6 +679,11 @@ private:
       sample.timestamp = TimeCurrent();
       sample.accepted = accepted;
       sample.labeled = false;
+      // Store original features for consistent training
+      sample.atrPoints = atrPoints;
+      sample.support = support;
+      sample.resistance = resistance;
+      sample.signal = signal;
 
       int size = ArraySize(m_pendingSamples);
       ArrayResize(m_pendingSamples, size + 1);
@@ -728,23 +742,17 @@ private:
                    DoubleToString(pnl, 2),
                    TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS));
 
-      // Train Neural Network with online backpropagation
+      // Train Neural Network with online backpropagation using ORIGINAL features
       // Win jika PnL > 0, Loss jika PnL <= 0
       bool actualOutcome = (pnl > 0);
 
-      // Retrieve original signal data for training
-      // Note: In production, you'd want to store full signal data in pending samples
-      // For now, we'll use simplified features based on ticket analysis
-      SignalDecision dummySignal;
-      dummySignal.patternType = PATTERN_NONE;
-      dummySignal.zonePrice = 0;
-      dummySignal.slMultiplier = 1.5;
-      dummySignal.valid = true;
+      // Use stored original features for consistent training
+      SignalDecision signal = m_pendingSamples[index].signal;
+      double atrPoints = m_pendingSamples[index].atrPoints;
+      double support = m_pendingSamples[index].support;
+      double resistance = m_pendingSamples[index].resistance;
 
-      double atrPoints = SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 20; // Default estimate
-      double support = 0, resistance = 0;
-
-      TrainNeuralNetwork(dummySignal, atrPoints, support, resistance, actualOutcome);
+      TrainNeuralNetwork(signal, atrPoints, support, resistance, actualOutcome);
 
       Log("NN trained on trade outcome: PnL=" + DoubleToString(pnl, 2) +
           " | Result=" + (actualOutcome ? "WIN" : "LOSS"));
@@ -818,8 +826,8 @@ private:
                 DoubleToString(score, 4),
                 accepted ? "1" : "0");
       FileClose(handle);
-      m_loggedSamples++;
-      RegisterPendingSample(sampleId, accepted);
+      // m_loggedSamples already incremented in CreateSampleId()
+      RegisterPendingSample(sampleId, accepted, atrPoints, support, resistance, signal);
    }
 
    // Export lengkap dataset untuk training external (Python/ONNX)
