@@ -348,7 +348,7 @@ public:
 
       double spread = GetGlobalSpread();
       if(spread < 0) spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD); // Fallback
-      
+
       double minRange = MathMax(atrPoints * m_cfgCache.minSRRangeATR, spread * 5.0);
       double rangePts = (m_targetResistance - m_targetSupport) / _Point;
 

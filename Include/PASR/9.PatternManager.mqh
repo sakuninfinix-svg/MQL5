@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| PatternManager.mqh                                               |
+//|                                              9.PatternManager.mqh |
 //|                                       Copyright 2026, Agsicentre |
 //|            Pattern Detection & Analysis Module                   |
 //+------------------------------------------------------------------+
@@ -52,7 +52,7 @@ public:
       outDir = 0;
       outExtreme = 0.0;
       outScore = 0.0;
-      outSLMult = 1.0; 
+      outSLMult = 1.0;
       outReason = "";
 
       if (shift < 1 || _atrPoints <= 0)
@@ -61,12 +61,12 @@ public:
          return false;
       }
 
-      if (shift + 3 >= ArraySize(rates)) 
+      if (shift + 3 >= ArraySize(rates))
       {
          outReason = "Insufficient bar history";
          return false;
       }
-      
+
       PatternVote votes[10];
       for (int i = 0; i < 10; i++)
          ResetVote(votes[i]);

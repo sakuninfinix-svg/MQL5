@@ -60,7 +60,7 @@ private:
    {
       string pattern = "PASR_PEND_" + (string)CFG.risk.magic + "_" + m_symbol + "_";
       int total = GlobalVariablesTotal();
-      
+
       for (int i = total - 1; i >= 0; i--)
       {
          string gvName = GlobalVariableName(i);
@@ -402,7 +402,7 @@ public:
       }
 
       int qualityScore = decision.orderType == ORDER_TYPE_BUY ? decision.bias : -decision.bias;
-      double signalQuality = (qualityScore == 0) ? 1.5 : 1.0; 
+      double signalQuality = (qualityScore == 0) ? 1.5 : 1.0;
       double baseLot = m_data.CalculateLotSize(m_symbol, CFG.risk.pct, slDistancePoints, signalQuality);
       plan.lot = baseLot;
       plan.comment = m_data ? m_data.BuildComment(plan.type == ORDER_TYPE_BUY ? "BUY" : "SELL", decision.bias, CFG.risk.entryMode) : "P_EXEC";
@@ -470,10 +470,10 @@ public:
       ulong tsID = GetTickCount64() % 10000000000;
       request.comment = plan.comment + "#" + (string)tsID;
 
-      SavePendingState(plan, zonePrice, slMult, tsID); 
+      SavePendingState(plan, zonePrice, slMult, tsID);
       if (!OrderSendAsync(request, result))
       {
-         DeletePendingStateById(tsID); 
+         DeletePendingStateById(tsID);
          if (m_debugMode)
             PrintFormat("[Exec Async] OrderSend failed: %d", GetLastError());
          return 0;

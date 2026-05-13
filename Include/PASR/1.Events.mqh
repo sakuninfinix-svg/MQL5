@@ -181,7 +181,7 @@ class PauseToggleEvent : public Event
 public:
    bool isBuy;
    bool newState;
-   
+
    PauseToggleEvent(bool buy, bool state) : Event(15), isBuy(buy), newState(state) {}
    virtual int ID() const override { return EVENT_ID_PAUSE_TOGGLE; }
 };
@@ -271,7 +271,7 @@ void ReplayRecordedEvents()
                MqlRates rates[];
                if(CopyRates(_Symbol, _Period, 0, 1, rates) > 0)
                {
-                  e = new NewBarEvent(rates[0].time, rates[0].open, rates[0].high, 
+                  e = new NewBarEvent(rates[0].time, rates[0].open, rates[0].high,
                                       rates[0].low, rates[0].close, _Period);
                }
             }

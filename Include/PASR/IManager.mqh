@@ -12,9 +12,9 @@
 #ifndef __I_MANAGER_MQH__
 #define __I_MANAGER_MQH__
 
-#include "2.Config.mqh"
 #include "0.EventBus.mqh"
 #include "1.Events.mqh"
+#include "2.Config.mqh"
 
 class DataManager;
 

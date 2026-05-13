@@ -1,49 +1,27 @@
 ```
 # Compiled files
-*.mqh
-*.ex4
+*.mqh.gch
+*.mq5.gch
 *.ex5
-*.mq4
-*.mq5
 
 # Build artifacts
-*.o
-*.obj
-*.dll
-*.so
-*.lib
-*.a
+*.hst
+*.fxt
+*.csv
 
-# Dependencies
-Libraries/
-Include/
-
-# Logs
-*.log
-*.txt
-
-# Temp files
-*.tmp
-*.temp
-
-# Editor files
+# Editor/IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS files
-.DS_Store
-Thumbs.db
+# Logs and temp files
+*.log
+*.tmp
 
-# Coverage and testing
-coverage/
-htmlcov/
-.coverage
-*.coverage
-
-# Distribution artifacts
-dist/
-build/
-target/
+# MetaTrader specific
+tester/
+profiles/
+config/
+.cache/
 ```

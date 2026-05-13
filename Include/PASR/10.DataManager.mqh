@@ -36,7 +36,7 @@ private:
    datetime m_lastProfitUpdateDay;
    datetime m_lastScanTime;
    int m_lastHistoryCount;
-   int m_consecutiveLosses; 
+   int m_consecutiveLosses;
    datetime m_lastLossTime;
 
 public:
@@ -68,7 +68,7 @@ public:
    {
       if (!IManager::Init())
          return false;
-      m_data = GetPointer(this); 
+      m_data = GetPointer(this);
       return ResetIndicators();
    }
 
@@ -183,7 +183,7 @@ public:
          return false;
       }
 
-      double minSL = 10.0; 
+      double minSL = 10.0;
       if (slDist < minSL)
       {
          reason = StringFormat("SL too close (%.1f < %.1f)", slDist, minSL);
@@ -246,7 +246,7 @@ public:
       m_lastProfitUpdateDay = today;
    }
 
-   void UpdateAccountState() 
+   void UpdateAccountState()
    {
       if (TimeCurrent() - m_lastScanTime < 1 && m_lastScanTime > 0)
          return;
@@ -257,7 +257,7 @@ public:
       if (today != m_lastProfitUpdateDay)
       {
          ResetDailyAnchor();
-         m_consecutiveLosses = 0; 
+         m_consecutiveLosses = 0;
       }
       else
          RefreshDailyProfit();
@@ -296,7 +296,7 @@ public:
       temp.totalProfit = temp.dailyRealized + temp.floatingPnL;
 
       double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-      if (MathAbs(m_dayStartBalance) > _Point) 
+      if (MathAbs(m_dayStartBalance) > _Point)
          temp.dailyDrawdown = ((m_dayStartBalance - equity) / m_dayStartBalance) * 100.0;
 
       m_scanCache = temp;
@@ -326,8 +326,8 @@ public:
          return;
 
       int total = HistoryDealsTotal();
-      if (total == m_lastHistoryCount) return; 
-      
+      if (total == m_lastHistoryCount) return;
+
       m_lastHistoryCount = total;
       ZeroMemory(m_perfStats);
 

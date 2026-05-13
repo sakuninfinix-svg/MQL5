@@ -103,7 +103,7 @@ public:
    {
       if (!m_isRecording || CheckPointer(e) == POINTER_INVALID)
          return;
-      
+
       // Circular buffer - zero allocation
       int idx = m_currentIndex % m_maxHistory;
       m_history[idx].timestamp = e.Timestamp();
@@ -114,7 +114,7 @@ public:
    }
 
    int HistorySize() const { return MathMin(m_currentIndex, m_maxHistory); }
-   
+
    // Get actual count including overflow
    int TotalRecorded() const { return m_currentIndex; }
 
@@ -126,7 +126,7 @@ public:
       int idx = i % m_maxHistory;
       return m_history[idx].eventType;
    }
-   
+
    int GetHistorySourceId(int i)
    {
       if (i < 0 || i >= HistorySize())
@@ -134,7 +134,7 @@ public:
       int idx = i % m_maxHistory;
       return m_history[idx].sourceId;
    }
-   
+
    datetime GetHistoryTimestamp(int i)
    {
       if (i < 0 || i >= HistorySize())
@@ -159,11 +159,11 @@ private:
       IEventHandler *handler;
       int priority;
    };
-   
+
    HandlerRegistration m_handlersByType[MAX_EVENT_TYPES][MAX_HANDLERS_PER_EVENT];
    int m_handlerCount[MAX_EVENT_TYPES];
 
-   EventBus() 
+   EventBus()
    {
       ArrayInitialize(m_handlerCount, 0);
    }
@@ -194,7 +194,7 @@ public:
          return false;
       if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
          return false;
-      
+
       int total = m_handlerCount[eventID];
       if (total >= MAX_HANDLERS_PER_EVENT)
          return false;
@@ -235,7 +235,7 @@ public:
          return;
 
       int total = m_handlerCount[eventID];
-      
+
       for (int i = 0; i < total; i++)
       {
          if (m_handlersByType[eventID][i].handler == handler)

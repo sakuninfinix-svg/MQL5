@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//|               Price Action & Support Resistance V1               |
-//|         Optimized by Agsicentre (agsicentre.wordpress.com)       |
+//|                                              3.MarketManager.mqh |
+//|                                       Copyright 2026, Agsicentre |
 //|            Market State & Session Management Module              |
 //+------------------------------------------------------------------+
 
@@ -202,7 +202,7 @@ void MarketManager::OnNewBar(NewBarEvent *e)
       if (!SymbolInfoTick(m_symbol, m_lastTick)) return;
       m_hasLastTick = true;
    }
-   
+
    UpdateGateState(m_lastTick);
 }
 
@@ -216,7 +216,7 @@ void MarketManager::UpdateGateState(const MqlTick &tick)
    bool gateOpen = (currentATR > 0) ? PassesGate(tick, currentSpread, currentATR) : false;
 
    bool entryAllowed = !IsEntryCooldownActive();
-   bool stateChanged = (gateOpen != m_gateOpen) || 
+   bool stateChanged = (gateOpen != m_gateOpen) ||
                        (entryAllowed != m_entryAllowed) ||
                        (MathAbs(currentSpread - m_lastSpread) > 0.1) ||
                        (MathAbs(currentATR - m_lastATR) > 0.1);
@@ -292,7 +292,7 @@ void MarketManager::FetchWebNews()
          break;
 
       string eventData = StringSubstr(content, pos, endPos - pos);
-      bool isHighImpact = (StringFind(eventData, "High") >= 0 || 
+      bool isHighImpact = (StringFind(eventData, "High") >= 0 ||
                            (CFG.news.level >= NEWS_HIGH_MEDIUM && StringFind(eventData, "Medium") >= 0));
 
       bool isRelevant = (StringFind(eventData, m_baseCurr) >= 0 ||
@@ -487,9 +487,9 @@ void MarketManager::UpdateLossStreak(double netProfit)
    {
       m_entryAllowed = entryAllowed;
       if (m_debugMode)
-         PrintFormat("[%s] Izin entry berubah menjadi %s akibat hasil trade terakhir.", 
+         PrintFormat("[%s] Izin entry berubah menjadi %s akibat hasil trade terakhir.",
                      m_name, m_entryAllowed ? "DIIZINKAN" : "DIBLOKIR");
-                     
+
       MarketGateEvent *evt = new MarketGateEvent(m_gateOpen, m_lastSpread, m_lastATR, m_entryAllowed);
       DispatchEvent(evt);
    }

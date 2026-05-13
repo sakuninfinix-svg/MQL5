@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//|               Price Action & Support Resistance V1               |
-//|         Optimized by Agsicentre (agsicentre.wordpress.com)       |
+//|                                              11.DashboardManager.mqh  |
+//|                                       Copyright 2026, Agsicentre |
 //|            Dashboard UI & Control Management Module              |
 //+------------------------------------------------------------------+
 
@@ -125,7 +125,7 @@ private:
 
       m_cache.lastUpdate = TimeCurrent();
    }
-   
+
    void SetSpread(double spread)
    {
       m_cache.spread = spread;
@@ -220,7 +220,7 @@ public:
       // Update spread from global EA config cache
       double spread = GetGlobalSpread();
       if(spread >= 0) SetSpread(spread);
-      
+
       if (m_chart > 0)
          EventChartCustom(m_chart, DASHBOARD_REFRESH, 0, 0, "");
    }
@@ -340,7 +340,7 @@ public:
                else if (m_debugMode)
                {
                   int err = GetLastError();
-                  PrintFormat("[Dashboard] Failed to close %d: Error %d (%s)", 
+                  PrintFormat("[Dashboard] Failed to close %d: Error %d (%s)",
                               ticket, err, m_trade.ResultRetcodeDescription());
                }
             }
