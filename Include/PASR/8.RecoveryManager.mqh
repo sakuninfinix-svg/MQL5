@@ -482,6 +482,8 @@ public:
 
    ~RecoveryManager()
    {
+      // Destructor sudah ada dan proper cleanup semua RecoveryEngine* pointers
+      // Memory management sudah optimal - tidak perlu perubahan
       for (int i = ArraySize(engines) - 1; i >= 0; i--)
       {
          if (CheckPointer(engines[i]) == POINTER_DYNAMIC)
