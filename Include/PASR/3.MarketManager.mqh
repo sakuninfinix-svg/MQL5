@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
 //|               Price Action & Support Resistance V1               |
 //|         Optimized by Agsicentre (agsicentre.wordpress.com)       |
+//|            Market State & Session Management Module              |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"

@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                   IManager.mqh   |
-//|              Base Class for Event-Driven PASR EA Modules         |
-//|                                     Copyright 2026, Agsicentre   |
+//|                                       Copyright 2026, Agsicentre |
+//|            Base Class for Event-Driven PASR EA Modules           |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"

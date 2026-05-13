@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                    SRManager.mqh |
 //|                                       Copyright 2026, Agsicentre |
+//|            Support & Resistance Zone Management Module           |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"

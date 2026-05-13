@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                             ExecutionManager.mqh |
 //|                                       Copyright 2026, Agsicentre |
+//|            Order Execution & Trade Management Module             |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"

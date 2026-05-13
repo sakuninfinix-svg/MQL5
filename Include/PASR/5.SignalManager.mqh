@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                SignalManager.mqh |
-//|                              Event-Driven Version for PASR EA    |
-//|                                     Copyright 2026, Agsicentre   |
+//|                                       Copyright 2026, Agsicentre |
+//|            Event-Driven Signal Generation Module                 |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"

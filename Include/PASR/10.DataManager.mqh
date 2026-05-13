@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
-//|                                                 DataManager.mqh   |
+//|                                                 DataManager.mqh  |
 //|                                       Copyright 2026, Agsicentre |
+//|            Data Management & Indicator Cache Module              |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
