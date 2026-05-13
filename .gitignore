@@ -1,1 +1,1 @@
-Nothing should be ignored based on the provided file changes. The modified file 'Include/PASR/9.PatternManager.mqh' appears to be a source code file that should be tracked in version control.
+Nothing to output - the change list contains only a markdown file (.md) which is a source/config file, and there are no build artifacts, dependencies, or temp files to ignore.
