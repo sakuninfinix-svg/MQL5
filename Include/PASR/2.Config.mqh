@@ -6,7 +6,7 @@
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.00"
+#property version "1.21"
 #property strict
 
 #ifndef __CONFIG_MQH__
@@ -278,6 +278,392 @@ input bool InpSafeMode;  // Aktifkan Proteksi Safe Mode
 input int InpATRPeriod;  // Periode ATR
 input double InpATRMin;  // Batas Bawah Volatilitas (Points)
 input double InpATRMax;  // Batas Atas Volatilitas (Points)
+
+//+------------------------------------------------------------------+
+//| Configuration Snapshot for Centralized Caching                   |
+//+------------------------------------------------------------------+
+struct ConfigSnapshot
+  {
+   // Market
+   int atr_period;
+   double atr_min;
+   double atr_max;
+   double max_spread;
+   
+   // News
+   bool news_use;
+   ENUM_NEWS_LEVEL news_level;
+   int news_freeze;
+   
+   // Risk
+   bool auto_lot;
+   double risk_pct;
+   double lot_size;
+   double max_daily_loss;
+   ulong magic;
+   ENUM_ENTRY_MODE entry_mode;
+   ENUM_TPSL_MODE tpsl_mode;
+   bool use_mtf;
+   ENUM_TIMEFRAMES htf;
+   int htf_lookback;
+   double quality_lot_mult;
+   int max_positions;
+   int max_consecutive_loss;
+   int max_trade_duration_days;
+   int entry_cooldown_bars;
+   int signal_cooldown_bars;
+   int loss_cooldown_bars;
+   
+   // SR
+   ENUM_SR_MODE sr_mode;
+   int sr_lookback;
+   int swing_lookback;
+   double touch_buffer_atr;
+   int min_touches_strong;
+   double min_range_atr;
+   double atr_buffer_mult;
+   double buffer_mult_strong;
+   double buffer_mult_weak;
+   double zone_reuse_atr;
+   
+   // Pattern
+   int pattern_lookback;
+   double mtf_confluence_bonus;
+   double strong_zone_bonus;
+   double strong_zone_threshold;
+   double max_signal_atr;
+   double momentum_threshold_atr;
+   bool use_weights;
+   double anti_breakout_pct;
+   double marubozu_min_body_pct;
+   double engulfing_body_mult;
+   double min_dominance_gap;
+   double strong_zone_buffer_mult;
+   bool use_adaptive_zone_buffer;
+   double sensitivity_atr;
+   double star_middle_body_mult;
+   double railroad_min_body_ratio;
+   int failure_cooldown_bars;
+   double hq_threshold;
+   bool use_dynamic_cooldown;
+   int reduced_cooldown_bars;
+   double base_score;
+   double bonus_strong_atr;
+   double bonus_strong_body;
+   double bonus_strong_wick;
+   double bonus_follow_through;
+   double bonus_gap_confirm;
+   double bonus_breakout_confirm;
+   double bonus_small;
+   double atr_range_threshold;
+   double body_ratio_threshold;
+   double wick_ratio_threshold;
+   double pinbar_wick_ratio;
+   double inside_bar_range_max;
+   double star_close_min;
+   double three_inside_body_min;
+   double railroad_avg_body_min;
+   double railroad_wick_mult;
+   double marubozu_min_atr_mult;
+   double marubozu_strong_atr_min;
+   double default_sl_mult;
+   double pinbar_sl_mult;
+   double inside_bar_sl_mult;
+   
+   // Recovery
+   bool recovery_use;
+   int recovery_cooldown_bars;
+   int max_recovery_attempts;
+   double recovery_lot_mult;
+   double recovery_pattern_score_threshold;
+   double recovery_zone_tolerance_atr;
+   double fakeout_sensitivity;
+   double fakeout_sl_adjustment_atr;
+   
+   // Exit
+   int order_throttle_ms;
+   bool use_trailing;
+   bool use_partial_close;
+   bool exit_on_opposite;
+   double tp_buffer_atr;
+   double sl_buffer_atr;
+   double min_tp_distance_atr;
+   double max_tp_distance_atr;
+   double trailing_start_atr;
+   double trailing_buffer_atr;
+   double trail_activation_atr;
+   double trail_step_atr;
+   double lock_profit_atr;
+   double lock_offset_atr;
+   double partial_close_lot_pct;
+   double partial_close_atr;
+   
+   // AI
+   bool use_ai;
+   int ai_training_window_bars;
+   double ai_min_confidence;
+   double ai_pattern_bonus;
+   
+   // System
+   bool debug;
+   bool safe;
+   
+   // Copy from StrategyConfig
+   void CopyFrom(const StrategyConfig &cfg)
+     {
+      // Market
+      atr_period = cfg.market.atrPeriod;
+      atr_min = cfg.market.atrMin;
+      atr_max = cfg.market.atrMax;
+      max_spread = cfg.market.maxSpread;
+      
+      // News
+      news_use = cfg.news.use;
+      news_level = cfg.news.level;
+      news_freeze = cfg.news.freeze;
+      
+      // Risk
+      auto_lot = cfg.risk.autoLot;
+      risk_pct = cfg.risk.pct;
+      lot_size = cfg.risk.lot;
+      max_daily_loss = cfg.risk.maxDailyLoss;
+      magic = cfg.risk.magic;
+      entry_mode = cfg.risk.entryMode;
+      tpsl_mode = cfg.risk.tpslMode;
+      use_mtf = cfg.risk.useMTF;
+      htf = cfg.risk.htf;
+      htf_lookback = cfg.risk.htfLookback;
+      quality_lot_mult = cfg.risk.qualityLotMult;
+      max_positions = cfg.risk.maxPositions;
+      max_consecutive_loss = cfg.risk.maxConsecutiveLoss;
+      max_trade_duration_days = cfg.risk.maxTradeDurationDays;
+      entry_cooldown_bars = cfg.risk.entryCooldownBars;
+      signal_cooldown_bars = cfg.risk.signalCooldownBars;
+      loss_cooldown_bars = cfg.risk.lossCooldownBars;
+      
+      // SR
+      sr_mode = cfg.sr.mode;
+      sr_lookback = cfg.sr.lookback;
+      swing_lookback = cfg.sr.swingLookback;
+      touch_buffer_atr = cfg.sr.touchBufferATR;
+      min_touches_strong = cfg.sr.minTouchesStrong;
+      min_range_atr = cfg.sr.minRangeATR;
+      atr_buffer_mult = cfg.sr.atrBufferMult;
+      buffer_mult_strong = cfg.sr.bufferMultStrong;
+      buffer_mult_weak = cfg.sr.bufferMultWeak;
+      zone_reuse_atr = cfg.sr.zoneReuseATR;
+      
+      // Pattern
+      pattern_lookback = cfg.pattern.lookback;
+      mtf_confluence_bonus = cfg.pattern.mtfConfluenceBonus;
+      strong_zone_bonus = cfg.pattern.strongZoneBonus;
+      strong_zone_threshold = cfg.pattern.strongZoneThreshold;
+      max_signal_atr = cfg.pattern.maxSignalATR;
+      momentum_threshold_atr = cfg.pattern.momentumThresholdATR;
+      use_weights = cfg.pattern.useWeights;
+      anti_breakout_pct = cfg.pattern.antiBreakoutPct;
+      marubozu_min_body_pct = cfg.pattern.marubozuMinBodyPct;
+      engulfing_body_mult = cfg.pattern.engulfingBodyMult;
+      min_dominance_gap = cfg.pattern.minDominanceGap;
+      strong_zone_buffer_mult = cfg.pattern.strongZoneBufferMult;
+      use_adaptive_zone_buffer = cfg.pattern.useAdaptiveZoneBuffer;
+      sensitivity_atr = cfg.pattern.sensitivityATR;
+      star_middle_body_mult = cfg.pattern.starMiddleBodyMult;
+      railroad_min_body_ratio = cfg.pattern.railroadMinBodyRatio;
+      failure_cooldown_bars = cfg.pattern.failureCooldownBars;
+      hq_threshold = cfg.pattern.hqThreshold;
+      use_dynamic_cooldown = cfg.pattern.useDynamicCooldown;
+      reduced_cooldown_bars = cfg.pattern.reducedCooldownBars;
+      base_score = cfg.pattern.baseScore;
+      bonus_strong_atr = cfg.pattern.bonusStrongATR;
+      bonus_strong_body = cfg.pattern.bonusStrongBody;
+      bonus_strong_wick = cfg.pattern.bonusStrongWick;
+      bonus_follow_through = cfg.pattern.bonusFollowThrough;
+      bonus_gap_confirm = cfg.pattern.bonusGapConfirm;
+      bonus_breakout_confirm = cfg.pattern.bonusBreakoutConfirm;
+      bonus_small = cfg.pattern.bonusSmall;
+      atr_range_threshold = cfg.pattern.atrRangeThreshold;
+      body_ratio_threshold = cfg.pattern.bodyRatioThreshold;
+      wick_ratio_threshold = cfg.pattern.wickRatioThreshold;
+      pinbar_wick_ratio = cfg.pattern.pinbarWickRatio;
+      inside_bar_range_max = cfg.pattern.insideBarRangeMax;
+      star_close_min = cfg.pattern.starCloseMin;
+      three_inside_body_min = cfg.pattern.threeInsideBodyMin;
+      railroad_avg_body_min = cfg.pattern.railroadAvgBodyMin;
+      railroad_wick_mult = cfg.pattern.railroadWickMult;
+      marubozu_min_atr_mult = cfg.pattern.marubozuMinATRMult;
+      marubozu_strong_atr_min = cfg.pattern.marubozuStrongATRMin;
+      default_sl_mult = cfg.pattern.defaultSLMult;
+      pinbar_sl_mult = cfg.pattern.pinbarSLMult;
+      inside_bar_sl_mult = cfg.pattern.insideBarSLMult;
+      
+      // Recovery
+      recovery_use = cfg.recovery.use;
+      recovery_cooldown_bars = cfg.recovery.cooldownBars;
+      max_recovery_attempts = cfg.recovery.maxAttempts;
+      recovery_lot_mult = cfg.recovery.lotMult;
+      recovery_pattern_score_threshold = cfg.recovery.patternScoreThreshold;
+      recovery_zone_tolerance_atr = cfg.recovery.zoneToleranceATR;
+      fakeout_sensitivity = cfg.recovery.fakeoutSensitivity;
+      fakeout_sl_adjustment_atr = cfg.recovery.fakeoutSLAdjustmentATR;
+      
+      // Exit
+      order_throttle_ms = cfg.exit.orderThrottleMs;
+      use_trailing = cfg.exit.useTrailing;
+      use_partial_close = cfg.exit.usePartialClose;
+      exit_on_opposite = cfg.exit.exitOnOpposite;
+      tp_buffer_atr = cfg.exit.tpBufferATR;
+      sl_buffer_atr = cfg.exit.slBufferATR;
+      min_tp_distance_atr = cfg.exit.minTPDistanceATR;
+      max_tp_distance_atr = cfg.exit.maxTPDistanceATR;
+      trailing_start_atr = cfg.exit.trailingStartATR;
+      trailing_buffer_atr = cfg.exit.trailingBufferATR;
+      trail_activation_atr = cfg.exit.trailActivationATR;
+      trail_step_atr = cfg.exit.trailStepATR;
+      lock_profit_atr = cfg.exit.lockProfitATR;
+      lock_offset_atr = cfg.exit.lockOffsetATR;
+      partial_close_lot_pct = cfg.exit.partialCloseLotPct;
+      partial_close_atr = cfg.exit.partialCloseATR;
+      
+      // AI
+      use_ai = cfg.ai.use;
+      ai_training_window_bars = cfg.ai.trainingWindowBars;
+      ai_min_confidence = cfg.ai.minConfidence;
+      ai_pattern_bonus = cfg.ai.patternBonus;
+      
+      // System
+      debug = cfg.system.debug;
+      safe = cfg.system.safe;
+     }
+     
+   // Copy to StrategyConfig
+   void CopyTo(StrategyConfig &cfg) const
+     {
+      // Market
+      cfg.market.atrPeriod = atr_period;
+      cfg.market.atrMin = atr_min;
+      cfg.market.atrMax = atr_max;
+      cfg.market.maxSpread = max_spread;
+      
+      // News
+      cfg.news.use = news_use;
+      cfg.news.level = news_level;
+      cfg.news.freeze = news_freeze;
+      
+      // Risk
+      cfg.risk.autoLot = auto_lot;
+      cfg.risk.pct = risk_pct;
+      cfg.risk.lot = lot_size;
+      cfg.risk.maxDailyLoss = max_daily_loss;
+      cfg.risk.magic = magic;
+      cfg.risk.entryMode = entry_mode;
+      cfg.risk.tpslMode = tpsl_mode;
+      cfg.risk.useMTF = use_mtf;
+      cfg.risk.htf = htf;
+      cfg.risk.htfLookback = htf_lookback;
+      cfg.risk.qualityLotMult = quality_lot_mult;
+      cfg.risk.maxPositions = max_positions;
+      cfg.risk.maxConsecutiveLoss = max_consecutive_loss;
+      cfg.risk.maxTradeDurationDays = max_trade_duration_days;
+      cfg.risk.entryCooldownBars = entry_cooldown_bars;
+      cfg.risk.signalCooldownBars = signal_cooldown_bars;
+      cfg.risk.lossCooldownBars = loss_cooldown_bars;
+      
+      // SR
+      cfg.sr.mode = sr_mode;
+      cfg.sr.lookback = sr_lookback;
+      cfg.sr.swingLookback = swing_lookback;
+      cfg.sr.touchBufferATR = touch_buffer_atr;
+      cfg.sr.minTouchesStrong = min_touches_strong;
+      cfg.sr.minRangeATR = min_range_atr;
+      cfg.sr.atrBufferMult = atr_buffer_mult;
+      cfg.sr.bufferMultStrong = buffer_mult_strong;
+      cfg.sr.bufferMultWeak = buffer_mult_weak;
+      cfg.sr.zoneReuseATR = zone_reuse_atr;
+      
+      // Pattern
+      cfg.pattern.lookback = pattern_lookback;
+      cfg.pattern.mtfConfluenceBonus = mtf_confluence_bonus;
+      cfg.pattern.strongZoneBonus = strong_zone_bonus;
+      cfg.pattern.strongZoneThreshold = strong_zone_threshold;
+      cfg.pattern.maxSignalATR = max_signal_atr;
+      cfg.pattern.momentumThresholdATR = momentum_threshold_atr;
+      cfg.pattern.useWeights = use_weights;
+      cfg.pattern.antiBreakoutPct = anti_breakout_pct;
+      cfg.pattern.marubozuMinBodyPct = marubozu_min_body_pct;
+      cfg.pattern.engulfingBodyMult = engulfing_body_mult;
+      cfg.pattern.minDominanceGap = min_dominance_gap;
+      cfg.pattern.strongZoneBufferMult = strong_zone_buffer_mult;
+      cfg.pattern.useAdaptiveZoneBuffer = use_adaptive_zone_buffer;
+      cfg.pattern.sensitivityATR = sensitivity_atr;
+      cfg.pattern.starMiddleBodyMult = star_middle_body_mult;
+      cfg.pattern.railroadMinBodyRatio = railroad_min_body_ratio;
+      cfg.pattern.failureCooldownBars = failure_cooldown_bars;
+      cfg.pattern.hqThreshold = hq_threshold;
+      cfg.pattern.useDynamicCooldown = use_dynamic_cooldown;
+      cfg.pattern.reducedCooldownBars = reduced_cooldown_bars;
+      cfg.pattern.baseScore = base_score;
+      cfg.pattern.bonusStrongATR = bonus_strong_atr;
+      cfg.pattern.bonusStrongBody = bonus_strong_body;
+      cfg.pattern.bonusStrongWick = bonus_strong_wick;
+      cfg.pattern.bonusFollowThrough = bonus_follow_through;
+      cfg.pattern.bonusGapConfirm = bonus_gap_confirm;
+      cfg.pattern.bonusBreakoutConfirm = bonus_breakout_confirm;
+      cfg.pattern.bonusSmall = bonus_small;
+      cfg.pattern.atrRangeThreshold = atr_range_threshold;
+      cfg.pattern.bodyRatioThreshold = body_ratio_threshold;
+      cfg.pattern.wickRatioThreshold = wick_ratio_threshold;
+      cfg.pattern.pinbarWickRatio = pinbar_wick_ratio;
+      cfg.pattern.insideBarRangeMax = inside_bar_range_max;
+      cfg.pattern.starCloseMin = star_close_min;
+      cfg.pattern.threeInsideBodyMin = three_inside_body_min;
+      cfg.pattern.railroadAvgBodyMin = railroad_avg_body_min;
+      cfg.pattern.railroadWickMult = railroad_wick_mult;
+      cfg.pattern.marubozuMinATRMult = marubozu_min_atr_mult;
+      cfg.pattern.marubozuStrongATRMin = marubozu_strong_atr_min;
+      cfg.pattern.defaultSLMult = default_sl_mult;
+      cfg.pattern.pinbarSLMult = pinbar_sl_mult;
+      cfg.pattern.insideBarSLMult = inside_bar_sl_mult;
+      
+      // Recovery
+      cfg.recovery.use = recovery_use;
+      cfg.recovery.cooldownBars = recovery_cooldown_bars;
+      cfg.recovery.maxAttempts = max_recovery_attempts;
+      cfg.recovery.lotMult = recovery_lot_mult;
+      cfg.recovery.patternScoreThreshold = recovery_pattern_score_threshold;
+      cfg.recovery.zoneToleranceATR = recovery_zone_tolerance_atr;
+      cfg.recovery.fakeoutSensitivity = fakeout_sensitivity;
+      cfg.recovery.fakeoutSLAdjustmentATR = fakeout_sl_adjustment_atr;
+      
+      // Exit
+      cfg.exit.orderThrottleMs = order_throttle_ms;
+      cfg.exit.useTrailing = use_trailing;
+      cfg.exit.usePartialClose = use_partial_close;
+      cfg.exit.exitOnOpposite = exit_on_opposite;
+      cfg.exit.tpBufferATR = tp_buffer_atr;
+      cfg.exit.slBufferATR = sl_buffer_atr;
+      cfg.exit.minTPDistanceATR = min_tp_distance_atr;
+      cfg.exit.maxTPDistanceATR = max_tp_distance_atr;
+      cfg.exit.trailingStartATR = trailing_start_atr;
+      cfg.exit.trailingBufferATR = trailing_buffer_atr;
+      cfg.exit.trailActivationATR = trail_activation_atr;
+      cfg.exit.trailStepATR = trail_step_atr;
+      cfg.exit.lockProfitATR = lock_profit_atr;
+      cfg.exit.lockOffsetATR = lock_offset_atr;
+      cfg.exit.partialCloseLotPct = partial_close_lot_pct;
+      cfg.exit.partialCloseATR = partial_close_atr;
+      
+      // AI
+      cfg.ai.use = use_ai;
+      cfg.ai.trainingWindowBars = ai_training_window_bars;
+      cfg.ai.minConfidence = ai_min_confidence;
+      cfg.ai.patternBonus = ai_pattern_bonus;
+      
+      // System
+      cfg.system.debug = debug;
+      cfg.system.safe = safe;
+     }
+  };
 
 //+------------------------------------------------------------------+
 //| STRATEGY CONFIG: Global Access Object                            |

@@ -13,6 +13,7 @@
 #define __DATA_MANAGER_MQH__
 
 #include "IManager.mqh"
+#include "2.Config.mqh"  // For ConfigSnapshot and CFG global instance
 
 //+------------------------------------------------------------------+
 //| Interface untuk Dependency Injection                             |
@@ -36,6 +37,10 @@ private:
    int m_atrHandle;
    int m_fractalHandle;
 
+   // Centralized Config Cache
+   ConfigSnapshot m_cfgCache;
+   bool m_cfgInitialized;
+
    struct CachedData
    {
       datetime barTime;
@@ -58,6 +63,7 @@ private:
 public:
    DataManager() : IManager("DataManager", 10),
                    m_atrHandle(INVALID_HANDLE), m_fractalHandle(INVALID_HANDLE),
+                   m_cfgInitialized(false),
                    m_realizedDailyProfit(0),
                    m_dayStartBalance(0), m_lastProfitUpdateDay(0), m_lastScanTime(0),
                    m_consecutiveLosses(0),
@@ -80,11 +86,28 @@ public:
          IndicatorRelease(m_fractalHandle);
    }
 
+   // Initialize config cache from global CFG
+   void InitConfigCache()
+   {
+      m_cfgCache.CopyFrom(CFG);
+      m_cfgInitialized = true;
+   }
+
+   // Get cached config reference
+   const ConfigSnapshot& GetConfigCache() const { return m_cfgCache; }
+
+   // Refresh config cache on reload
+   void RefreshConfigCache()
+   {
+      m_cfgCache.CopyFrom(CFG);
+   }
+
    virtual bool Init() override
    {
       if (!IManager::Init())
          return false;
       m_data = GetPointer(this);
+      InitConfigCache();  // Initialize config cache
       return ResetIndicators();
    }
 
@@ -97,6 +120,7 @@ public:
    virtual void OnConfigReload(ConfigReloadEvent *e) override
    {
       IManager::OnConfigReload(e);
+      RefreshConfigCache();  // Update cached config
       ResetIndicators();
    }
 
