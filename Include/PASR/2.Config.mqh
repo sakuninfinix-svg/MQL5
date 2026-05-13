@@ -152,6 +152,15 @@ input ENUM_NEWS_LEVEL InpNewsLevel = NEWS_OFF;                         // News F
 input int InpNewsFreezeMinutes = 30;                                   // News Freeze (Minutes before/after)
 input string InpNewsWebURL = "https://nfs.faireconomy.media/ff_calendar_thisweek.xml";                                       // News XML Calendar URL
 
+// [GROUP] MARKET REGIME & VOLATILITY FILTER
+input bool InpUseMarketRegime;        // Aktifkan Filter Market Regime
+input double InpMinTrendStrength;     // Kekuatan Tren Minimum (0.0-1.0)
+input bool InpAllowSidewaysTrading;   // Izinkan Trading di Sideways
+input double InpRegimeLotMultStrong;  // Lot Multiplier Strong Trend
+input double InpRegimeLotMultWeak;    // Lot Multiplier Weak Trend
+input double InpRegimeLotMultSide;    // Lot Multiplier Sideways
+input double InpRegimeLotMultChop;    // Lot Multiplier Volatile Chop
+
 // [GROUP] RISK MANAGEMENT
 input bool InpUseAutoLot;           // Gunakan AutoLot (Risk %)
 input double InpRiskPct;            // Risiko % per Trade
@@ -290,6 +299,14 @@ struct StrategyConfig
       double atrMax;
       double maxSpread;
       string sessions[7];
+      // Market Regime
+      bool useRegime;
+      double minTrendStrength;
+      bool allowSideways;
+      double regimeLotMultStrong;
+      double regimeLotMultWeak;
+      double regimeLotMultSide;
+      double regimeLotMultChop;
    } market;
 
    struct News {
@@ -439,6 +456,15 @@ struct ConfigSnapshot
    double max_spread;
    string sessions[7];
    
+   // Market Regime
+   bool use_regime;
+   double min_trend_strength;
+   bool allow_sideways;
+   double regime_lot_mult_strong;
+   double regime_lot_mult_weak;
+   double regime_lot_mult_side;
+   double regime_lot_mult_chop;
+   
    // News
    bool news_use;
    ENUM_NEWS_LEVEL news_level;
@@ -567,6 +593,15 @@ struct ConfigSnapshot
       atr_max = cfg.market.atrMax;
       max_spread = cfg.market.maxSpread;
       for(int i=0; i<7; i++) sessions[i] = cfg.market.sessions[i];
+      
+      // Market Regime
+      use_regime = cfg.market.useRegime;
+      min_trend_strength = cfg.market.minTrendStrength;
+      allow_sideways = cfg.market.allowSideways;
+      regime_lot_mult_strong = cfg.market.regimeLotMultStrong;
+      regime_lot_mult_weak = cfg.market.regimeLotMultWeak;
+      regime_lot_mult_side = cfg.market.regimeLotMultSide;
+      regime_lot_mult_chop = cfg.market.regimeLotMultChop;
       
       // News
       news_use = cfg.news.use;
@@ -823,6 +858,15 @@ void SetCommonDefaults()
    CFG.market.sessions[4] = InpSessionThu;
    CFG.market.sessions[5] = InpSessionFri;
    CFG.market.sessions[6] = InpSessionSat;
+   
+   // Market Regime Filter
+   CFG.market.useRegime = InpUseMarketRegime;
+   CFG.market.minTrendStrength = InpMinTrendStrength;
+   CFG.market.allowSideways = InpAllowSidewaysTrading;
+   CFG.market.regimeLotMultStrong = InpRegimeLotMultStrong;
+   CFG.market.regimeLotMultWeak = InpRegimeLotMultWeak;
+   CFG.market.regimeLotMultSide = InpRegimeLotMultSide;
+   CFG.market.regimeLotMultChop = InpRegimeLotMultChop;
 
    // --- Input Validation & Assignment ---
    CFG.market.atrPeriod = (InpATRPeriod > 0) ? InpATRPeriod : 14;
