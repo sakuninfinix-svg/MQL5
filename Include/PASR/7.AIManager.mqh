@@ -70,6 +70,12 @@ private:
       bool labeled;
       // Store original features for consistent training
       double atrPoints;
+      double volatility;
+      double mtConfluence;
+      double volumeRatio;
+      double zoneStrength;
+      double slMultiplier;
+      int patternType;
       double support;
       double resistance;
       SignalDecision signal;
@@ -684,6 +690,13 @@ private:
       sample.support = support;
       sample.resistance = resistance;
       sample.signal = signal;
+      // Additional features for consistent training
+      sample.volatility = NormalizeVolatilityFeature();
+      sample.mtConfluence = NormalizeMultiTimeframeConfluence(signal);
+      sample.volumeRatio = NormalizeVolumeFeature();
+      sample.zoneStrength = NormalizeZoneFeature(signal.zonePrice, support, resistance);
+      sample.slMultiplier = signal.slMultiplier;
+      sample.patternType = (int)signal.patternType;
 
       int size = ArraySize(m_pendingSamples);
       ArrayResize(m_pendingSamples, size + 1);
