@@ -6,7 +6,7 @@
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.20"
+#property version "1.30"
 #property strict
 
 #ifndef __EVENT_BUS_MQH__
@@ -15,6 +15,20 @@
 //--- Performance optimization: Pre-allocated handler pool
 #define MAX_HANDLERS_PER_EVENT 16
 #define MAX_EVENT_TYPES 32
+
+//+------------------------------------------------------------------+
+//| Event Priority Groups - OPTIMIZATION V1.30                       |
+//+------------------------------------------------------------------+
+#define EVENT_PRIORITY_CRITICAL  0      // Emergency stops
+#define EVENT_PRIORITY_HIGH     50      // Price updates, new bars
+#define EVENT_PRIORITY_NORMAL   100     // Heartbeats, config changes
+#define EVENT_PRIORITY_LOW      150     // UI updates, logging
+
+// Priority validation macros
+#define IS_CRITICAL_PRIORITY(p)  ((p) >= 0 && (p) <= 10)
+#define IS_HIGH_PRIORITY(p)      ((p) > 10 && (p) <= 50)
+#define IS_NORMAL_PRIORITY(p)    ((p) > 50 && (p) <= 100)
+#define IS_LOW_PRIORITY(p)       ((p) > 100 && (p) <= 200)
 
 //+------------------------------------------------------------------+
 //| Base Event Class - OPTIMIZED V1.20                               |
@@ -188,12 +202,21 @@ public:
    }
 
    // Register handler for specific event type - O(1) operation
-   bool Subscribe(int eventID, IEventHandler *handler, int priority = 100)
+   // OPTIMIZATION V1.30: Added priority validation and warnings
+   bool Subscribe(int eventID, IEventHandler *handler, int priority = EVENT_PRIORITY_NORMAL)
    {
       if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
          return false;
       if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
          return false;
+      
+      // Priority validation with warnings for critical events
+      #ifdef __DEBUG__
+      if (eventID == 0 && !IS_CRITICAL_PRIORITY(priority)) // EVENT_ID_EMERGENCY_STOP assumed as 0
+         Print("WARNING: Emergency stop event should have CRITICAL priority (0-10). Current: ", priority);
+      if (eventID == 1 && !IS_HIGH_PRIORITY(priority)) // EVENT_ID_PRICE_UPDATE assumed as 1
+         Print("WARNING: Price update event should have HIGH priority (11-50). Current: ", priority);
+      #endif
 
       int total = m_handlerCount[eventID];
       if (total >= MAX_HANDLERS_PER_EVENT)
@@ -252,6 +275,7 @@ public:
    }
 
    // Dispatch event - OPTIMIZED: No sorting, direct execution
+   // OPTIMIZATION V1.30: Added batch dispatch support for high-frequency events
    void Dispatch(Event *e)
    {
       if (e == NULL || CheckPointer(e) == POINTER_INVALID)
@@ -293,6 +317,60 @@ public:
       if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC)
       {
          delete e;
+      }
+   }
+   
+   // OPTIMIZATION V1.30: Batch dispatch for high-frequency events
+   // Reduces overhead when firing multiple events of same type
+   void DispatchBatch(int eventID, Event *events[], int count)
+   {
+      if (count <= 0 || events == NULL)
+         return;
+      if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
+         return;
+      
+      int total = m_handlerCount[eventID];
+      if (total == 0)
+      {
+         // Clean up all events if no handlers
+         for (int i = 0; i < count; i++)
+         {
+            if (events[i] != NULL && CheckPointer(events[i]) == POINTER_DYNAMIC)
+               delete events[i];
+         }
+         return;
+      }
+      
+      // Process each event through all handlers
+      for (int e = 0; e < count; e++)
+      {
+         if (events[e] == NULL || CheckPointer(events[e]) == POINTER_INVALID)
+            continue;
+            
+         bool isHeapAllocated = (CheckPointer(events[e]) == POINTER_DYNAMIC);
+         
+         // Record event
+         if (CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
+         {
+            g_recorder.Record(events[e]);
+         }
+         
+         // Execute all handlers for this event
+         for (int i = 0; i < total; i++)
+         {
+            IEventHandler *h = m_handlersByType[eventID][i].handler;
+            if (h != NULL && CheckPointer(h) != POINTER_INVALID)
+            {
+               h.HandleEvent(events[e]);
+            }
+         }
+         
+         // Clean up if heap-allocated
+         if (isHeapAllocated && CheckPointer(events[e]) == POINTER_DYNAMIC)
+         {
+            delete events[e];
+            events[e] = NULL;
+         }
       }
    }
 
