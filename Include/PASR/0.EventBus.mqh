@@ -116,6 +116,12 @@ public:
    { 
       LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Handler error on event " + IntegerToString(eventId) + ": " + errorMsg);
    }
+   
+   // Optional: Get handler name for debug logging
+   virtual string GetHandlerName() const 
+   { 
+      return "UnknownHandler"; 
+   }
 };
 
 //+------------------------------------------------------------------+
@@ -280,7 +286,11 @@ private:
    }
 
 public:
-   ~EventBus() { Clear(); }
+   ~EventBus() 
+   { 
+      Clear(); 
+      LOG_EVENT(EVENT_LOG_LEVEL_INFO, "EventBus destroyed");
+   }
 
    static EventBus *Instance()
    {
@@ -464,18 +474,26 @@ public:
          IEventHandler *h = m_handlersByType[id][i].handler;
          if (h != NULL && CheckPointer(h) != POINTER_INVALID)
          {
-            // Try-catch pattern for error handling
+            // Try-catch pattern for error handling with detailed logging
             #ifdef __DEBUG__
             try
             {
                h.HandleEvent(e);
                handlersCalled++;
             }
+            catch(const std::exception &ex)
+            {
+               errorsHandled++;
+               string handlerName = (CheckPointer(h) != POINTER_INVALID) ? h.GetHandlerName() : "Unknown";
+               LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Exception in handler [" + handlerName + "] for event " + IntegerToString(id) + ": " + ex.Description());
+               h.OnHandlerError(id, "Exception: " + ex.Description());
+            }
             catch(...)
             {
                errorsHandled++;
-               LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Exception in handler for event " + IntegerToString(id));
-               h.OnHandlerError(id, "Exception caught during HandleEvent");
+               string handlerName = (CheckPointer(h) != POINTER_INVALID) ? h.GetHandlerName() : "Unknown";
+               LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Unknown exception in handler [" + handlerName + "] for event " + IntegerToString(id));
+               h.OnHandlerError(id, "Unknown exception");
             }
             #else
             // Production: simpler error detection without try-catch overhead
@@ -674,29 +692,62 @@ public:
          if (m_deferredQueue[i].isPending && m_deferredQueue[i].eventPtr != NULL)
          {
             if (CheckPointer(m_deferredQueue[i].eventPtr) == POINTER_DYNAMIC)
+            {
                delete m_deferredQueue[i].eventPtr;
-            m_deferredQueue[i].eventPtr = NULL;
+               m_deferredQueue[i].eventPtr = NULL;
+            }
             m_deferredQueue[i].isPending = false;
          }
       }
       m_deferredCount = 0;
       
+      // Unsubscribe all handlers (no deletion - handlers are owned by managers)
       for (int i = 0; i < MAX_EVENT_TYPES; i++)
       {
          m_handlerCount[i] = 0;
+         // Explicitly clear handler pointers to prevent dangling references
+         for (int j = 0; j < MAX_HANDLERS_PER_EVENT; j++)
+         {
+            m_handlersByType[i][j].handler = NULL;
+            m_handlersByType[i][j].priority = 0;
+            m_handlersByType[i][j].groupFlags = EVENT_GROUP_NONE;
+         }
       }
       
-      LOG_EVENT(EVENT_LOG_LEVEL_INFO, "EventBus cleared");
+      // Reset metrics
+      m_totalDispatches = 0;
+      m_totalHandlersCalled = 0;
+      m_lastResetTime = TimeCurrent();
+      
+      LOG_EVENT(EVENT_LOG_LEVEL_INFO, "EventBus cleared and reset");
    }
 };
 
+//+------------------------------------------------------------------+
+//| Safe Event Dispatch with Null Check                              |
+//| Prevents memory leaks when EventBus is unavailable               |
+//+------------------------------------------------------------------+
 inline void DispatchEvent(Event *e)
 {
+   if (CheckPointer(e) == POINTER_INVALID)
+      return;
+      
    EventBus *bus = EventBus::Instance();
    if (CheckPointer(bus) != POINTER_INVALID)
-      bus.Dispatch(e);
-   else if (CheckPointer(e) == POINTER_DYNAMIC)
-      delete e;
+   {
+      bus.Dispatch(e);  // Dispatch takes ownership and deletes heap events
+   }
+   else
+   {
+      // EventBus not available - clean up to prevent memory leak
+      if (CheckPointer(e) == POINTER_DYNAMIC)
+      {
+         #ifdef __DEBUG__
+         Print("[WARN] EventBus unavailable, deleting event ", e.ID(), " to prevent memory leak");
+         #endif
+         delete e;
+      }
+   }
 }
 
 // Initialize static members
