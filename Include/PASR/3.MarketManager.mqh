@@ -92,7 +92,7 @@ public:
 
    virtual void OnHeartbeat(HeartbeatEvent *e) override
    {
-      if (m_data.GetConfigCache().news_use)
+      if (cfg.news.use)
          FetchWebNews();
    }
 };
@@ -112,7 +112,7 @@ bool MarketManager::Init()
    if (!IManager::Init())
       return false;
 
-   ConfigSnapshot cfg = m_data.GetConfigCache();
+   StrategyConfig cfg; m_data.GetConfigCache(cfg);
    // Cache is already refreshed by IManager::Init()
    for (int i = 0; i < 7; i++)
    {
@@ -151,7 +151,7 @@ bool MarketManager::Init()
 //+------------------------------------------------------------------+
 bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, double currentATR)
 {
-   ConfigSnapshot cfg = m_data.GetConfigCache();
+   StrategyConfig cfg; m_data.GetConfigCache(cfg);
    if (!IsTradingSession())
    {
       m_data.DebugLog(m_debugMode, "Trading session is closed.");
@@ -269,7 +269,7 @@ bool MarketManager::IsTradingSession()
 //+------------------------------------------------------------------+
 void MarketManager::FetchWebNews()
 {
-   const ConfigSnapshot cfg = m_data.GetConfigCache();
+   StrategyConfig cfg; m_data.GetConfigCache(cfg);
    if (MQLInfoInteger(MQL_TESTER))
       return;
    if (TimeCurrent() < m_lastWebFetch + 1800)
@@ -356,7 +356,7 @@ void MarketManager::FetchWebNews()
 //+------------------------------------------------------------------+
 bool MarketManager::IsNewsTime()
 {
-   ConfigSnapshot cfg = m_data.GetConfigCache();
+   StrategyConfig cfg; m_data.GetConfigCache(cfg);
    if (cfg.news_level == NEWS_OFF)
    {
       m_newsStatus = "News filter OFF";
@@ -433,7 +433,7 @@ bool MarketManager::IsNewsTime()
 //+------------------------------------------------------------------+
 bool MarketManager::IsEntryCooldownActive()
 {
-   ConfigSnapshot cfg = m_data.GetConfigCache();
+   StrategyConfig cfg; m_data.GetConfigCache(cfg);
    MqlRates rates[];
    // FIX: Use closed bar (shift 1) to prevent repainting issues
    if (CopyRates(m_symbol, m_period, 1, 1, rates) <= 0)
