@@ -15,8 +15,200 @@
 #include "IManager.mqh"
 #include "2.Config.mqh"  // For ConfigSnapshot and CFG global instance
 #include "12.MarketRegime.mqh"  // For MarketRegimeFilter
-#include "DataUtils.mqh"  // Utility functions
-#include "PerformanceTracker.mqh"  // Performance tracking module
+
+//+------------------------------------------------------------------+
+//| Utility Functions Class (Non-Data Utilities)                     |
+//+------------------------------------------------------------------+
+class DataUtils
+{
+public:
+   // Parse "HH:MM" string to minutes since midnight
+   static int ParseHM(const string hm)
+   {
+      string parts[];
+      if(StringSplit(hm, ':', parts) != 2) return -1;
+      int h = (int)StringToInteger(parts[0]);
+      int m = (int)StringToInteger(parts[1]);
+      if(h < 0 || h > 23 || m < 0 || m > 59) return -1;
+      return h * 60 + m;
+   }
+   
+   // Strip HTML-like tags from comment strings
+   static string StripTags(const string input)
+   {
+      string result = input;
+      int start = StringFind(result, "<");
+      while(start >= 0)
+      {
+         int end = StringFind(result, ">", start);
+         if(end < 0) break;
+         result = StringSubstr(result, 0, start) + StringSubstr(result, end + 1);
+         start = StringFind(result, "<");
+      }
+      return result;
+   }
+   
+   // Build formatted comment for dashboard display
+   static string BuildComment(const string title, const string content)
+   {
+      return "<b>" + title + "</b>\n" + content;
+   }
+};
+
+//+------------------------------------------------------------------+
+//| Performance Tracker Class (Modular Statistics)                   |
+//+------------------------------------------------------------------+
+class PerformanceTracker
+{
+private:
+   ulong m_magic;
+   string m_symbol;
+   
+   struct StatWindow
+   {
+      datetime startTime;
+      int totalTrades;
+      double grossProfit;
+      double grossLoss;
+      double maxDrawdown;
+      double peakEquity;
+      
+      void Reset()
+      {
+         startTime = TimeCurrent();
+         totalTrades = 0;
+         grossProfit = 0;
+         grossLoss = 0;
+         maxDrawdown = 0;
+         peakEquity = 0;
+      }
+   };
+   
+   StatWindow m_lifetime;
+   StatWindow m_session;
+   StatWindow m_rolling7d;
+   StatWindow m_rolling30d;
+   
+   datetime m_lastUpdate;
+   
+   void UpdateWindow(StatWindow &win, double profit, double currentEquity)
+   {
+      win.totalTrades++;
+      if(profit > 0)
+         win.grossProfit += profit;
+      else
+         win.grossLoss += MathAbs(profit);
+         
+      if(currentEquity > win.peakEquity)
+         win.peakEquity = currentEquity;
+         
+      double dd = win.peakEquity - currentEquity;
+      if(dd > win.maxDrawdown)
+         win.maxDrawdown = dd;
+   }
+   
+   void CheckRollingWindows()
+   {
+      datetime now = TimeCurrent();
+      // 7-day rolling window
+      if(now - m_rolling7d.startTime > 7 * 24 * 3600)
+         m_rolling7d.Reset();
+      // 30-day rolling window
+      if(now - m_rolling30d.startTime > 30 * 24 * 3600)
+         m_rolling30d.Reset();
+   }
+   
+public:
+   PerformanceTracker() : m_magic(0), m_symbol(""), m_lastUpdate(0)
+   {
+      m_lifetime.Reset();
+      m_session.Reset();
+      m_rolling7d.Reset();
+      m_rolling30d.Reset();
+   }
+   
+   void Initialize(ulong magic, const string symbol)
+   {
+      m_magic = magic;
+      m_symbol = symbol;
+      m_lifetime.startTime = TimeCurrent();
+      m_session.startTime = TimeCurrent();
+      m_rolling7d.startTime = TimeCurrent();
+      m_rolling30d.startTime = TimeCurrent();
+   }
+   
+   void RecordTrade(double profit, double currentEquity)
+   {
+      CheckRollingWindows();
+      
+      UpdateWindow(m_lifetime, profit, currentEquity);
+      UpdateWindow(m_session, profit, currentEquity);
+      UpdateWindow(m_rolling7d, profit, currentEquity);
+      UpdateWindow(m_rolling30d, profit, currentEquity);
+      
+      m_lastUpdate = TimeCurrent();
+   }
+   
+   void ResetSession()
+   {
+      m_session.Reset();
+      m_session.startTime = TimeCurrent();
+   }
+   
+   PerformanceStats GetStats() const
+   {
+      PerformanceStats stats;
+      // Use lifetime stats as primary (backward compatible)
+      stats.totalTrades = m_lifetime.totalTrades;
+      stats.grossProfit = m_lifetime.grossProfit;
+      stats.grossLoss = m_lifetime.grossLoss;
+      stats.maxDrawdown = m_lifetime.maxDrawdown;
+      return stats;
+   }
+   
+   // Accessors for different time windows
+   PerformanceStats GetLifetimeStats() const
+   {
+      PerformanceStats stats;
+      stats.totalTrades = m_lifetime.totalTrades;
+      stats.grossProfit = m_lifetime.grossProfit;
+      stats.grossLoss = m_lifetime.grossLoss;
+      stats.maxDrawdown = m_lifetime.maxDrawdown;
+      return stats;
+   }
+   
+   PerformanceStats GetSessionStats() const
+   {
+      PerformanceStats stats;
+      stats.totalTrades = m_session.totalTrades;
+      stats.grossProfit = m_session.grossProfit;
+      stats.grossLoss = m_session.grossLoss;
+      stats.maxDrawdown = m_session.maxDrawdown;
+      return stats;
+   }
+   
+   PerformanceStats GetRolling7DayStats() const
+   {
+      PerformanceStats stats;
+      stats.totalTrades = m_rolling7d.totalTrades;
+      stats.grossProfit = m_rolling7d.grossProfit;
+      stats.grossLoss = m_rolling7d.grossLoss;
+      stats.maxDrawdown = m_rolling7d.maxDrawdown;
+      return stats;
+   }
+   
+   PerformanceStats GetRolling30DayStats() const
+   {
+      PerformanceStats stats;
+      stats.totalTrades = m_rolling30d.totalTrades;
+      stats.grossProfit = m_rolling30d.grossProfit;
+      stats.grossLoss = m_rolling30d.grossLoss;
+      stats.maxDrawdown = m_rolling30d.maxDrawdown;
+      return stats;
+   }
+   
+   datetime GetLastUpdate() const { return m_lastUpdate; }
+};
 
 //+------------------------------------------------------------------+
 //| Global pointer to MarketRegimeFilter (set in EA)                 |
@@ -548,20 +740,13 @@ public:
 
    void UpdatePerformanceStats()
    {
-      // Delegate to PerformanceTracker module for efficient multi-window tracking
-      // This replaces the old monolithic stats calculation
-      m_perfTracker.UpdateFromHistory();
-      
-      // Update legacy m_perfStats for backward compatibility
-      PerformanceWindow lifetime = m_perfTracker.GetLifetime();
-      m_perfStats.safeTotal = lifetime.totalTrades;  // Approximation
-      m_perfStats.safeWins = lifetime.wins;
-      // Note: For full backward compatibility, you may want to map specific trade types
-      // This is a simplified mapping - adjust based on your actual usage
+      // Performance stats are now updated via RecordTrade() when trades close
+      // This method is kept for backward compatibility but does nothing
+      // The new modular approach tracks stats in real-time
    }
 
    // Access to new performance tracker (optional)
-   PerformanceTracker GetPerfTracker() const { return m_perfTracker; }
+   const PerformanceTracker& GetPerfTracker() const { return m_perfTracker; }
 
    void UpdateConsecutiveLosses(double netProfit)
    {
@@ -587,8 +772,8 @@ public:
 
    string BuildComment(string type, int bias, ENUM_ENTRY_MODE mode) const
    {
-      Print("[DataManager] WARNING: BuildComment() is deprecated. Use DataUtils::BuildComment() instead.");
-      return DataUtils::BuildComment(type, bias, mode);
+      Print("[DataManager] WARNING: BuildComment() is deprecated. Use DataUtils::BuildComment(type, \"Bias: \" + IntegerToString(bias)) instead.");
+      return DataUtils::BuildComment(type, "Bias: " + IntegerToString(bias));
    }
 
    string StripTags(string html) const
