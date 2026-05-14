@@ -407,6 +407,11 @@ struct StrategyConfig
       double zoneToleranceATR;
       double fakeoutSensitivity;
       double fakeoutSLAdjATR;
+      // SAFEGUARD: Maximum recovery positions per initial position
+      int maxRecoveryPositions;          // Max 2 recovery positions per initial trade
+      double maxExposureMultiplier;      // Max total exposure (e.g., 2x initial lot)
+      int recoveryTimeoutBars;           // Close all if still losing after N bars
+      double hardStopLossPct;            // Hard stop per group (e.g., 3% of balance)
    } recovery;
 
    struct Exit {
@@ -555,6 +560,11 @@ struct ConfigSnapshot
    double recovery_zone_tolerance_atr;
    double fakeout_sensitivity;
    double fakeout_sl_adjustment_atr;
+   // SAFEGUARD fields
+   int recovery_max_positions;
+   double recovery_max_exposure_mult;
+   int recovery_timeout_bars;
+   double recovery_hard_stop_pct;
    
    // Exit
    int order_throttle_ms;
@@ -693,6 +703,11 @@ struct ConfigSnapshot
       recovery_zone_tolerance_atr = cfg.recovery.zoneToleranceATR;
       fakeout_sensitivity = cfg.recovery.fakeoutSensitivity;
       fakeout_sl_adjustment_atr = cfg.recovery.fakeoutSLAdjATR;
+      // SAFEGUARD fields
+      recovery_max_positions = cfg.recovery.maxRecoveryPositions;
+      recovery_max_exposure_mult = cfg.recovery.maxExposureMultiplier;
+      recovery_timeout_bars = cfg.recovery.recoveryTimeoutBars;
+      recovery_hard_stop_pct = cfg.recovery.hardStopLossPct;
       
       // Exit
       order_throttle_ms = cfg.system.orderThrottleMs;
@@ -823,6 +838,11 @@ struct ConfigSnapshot
       cfg.recovery.zoneToleranceATR = recovery_zone_tolerance_atr;
       cfg.recovery.fakeoutSensitivity = fakeout_sensitivity;
       cfg.recovery.fakeoutSLAdjATR = fakeout_sl_adjustment_atr;
+      // SAFEGUARD fields
+      cfg.recovery.maxRecoveryPositions = recovery_max_positions;
+      cfg.recovery.maxExposureMultiplier = recovery_max_exposure_mult;
+      cfg.recovery.recoveryTimeoutBars = recovery_timeout_bars;
+      cfg.recovery.hardStopLossPct = recovery_hard_stop_pct;
       
       // Exit
       cfg.system.orderThrottleMs = order_throttle_ms;
@@ -1010,6 +1030,19 @@ void SetCommonDefaults()
    if (InpFakeoutDetectionSensitivity <= 0) Print("WARNING: InpFakeoutDetectionSensitivity must be > 0. Using default 0.3.");
 
    CFG.recovery.fakeoutSLAdjATR = InpFakeoutSLAdjustmentATR;
+   
+   // SAFEGUARD: Recovery limits
+   CFG.recovery.maxRecoveryPositions = (InpMaxRecoveryPositions >= 0) ? InpMaxRecoveryPositions : 2;
+   if (InpMaxRecoveryPositions < 0) Print("WARNING: InpMaxRecoveryPositions must be >= 0. Using default 2.");
+   
+   CFG.recovery.maxExposureMultiplier = (InpMaxRecoveryExposureMult >= 0) ? InpMaxRecoveryExposureMult : 2.0;
+   if (InpMaxRecoveryExposureMult < 0) Print("WARNING: InpMaxRecoveryExposureMult must be >= 0. Using default 2.0.");
+   
+   CFG.recovery.recoveryTimeoutBars = (InpRecoveryTimeoutBars >= 0) ? InpRecoveryTimeoutBars : 20;
+   if (InpRecoveryTimeoutBars < 0) Print("WARNING: InpRecoveryTimeoutBars must be >= 0. Using default 20.");
+   
+   CFG.recovery.hardStopLossPct = (InpRecoveryHardStopPct >= 0 && InpRecoveryHardStopPct <= 100) ? InpRecoveryHardStopPct : 3.0;
+   if (InpRecoveryHardStopPct < 0 || InpRecoveryHardStopPct > 100) Print("WARNING: InpRecoveryHardStopPct must be 0-100. Using default 3.0.");
 
    // Exit & Trailing
    CFG.exit.useTrailing = InpUseTrailing;
