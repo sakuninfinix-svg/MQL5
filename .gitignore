@@ -1,1 +1,1 @@
-Nothing should be ignored in this case, as the changes only involve source code files (.mqh) and documentation (.md), which are not build artifacts, dependencies, or temporary files.
+Nothing should be ignored based on the provided file changes. The modified file 'Include/PASR/2.Config.mqh' appears to be a source/config file and should not be added to .gitignore.

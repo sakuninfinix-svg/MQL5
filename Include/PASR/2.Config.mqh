@@ -6,7 +6,7 @@
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.21"
+#property version "2.00"
 #property strict
 
 #ifndef __CONFIG_MQH__
@@ -289,6 +289,63 @@ input double InpATRMin;  // Batas Bawah Volatilitas (Points)
 input double InpATRMax;  // Batas Atas Volatilitas (Points)
 
 //+------------------------------------------------------------------+
+//| VALIDATION HELPERS - Central validation utilities                |
+//+------------------------------------------------------------------+
+
+/**
+ * Clamp value between min and max
+ */
+template<typename T>
+T Clamp(T value, T minVal, T maxVal)
+{
+   if(value < minVal) return minVal;
+   if(value > maxVal) return maxVal;
+   return value;
+}
+
+/**
+ * Ensure value is positive, return default if not
+ */
+double EnsurePositive(double value, double defaultValue)
+{
+   return (value > 0) ? value : defaultValue;
+}
+
+/**
+ * Ensure value is non-negative, return default if not
+ */
+double EnsureNonNegative(double value, double defaultValue)
+{
+   return (value >= 0) ? value : defaultValue;
+}
+
+/**
+ * Validate range: min <= value <= max, return default if invalid
+ */
+double ValidateRange(double value, double minVal, double maxVal, double defaultValue)
+{
+   if(value < minVal || value > maxVal) return defaultValue;
+   return value;
+}
+
+/**
+ * Validate integer range: min <= value <= max, return default if invalid
+ */
+int ValidateIntRange(int value, int minVal, int maxVal, int defaultValue)
+{
+   if(value < minVal || value > maxVal) return defaultValue;
+   return value;
+}
+
+/**
+ * Log warning for invalid parameter
+ */
+void LogWarning(const string paramName, const string message)
+{
+   Print("WARNING: ", paramName, " ", message);
+}
+
+//+------------------------------------------------------------------+
 //| Configuration Snapshot for Centralized Caching                   |
 //+------------------------------------------------------------------+
 struct StrategyConfig
@@ -446,665 +503,324 @@ struct StrategyConfig
    } system;
 };
 
-// Global instance of StrategyConfig.
-// In MQL5, include files are typically included once in the main EA file,
-// making this acceptable. It serves as the primary configuration source
-// for all managers after SetCommonDefaults() is called.
-StrategyConfig CFG;
-
-struct ConfigSnapshot
-  {
-   // Market
-   int atr_period;
-   double atr_min;
-   double atr_max;
-   double max_spread;
-   string sessions[7];
-   
-   // Market Regime
-   bool use_regime;
-   double min_trend_strength;
-   bool allow_sideways;
-   double regime_lot_mult_strong;
-   double regime_lot_mult_weak;
-   double regime_lot_mult_side;
-   double regime_lot_mult_chop;
-   
-   // News
-   bool news_use;
-   ENUM_NEWS_LEVEL news_level;
-   int news_freeze;
-   string news_url;
-   
-   // Risk
-   bool auto_lot;
-   double risk_pct;
-   double lot_size;
-   double max_daily_loss;
-   ulong magic;
-   ENUM_ENTRY_MODE entry_mode;
-   ENUM_TPSL_MODE tpsl_mode;
-   bool use_mtf;
-   ENUM_TIMEFRAMES htf;
-   int htf_lookback;
-   double quality_lot_mult;
-   int max_positions;
-   int max_consecutive_loss;
-   int max_trade_duration_days;
-   int entry_cooldown_bars;
-   int signal_cooldown_bars;
-   int loss_cooldown_bars;
-   
-   // SR
-   ENUM_SR_MODE sr_mode;
-   int sr_lookback;
-   int swing_lookback;
-   double touch_buffer_atr;
-   int min_touches_strong;
-   double min_range_atr;
-   double atr_buffer_mult;
-   double buffer_mult_strong;
-   double buffer_mult_weak;
-   double zone_reuse_atr;
-   
-   // Pattern
-   int pattern_lookback;
-   double mtf_confluence_bonus;
-   double strong_zone_bonus;
-   double strong_zone_threshold;
-   double max_signal_atr;
-   double momentum_threshold_atr;
-   bool use_weights;
-   double anti_breakout_pct;
-   double marubozu_min_body_pct;
-   double engulfing_body_mult;
-   double min_dominance_gap;
-   double strong_zone_buffer_mult;
-   bool use_adaptive_zone_buffer;
-   double sensitivity_atr;
-   double star_middle_body_mult;
-   double railroad_min_body_ratio;
-   int failure_cooldown_bars;
-   double hq_threshold;
-   bool use_dynamic_cooldown;
-   int reduced_cooldown_bars;
-   double base_score;
-   double bonus_strong_atr;
-   double bonus_strong_body;
-   double bonus_strong_wick;
-   double bonus_follow_through;
-   double bonus_gap_confirm;
-   double bonus_breakout_confirm;
-   double bonus_small;
-   double atr_range_threshold;
-   double body_ratio_threshold;
-   double wick_ratio_threshold;
-   double pinbar_wick_ratio;
-   double inside_bar_range_max;
-   double star_close_min;
-   double three_inside_body_min;
-   double railroad_avg_body_min;
-   double railroad_wick_mult;
-   double marubozu_min_atr_mult;
-   double marubozu_strong_atr_min;
-   double default_sl_mult;
-   double pinbar_sl_mult;
-   double inside_bar_sl_mult;
-   
-   // Recovery
-   bool recovery_use;
-   int recovery_cooldown_bars;
-   int max_recovery_attempts;
-   double recovery_lot_mult;
-   double recovery_pattern_score_threshold;
-   double recovery_zone_tolerance_atr;
-   double fakeout_sensitivity;
-   double fakeout_sl_adjustment_atr;
-   // SAFEGUARD fields
-   int recovery_max_positions;
-   double recovery_max_exposure_mult;
-   int recovery_timeout_bars;
-   double recovery_hard_stop_pct;
-   
-   // Execution & Slippage
-   int order_throttle_ms;
-   int max_slippage_points;  // NEW: Maximum allowed slippage in points
-   
-   // Exit
-   bool use_trailing;
-   bool use_partial_close;
-   bool exit_on_opposite;
-   double tp_buffer_atr;
-   double sl_buffer_atr;
-   double min_tp_distance_atr;
-   double max_tp_distance_atr;
-   double trailing_start_atr;
-   double trailing_buffer_atr;
-   double trail_activation_atr;
-   double trail_step_atr;
-   double lock_profit_atr;
-   double lock_offset_atr;
-   double partial_close_lot_pct;
-   double partial_close_atr;
-   
-   // AI
-   bool use_ai;
-   int ai_training_window_bars;
-   double ai_min_confidence;
-   double ai_pattern_bonus;
-   
-   // System
-   bool debug;
-   bool safe;
-   
-   // Copy from StrategyConfig
-   void CopyFrom(const StrategyConfig &cfg)
-     {
-      // Market
-      atr_period = cfg.market.atrPeriod;
-      atr_min = cfg.market.atrMin;
-      atr_max = cfg.market.atrMax;
-      max_spread = cfg.market.maxSpread;
-      for(int i=0; i<7; i++) sessions[i] = cfg.market.sessions[i];
-      
-      // Market Regime
-      use_regime = cfg.market.useRegime;
-      min_trend_strength = cfg.market.minTrendStrength;
-      allow_sideways = cfg.market.allowSideways;
-      regime_lot_mult_strong = cfg.market.regimeLotMultStrong;
-      regime_lot_mult_weak = cfg.market.regimeLotMultWeak;
-      regime_lot_mult_side = cfg.market.regimeLotMultSide;
-      regime_lot_mult_chop = cfg.market.regimeLotMultChop;
-      
-      // News
-      news_use = cfg.news.use;
-      news_level = cfg.news.level;
-      news_freeze = cfg.news.freeze;
-      news_url = cfg.news.url;
-      
-      // Risk
-      auto_lot = cfg.risk.autoLot;
-      risk_pct = cfg.risk.pct;
-      lot_size = cfg.risk.lot;
-      max_daily_loss = cfg.risk.maxDailyLoss;
-      magic = cfg.risk.magic;
-      entry_mode = cfg.risk.entryMode;
-      tpsl_mode = cfg.risk.tpslMode;
-      use_mtf = cfg.risk.useMTF;
-      htf = cfg.risk.htf;
-      htf_lookback = cfg.risk.htfLookback;
-      quality_lot_mult = cfg.risk.qualityLotMult;
-      max_positions = cfg.risk.maxPositions;
-      max_consecutive_loss = cfg.risk.maxConsecutiveLoss;
-      max_trade_duration_days = cfg.risk.maxTradeDurationDays;
-      entry_cooldown_bars = cfg.risk.entryCooldownBars;
-      signal_cooldown_bars = cfg.risk.signalCooldownBars;
-      loss_cooldown_bars = cfg.risk.lossCooldownBars;
-      
-      // SR
-      sr_mode = cfg.sr.mode;
-      sr_lookback = cfg.sr.lookback;
-      swing_lookback = cfg.sr.swingLookback;
-      touch_buffer_atr = cfg.sr.touchBufferATR;
-      min_touches_strong = cfg.sr.minTouchesStrong;
-      min_range_atr = cfg.sr.minRangeATR;
-      atr_buffer_mult = cfg.sr.atrBufferMult;
-      buffer_mult_strong = cfg.sr.bufferMultStrong;
-      buffer_mult_weak = cfg.sr.bufferMultWeak;
-      zone_reuse_atr = cfg.sr.zoneReuseATR;
-      
-      // Pattern
-      pattern_lookback = cfg.pattern.lookback;
-      mtf_confluence_bonus = cfg.pattern.mtfConfluenceBonus;
-      strong_zone_bonus = cfg.pattern.strongZoneBonus;
-      strong_zone_threshold = cfg.pattern.strongZoneThreshold;
-      max_signal_atr = cfg.pattern.maxSignalATR;
-      momentum_threshold_atr = cfg.pattern.momentumThresholdATR;
-      use_weights = cfg.pattern.useWeights;
-      anti_breakout_pct = cfg.pattern.antiBreakoutPct;
-      marubozu_min_body_pct = cfg.pattern.marubozuMinBodyPct;
-      engulfing_body_mult = cfg.pattern.engulfingBodyMult;
-      min_dominance_gap = cfg.pattern.minDominanceGap;
-      strong_zone_buffer_mult = cfg.pattern.strongZoneBufferMult;
-      use_adaptive_zone_buffer = cfg.pattern.useAdaptiveZoneBuffer;
-      sensitivity_atr = cfg.pattern.sensitivityATR;
-      star_middle_body_mult = cfg.pattern.starMiddleBodyMult;
-      railroad_min_body_ratio = cfg.pattern.railroadMinBodyRatio;
-      failure_cooldown_bars = cfg.pattern.failureCooldownBars;
-      hq_threshold = cfg.pattern.hqThreshold;
-      use_dynamic_cooldown = cfg.pattern.useDynamicCooldown;
-      reduced_cooldown_bars = cfg.pattern.reducedCooldownBars;
-      base_score = cfg.pattern.baseScore;
-      bonus_strong_atr = cfg.pattern.bonusStrongATR;
-      bonus_strong_body = cfg.pattern.bonusStrongBody;
-      bonus_strong_wick = cfg.pattern.bonusStrongWick;
-      bonus_follow_through = cfg.pattern.bonusFollowThrough;
-      bonus_gap_confirm = cfg.pattern.bonusGapConfirm;
-      bonus_breakout_confirm = cfg.pattern.bonusBreakoutConfirm;
-      bonus_small = cfg.pattern.bonusSmall;
-      atr_range_threshold = cfg.pattern.atrRangeThreshold;
-      body_ratio_threshold = cfg.pattern.bodyRatioThreshold;
-      wick_ratio_threshold = cfg.pattern.wickRatioThreshold;
-      pinbar_wick_ratio = cfg.pattern.pinbarWickRatio;
-      inside_bar_range_max = cfg.pattern.insideBarRangeMax;
-      star_close_min = cfg.pattern.starCloseMin;
-      three_inside_body_min = cfg.pattern.threeInsideBodyMin;
-      railroad_avg_body_min = cfg.pattern.railroadAvgBodyMin;
-      railroad_wick_mult = cfg.pattern.railroadWickMult;
-      marubozu_min_atr_mult = cfg.pattern.marubozuMinATRMult;
-      marubozu_strong_atr_min = cfg.pattern.marubozuStrongATRMin;
-      default_sl_mult = cfg.pattern.defaultSLMult;
-      pinbar_sl_mult = cfg.pattern.pinbarSLMult;
-      inside_bar_sl_mult = cfg.pattern.insideBarSLMult;
-      
-      // Recovery
-      recovery_use = cfg.recovery.use;
-      recovery_cooldown_bars = cfg.recovery.cooldownBars;
-      max_recovery_attempts = cfg.recovery.maxAttempts;
-      recovery_lot_mult = cfg.recovery.lotMult;
-      recovery_pattern_score_threshold = cfg.recovery.scoreThreshold;
-      recovery_zone_tolerance_atr = cfg.recovery.zoneToleranceATR;
-      fakeout_sensitivity = cfg.recovery.fakeoutSensitivity;
-      fakeout_sl_adjustment_atr = cfg.recovery.fakeoutSLAdjATR;
-      // SAFEGUARD fields
-      recovery_max_positions = cfg.recovery.maxRecoveryPositions;
-      recovery_max_exposure_mult = cfg.recovery.maxExposureMultiplier;
-      recovery_timeout_bars = cfg.recovery.recoveryTimeoutBars;
-      recovery_hard_stop_pct = cfg.recovery.hardStopLossPct;
-      
-      // Execution & Slippage
-      order_throttle_ms = cfg.system.orderThrottleMs;
-      max_slippage_points = cfg.execution.maxSlippagePoints;  // NEW
-      
-      // Exit
-      use_trailing = cfg.exit.useTrailing;
-      use_partial_close = cfg.exit.usePartial;
-      exit_on_opposite = cfg.exit.exitOnOpposite;
-      tp_buffer_atr = cfg.exit.tpBufferATR;
-      sl_buffer_atr = cfg.exit.slBufferATR;
-      min_tp_distance_atr = cfg.exit.minTPDistATR;
-      max_tp_distance_atr = cfg.exit.maxTPDistATR;
-      trailing_start_atr = cfg.exit.trailingStartATR;
-      trailing_buffer_atr = cfg.exit.trailingBufferATR;
-      trail_activation_atr = cfg.exit.trailActivationATR;
-      trail_step_atr = cfg.exit.trailStepATR;
-      lock_profit_atr = cfg.exit.lockProfitATR;
-      lock_offset_atr = cfg.exit.lockOffsetATR;
-      partial_close_lot_pct = cfg.exit.partialLotPct;
-      partial_close_atr = cfg.exit.partialATR;
-      
-      // AI
-      use_ai = cfg.ai.use;
-      ai_training_window_bars = cfg.ai.trainingWindow;
-      ai_min_confidence = cfg.ai.minConfidence;
-      ai_pattern_bonus = cfg.ai.patternBonus;
-      
-      // System
-      debug = cfg.system.debug;
-      safe = cfg.system.safe;
-     }
-     
-   // Copy to StrategyConfig
-   void CopyTo(StrategyConfig &cfg) const
-     {
-      // Market
-      cfg.market.atrPeriod = atr_period;
-      cfg.market.atrMin = atr_min;
-      cfg.market.atrMax = atr_max;
-      cfg.market.maxSpread = max_spread;
-      for(int i=0; i<7; i++) cfg.market.sessions[i] = sessions[i];
-      
-      // News
-      cfg.news.use = news_use;
-      cfg.news.level = news_level;
-      cfg.news.freeze = news_freeze;
-      cfg.news.url = news_url;
-      
-      // Risk
-      cfg.risk.autoLot = auto_lot;
-      cfg.risk.pct = risk_pct;
-      cfg.risk.lot = lot_size;
-      cfg.risk.maxDailyLoss = max_daily_loss;
-      cfg.risk.magic = magic;
-      cfg.risk.entryMode = entry_mode;
-      cfg.risk.tpslMode = tpsl_mode;
-      cfg.risk.useMTF = use_mtf;
-      cfg.risk.htf = htf;
-      cfg.risk.htfLookback = htf_lookback;
-      cfg.risk.qualityLotMult = quality_lot_mult;
-      cfg.risk.maxPositions = max_positions;
-      cfg.risk.maxConsecutiveLoss = max_consecutive_loss;
-      cfg.risk.maxTradeDurationDays = max_trade_duration_days;
-      cfg.risk.entryCooldownBars = entry_cooldown_bars;
-      cfg.risk.signalCooldownBars = signal_cooldown_bars;
-      cfg.risk.lossCooldownBars = loss_cooldown_bars;
-      
-      // SR
-      cfg.sr.mode = sr_mode;
-      cfg.sr.lookback = sr_lookback;
-      cfg.sr.swingLookback = swing_lookback;
-      cfg.sr.touchBufferATR = touch_buffer_atr;
-      cfg.sr.minTouchesStrong = min_touches_strong;
-      cfg.sr.minRangeATR = min_range_atr;
-      cfg.sr.atrBufferMult = atr_buffer_mult;
-      cfg.sr.bufferMultStrong = buffer_mult_strong;
-      cfg.sr.bufferMultWeak = buffer_mult_weak;
-      cfg.sr.zoneReuseATR = zone_reuse_atr;
-      
-      // Pattern
-      cfg.pattern.lookback = pattern_lookback;
-      cfg.pattern.mtfConfluenceBonus = mtf_confluence_bonus;
-      cfg.pattern.strongZoneBonus = strong_zone_bonus;
-      cfg.pattern.strongZoneThreshold = strong_zone_threshold;
-      cfg.pattern.maxSignalATR = max_signal_atr;
-      cfg.pattern.momentumThresholdATR = momentum_threshold_atr;
-      cfg.pattern.useWeights = use_weights;
-      cfg.pattern.antiBreakoutPct = anti_breakout_pct;
-      cfg.pattern.marubozuMinBodyPct = marubozu_min_body_pct;
-      cfg.pattern.engulfingBodyMult = engulfing_body_mult;
-      cfg.pattern.minDominanceGap = min_dominance_gap;
-      cfg.pattern.strongZoneBufferMult = strong_zone_buffer_mult;
-      cfg.pattern.useAdaptiveZoneBuffer = use_adaptive_zone_buffer;
-      cfg.pattern.sensitivityATR = sensitivity_atr;
-      cfg.pattern.starMiddleBodyMult = star_middle_body_mult;
-      cfg.pattern.railroadMinBodyRatio = railroad_min_body_ratio;
-      cfg.pattern.failureCooldownBars = failure_cooldown_bars;
-      cfg.pattern.hqThreshold = hq_threshold;
-      cfg.pattern.useDynamicCooldown = use_dynamic_cooldown;
-      cfg.pattern.reducedCooldownBars = reduced_cooldown_bars;
-      cfg.pattern.baseScore = base_score;
-      cfg.pattern.bonusStrongATR = bonus_strong_atr;
-      cfg.pattern.bonusStrongBody = bonus_strong_body;
-      cfg.pattern.bonusStrongWick = bonus_strong_wick;
-      cfg.pattern.bonusFollowThrough = bonus_follow_through;
-      cfg.pattern.bonusGapConfirm = bonus_gap_confirm;
-      cfg.pattern.bonusBreakoutConfirm = bonus_breakout_confirm;
-      cfg.pattern.bonusSmall = bonus_small;
-      cfg.pattern.atrRangeThreshold = atr_range_threshold;
-      cfg.pattern.bodyRatioThreshold = body_ratio_threshold;
-      cfg.pattern.wickRatioThreshold = wick_ratio_threshold;
-      cfg.pattern.pinbarWickRatio = pinbar_wick_ratio;
-      cfg.pattern.insideBarRangeMax = inside_bar_range_max;
-      cfg.pattern.starCloseMin = star_close_min;
-      cfg.pattern.threeInsideBodyMin = three_inside_body_min;
-      cfg.pattern.railroadAvgBodyMin = railroad_avg_body_min;
-      cfg.pattern.railroadWickMult = railroad_wick_mult;
-      cfg.pattern.marubozuMinATRMult = marubozu_min_atr_mult;
-      cfg.pattern.marubozuStrongATRMin = marubozu_strong_atr_min;
-      cfg.pattern.defaultSLMult = default_sl_mult;
-      cfg.pattern.pinbarSLMult = pinbar_sl_mult;
-      cfg.pattern.insideBarSLMult = inside_bar_sl_mult;
-      
-      // Recovery
-      cfg.recovery.use = recovery_use;
-      cfg.recovery.cooldownBars = recovery_cooldown_bars;
-      cfg.recovery.maxAttempts = max_recovery_attempts;
-      cfg.recovery.lotMult = recovery_lot_mult;
-      cfg.recovery.scoreThreshold = recovery_pattern_score_threshold;
-      cfg.recovery.zoneToleranceATR = recovery_zone_tolerance_atr;
-      cfg.recovery.fakeoutSensitivity = fakeout_sensitivity;
-      cfg.recovery.fakeoutSLAdjATR = fakeout_sl_adjustment_atr;
-      // SAFEGUARD fields
-      cfg.recovery.maxRecoveryPositions = recovery_max_positions;
-      cfg.recovery.maxExposureMultiplier = recovery_max_exposure_mult;
-      cfg.recovery.recoveryTimeoutBars = recovery_timeout_bars;
-      cfg.recovery.hardStopLossPct = recovery_hard_stop_pct;
-      
-      // Execution & Slippage
-      cfg.system.orderThrottleMs = order_throttle_ms;
-      cfg.execution.maxSlippagePoints = max_slippage_points;  // NEW
-      
-      // Exit
-      cfg.exit.useTrailing = use_trailing;
-      cfg.exit.usePartial = use_partial_close;
-      cfg.exit.exitOnOpposite = exit_on_opposite;
-      cfg.exit.tpBufferATR = tp_buffer_atr;
-      cfg.exit.slBufferATR = sl_buffer_atr;
-      cfg.exit.minTPDistATR = min_tp_distance_atr;
-      cfg.exit.maxTPDistATR = max_tp_distance_atr;
-      cfg.exit.trailingStartATR = trailing_start_atr;
-      cfg.exit.trailingBufferATR = trailing_buffer_atr;
-      cfg.exit.trailActivationATR = trail_activation_atr;
-      cfg.exit.trailStepATR = trail_step_atr;
-      cfg.exit.lockProfitATR = lock_profit_atr;
-      cfg.exit.lockOffsetATR = lock_offset_atr;
-      cfg.exit.partialLotPct = partial_close_lot_pct;
-      cfg.exit.partialATR = partial_close_atr;
-      
-      // System
-      cfg.system.debug = debug;
-      cfg.system.safe = safe;
-     }
-  };
-
-void SetCommonDefaults()
+//+------------------------------------------------------------------+
+//| ConfigManager - Singleton untuk mengelola konfigurasi global     |
+//| Membatasi akses mutabilitas, hanya melalui getter dan setter     |
+//+------------------------------------------------------------------+
+class ConfigManager
 {
-// Market & Sessions
-   CFG.market.sessions[0] = InpSessionSun;
-   CFG.market.sessions[1] = InpSessionMon;
-   CFG.market.sessions[2] = InpSessionTue;
-   CFG.market.sessions[3] = InpSessionWed;
-   CFG.market.sessions[4] = InpSessionThu;
-   CFG.market.sessions[5] = InpSessionFri;
-   CFG.market.sessions[6] = InpSessionSat;
+private:
+   static ConfigManager *m_instance;
+   StrategyConfig m_config;
+   bool m_initialized;
    
-   // Market Regime Filter
-   CFG.market.useRegime = InpUseMarketRegime;
-   CFG.market.minTrendStrength = InpMinTrendStrength;
-   CFG.market.allowSideways = InpAllowSidewaysTrading;
-   CFG.market.regimeLotMultStrong = InpRegimeLotMultStrong;
-   CFG.market.regimeLotMultWeak = InpRegimeLotMultWeak;
-   CFG.market.regimeLotMultSide = InpRegimeLotMultSide;
-   CFG.market.regimeLotMultChop = InpRegimeLotMultChop;
-
-   // --- Input Validation & Assignment ---
-   CFG.market.atrPeriod = (InpATRPeriod > 0) ? InpATRPeriod : 14;
-   if (InpATRPeriod <= 0) Print("WARNING: InpATRPeriod must be > 0. Using default 14.");
-
-   CFG.market.atrMin = (InpATRMin >= 0) ? InpATRMin : 0.0;
-   if (InpATRMin < 0) Print("WARNING: InpATRMin must be >= 0. Using default 0.0.");
-
-   CFG.market.atrMax = (InpATRMax >= CFG.market.atrMin) ? InpATRMax : CFG.market.atrMin;
-   if (InpATRMax < CFG.market.atrMin) Print("WARNING: InpATRMax must be >= InpATRMin. Adjusting InpATRMax to InpATRMin.");
-
-   CFG.market.maxSpread = (InpMaxSpread >= 0) ? InpMaxSpread : 0.0;
-   if (InpMaxSpread < 0) Print("WARNING: InpMaxSpread must be >= 0. Using default 0.0.");
-
-   // News
-   CFG.news.use = (InpNewsLevel != NEWS_OFF); // Assigned here
-   CFG.news.level = InpNewsLevel;
-   CFG.news.freeze = (InpNewsFreezeMinutes >= 0) ? InpNewsFreezeMinutes : 30;
-   if (InpNewsFreezeMinutes < 0) Print("WARNING: InpNewsFreezeMinutes must be >= 0. Using default 30.");
-   CFG.news.url = InpNewsWebURL;
-
-   // Risk & Account
-   CFG.risk.autoLot = InpUseAutoLot;
-   CFG.risk.pct = (InpRiskPct > 0 && InpRiskPct <= 100) ? InpRiskPct : 1.0;
-   if (InpRiskPct <= 0 || InpRiskPct > 100) Print("WARNING: InpRiskPct must be between 0 and 100. Using default 1.0.");
-
-   CFG.risk.lot = (InpLotSize > 0) ? InpLotSize : 0.01;
-   if (InpLotSize <= 0) Print("WARNING: InpLotSize must be > 0. Using default 0.01.");
-
-   CFG.risk.maxDailyLoss = (InpMaxDailyLossPct >= 0) ? InpMaxDailyLossPct : 0.0;
-   if (InpMaxDailyLossPct < 0) Print("WARNING: InpMaxDailyLossPct must be >= 0. Using default 0.0.");
-
-   CFG.risk.magic = InpMagicNum;
-   CFG.risk.entryMode = InpEntryMode;
-   CFG.risk.tpslMode = InpTPSLMode;
-   CFG.risk.useMTF = InpUseMTF;
-   CFG.risk.htf = InpHTF;
-   CFG.risk.htfLookback = InpHTFLookback;
-   CFG.risk.qualityLotMult = InpQualityLotMult;
-
-   CFG.risk.maxPositions = (InpMaxOpenPositions >= 0) ? InpMaxOpenPositions : 0;
-   if (InpMaxOpenPositions < 0) Print("WARNING: InpMaxOpenPositions must be >= 0. Using default 0.");
-
-   CFG.risk.maxConsecutiveLoss = (InpMaxConsecutiveLoss >= 0) ? InpMaxConsecutiveLoss : 0;
-   if (InpMaxConsecutiveLoss < 0) Print("WARNING: InpMaxConsecutiveLoss must be >= 0. Using default 0.");
-
-   CFG.risk.maxTradeDurationDays = (InpMaxTradeDurationDays >= 0) ? InpMaxTradeDurationDays : 0;
-   if (InpMaxTradeDurationDays < 0) Print("WARNING: InpMaxTradeDurationDays must be >= 0. Using default 0.");
-
-   CFG.risk.entryCooldownBars = (InpEntryCooldownBars >= 0) ? InpEntryCooldownBars : 0;
-   if (InpEntryCooldownBars < 0) Print("WARNING: InpEntryCooldownBars must be >= 0. Using default 0.");
-
-   CFG.risk.signalCooldownBars = (InpSignalCooldownBars >= 0) ? InpSignalCooldownBars : 0;
-   if (InpSignalCooldownBars < 0) Print("WARNING: InpSignalCooldownBars must be >= 0. Using default 0.");
-
-   CFG.risk.lossCooldownBars = (InpLossCooldownBars >= 0) ? InpLossCooldownBars : 0;
-   if (InpLossCooldownBars < 0) Print("WARNING: InpLossCooldownBars must be >= 0. Using default 0.");
-
-   // SR Engine
-   CFG.sr.mode = InpSRMode;
-   CFG.sr.lookback = (InpSRLookback > 0) ? InpSRLookback : 100;
-   if (InpSRLookback <= 0) Print("WARNING: InpSRLookback must be > 0. Using default 100.");
-
-   CFG.sr.swingLookback = (InpSwingLookback > 0) ? InpSwingLookback : 20;
-   if (InpSwingLookback <= 0) Print("WARNING: InpSwingLookback must be > 0. Using default 20.");
-
-   CFG.sr.touchBufferATR = InpSRTouchBufferATR;
-   CFG.sr.minTouchesStrong = InpSRMinTouchesStrong;
-   CFG.sr.minRangeATR = InpMinSRRangeATR;
-   CFG.sr.atrBufferMult = InpATRBufferMult;
-   CFG.sr.bufferMultStrong = InpBufferMultStrong;
-   CFG.sr.bufferMultWeak = InpBufferMultWeak;
-   CFG.sr.zoneReuseATR = InpZoneReuseATR;
-
-   // Patterns
-   CFG.pattern.lookback = (InpSignalLookback > 0) ? InpSignalLookback : 5;
-   if (InpSignalLookback <= 0) Print("WARNING: InpSignalLookback must be > 0. Using default 5.");
-
-   CFG.pattern.mtfConfluenceBonus = InpMTFConfluenceBonus;
-   CFG.pattern.strongZoneBonus = InpStrongZoneBonus;
-   CFG.pattern.strongZoneThreshold = InpStrongZoneThreshold;
-   CFG.pattern.maxSignalATR = InpMaxSignalATR;
-   CFG.pattern.momentumThresholdATR = InpMomentumThresholdATR;
-   CFG.pattern.useWeights = InpUsePatternWeights;
-   CFG.pattern.antiBreakoutPct = InpAntiBreakoutPct;
-   CFG.pattern.marubozuMinBodyPct = InpMarubozuMinBodyPct;
-   CFG.pattern.engulfingBodyMult = InpEngulfingBodyMult;
-   CFG.pattern.minDominanceGap = InpMinDominanceGap;
-   CFG.pattern.strongZoneBufferMult = InpStrongZoneBufferMult;
-   CFG.pattern.useAdaptiveZoneBuffer = InpUseAdaptiveZoneBuffer;
-   CFG.pattern.sensitivityATR = InpPatternSensitivityATR;
-   CFG.pattern.starMiddleBodyMult = InpStarMiddleBodyMult;
-   CFG.pattern.railroadMinBodyRatio = InpRailroadMinBodyRatio;
-   CFG.pattern.failureCooldownBars = InpPatternFailureCooldownBars;
-   CFG.pattern.hqThreshold = InpHighQualityThreshold;
-   CFG.pattern.useDynamicCooldown = InpUseDynamicCooldown;
-   CFG.pattern.reducedCooldownBars = InpReducedCooldownBars;
-   // Scoring
-   CFG.pattern.baseScore = InpPatternBaseScore;
-   CFG.pattern.bonusStrongATR = InpPatternBonusStrongATRRange;
-   CFG.pattern.bonusStrongBody = InpPatternBonusStrongBodyRatio;
-   CFG.pattern.bonusStrongWick = InpPatternBonusStrongWickRejection;
-   CFG.pattern.bonusFollowThrough = InpPatternBonusFollowThrough;
-   CFG.pattern.bonusGapConfirm = InpPatternBonusGapConfirmation;
-   CFG.pattern.bonusBreakoutConfirm = InpPatternBonusBreakoutConfirmation;
-   CFG.pattern.bonusSmall = InpPatternBonusSmall;
-   // Thresholds
-   CFG.pattern.atrRangeThreshold = InpPatternATRRangeThreshold;
-   CFG.pattern.bodyRatioThreshold = InpPatternBodyRatioThreshold;
-   CFG.pattern.wickRatioThreshold = InpPatternWickRatioThreshold;
-   // Specifics
-   CFG.pattern.pinbarWickRatio = InpPinbarWickToOppositeWickRatio;
-   CFG.pattern.insideBarRangeMax = InpInsideBarChildMotherRangeMax;
-   CFG.pattern.starCloseMin = InpStarClosePositionMin;
-   CFG.pattern.threeInsideBodyMin = InpThreeInsideBodyRatioMin;
-   CFG.pattern.railroadAvgBodyMin = InpRailroadAvgBodyMinATR;
-   CFG.pattern.railroadWickMult = InpRailroadWickRejectionMult;
-   CFG.pattern.marubozuMinATRMult = InpMarubozuMinATRRangeMult;
-   CFG.pattern.marubozuStrongATRMin = InpMarubozuStrongATRRangeMin;
-   // SL Multipliers
-   CFG.pattern.defaultSLMult = InpDefaultSLMult;
-   CFG.pattern.pinbarSLMult = InpPinbarSLMult;
-   CFG.pattern.insideBarSLMult = InpInsideBarSLMult;
-
-   // Recovery
-   CFG.recovery.use = InpUseRecoveryMode; // Boolean, no validation needed
-
-   CFG.recovery.cooldownBars = (InpRecoveryCooldownBars >= 0) ? InpRecoveryCooldownBars : 3;
-   if (InpRecoveryCooldownBars < 0) Print("WARNING: InpRecoveryCooldownBars must be >= 0. Using default 3.");
-
-   CFG.recovery.maxAttempts = (InpMaxRecoveryAttempts >= 0) ? InpMaxRecoveryAttempts : 2;
-   if (InpMaxRecoveryAttempts < 0) Print("WARNING: InpMaxRecoveryAttempts must be >= 0. Using default 2.");
-
-   CFG.recovery.lotMult = (InpRecoveryLotMult >= 0) ? InpRecoveryLotMult : 1.0;
-   if (InpRecoveryLotMult < 0) Print("WARNING: InpRecoveryLotMult must be >= 0. Using default 1.0.");
-
-   CFG.recovery.scoreThreshold = InpRecoveryPatternScoreThreshold;
-   CFG.recovery.zoneToleranceATR = InpRecoveryZoneToleranceATR;
-
-   CFG.recovery.fakeoutSensitivity = (InpFakeoutDetectionSensitivity > 0) ? InpFakeoutDetectionSensitivity : 0.3;
-   if (InpFakeoutDetectionSensitivity <= 0) Print("WARNING: InpFakeoutDetectionSensitivity must be > 0. Using default 0.3.");
-
-   CFG.recovery.fakeoutSLAdjATR = InpFakeoutSLAdjustmentATR;
+   // Constructor privat untuk singleton
+   ConfigManager() : m_initialized(false) {}
    
-   // SAFEGUARD: Recovery limits
-   CFG.recovery.maxRecoveryPositions = (InpMaxRecoveryPositions >= 0) ? InpMaxRecoveryPositions : 2;
-   if (InpMaxRecoveryPositions < 0) Print("WARNING: InpMaxRecoveryPositions must be >= 0. Using default 2.");
+public:
+   // Mendapatkan instance singleton
+   static ConfigManager *GetInstance()
+   {
+      if(m_instance == NULL)
+         m_instance = new ConfigManager();
+      return m_instance;
+   }
    
-   CFG.recovery.maxExposureMultiplier = (InpMaxRecoveryExposureMult >= 0) ? InpMaxRecoveryExposureMult : 2.0;
-   if (InpMaxRecoveryExposureMult < 0) Print("WARNING: InpMaxRecoveryExposureMult must be >= 0. Using default 2.0.");
+   // Getter untuk membaca konfigurasi (const reference, read-only)
+   const StrategyConfig& GetConfig() const { return m_config; }
    
-   CFG.recovery.recoveryTimeoutBars = (InpRecoveryTimeoutBars >= 0) ? InpRecoveryTimeoutBars : 20;
-   if (InpRecoveryTimeoutBars < 0) Print("WARNING: InpRecoveryTimeoutBars must be >= 0. Using default 20.");
+   // Check apakah sudah diinisialisasi
+   bool IsInitialized() const { return m_initialized; }
    
-   CFG.recovery.hardStopLossPct = (InpRecoveryHardStopPct >= 0 && InpRecoveryHardStopPct <= 100) ? InpRecoveryHardStopPct : 3.0;
-   if (InpRecoveryHardStopPct < 0 || InpRecoveryHardStopPct > 100) Print("WARNING: InpRecoveryHardStopPct must be 0-100. Using default 3.0.");
-
-   // Exit & Trailing
-   CFG.exit.useTrailing = InpUseTrailing;
-   CFG.exit.usePartial = InpUsePartialClose;
-   CFG.exit.exitOnOpposite = InpExitOnOpposite;
-   CFG.exit.tpBufferATR = InpTPBufferATR;
-   CFG.exit.slBufferATR = InpSLBufferATR;
-   CFG.exit.minTPDistATR = InpMinTPDistanceATR;
-   CFG.exit.maxTPDistATR = InpMaxTPDistanceATR;
-   CFG.exit.trailingStartATR = (InpTrailingStartATR >= 0) ? InpTrailingStartATR : 1.5;
-   CFG.exit.trailingBufferATR = InpTrailingBufferATR;
-   CFG.exit.trailActivationATR = InpTrailActivationATR;
-   CFG.exit.trailStepATR = InpTrailStepATR;
-   CFG.exit.lockProfitATR = InpLockProfitATR;
-   CFG.exit.lockOffsetATR = InpLockOffsetATR;
+   // Reload konfigurasi dari input parameters
+   void Reload()
+   {
+      LoadMarketParams();
+      LoadNewsParams();
+      LoadRiskParams();
+      LoadSRParams();
+      LoadPatternParams();
+      LoadRecoveryParams();
+      LoadExitParams();
+      LoadAIParams();
+      LoadSystemParams();
+      m_initialized = true;
+   }
    
-   CFG.exit.partialLotPct = (InpPartialCloseLotPct > 0 && InpPartialCloseLotPct <= 100) ? InpPartialCloseLotPct : 50.0;
-   if(InpPartialCloseLotPct <= 0 || InpPartialCloseLotPct > 100) Print("WARNING: InpPartialCloseLotPct must be 1-100. Using 50.0");
+   //+------------------------------------------------------------------+
+   //| Modular Loading Functions                                        |
+   //+------------------------------------------------------------------+
+   
+   void LoadMarketParams()
+   {
+      // Sessions
+      m_config.market.sessions[0] = InpSessionSun;
+      m_config.market.sessions[1] = InpSessionMon;
+      m_config.market.sessions[2] = InpSessionTue;
+      m_config.market.sessions[3] = InpSessionWed;
+      m_config.market.sessions[4] = InpSessionThu;
+      m_config.market.sessions[5] = InpSessionFri;
+      m_config.market.sessions[6] = InpSessionSat;
+      
+      // Market Regime Filter
+      m_config.market.useRegime = InpUseMarketRegime;
+      m_config.market.minTrendStrength = Clamp(InpMinTrendStrength, 0.0, 1.0);
+      m_config.market.allowSideways = InpAllowSidewaysTrading;
+      m_config.market.regimeLotMultStrong = EnsurePositive(InpRegimeLotMultStrong, 1.0);
+      m_config.market.regimeLotMultWeak = EnsurePositive(InpRegimeLotMultWeak, 1.0);
+      m_config.market.regimeLotMultSide = EnsurePositive(InpRegimeLotMultSide, 1.0);
+      m_config.market.regimeLotMultChop = EnsurePositive(InpRegimeLotMultChop, 1.0);
+      
+      // ATR Validation
+      m_config.market.atrPeriod = ValidateIntRange(InpATRPeriod, 1, 1000, 14);
+      if(InpATRPeriod <= 0) LogWarning("InpATRPeriod", "must be > 0. Using default 14.");
+      
+      m_config.market.atrMin = EnsureNonNegative(InpATRMin, 0.0);
+      if(InpATRMin < 0) LogWarning("InpATRMin", "must be >= 0. Using default 0.0.");
+      
+      m_config.market.atrMax = (InpATRMax >= m_config.market.atrMin) ? InpATRMax : m_config.market.atrMin;
+      if(InpATRMax < m_config.market.atrMin) LogWarning("InpATRMax", "must be >= InpATRMin. Adjusted to InpATRMin.");
+      
+      m_config.market.maxSpread = EnsureNonNegative(InpMaxSpread, 0.0);
+      if(InpMaxSpread < 0) LogWarning("InpMaxSpread", "must be >= 0. Using default 0.0.");
+   }
+   
+   void LoadNewsParams()
+   {
+      m_config.news.use = (InpNewsLevel != NEWS_OFF);
+      m_config.news.level = InpNewsLevel;
+      m_config.news.freeze = ValidateIntRange(InpNewsFreezeMinutes, 0, 1440, 30);
+      if(InpNewsFreezeMinutes < 0) LogWarning("InpNewsFreezeMinutes", "must be >= 0. Using default 30.");
+      m_config.news.url = InpNewsWebURL;
+   }
+   
+   void LoadRiskParams()
+   {
+      m_config.risk.autoLot = InpUseAutoLot;
+      m_config.risk.pct = ValidateRange(InpRiskPct, 0.01, 100.0, 1.0);
+      if(InpRiskPct <= 0 || InpRiskPct > 100) LogWarning("InpRiskPct", "must be between 0.01 and 100. Using default 1.0.");
+      
+      m_config.risk.lot = EnsurePositive(InpLotSize, 0.01);
+      if(InpLotSize <= 0) LogWarning("InpLotSize", "must be > 0. Using default 0.01.");
+      
+      m_config.risk.maxDailyLoss = EnsureNonNegative(InpMaxDailyLossPct, 0.0);
+      if(InpMaxDailyLossPct < 0) LogWarning("InpMaxDailyLossPct", "must be >= 0. Using default 0.0.");
+      
+      m_config.risk.magic = InpMagicNum;
+      m_config.risk.entryMode = InpEntryMode;
+      m_config.risk.tpslMode = InpTPSLMode;
+      m_config.risk.useMTF = InpUseMTF;
+      m_config.risk.htf = InpHTF;
+      m_config.risk.htfLookback = ValidateIntRange(InpHTFLookback, 1, 1000, 100);
+      m_config.risk.qualityLotMult = EnsurePositive(InpQualityLotMult, 1.0);
+      
+      m_config.risk.maxPositions = ValidateIntRange(InpMaxOpenPositions, 0, 100, 0);
+      if(InpMaxOpenPositions < 0) LogWarning("InpMaxOpenPositions", "must be >= 0. Using default 0.");
+      
+      m_config.risk.maxConsecutiveLoss = ValidateIntRange(InpMaxConsecutiveLoss, 0, 100, 0);
+      if(InpMaxConsecutiveLoss < 0) LogWarning("InpMaxConsecutiveLoss", "must be >= 0. Using default 0.");
+      
+      m_config.risk.maxTradeDurationDays = ValidateIntRange(InpMaxTradeDurationDays, 0, 365, 0);
+      if(InpMaxTradeDurationDays < 0) LogWarning("InpMaxTradeDurationDays", "must be >= 0. Using default 0.");
+      
+      m_config.risk.entryCooldownBars = ValidateIntRange(InpEntryCooldownBars, 0, 1000, 0);
+      if(InpEntryCooldownBars < 0) LogWarning("InpEntryCooldownBars", "must be >= 0. Using default 0.");
+      
+      m_config.risk.signalCooldownBars = ValidateIntRange(InpSignalCooldownBars, 0, 1000, 0);
+      if(InpSignalCooldownBars < 0) LogWarning("InpSignalCooldownBars", "must be >= 0. Using default 0.");
+      
+      m_config.risk.lossCooldownBars = ValidateIntRange(InpLossCooldownBars, 0, 1000, 0);
+      if(InpLossCooldownBars < 0) LogWarning("InpLossCooldownBars", "must be >= 0. Using default 0.");
+   }
+   
+   void LoadSRParams()
+   {
+      m_config.sr.mode = InpSRMode;
+      m_config.sr.lookback = ValidateIntRange(InpSRLookback, 10, 10000, 100);
+      if(InpSRLookback <= 0) LogWarning("InpSRLookback", "must be > 0. Using default 100.");
+      
+      m_config.sr.swingLookback = ValidateIntRange(InpSwingLookback, 5, 500, 20);
+      if(InpSwingLookback <= 0) LogWarning("InpSwingLookback", "must be > 0. Using default 20.");
+      
+      m_config.sr.touchBufferATR = InpSRTouchBufferATR;
+      m_config.sr.minTouchesStrong = InpSRMinTouchesStrong;
+      m_config.sr.minRangeATR = InpMinSRRangeATR;
+      m_config.sr.atrBufferMult = InpATRBufferMult;
+      m_config.sr.bufferMultStrong = InpBufferMultStrong;
+      m_config.sr.bufferMultWeak = InpBufferMultWeak;
+      m_config.sr.zoneReuseATR = InpZoneReuseATR;
+   }
+   
+   void LoadPatternParams()
+   {
+      m_config.pattern.lookback = ValidateIntRange(InpSignalLookback, 1, 500, 5);
+      if(InpSignalLookback <= 0) LogWarning("InpSignalLookback", "must be > 0. Using default 5.");
+      
+      m_config.pattern.mtfConfluenceBonus = InpMTFConfluenceBonus;
+      m_config.pattern.strongZoneBonus = InpStrongZoneBonus;
+      m_config.pattern.strongZoneThreshold = InpStrongZoneThreshold;
+      m_config.pattern.maxSignalATR = InpMaxSignalATR;
+      m_config.pattern.momentumThresholdATR = InpMomentumThresholdATR;
+      m_config.pattern.useWeights = InpUsePatternWeights;
+      m_config.pattern.antiBreakoutPct = InpAntiBreakoutPct;
+      m_config.pattern.marubozuMinBodyPct = InpMarubozuMinBodyPct;
+      m_config.pattern.engulfingBodyMult = InpEngulfingBodyMult;
+      m_config.pattern.minDominanceGap = InpMinDominanceGap;
+      m_config.pattern.strongZoneBufferMult = InpStrongZoneBufferMult;
+      m_config.pattern.useAdaptiveZoneBuffer = InpUseAdaptiveZoneBuffer;
+      m_config.pattern.sensitivityATR = InpPatternSensitivityATR;
+      m_config.pattern.starMiddleBodyMult = InpStarMiddleBodyMult;
+      m_config.pattern.railroadMinBodyRatio = InpRailroadMinBodyRatio;
+      m_config.pattern.failureCooldownBars = ValidateIntRange(InpPatternFailureCooldownBars, 0, 1000, 0);
+      m_config.pattern.hqThreshold = InpHighQualityThreshold;
+      m_config.pattern.useDynamicCooldown = InpUseDynamicCooldown;
+      m_config.pattern.reducedCooldownBars = ValidateIntRange(InpReducedCooldownBars, 0, 1000, 0);
+      
+      // Scoring
+      m_config.pattern.baseScore = InpPatternBaseScore;
+      m_config.pattern.bonusStrongATR = InpPatternBonusStrongATRRange;
+      m_config.pattern.bonusStrongBody = InpPatternBonusStrongBodyRatio;
+      m_config.pattern.bonusStrongWick = InpPatternBonusStrongWickRejection;
+      m_config.pattern.bonusFollowThrough = InpPatternBonusFollowThrough;
+      m_config.pattern.bonusGapConfirm = InpPatternBonusGapConfirmation;
+      m_config.pattern.bonusBreakoutConfirm = InpPatternBonusBreakoutConfirmation;
+      m_config.pattern.bonusSmall = InpPatternBonusSmall;
+      
+      // Thresholds
+      m_config.pattern.atrRangeThreshold = InpPatternATRRangeThreshold;
+      m_config.pattern.bodyRatioThreshold = InpPatternBodyRatioThreshold;
+      m_config.pattern.wickRatioThreshold = InpPatternWickRatioThreshold;
+      
+      // Specifics
+      m_config.pattern.pinbarWickRatio = InpPinbarWickToOppositeWickRatio;
+      m_config.pattern.insideBarRangeMax = InpInsideBarChildMotherRangeMax;
+      m_config.pattern.starCloseMin = InpStarClosePositionMin;
+      m_config.pattern.threeInsideBodyMin = InpThreeInsideBodyRatioMin;
+      m_config.pattern.railroadAvgBodyMin = InpRailroadAvgBodyMinATR;
+      m_config.pattern.railroadWickMult = InpRailroadWickRejectionMult;
+      m_config.pattern.marubozuMinATRMult = InpMarubozuMinATRRangeMult;
+      m_config.pattern.marubozuStrongATRMin = InpMarubozuStrongATRRangeMin;
+      
+      // SL Multipliers
+      m_config.pattern.defaultSLMult = EnsurePositive(InpDefaultSLMult, 1.0);
+      m_config.pattern.pinbarSLMult = EnsurePositive(InpPinbarSLMult, 1.0);
+      m_config.pattern.insideBarSLMult = EnsurePositive(InpInsideBarSLMult, 1.0);
+   }
+   
+   void LoadRecoveryParams()
+   {
+      m_config.recovery.use = InpUseRecoveryMode;
+      
+      m_config.recovery.cooldownBars = ValidateIntRange(InpRecoveryCooldownBars, 0, 1000, 3);
+      if(InpRecoveryCooldownBars < 0) LogWarning("InpRecoveryCooldownBars", "must be >= 0. Using default 3.");
+      
+      m_config.recovery.maxAttempts = ValidateIntRange(InpMaxRecoveryAttempts, 0, 10, 2);
+      if(InpMaxRecoveryAttempts < 0) LogWarning("InpMaxRecoveryAttempts", "must be >= 0. Using default 2.");
+      
+      m_config.recovery.lotMult = EnsureNonNegative(InpRecoveryLotMult, 1.0);
+      if(InpRecoveryLotMult < 0) LogWarning("InpRecoveryLotMult", "must be >= 0. Using default 1.0.");
+      
+      m_config.recovery.scoreThreshold = InpRecoveryPatternScoreThreshold;
+      m_config.recovery.zoneToleranceATR = InpRecoveryZoneToleranceATR;
+      
+      m_config.recovery.fakeoutSensitivity = ValidateRange(InpFakeoutDetectionSensitivity, 0.1, 1.0, 0.3);
+      if(InpFakeoutDetectionSensitivity <= 0) LogWarning("InpFakeoutDetectionSensitivity", "must be > 0. Using default 0.3.");
+      
+      m_config.recovery.fakeoutSLAdjATR = InpFakeoutSLAdjustmentATR;
+      
+      // SAFEGUARD: Recovery limits
+      m_config.recovery.maxRecoveryPositions = ValidateIntRange(InpMaxRecoveryPositions, 0, 10, 2);
+      if(InpMaxRecoveryPositions < 0) LogWarning("InpMaxRecoveryPositions", "must be >= 0. Using default 2.");
+      
+      m_config.recovery.maxExposureMultiplier = EnsurePositive(InpMaxRecoveryExposureMult, 2.0);
+      if(InpMaxRecoveryExposureMult < 0) LogWarning("InpMaxRecoveryExposureMult", "must be >= 0. Using default 2.0.");
+      
+      m_config.recovery.recoveryTimeoutBars = ValidateIntRange(InpRecoveryTimeoutBars, 0, 1000, 20);
+      if(InpRecoveryTimeoutBars < 0) LogWarning("InpRecoveryTimeoutBars", "must be >= 0. Using default 20.");
+      
+      m_config.recovery.hardStopLossPct = ValidateRange(InpRecoveryHardStopPct, 0.0, 100.0, 3.0);
+      if(InpRecoveryHardStopPct < 0 || InpRecoveryHardStopPct > 100) LogWarning("InpRecoveryHardStopPct", "must be 0-100. Using default 3.0.");
+   }
+   
+   void LoadExitParams()
+   {
+      m_config.exit.useTrailing = InpUseTrailing;
+      m_config.exit.usePartial = InpUsePartialClose;
+      m_config.exit.exitOnOpposite = InpExitOnOpposite;
+      m_config.exit.tpBufferATR = InpTPBufferATR;
+      m_config.exit.slBufferATR = InpSLBufferATR;
+      m_config.exit.minTPDistATR = InpMinTPDistanceATR;
+      m_config.exit.maxTPDistATR = InpMaxTPDistanceATR;
+      
+      m_config.exit.trailingStartATR = EnsureNonNegative(InpTrailingStartATR, 1.5);
+      m_config.exit.trailingBufferATR = InpTrailingBufferATR;
+      m_config.exit.trailActivationATR = InpTrailActivationATR;
+      m_config.exit.trailStepATR = InpTrailStepATR;
+      m_config.exit.lockProfitATR = InpLockProfitATR;
+      m_config.exit.lockOffsetATR = InpLockOffsetATR;
+      
+      m_config.exit.partialLotPct = ValidateRange(InpPartialCloseLotPct, 1.0, 100.0, 50.0);
+      if(InpPartialCloseLotPct <= 0 || InpPartialCloseLotPct > 100) LogWarning("InpPartialCloseLotPct", "must be 1-100. Using 50.0");
+      
+      m_config.exit.partialATR = InpPartialCloseATR;
+   }
+   
+   void LoadAIParams()
+   {
+      m_config.ai.use = InpUseAI;
+      m_config.ai.trainingWindow = ValidateIntRange(InpAITrainingWindowBars, 10, 10000, 200);
+      if(InpUseAI && InpAITrainingWindowBars <= 10) LogWarning("InpAITrainingWindowBars", "too small for AI. Using default 200.");
+      
+      m_config.ai.minConfidence = InpAIMinConfidence;
+      m_config.ai.patternBonus = InpAIPatternBonus;
+   }
+   
+   void LoadSystemParams()
+   {
+      m_config.system.debug = InpDebugMode;
+      m_config.system.safe = InpSafeMode;
+      m_config.system.orderThrottleMs = ValidateIntRange(InpOrderThrottleMs, 0, 10000, 100);
+   }
+};
 
-   CFG.exit.partialATR = InpPartialCloseATR;
+// Static member initialization
+ConfigManager *ConfigManager::m_instance = NULL;
 
-   // AI
-   CFG.ai.use = InpUseAI;
-   CFG.ai.trainingWindow = (InpAITrainingWindowBars > 10) ? InpAITrainingWindowBars : 200;
-   if(InpUseAI && InpAITrainingWindowBars <= 10) Print("WARNING: AI Training Window too small. Using default 200.");
-
-   CFG.ai.minConfidence = InpAIMinConfidence;
-   CFG.ai.patternBonus = InpAIPatternBonus;
-
-   // System
-   CFG.system.debug = InpDebugMode;
-   CFG.system.safe = InpSafeMode;
-   CFG.system.orderThrottleMs = InpOrderThrottleMs;
+// Global accessor function (read-only access to config)
+const StrategyConfig& GetConfig()
+{
+   return ConfigManager::GetInstance()->GetConfig();
 }
 
+// Backward compatibility wrapper - deprecated, use ConfigManager::GetInstance()->Reload() instead
+void SetCommonDefaults()
+{
+   ConfigManager::GetInstance()->Reload();
+}
+
+//+------------------------------------------------------------------+
+//| PrintConfigSummary - Display active configuration in debug mode  |
+//+------------------------------------------------------------------+
 void PrintConfigSummary()
 {
-   if (!CFG.system.debug)
+   const StrategyConfig &cfg = GetConfig();
+   
+   if(!cfg.system.debug)
       return;
 
    Print("=== PASR CONFIG ACTIVE ===");
-   Print("ATR Period       : ", CFG.market.atrPeriod);
-   Print("ATR Range        : ", DoubleToString(CFG.market.atrMin, 1), " - ", DoubleToString(CFG.market.atrMax, 1));
-   Print("SR Mode          : ", (string)CFG.sr.mode);
-   Print("Risk %           : ", DoubleToString(CFG.risk.pct, 2));
-   Print("Magic Number     : ", CFG.risk.magic);
-   Print("Signal Lookback  : ", CFG.pattern.lookback);
-   Print("Recovery Mode    : ", (CFG.recovery.use ? "Enabled" : "Disabled"));
-   if (CFG.recovery.use) {
-      Print("  Fakeout Sensitivity: ", DoubleToString(CFG.recovery.fakeoutSensitivity, 2));
+   Print("ATR Period       : ", cfg.market.atrPeriod);
+   Print("ATR Range        : ", DoubleToString(cfg.market.atrMin, 1), " - ", DoubleToString(cfg.market.atrMax, 1));
+   Print("SR Mode          : ", (string)cfg.sr.mode);
+   Print("Risk %           : ", DoubleToString(cfg.risk.pct, 2));
+   Print("Magic Number     : ", cfg.risk.magic);
+   Print("Signal Lookback  : ", cfg.pattern.lookback);
+   Print("Recovery Mode    : ", (cfg.recovery.use ? "Enabled" : "Disabled"));
+   if(cfg.recovery.use) {
+      Print("  Fakeout Sensitivity: ", DoubleToString(cfg.recovery.fakeoutSensitivity, 2));
    }
-   Print("Use MTF          : ", (CFG.risk.useMTF ? "true" : "false"));
-   Print("Use Trailing     : ", (CFG.exit.useTrailing ? "true" : "false"));
+   Print("Use MTF          : ", (cfg.risk.useMTF ? "true" : "false"));
+   Print("Use Trailing     : ", (cfg.exit.useTrailing ? "true" : "false"));
 }
 
 //+------------------------------------------------------------------+
