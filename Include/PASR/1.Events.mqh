@@ -269,10 +269,12 @@ void ReplayRecordedEvents()
          case EVENT_ID_NEW_BAR:
             {
                MqlRates rates[];
-               if(CopyRates(_Symbol, _Period, 0, 1, rates) > 0)
+               // FIX: Copy 2 bars to get closed bar at index 1 (index 0 is still forming)
+               if(CopyRates(_Symbol, _Period, 0, 2, rates) > 1)
                {
-                  e = new NewBarEvent(rates[0].time, rates[0].open, rates[0].high,
-                                      rates[0].low, rates[0].close, _Period);
+                  // Use rates[1] - the last CLOSED bar to prevent repainting
+                  e = new NewBarEvent(rates[1].time, rates[1].open, rates[1].high,
+                                      rates[1].low, rates[1].close, _Period);
                }
             }
             break;

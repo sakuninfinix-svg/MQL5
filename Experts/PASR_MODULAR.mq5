@@ -78,7 +78,8 @@ struct EAConfigCache
 } eaCfg;
 
 //--- Cached values for performance
-static datetime g_lastBarTime = 0;
+static datetime g_lastBarTime = 0;          // For forming bar detection
+static datetime g_lastClosedBarTime = 0;    // For closed bar detection (FIX: Repainting issue)
 static bool     g_isInitialized = false;
 
 //+------------------------------------------------------------------+
@@ -451,28 +452,37 @@ void OnTick()
 
    //--- Check for new bar using CopyTime (MQL5 Best Practice)
    datetime times[];
-   if(CopyTime(eaCfg.symbolName, eaCfg.timeframe, 0, 1, times) <= 0)
+   if(CopyTime(eaCfg.symbolName, eaCfg.timeframe, 0, 2, times) <= 0)
       return;
       
-   datetime currentBar = times[0];
+   datetime currentFormingBar = times[0];    // Currently forming bar
+   datetime lastClosedBar = times[1];        // Last closed bar
 
-   if(currentBar != g_lastBarTime)
+   // Fire NewBarEvent ONLY when a NEW bar has CLOSED (not on every tick of forming bar)
+   // FIX: Prevents repainting by using confirmed, closed bar data
+   if(lastClosedBar != g_lastClosedBarTime)
    {
-      g_lastBarTime = currentBar;
-      market.SetLastBarTime(currentBar);
+      g_lastClosedBarTime = lastClosedBar;
+      market.SetLastBarTime(lastClosedBar);
 
       MqlRates rates[];
       ArraySetAsSeries(rates, true);
       
-      if(CopyRates(eaCfg.symbolName, eaCfg.timeframe, 0, 1, rates) > 0)
+      // Copy 2 bars: [0]=forming, [1]=just closed
+      if(CopyRates(eaCfg.symbolName, eaCfg.timeframe, 0, 2, rates) > 1)
       {
-         DispatchEvent(new NewBarEvent(
-             currentBar,
-             rates[0].open,
-             rates[0].high,
-             rates[0].low,
-             rates[0].close,
-             eaCfg.timeframe));
+         // Validate candle data before dispatching event
+         if(rates[1].high >= rates[1].low && rates[1].open > 0 && rates[1].close > 0)
+         {
+            // Use rates[1] - the CLOSED bar (rates[0] is still forming and will repaint)
+            DispatchEvent(new NewBarEvent(
+                lastClosedBar,           // Time of closed bar
+                rates[1].open,           // Final OHLC of closed bar
+                rates[1].high,
+                rates[1].low,
+                rates[1].close,
+                eaCfg.timeframe));
+         }
       }
    }
 }
