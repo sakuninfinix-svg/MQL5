@@ -21,7 +21,6 @@
 *.exe 
 *.out 
  
- 
  # Dependencies 
  MQL5/Libraries/ 
  MQL5/Indicators/ 
@@ -56,11 +55,7 @@
  # MetaQuotes cache 
  tester/ 
  logs/ 
- 
- # Logs and temp files 
- *.log 
- *.tmp 
- 
+  
 # Editor/IDE 
 .vscode/ 
 .idea/ 
@@ -74,11 +69,6 @@
  *.backup 
  *.swo 
  *.tmp  
- 
-  # Environment 
- .env 
- .env.local 
- .env.* 
   
  # Build outputs 
  Debug/ 
@@ -135,11 +125,7 @@
   .pytest_cache/  
   .julia/  
   zig*/  
-   
-   # OS generated files  
-   .DS_Store  
-   Thumbs.db  
-    
+      
   # Coverage reports  
   coverage/  
   htmlcov/  
@@ -168,6 +154,5 @@
   *.tar.bz2  
   *.tar.xz  
   *.tar.zst 
-.env.local
 *.env.*
 ```
