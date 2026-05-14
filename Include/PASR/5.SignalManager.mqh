@@ -232,6 +232,49 @@ private:
    //| PRIVATE: Signal Detection Logic (Core Business)                 |
    //+------------------------------------------------------------------+
 private:
+   // === DATA VALIDATION - FIX: Prevent outlier/stale data ===
+   bool ValidateCandleData(const MqlRates &rates[], int shift)
+   {
+      if(shift >= ArraySize(rates) || shift < 0) return false;
+      
+      double currentRange = rates[shift].high - rates[shift].low;
+      double prevRange = (shift + 1 < ArraySize(rates)) ? rates[shift + 1].high - rates[shift + 1].low : currentRange;
+      
+      // Outlier detection: Range > 5x previous candle (spike/wick anomaly)
+      if(prevRange > 0 && currentRange > (prevRange * 5.0))
+      {
+         if(m_debugMode)
+            PrintFormat("[SignalManager] Outlier candle at shift %d: Range %.2f vs Prev %.2f", shift, currentRange, prevRange);
+         return false;
+      }
+      
+      // Stale data: Zero range or invalid OHLC
+      if(currentRange <= 0 || 
+         rates[shift].high < rates[shift].low ||
+         rates[shift].open <= 0 || rates[shift].close <= 0)
+      {
+         if(m_debugMode)
+            PrintFormat("[SignalManager] Invalid/stale data at shift %d: Range=%.2f O=%.5f H=%.5f L=%.5f C=%.5f", 
+                       shift, currentRange, rates[shift].open, rates[shift].high, rates[shift].low, rates[shift].close);
+         return false;
+      }
+      
+      // Gap detection: Large gap from previous close (risky but not rejected)
+      if(shift + 1 < ArraySize(rates))
+      {
+         double gap = MathAbs(rates[shift].open - rates[shift + 1].close);
+         if(gap > (prevRange * 2.0))
+         {
+            if(m_debugMode)
+               PrintFormat("[SignalManager] Large gap detected at shift %d: Gap=%.2f (%.1fx prev range)", 
+                          shift, gap, gap / prevRange);
+            // Don't reject - gaps are valid market behavior, just log for awareness
+         }
+      }
+      
+      return true;
+   }
+
    // === FILTER METHODS (dipisah agar mudah di-test) ===
 
    bool PassZoneTouchFilter(int shift, int dir, double zonePrice,
@@ -411,13 +454,23 @@ private:
       }
 
       // === OPTIMIZATION: Batch fetch candles once ===
+      // FIX: Start from shift 1 to skip currently forming bar (rates[0])
+      // Only use CLOSED bars for signal detection to prevent repainting
       MqlRates rates[];
-      if (!FetchCandleBatch(1, cfg.pattern_lookback + 4, rates))
+      if (!FetchCandleBatch(1, cfg.pattern_lookback + 5, rates))  // +5 for safety margin
       {
          decision.reason = "Failed to fetch candle data";
          return false;
       }
 
+      // Validate candle data - reject outliers and stale data
+      if(!ValidateCandleData(rates, 0))  // Check first closed bar (shift 1 in absolute terms)
+      {
+         decision.reason = "Invalid/outlier candle data detected";
+         return false;
+      }
+
+      // Loop through CLOSED bars only (shift 0 in our array = rates[1] in absolute terms)
       for (int shift = 0; shift < cfg.pattern_lookback; shift++)
       {
          string currentFilterReason = "";
