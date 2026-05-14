@@ -30,7 +30,7 @@
 EventRecorder      *g_recorder = NULL;  // Defined here, declared extern in EventBus.mqh
 DashboardManager   *dashCtrl   = NULL;
 DataManager        *IManager::s_dataCache = NULL;
-MarketRegimeFilter *g_regimeFilter = &regimeFilter;  // Global pointer for managers to access regime filter
+MarketRegimeFilter *g_regimeFilter = NULL;  // Global pointer for managers to access regime filter (initialized in OnInit)
 
 //--- Manager Instances (Stack-allocated for automatic cleanup)
 MarketManager      market;
@@ -182,7 +182,12 @@ int OnInit()
 
    // Initialize Market Regime Filter
    regimeFilter.SetDataManager(GetPointer(dta));
-   regimeFilter.SetParameters(14, 20, 25.0, 15.0, 5.0, 1.5);
+   if(!regimeFilter.CreateIndicators())
+   {
+      Print("[ERROR] Failed to create MarketRegime indicators");
+      return INIT_FAILED;
+   }
+   g_regimeFilter = GetPointer(regimeFilter);  // Set global pointer after initialization
 
    // 7. Initialize Dashboard
    dashCtrl = DashboardManagerFactory::Create(GetPointer(dashboard), GetPointer(dta));
