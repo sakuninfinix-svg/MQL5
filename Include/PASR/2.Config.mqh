@@ -346,7 +346,171 @@ void LogWarning(const string paramName, const string message)
 }
 
 //+------------------------------------------------------------------+
-//| Configuration Snapshot for Centralized Caching                   |
+//| DOMAIN-SPECIFIC VALIDATION RULES                                 |
+//| Centralized validation logic per configuration domain            |
+//+------------------------------------------------------------------+
+
+/**
+ * Market parameter validation rules
+ */
+struct MarketValidation
+{
+   static bool ValidateATRPeriod(int period) { return period >= 1 && period <= 1000; }
+   static bool ValidateTrendStrength(double strength) { return strength >= 0.0 && strength <= 1.0; }
+   static bool ValidateLotMultiplier(double mult) { return mult >= 0.1 && mult <= 10.0; }
+   
+   static int NormalizeATRPeriod(int period)
+   {
+      if(!ValidateATRPeriod(period))
+      {
+         LogWarning("ATRPeriod", "must be 1-1000. Using default 14.");
+         return 14;
+      }
+      return period;
+   }
+   
+   static double NormalizeTrendStrength(double strength)
+   {
+      double normalized = Clamp(strength, 0.0, 1.0);
+      if(normalized != strength)
+         LogWarning("TrendStrength", "must be 0.0-1.0. Clamped.");
+      return normalized;
+   }
+   
+   static double NormalizeLotMultiplier(double mult, double defaultVal = 1.0)
+   {
+      if(!ValidateLotMultiplier(mult))
+      {
+         LogWarning("LotMultiplier", "must be 0.1-10.0. Using default.");
+         return defaultVal;
+      }
+      return mult;
+   }
+};
+
+/**
+ * Risk parameter validation rules
+ */
+struct RiskValidation
+{
+   static bool ValidateRiskPct(double pct) { return pct >= 0.01 && pct <= 100.0; }
+   static bool ValidateLotSize(double lot) { return lot >= 0.01; }
+   static bool ValidateMaxPositions(int count) { return count >= 0 && count <= 100; }
+   
+   static double NormalizeRiskPct(double pct)
+   {
+      if(!ValidateRiskPct(pct))
+      {
+         LogWarning("RiskPct", "must be 0.01-100. Using default 1.0.");
+         return 1.0;
+      }
+      return pct;
+   }
+   
+   static double NormalizeLotSize(double lot)
+   {
+      if(!ValidateLotSize(lot))
+      {
+         LogWarning("LotSize", "must be >= 0.01. Using default 0.01.");
+         return 0.01;
+      }
+      return lot;
+   }
+   
+   static int NormalizeMaxPositions(int count)
+   {
+      if(!ValidateMaxPositions(count))
+      {
+         LogWarning("MaxPositions", "must be 0-100. Using default 0.");
+         return 0;
+      }
+      return count;
+   }
+};
+
+/**
+ * Pattern parameter validation rules
+ */
+struct PatternValidation
+{
+   static bool ValidateScore(double score) { return score >= 0.0; }
+   static bool ValidateRatio(double ratio) { return ratio >= 0.0 && ratio <= 1.0; }
+   static bool ValidateSLMultiplier(double mult) { return mult >= 0.5 && mult <= 5.0; }
+   
+   static double NormalizeScore(double score, double defaultVal = 0.0)
+   {
+      if(!ValidateScore(score))
+      {
+         LogWarning("PatternScore", "must be >= 0. Using default.");
+         return defaultVal;
+      }
+      return score;
+   }
+   
+   static double NormalizeRatio(double ratio, double defaultVal = 0.5)
+   {
+      if(!ValidateRatio(ratio))
+      {
+         LogWarning("PatternRatio", "must be 0.0-1.0. Using default.");
+         return defaultVal;
+      }
+      return ratio;
+   }
+   
+   static double NormalizeSLMultiplier(double mult)
+   {
+      if(!ValidateSLMultiplier(mult))
+      {
+         LogWarning("SLMultiplier", "must be 0.5-5.0. Using default 1.0.");
+         return 1.0;
+      }
+      return mult;
+   }
+};
+
+/**
+ * Recovery parameter validation rules
+ */
+struct RecoveryValidation
+{
+   static bool ValidateCooldownBars(int bars) { return bars >= 0 && bars <= 1000; }
+   static bool ValidateMaxAttempts(int attempts) { return attempts >= 0 && attempts <= 10; }
+   static bool ValidateSensitivity(double sens) { return sens >= 0.1 && sens <= 1.0; }
+   
+   static int NormalizeCooldownBars(int bars, int defaultVal = 3)
+   {
+      if(!ValidateCooldownBars(bars))
+      {
+         LogWarning("RecoveryCooldown", "must be 0-1000. Using default.");
+         return defaultVal;
+      }
+      return bars;
+   }
+   
+   static int NormalizeMaxAttempts(int attempts)
+   {
+      if(!ValidateMaxAttempts(attempts))
+      {
+         LogWarning("MaxRecoveryAttempts", "must be 0-10. Using default 2.");
+         return 2;
+      }
+      return attempts;
+   }
+   
+   static double NormalizeSensitivity(double sens)
+   {
+      if(!ValidateSensitivity(sens))
+      {
+         LogWarning("FakeoutSensitivity", "must be 0.1-1.0. Using default 0.3.");
+         return 0.3;
+      }
+      return sens;
+   }
+};
+
+//+------------------------------------------------------------------+
+//| STRATEGY CONFIG - Single Source of Truth                         |
+//| Nested struct dengan camelCase, validasi terintegrasi            |
 //+------------------------------------------------------------------+
 struct StrategyConfig
 {
@@ -364,13 +528,37 @@ struct StrategyConfig
       double regimeLotMultWeak;
       double regimeLotMultSide;
       double regimeLotMultChop;
+      
+      // Validation method
+      void Validate()
+      {
+         atrPeriod = MarketValidation::NormalizeATRPeriod(atrPeriod);
+         minTrendStrength = MarketValidation::NormalizeTrendStrength(minTrendStrength);
+         regimeLotMultStrong = MarketValidation::NormalizeLotMultiplier(regimeLotMultStrong, 1.0);
+         regimeLotMultWeak = MarketValidation::NormalizeLotMultiplier(regimeLotMultWeak, 1.0);
+         regimeLotMultSide = MarketValidation::NormalizeLotMultiplier(regimeLotMultSide, 1.0);
+         regimeLotMultChop = MarketValidation::NormalizeLotMultiplier(regimeLotMultChop, 1.0);
+         
+         // Cross-field validation
+         if(atrMax < atrMin)
+         {
+            LogWarning("ATRMax", "must be >= ATRMin. Adjusted.");
+            atrMax = atrMin;
+         }
+      }
    } market;
 
    struct News {
-      bool use; // Added missing parameter
+      bool use;
       ENUM_NEWS_LEVEL level;
       int freeze;
       string url;
+      
+      void Validate()
+      {
+         freeze = ValidateIntRange(freeze, 0, 1440, 30);
+         use = (level != NEWS_OFF);
+      }
    } news;
 
    struct Risk {
@@ -391,6 +579,22 @@ struct StrategyConfig
       int entryCooldownBars;
       int signalCooldownBars;
       int lossCooldownBars;
+      
+      void Validate()
+      {
+         pct = RiskValidation::NormalizeRiskPct(pct);
+         lot = RiskValidation::NormalizeLotSize(lot);
+         maxPositions = RiskValidation::NormalizeMaxPositions(maxPositions);
+         
+         maxConsecutiveLoss = ValidateIntRange(maxConsecutiveLoss, 0, 100, 0);
+         maxTradeDurationDays = ValidateIntRange(maxTradeDurationDays, 0, 365, 0);
+         entryCooldownBars = ValidateIntRange(entryCooldownBars, 0, 1000, 0);
+         signalCooldownBars = ValidateIntRange(signalCooldownBars, 0, 1000, 0);
+         lossCooldownBars = ValidateIntRange(lossCooldownBars, 0, 1000, 0);
+         htfLookback = ValidateIntRange(htfLookback, 1, 1000, 100);
+         
+         qualityLotMult = MarketValidation::NormalizeLotMultiplier(qualityLotMult, 1.0);
+      }
    } risk;
 
    struct SR {
@@ -404,6 +608,12 @@ struct StrategyConfig
       double bufferMultStrong;
       double bufferMultWeak;
       double zoneReuseATR;
+      
+      void Validate()
+      {
+         lookback = ValidateIntRange(lookback, 10, 10000, 100);
+         swingLookback = ValidateIntRange(swingLookback, 5, 500, 20);
+      }
    } sr;
 
    struct Pattern {
@@ -453,6 +663,28 @@ struct StrategyConfig
       double defaultSLMult;
       double pinbarSLMult;
       double insideBarSLMult;
+      
+      void Validate()
+      {
+         lookback = ValidateIntRange(lookback, 1, 500, 5);
+         failureCooldownBars = ValidateIntRange(failureCooldownBars, 0, 1000, 0);
+         reducedCooldownBars = ValidateIntRange(reducedCooldownBars, 0, 1000, 0);
+         
+         // Scores
+         baseScore = PatternValidation::NormalizeScore(baseScore, 0.0);
+         bonusStrongATR = PatternValidation::NormalizeScore(bonusStrongATR, 0.0);
+         bonusStrongBody = PatternValidation::NormalizeScore(bonusStrongBody, 0.0);
+         bonusStrongWick = PatternValidation::NormalizeScore(bonusStrongWick, 0.0);
+         
+         // Ratios
+         marubozuMinBodyPct = PatternValidation::NormalizeRatio(marubozuMinBodyPct, 0.9);
+         antiBreakoutPct = PatternValidation::NormalizeRatio(antiBreakoutPct, 0.5);
+         
+         // SL Multipliers
+         defaultSLMult = PatternValidation::NormalizeSLMultiplier(defaultSLMult);
+         pinbarSLMult = PatternValidation::NormalizeSLMultiplier(pinbarSLMult);
+         insideBarSLMult = PatternValidation::NormalizeSLMultiplier(insideBarSLMult);
+      }
    } pattern;
 
    struct Recovery {
@@ -465,10 +697,24 @@ struct StrategyConfig
       double fakeoutSensitivity;
       double fakeoutSLAdjATR;
       // SAFEGUARD: Maximum recovery positions per initial position
-      int maxRecoveryPositions;          // Max 2 recovery positions per initial trade
-      double maxExposureMultiplier;      // Max total exposure (e.g., 2x initial lot)
-      int recoveryTimeoutBars;           // Close all if still losing after N bars
-      double hardStopLossPct;            // Hard stop per group (e.g., 3% of balance)
+      int maxRecoveryPositions;
+      double maxExposureMultiplier;
+      int recoveryTimeoutBars;
+      double hardStopLossPct;
+      
+      void Validate()
+      {
+         cooldownBars = RecoveryValidation::NormalizeCooldownBars(cooldownBars, 3);
+         maxAttempts = RecoveryValidation::NormalizeMaxAttempts(maxAttempts);
+         fakeoutSensitivity = RecoveryValidation::NormalizeSensitivity(fakeoutSensitivity);
+         
+         maxRecoveryPositions = ValidateIntRange(maxRecoveryPositions, 0, 10, 2);
+         recoveryTimeoutBars = ValidateIntRange(recoveryTimeoutBars, 0, 1000, 20);
+         hardStopLossPct = ValidateRange(hardStopLossPct, 0.0, 100.0, 3.0);
+         
+         lotMult = EnsureNonNegative(lotMult, 1.0);
+         maxExposureMultiplier = EnsurePositive(maxExposureMultiplier, 2.0);
+      }
    } recovery;
 
    struct Exit {
@@ -487,6 +733,19 @@ struct StrategyConfig
       double lockOffsetATR;
       double partialLotPct;
       double partialATR;
+      
+      void Validate()
+      {
+         partialLotPct = ValidateRange(partialLotPct, 1.0, 100.0, 50.0);
+         trailingStartATR = EnsureNonNegative(trailingStartATR, 1.5);
+         
+         // Cross-field validation
+         if(maxTPDistATR < minTPDistATR)
+         {
+            LogWarning("MaxTPDistance", "must be >= MinTPDistance. Adjusted.");
+            maxTPDistATR = minTPDistATR;
+         }
+      }
    } exit;
 
    struct AI {
@@ -494,13 +753,42 @@ struct StrategyConfig
       int trainingWindow;
       double minConfidence;
       double patternBonus;
+      
+      void Validate()
+      {
+         trainingWindow = ValidateIntRange(trainingWindow, 10, 10000, 200);
+         if(use && trainingWindow < 100)
+         {
+            LogWarning("AITrainingWindow", "too small for AI. Using default 200.");
+            trainingWindow = 200;
+         }
+      }
    } ai;
 
    struct System {
       bool debug;
       bool safe;
       int orderThrottleMs;
+      
+      void Validate()
+      {
+         orderThrottleMs = ValidateIntRange(orderThrottleMs, 0, 10000, 100);
+      }
    } system;
+   
+   // Master validation - calls all sub-struct validators
+   void Validate()
+   {
+      market.Validate();
+      news.Validate();
+      risk.Validate();
+      sr.Validate();
+      pattern.Validate();
+      recovery.Validate();
+      exit.Validate();
+      ai.Validate();
+      system.Validate();
+   }
 };
 
 //+------------------------------------------------------------------+
@@ -548,12 +836,12 @@ public:
    }
    
    //+------------------------------------------------------------------+
-   //| Modular Loading Functions                                        |
+   //| Modular Loading Functions with Centralized Validation            |
    //+------------------------------------------------------------------+
    
    void LoadMarketParams()
    {
-      // Sessions
+      // Sessions - direct assignment
       m_config.market.sessions[0] = InpSessionSun;
       m_config.market.sessions[1] = InpSessionMon;
       m_config.market.sessions[2] = InpSessionTue;
@@ -562,86 +850,66 @@ public:
       m_config.market.sessions[5] = InpSessionFri;
       m_config.market.sessions[6] = InpSessionSat;
       
-      // Market Regime Filter
+      // Market Regime Filter - use validation helpers
       m_config.market.useRegime = InpUseMarketRegime;
-      m_config.market.minTrendStrength = Clamp(InpMinTrendStrength, 0.0, 1.0);
+      m_config.market.minTrendStrength = MarketValidation::NormalizeTrendStrength(InpMinTrendStrength);
       m_config.market.allowSideways = InpAllowSidewaysTrading;
-      m_config.market.regimeLotMultStrong = EnsurePositive(InpRegimeLotMultStrong, 1.0);
-      m_config.market.regimeLotMultWeak = EnsurePositive(InpRegimeLotMultWeak, 1.0);
-      m_config.market.regimeLotMultSide = EnsurePositive(InpRegimeLotMultSide, 1.0);
-      m_config.market.regimeLotMultChop = EnsurePositive(InpRegimeLotMultChop, 1.0);
+      m_config.market.regimeLotMultStrong = MarketValidation::NormalizeLotMultiplier(InpRegimeLotMultStrong, 1.0);
+      m_config.market.regimeLotMultWeak = MarketValidation::NormalizeLotMultiplier(InpRegimeLotMultWeak, 1.0);
+      m_config.market.regimeLotMultSide = MarketValidation::NormalizeLotMultiplier(InpRegimeLotMultSide, 1.0);
+      m_config.market.regimeLotMultChop = MarketValidation::NormalizeLotMultiplier(InpRegimeLotMultChop, 1.0);
       
-      // ATR Validation
-      m_config.market.atrPeriod = ValidateIntRange(InpATRPeriod, 1, 1000, 14);
-      if(InpATRPeriod <= 0) LogWarning("InpATRPeriod", "must be > 0. Using default 14.");
-      
+      // ATR & Spread
+      m_config.market.atrPeriod = MarketValidation::NormalizeATRPeriod(InpATRPeriod);
       m_config.market.atrMin = EnsureNonNegative(InpATRMin, 0.0);
-      if(InpATRMin < 0) LogWarning("InpATRMin", "must be >= 0. Using default 0.0.");
-      
-      m_config.market.atrMax = (InpATRMax >= m_config.market.atrMin) ? InpATRMax : m_config.market.atrMin;
-      if(InpATRMax < m_config.market.atrMin) LogWarning("InpATRMax", "must be >= InpATRMin. Adjusted to InpATRMin.");
-      
+      m_config.market.atrMax = EnsureNonNegative(InpATRMax, m_config.market.atrMin);
       m_config.market.maxSpread = EnsureNonNegative(InpMaxSpread, 0.0);
-      if(InpMaxSpread < 0) LogWarning("InpMaxSpread", "must be >= 0. Using default 0.0.");
+      
+      // Run domain-specific validation
+      m_config.market.Validate();
    }
    
    void LoadNewsParams()
    {
-      m_config.news.use = (InpNewsLevel != NEWS_OFF);
       m_config.news.level = InpNewsLevel;
       m_config.news.freeze = ValidateIntRange(InpNewsFreezeMinutes, 0, 1440, 30);
-      if(InpNewsFreezeMinutes < 0) LogWarning("InpNewsFreezeMinutes", "must be >= 0. Using default 30.");
       m_config.news.url = InpNewsWebURL;
+      
+      // Run domain-specific validation
+      m_config.news.Validate();
    }
    
    void LoadRiskParams()
    {
       m_config.risk.autoLot = InpUseAutoLot;
-      m_config.risk.pct = ValidateRange(InpRiskPct, 0.01, 100.0, 1.0);
-      if(InpRiskPct <= 0 || InpRiskPct > 100) LogWarning("InpRiskPct", "must be between 0.01 and 100. Using default 1.0.");
-      
-      m_config.risk.lot = EnsurePositive(InpLotSize, 0.01);
-      if(InpLotSize <= 0) LogWarning("InpLotSize", "must be > 0. Using default 0.01.");
-      
+      m_config.risk.pct = RiskValidation::NormalizeRiskPct(InpRiskPct);
+      m_config.risk.lot = RiskValidation::NormalizeLotSize(InpLotSize);
       m_config.risk.maxDailyLoss = EnsureNonNegative(InpMaxDailyLossPct, 0.0);
-      if(InpMaxDailyLossPct < 0) LogWarning("InpMaxDailyLossPct", "must be >= 0. Using default 0.0.");
-      
       m_config.risk.magic = InpMagicNum;
       m_config.risk.entryMode = InpEntryMode;
       m_config.risk.tpslMode = InpTPSLMode;
       m_config.risk.useMTF = InpUseMTF;
       m_config.risk.htf = InpHTF;
       m_config.risk.htfLookback = ValidateIntRange(InpHTFLookback, 1, 1000, 100);
-      m_config.risk.qualityLotMult = EnsurePositive(InpQualityLotMult, 1.0);
+      m_config.risk.qualityLotMult = MarketValidation::NormalizeLotMultiplier(InpQualityLotMult, 1.0);
       
-      m_config.risk.maxPositions = ValidateIntRange(InpMaxOpenPositions, 0, 100, 0);
-      if(InpMaxOpenPositions < 0) LogWarning("InpMaxOpenPositions", "must be >= 0. Using default 0.");
-      
+      // Cooldowns & limits
+      m_config.risk.maxPositions = RiskValidation::NormalizeMaxPositions(InpMaxOpenPositions);
       m_config.risk.maxConsecutiveLoss = ValidateIntRange(InpMaxConsecutiveLoss, 0, 100, 0);
-      if(InpMaxConsecutiveLoss < 0) LogWarning("InpMaxConsecutiveLoss", "must be >= 0. Using default 0.");
-      
       m_config.risk.maxTradeDurationDays = ValidateIntRange(InpMaxTradeDurationDays, 0, 365, 0);
-      if(InpMaxTradeDurationDays < 0) LogWarning("InpMaxTradeDurationDays", "must be >= 0. Using default 0.");
-      
       m_config.risk.entryCooldownBars = ValidateIntRange(InpEntryCooldownBars, 0, 1000, 0);
-      if(InpEntryCooldownBars < 0) LogWarning("InpEntryCooldownBars", "must be >= 0. Using default 0.");
-      
       m_config.risk.signalCooldownBars = ValidateIntRange(InpSignalCooldownBars, 0, 1000, 0);
-      if(InpSignalCooldownBars < 0) LogWarning("InpSignalCooldownBars", "must be >= 0. Using default 0.");
-      
       m_config.risk.lossCooldownBars = ValidateIntRange(InpLossCooldownBars, 0, 1000, 0);
-      if(InpLossCooldownBars < 0) LogWarning("InpLossCooldownBars", "must be >= 0. Using default 0.");
+      
+      // Run domain-specific validation
+      m_config.risk.Validate();
    }
    
    void LoadSRParams()
    {
       m_config.sr.mode = InpSRMode;
       m_config.sr.lookback = ValidateIntRange(InpSRLookback, 10, 10000, 100);
-      if(InpSRLookback <= 0) LogWarning("InpSRLookback", "must be > 0. Using default 100.");
-      
       m_config.sr.swingLookback = ValidateIntRange(InpSwingLookback, 5, 500, 20);
-      if(InpSwingLookback <= 0) LogWarning("InpSwingLookback", "must be > 0. Using default 20.");
-      
       m_config.sr.touchBufferATR = InpSRTouchBufferATR;
       m_config.sr.minTouchesStrong = InpSRMinTouchesStrong;
       m_config.sr.minRangeATR = InpMinSRRangeATR;
@@ -649,21 +917,22 @@ public:
       m_config.sr.bufferMultStrong = InpBufferMultStrong;
       m_config.sr.bufferMultWeak = InpBufferMultWeak;
       m_config.sr.zoneReuseATR = InpZoneReuseATR;
+      
+      // Run domain-specific validation
+      m_config.sr.Validate();
    }
    
    void LoadPatternParams()
    {
       m_config.pattern.lookback = ValidateIntRange(InpSignalLookback, 1, 500, 5);
-      if(InpSignalLookback <= 0) LogWarning("InpSignalLookback", "must be > 0. Using default 5.");
-      
       m_config.pattern.mtfConfluenceBonus = InpMTFConfluenceBonus;
       m_config.pattern.strongZoneBonus = InpStrongZoneBonus;
       m_config.pattern.strongZoneThreshold = InpStrongZoneThreshold;
       m_config.pattern.maxSignalATR = InpMaxSignalATR;
       m_config.pattern.momentumThresholdATR = InpMomentumThresholdATR;
       m_config.pattern.useWeights = InpUsePatternWeights;
-      m_config.pattern.antiBreakoutPct = InpAntiBreakoutPct;
-      m_config.pattern.marubozuMinBodyPct = InpMarubozuMinBodyPct;
+      m_config.pattern.antiBreakoutPct = PatternValidation::NormalizeRatio(InpAntiBreakoutPct, 0.5);
+      m_config.pattern.marubozuMinBodyPct = PatternValidation::NormalizeRatio(InpMarubozuMinBodyPct, 0.9);
       m_config.pattern.engulfingBodyMult = InpEngulfingBodyMult;
       m_config.pattern.minDominanceGap = InpMinDominanceGap;
       m_config.pattern.strongZoneBufferMult = InpStrongZoneBufferMult;
@@ -676,22 +945,22 @@ public:
       m_config.pattern.useDynamicCooldown = InpUseDynamicCooldown;
       m_config.pattern.reducedCooldownBars = ValidateIntRange(InpReducedCooldownBars, 0, 1000, 0);
       
-      // Scoring
-      m_config.pattern.baseScore = InpPatternBaseScore;
-      m_config.pattern.bonusStrongATR = InpPatternBonusStrongATRRange;
-      m_config.pattern.bonusStrongBody = InpPatternBonusStrongBodyRatio;
-      m_config.pattern.bonusStrongWick = InpPatternBonusStrongWickRejection;
-      m_config.pattern.bonusFollowThrough = InpPatternBonusFollowThrough;
-      m_config.pattern.bonusGapConfirm = InpPatternBonusGapConfirmation;
-      m_config.pattern.bonusBreakoutConfirm = InpPatternBonusBreakoutConfirmation;
-      m_config.pattern.bonusSmall = InpPatternBonusSmall;
+      // Scoring parameters
+      m_config.pattern.baseScore = PatternValidation::NormalizeScore(InpPatternBaseScore, 0.0);
+      m_config.pattern.bonusStrongATR = PatternValidation::NormalizeScore(InpPatternBonusStrongATRRange, 0.0);
+      m_config.pattern.bonusStrongBody = PatternValidation::NormalizeScore(InpPatternBonusStrongBodyRatio, 0.0);
+      m_config.pattern.bonusStrongWick = PatternValidation::NormalizeScore(InpPatternBonusStrongWickRejection, 0.0);
+      m_config.pattern.bonusFollowThrough = PatternValidation::NormalizeScore(InpPatternBonusFollowThrough, 0.0);
+      m_config.pattern.bonusGapConfirm = PatternValidation::NormalizeScore(InpPatternBonusGapConfirmation, 0.0);
+      m_config.pattern.bonusBreakoutConfirm = PatternValidation::NormalizeScore(InpPatternBonusBreakoutConfirmation, 0.0);
+      m_config.pattern.bonusSmall = PatternValidation::NormalizeScore(InpPatternBonusSmall, 0.0);
       
       // Thresholds
       m_config.pattern.atrRangeThreshold = InpPatternATRRangeThreshold;
       m_config.pattern.bodyRatioThreshold = InpPatternBodyRatioThreshold;
       m_config.pattern.wickRatioThreshold = InpPatternWickRatioThreshold;
       
-      // Specifics
+      // Specific thresholds
       m_config.pattern.pinbarWickRatio = InpPinbarWickToOppositeWickRatio;
       m_config.pattern.insideBarRangeMax = InpInsideBarChildMotherRangeMax;
       m_config.pattern.starCloseMin = InpStarClosePositionMin;
@@ -702,44 +971,33 @@ public:
       m_config.pattern.marubozuStrongATRMin = InpMarubozuStrongATRRangeMin;
       
       // SL Multipliers
-      m_config.pattern.defaultSLMult = EnsurePositive(InpDefaultSLMult, 1.0);
-      m_config.pattern.pinbarSLMult = EnsurePositive(InpPinbarSLMult, 1.0);
-      m_config.pattern.insideBarSLMult = EnsurePositive(InpInsideBarSLMult, 1.0);
+      m_config.pattern.defaultSLMult = PatternValidation::NormalizeSLMultiplier(InpDefaultSLMult);
+      m_config.pattern.pinbarSLMult = PatternValidation::NormalizeSLMultiplier(InpPinbarSLMult);
+      m_config.pattern.insideBarSLMult = PatternValidation::NormalizeSLMultiplier(InpInsideBarSLMult);
+      
+      // Run domain-specific validation
+      m_config.pattern.Validate();
    }
    
    void LoadRecoveryParams()
    {
       m_config.recovery.use = InpUseRecoveryMode;
-      
-      m_config.recovery.cooldownBars = ValidateIntRange(InpRecoveryCooldownBars, 0, 1000, 3);
-      if(InpRecoveryCooldownBars < 0) LogWarning("InpRecoveryCooldownBars", "must be >= 0. Using default 3.");
-      
-      m_config.recovery.maxAttempts = ValidateIntRange(InpMaxRecoveryAttempts, 0, 10, 2);
-      if(InpMaxRecoveryAttempts < 0) LogWarning("InpMaxRecoveryAttempts", "must be >= 0. Using default 2.");
-      
+      m_config.recovery.cooldownBars = RecoveryValidation::NormalizeCooldownBars(InpRecoveryCooldownBars, 3);
+      m_config.recovery.maxAttempts = RecoveryValidation::NormalizeMaxAttempts(InpMaxRecoveryAttempts);
       m_config.recovery.lotMult = EnsureNonNegative(InpRecoveryLotMult, 1.0);
-      if(InpRecoveryLotMult < 0) LogWarning("InpRecoveryLotMult", "must be >= 0. Using default 1.0.");
-      
       m_config.recovery.scoreThreshold = InpRecoveryPatternScoreThreshold;
       m_config.recovery.zoneToleranceATR = InpRecoveryZoneToleranceATR;
-      
-      m_config.recovery.fakeoutSensitivity = ValidateRange(InpFakeoutDetectionSensitivity, 0.1, 1.0, 0.3);
-      if(InpFakeoutDetectionSensitivity <= 0) LogWarning("InpFakeoutDetectionSensitivity", "must be > 0. Using default 0.3.");
-      
+      m_config.recovery.fakeoutSensitivity = RecoveryValidation::NormalizeSensitivity(InpFakeoutDetectionSensitivity);
       m_config.recovery.fakeoutSLAdjATR = InpFakeoutSLAdjustmentATR;
       
-      // SAFEGUARD: Recovery limits
+      // Safeguards
       m_config.recovery.maxRecoveryPositions = ValidateIntRange(InpMaxRecoveryPositions, 0, 10, 2);
-      if(InpMaxRecoveryPositions < 0) LogWarning("InpMaxRecoveryPositions", "must be >= 0. Using default 2.");
-      
       m_config.recovery.maxExposureMultiplier = EnsurePositive(InpMaxRecoveryExposureMult, 2.0);
-      if(InpMaxRecoveryExposureMult < 0) LogWarning("InpMaxRecoveryExposureMult", "must be >= 0. Using default 2.0.");
-      
       m_config.recovery.recoveryTimeoutBars = ValidateIntRange(InpRecoveryTimeoutBars, 0, 1000, 20);
-      if(InpRecoveryTimeoutBars < 0) LogWarning("InpRecoveryTimeoutBars", "must be >= 0. Using default 20.");
-      
       m_config.recovery.hardStopLossPct = ValidateRange(InpRecoveryHardStopPct, 0.0, 100.0, 3.0);
-      if(InpRecoveryHardStopPct < 0 || InpRecoveryHardStopPct > 100) LogWarning("InpRecoveryHardStopPct", "must be 0-100. Using default 3.0.");
+      
+      // Run domain-specific validation
+      m_config.recovery.Validate();
    }
    
    void LoadExitParams()
@@ -751,28 +1009,28 @@ public:
       m_config.exit.slBufferATR = InpSLBufferATR;
       m_config.exit.minTPDistATR = InpMinTPDistanceATR;
       m_config.exit.maxTPDistATR = InpMaxTPDistanceATR;
-      
       m_config.exit.trailingStartATR = EnsureNonNegative(InpTrailingStartATR, 1.5);
       m_config.exit.trailingBufferATR = InpTrailingBufferATR;
       m_config.exit.trailActivationATR = InpTrailActivationATR;
       m_config.exit.trailStepATR = InpTrailStepATR;
       m_config.exit.lockProfitATR = InpLockProfitATR;
       m_config.exit.lockOffsetATR = InpLockOffsetATR;
-      
       m_config.exit.partialLotPct = ValidateRange(InpPartialCloseLotPct, 1.0, 100.0, 50.0);
-      if(InpPartialCloseLotPct <= 0 || InpPartialCloseLotPct > 100) LogWarning("InpPartialCloseLotPct", "must be 1-100. Using 50.0");
-      
       m_config.exit.partialATR = InpPartialCloseATR;
+      
+      // Run domain-specific validation
+      m_config.exit.Validate();
    }
    
    void LoadAIParams()
    {
       m_config.ai.use = InpUseAI;
       m_config.ai.trainingWindow = ValidateIntRange(InpAITrainingWindowBars, 10, 10000, 200);
-      if(InpUseAI && InpAITrainingWindowBars <= 10) LogWarning("InpAITrainingWindowBars", "too small for AI. Using default 200.");
-      
       m_config.ai.minConfidence = InpAIMinConfidence;
       m_config.ai.patternBonus = InpAIPatternBonus;
+      
+      // Run domain-specific validation
+      m_config.ai.Validate();
    }
    
    void LoadSystemParams()
@@ -780,6 +1038,9 @@ public:
       m_config.system.debug = InpDebugMode;
       m_config.system.safe = InpSafeMode;
       m_config.system.orderThrottleMs = ValidateIntRange(InpOrderThrottleMs, 0, 10000, 100);
+      
+      // Run domain-specific validation
+      m_config.system.Validate();
    }
 };
 
