@@ -789,12 +789,6 @@ struct StrategyConfig
       ai.Validate();
       system.Validate();
    }
-   
-   // Helper method to copy config (for caching purposes)
-   void CopyTo(StrategyConfig &dest) const
-   {
-      dest = m_config;
-   }
 };
 
 //+------------------------------------------------------------------+
@@ -825,6 +819,12 @@ public:
    
    // Check apakah sudah diinisialisasi
    bool IsInitialized() const { return m_initialized; }
+   
+   // Helper method to copy config (for caching purposes)
+   void CopyTo(StrategyConfig &dest) const
+   {
+      dest = m_config;
+   }
    
    // Reload konfigurasi dari input parameters
    void Reload()
