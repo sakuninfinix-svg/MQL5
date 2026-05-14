@@ -153,6 +153,9 @@ private:
    double m_cachedVolatilityScore;
    datetime m_cachedScoreTime;
    
+   // DataManager reference for ATR/price data access
+   DataManager *m_data;
+   
 private:
    // Initialize indicator handles
    bool CreateIndicators()
@@ -495,6 +498,7 @@ public:
       m_cachedRegimeScore = 0.0;
       m_cachedVolatilityScore = 0.5;
       m_cachedScoreTime = 0;
+      m_data = NULL;  // Initialize DataManager pointer
       
       // Create indicators on construction
       CreateIndicators();
@@ -504,6 +508,10 @@ public:
    {
       ReleaseIndicators();
    }
+   
+   // Set DataManager reference
+   void SetDataManager(DataManager *data) { m_data = data; }
+   DataManager* GetDataManager() const { return m_data; }
    
    // Initialize with custom timeframes
    bool Init(ENUM_TIMEFRAMES tfTrading, ENUM_TIMEFRAMES tfHigher, ENUM_TIMEFRAMES tfLongTerm)
