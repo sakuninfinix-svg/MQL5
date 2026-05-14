@@ -1,78 +1,84 @@
 ```
-# Compiled files
-*.mq5
-*.mq4
-*.ex5
-*.ex4
-
-# MetaQuotes cache
-tester/
-logs/
-
 # Editor/IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *.tmp
- *.ex5 
-  *.ex4 
- *.os 
- *.h 
- *.hpp 
- *.cpp 
- *.c 
- *.obj 
- *.o 
- *.dll 
- *.so 
- *.a 
- *.lib 
- *.exe 
- *.out 
+*.ex5 
+*.ex4 
+*.os 
+*.h 
+*.hpp 
+*.cpp 
+*.c 
+*.obj 
+*.o 
+*.dll 
+*.so 
+*.a 
+*.lib 
+*.exe 
+*.out 
  
  
  # Dependencies 
- Include/ 
- Libraries/ 
  MQL5/Libraries/ 
  MQL5/Indicators/ 
  MQL5/Scripts/ 
  MQL5/Expert Advisors/ 
+ MQL5/.continue/  
+ MQL5/Files/  
+ MQL5/Images/  
+ MQL5/Profiles/  
+ MQL5/Experts/Advisors/  
+ MQL5/Experts/Examples/  
+ MQL5/Experts/Free Robots/  
+ MQL5/Include/Arrays/  
+ MQL5/Include/Canvas/  
+ MQL5/Include/ChartObjects/  
+ MQL5/Include/Charts/  
+ MQL5/Include/Controls/  
+ MQL5/Include/Expert/  
+ MQL5/Include/Generic/  
+ MQL5/Include/Math/  
+ MQL5/Include/Graphics/  
+ MQL5/Include/OpenCL/  
+ MQL5/Include/Strings/  
+ MQL5/Include/Trade/  
+ MQL5/Include/Tools/  
+ MQL5/Include/WinAPI  
+ MQL5/Include/MovingAverages.mqh  
+ MQL5/Include/VirtualKeys.mqh  
+ MQL5/Include/StdLibErr.mqh  
+ MQL5/Include/Object.mqh
+
  # MetaQuotes cache 
  tester/ 
  logs/ 
  
- 
  # Logs and temp files 
  *.log 
  *.tmp 
- # Editor/IDE 
- .vscode/ 
- .idea/ 
-  *.swp 
+ 
+# Editor/IDE 
+.vscode/ 
+.idea/ 
+*.suo 
+*.user 
+*.userosscache 
+*.sln.docstates 
+*.swp 
  *.bak 
  *.~* 
  *.backup 
  *.swo 
- *.tmp 
-  
- # Logs 
- *.log 
- 
+ *.tmp  
  
   # Environment 
-  .env 
-  .env.local 
+ .env 
+ .env.local 
  .env.* 
-  
- # Editors 
- .vscode/ 
- .idea/ 
- *.suo 
- *.user 
- *.userosscache 
- *.sln.docstates 
   
  # Build outputs 
  Debug/ 
@@ -94,22 +100,13 @@ logs/
  Thumbs.db 
  desktop.ini 
   
- # Logs and temp files  
-  # Compiled and binary files  
-  *.mq5  
-  *.mqh  
-  *.ex5  
-  *.ex4  
-  *.o  
-  *.obj  
-  *.out  
-    
   # Dependencies and build artifacts  
   lib/  
   libs/  
   objects/  
   tester/  
   history/  
+
   # MetaTrader specific  
   *.set  
   *.hst  
@@ -119,9 +116,7 @@ logs/
   *.tmp  
   *.swp  
   *.txt  
-   
-   
-  # Environment  
+      
   # Environment and temporary files  
    .env  
    .env.local  
@@ -130,13 +125,7 @@ logs/
   *.temp  
   *.bak  
   *.backup  
-   
-   
-  # Editors  
-  # Editors and IDEs  
-   .vscode/  
-   .idea/  
-    
+       
   # Dependencies  
   node_modules/  
   .venv/  
@@ -146,21 +135,6 @@ logs/
   .pytest_cache/  
   .julia/  
   zig*/  
-    
-  # Build artifacts  
-  dist/  
-  build/  
-  target/  
-  *.o  
-  *.obj  
-  *.out  
-  *.exe  
-  *.so  
-  *.ex4  
-  *.ex5  
-  *.swp  
-  *.swo  
-   
    
    # OS generated files  
    .DS_Store  
@@ -170,36 +144,7 @@ logs/
   coverage/  
   htmlcov/  
   .coverage  
-    
-  #MQL FOLDER  
-  .continue/  
-  Files/  
-  Images/  
-  Indicators/  
-  Profiles/  
-  Scripts/  
-  Experts/Advisors/  
-  Experts/Examples/  
-  Experts/Free Robots/  
-  Include/Arrays/  
-  Include/Canvas/  
-  Include/ChartObjects/  
-  Include/Charts/  
-  Include/Controls/  
-  Include/Expert/  
-  Include/Generic/  
-  Include/Math/  
-  Include/Graphics/  
-  Include/OpenCL/  
-  Include/Strings/  
-  Include/Trade/  
-  Include/Tools/  
-  Include/WinAPI  
-  Include/MovingAverages.mqh  
-  Include/VirtualKeys.mqh  
-  Include/StdLibErr.mqh  
-  Include/Object.mqh  
-    
+      
   # Compressed files  
   *.zip  
   *.gz  
@@ -223,13 +168,6 @@ logs/
   *.tar.bz2  
   *.tar.xz  
   *.tar.zst 
- *.env.* 
-  ```
-# Logs
-*.log
-
-# Environment
-.env
 .env.local
 *.env.*
 ```
