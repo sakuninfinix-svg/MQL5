@@ -347,7 +347,7 @@ public:
    // Initialize config cache from global CFG
    void InitConfigCache()
    {
-      GetConfig().CopyTo(m_cfgCache);
+      ConfigManager::GetInstance()->CopyTo(m_cfgCache);
       m_cfgInitialized = true;
    }
 
@@ -360,7 +360,7 @@ public:
    // Refresh config cache on reload
    void RefreshConfigCache()
    {
-      GetConfig().CopyTo(m_cfgCache);
+      ConfigManager::GetInstance()->CopyTo(m_cfgCache);
    }
 
    virtual bool Init() override
