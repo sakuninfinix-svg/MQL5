@@ -1,1 +1,1 @@
-Nothing should be ignored based on the provided file changes, as they only include source/config files (.md and .mqh).
+Nothing should be ignored based on the provided file changes. The modified file 'Include/PASR/8.RecoveryManager.mqh' appears to be a source code file that should not be added to .gitignore. Since there are no build artifacts, dependencies, or temporary files in the changes, no additional ignore rules are needed.
