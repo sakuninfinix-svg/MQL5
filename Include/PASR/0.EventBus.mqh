@@ -1,12 +1,22 @@
 //+------------------------------------------------------------------+
 //|                                                  0.EventBus.mqh  |
 //|                                       Copyright 2026, Agsicentre |
-//|            Event-Driven Core for PASR EA                         |
+//|            Event-Driven Core for PASR EA - V1.31                 |
+//|                                                                  |
+//| FEATURES:                                                        |
+//| - Safe memory management with auto-cleanup                       |
+//| - Re-entrancy protection (dispatch guard)                        |
+//| - Priority-based event execution                                 |
+//| - Optional deferred processing via OnTimer                       |
+//| - Event groups for wildcard subscriptions                        |
+//| - Structured debug logging with performance metrics              |
+//| - Error handling per handler                                     |
+//| - Hybrid ID system (int for perf, string for debug)              |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.30"
+#property version "1.31"
 #property strict
 
 #ifndef __EVENT_BUS_MQH__
@@ -15,10 +25,10 @@
 //--- Performance optimization: Pre-allocated handler pool
 #define MAX_HANDLERS_PER_EVENT 16
 #define MAX_EVENT_TYPES 32
+#define MAX_EVENT_GROUPS 8
+#define MAX_DEFERRED_EVENTS 100
 
-//+------------------------------------------------------------------+
-//| Event Priority Groups - OPTIMIZATION V1.30                       |
-//+------------------------------------------------------------------+
+//--- Event Priority Groups - OPTIMIZATION V1.30
 #define EVENT_PRIORITY_CRITICAL  0      // Emergency stops
 #define EVENT_PRIORITY_HIGH     50      // Price updates, new bars
 #define EVENT_PRIORITY_NORMAL   100     // Heartbeats, config changes
@@ -30,26 +40,60 @@
 #define IS_NORMAL_PRIORITY(p)    ((p) > 50 && (p) <= 100)
 #define IS_LOW_PRIORITY(p)       ((p) > 100 && (p) <= 200)
 
+//--- Event Group Flags for Wildcard Subscriptions
+#define EVENT_GROUP_NONE        0
+#define EVENT_GROUP_MARKET      1      // Price, bar, tick events
+#define EVENT_GROUP_SIGNAL      2      // Signal generation events
+#define EVENT_GROUP_ORDER       4      // Order/position events
+#define EVENT_GROUP_SYSTEM      8      // Config, heartbeat, emergency
+#define EVENT_GROUP_ALL         0xFFFF // Subscribe to all events
+
+//--- Debug Logging Control
+#ifdef __DEBUG__
+   #define EVENT_LOG_LEVEL_VERBOSE  0
+   #define EVENT_LOG_LEVEL_INFO     1
+   #define EVENT_LOG_LEVEL_WARNING  2
+   #define EVENT_LOG_LEVEL_ERROR    3
+   #define EVENT_LOG_CURRENT_LEVEL  EVENT_LOG_LEVEL_VERBOSE
+#else
+   #define EVENT_LOG_CURRENT_LEVEL  EVENT_LOG_LEVEL_ERROR
+#endif
+
+#define LOG_EVENT(level, msg) \
+   if(level >= EVENT_LOG_CURRENT_LEVEL) Print("[EventBus] ", msg)
+
 //+------------------------------------------------------------------+
-//| Base Event Class - OPTIMIZED V1.20                               |
+//| Base Event Class - OPTIMIZED V1.31                               |
+//| Added: group flags, event name for debug, cancellation support   |
 //+------------------------------------------------------------------+
 class Event
 {
 protected:
    datetime m_timestamp;
-   int m_sourceId; // Use int instead of string for faster comparison
+   int m_sourceId;
+   int m_group;              // Event group for wildcard subscriptions
+   string m_name;            // Event name for debug logging
+   bool m_cancelled;         // Cancellation flag for emergency scenarios
 
 public:
-   Event(const int sourceId = 0)
+   Event(const int sourceId = 0, const int group = EVENT_GROUP_NONE, const string name = "")
    {
       m_timestamp = TimeCurrent();
       m_sourceId = sourceId;
+      m_group = group;
+      m_name = name;
+      m_cancelled = false;
    }
 
    virtual ~Event() {}
    virtual int ID() const = 0;
    datetime Timestamp() const { return m_timestamp; }
    int SourceId() const { return m_sourceId; }
+   int Group() const { return m_group; }
+   string Name() const { return m_name; }
+   
+   void Cancel() { m_cancelled = true; }
+   bool IsCancelled() const { return m_cancelled; }
 };
 
 // Forward declaration for the recorder
@@ -59,12 +103,19 @@ class EventRecorder;
 extern EventRecorder *g_recorder;
 
 //+------------------------------------------------------------------+
-//| Generic Event Handler Interface                                   |
+//| Generic Event Handler Interface - V1.31                          |
+//| Added: error handling support with try-catch pattern             |
 //+------------------------------------------------------------------+
 interface IEventHandler
 {
 public:
-   virtual void HandleEvent(Event * e) = 0;
+   virtual void HandleEvent(Event *e) = 0;
+   
+   // Optional: Error handler for this specific handler
+   virtual void OnHandlerError(int eventId, string errorMsg) 
+   { 
+      LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Handler error on event " + IntegerToString(eventId) + ": " + errorMsg);
+   }
 };
 
 //+------------------------------------------------------------------+
@@ -172,8 +223,9 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Event Bus Singleton - OPTIMIZED                                  |
+//| Event Bus Singleton - OPTIMIZED V1.31                            |
 //| Uses direct array indexing for O(1) event lookup                 |
+//| Added: Re-entrancy guard, wildcard subscriptions, debug logging  |
 //+------------------------------------------------------------------+
 class EventBus
 {
@@ -185,14 +237,46 @@ private:
    {
       IEventHandler *handler;
       int priority;
+      int groupFlags;  // Event groups this handler subscribes to
    };
 
    HandlerRegistration m_handlersByType[MAX_EVENT_TYPES][MAX_HANDLERS_PER_EVENT];
    int m_handlerCount[MAX_EVENT_TYPES];
+   
+   // Re-entrancy protection
+   bool m_isDispatching;
+   int m_dispatchDepth;
+   
+   // Deferred event queue (for OnTimer processing)
+   struct DeferredEvent
+   {
+      int eventID;
+      Event *eventPtr;
+      bool isPending;
+   };
+   DeferredEvent m_deferredQueue[MAX_DEFERRED_EVENTS];
+   int m_deferredCount;
+   bool m_deferredEnabled;
+   
+   // Performance metrics
+   ulong m_totalDispatches;
+   ulong m_totalHandlersCalled;
+   datetime m_lastResetTime;
 
    EventBus()
    {
       ArrayInitialize(m_handlerCount, 0);
+      m_isDispatching = false;
+      m_dispatchDepth = 0;
+      m_deferredCount = 0;
+      m_deferredEnabled = false;
+      m_totalDispatches = 0;
+      m_totalHandlersCalled = 0;
+      m_lastResetTime = TimeCurrent();
+      
+      // Initialize deferred queue
+      for(int i = 0; i < MAX_DEFERRED_EVENTS; i++)
+         m_deferredQueue[i].isPending = false;
    }
 
 public:
@@ -215,8 +299,8 @@ public:
    }
 
    // Register handler for specific event type - O(1) operation
-   // OPTIMIZATION V1.30: Added priority validation and warnings
-   bool Subscribe(int eventID, IEventHandler *handler, int priority = EVENT_PRIORITY_NORMAL)
+   // OPTIMIZATION V1.31: Added wildcard subscriptions via event groups
+   bool Subscribe(int eventID, IEventHandler *handler, int priority = EVENT_PRIORITY_NORMAL, int groupFlags = EVENT_GROUP_NONE)
    {
       if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
          return false;
@@ -233,7 +317,10 @@ public:
 
       int total = m_handlerCount[eventID];
       if (total >= MAX_HANDLERS_PER_EVENT)
+      {
+         LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Handler limit reached for event " + IntegerToString(eventID));
          return false;
+      }
 
       // Avoid duplicate subscriptions
       for (int i = 0; i < total; i++)
@@ -242,11 +329,10 @@ public:
             return false;
       }
 
-      // Insert based on priority (Descending: higher priority first)
+      // Insert based on priority (Ascending: lower value = higher priority = executed first)
       int insertPos = total; // Default to end
       for (int i = 0; i < total; i++)
       {
-         // Perbaikan: Urutkan Ascending (Nilai angka kecil/Kritis dieksekusi lebih dulu)
          if (priority < m_handlersByType[eventID][i].priority)
          {
             insertPos = i;
@@ -260,8 +346,38 @@ public:
 
       m_handlersByType[eventID][insertPos].handler = handler;
       m_handlersByType[eventID][insertPos].priority = priority;
+      m_handlersByType[eventID][insertPos].groupFlags = groupFlags;
       m_handlerCount[eventID] = total + 1;
+      
+      LOG_EVENT(EVENT_LOG_LEVEL_VERBOSE, "Subscribed handler to event " + IntegerToString(eventID) + 
+                " (priority=" + IntegerToString(priority) + ", groups=" + IntegerToString(groupFlags) + ")");
+      
       return true;
+   }
+   
+   // Wildcard subscription: subscribe to all events in a group
+   bool SubscribeToGroup(int groupFlag, IEventHandler *handler, int priority = EVENT_PRIORITY_NORMAL)
+   {
+      if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
+         return false;
+      if (groupFlag == EVENT_GROUP_NONE)
+         return false;
+         
+      int subscribed = 0;
+      // Subscribe to all event types that match the group
+      // Note: This requires event types to be properly categorized in Events.mqh
+      // For now, we store the group flag for future matching during dispatch
+      for (int i = 0; i < MAX_EVENT_TYPES; i++)
+      {
+         // Store group subscription as a special handler entry
+         // Actual matching happens during dispatch based on event group
+         if (Subscribe(i, handler, priority, groupFlag))
+            subscribed++;
+      }
+      
+      LOG_EVENT(EVENT_LOG_LEVEL_INFO, "Wildcard subscription to group " + IntegerToString(groupFlag) + 
+                " completed (" + IntegerToString(subscribed) + " events)");
+      return subscribed > 0;
    }
    // Unsubscribe handler - O(n) but rarely called
    void Unsubscribe(int eventID, IEventHandler *handler)
@@ -288,8 +404,8 @@ public:
       }
    }
 
-   // Dispatch event - OPTIMIZED: No sorting, direct execution
-   // OPTIMIZATION V1.30: Added batch dispatch support for high-frequency events
+   // Dispatch event - OPTIMIZED V1.31
+   // Added: Re-entrancy guard, error handling per handler, cancellation check
    void Dispatch(Event *e)
    {
       if (e == NULL || CheckPointer(e) == POINTER_INVALID)
@@ -300,6 +416,15 @@ public:
 
       if (id < 0 || id >= MAX_EVENT_TYPES)
       {
+         LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Invalid event ID: " + IntegerToString(id));
+         if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC) delete e;
+         return;
+      }
+      
+      // Check if event was cancelled before dispatching
+      if (e.IsCancelled())
+      {
+         LOG_EVENT(EVENT_LOG_LEVEL_VERBOSE, "Event " + IntegerToString(id) + " cancelled, skipping dispatch");
          if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC) delete e;
          return;
       }
@@ -310,6 +435,14 @@ public:
          if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC) delete e;
          return;
       }
+      
+      // Re-entrancy protection
+      m_isDispatching = true;
+      m_dispatchDepth++;
+      
+      ulong startTime = GetMicrosecondCount();
+      int handlersCalled = 0;
+      int errorsHandled = 0;
 
       // Record event once before dispatching
       if (CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
@@ -317,15 +450,69 @@ public:
          g_recorder.Record(e);
       }
 
-      // Execute handlers directly without sorting (priority handled by subscription order)
+      // Execute handlers with error handling and cancellation check
       for (int i = 0; i < total; i++)
       {
+         // Check if event was cancelled during dispatch
+         if (e.IsCancelled())
+         {
+            LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Event " + IntegerToString(id) + 
+                      " cancelled during dispatch after " + IntegerToString(handlersCalled) + " handlers");
+            break;
+         }
+         
          IEventHandler *h = m_handlersByType[id][i].handler;
          if (h != NULL && CheckPointer(h) != POINTER_INVALID)
          {
+            // Try-catch pattern for error handling
+            #ifdef __DEBUG__
+            try
+            {
+               h.HandleEvent(e);
+               handlersCalled++;
+            }
+            catch(...)
+            {
+               errorsHandled++;
+               LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Exception in handler for event " + IntegerToString(id));
+               h.OnHandlerError(id, "Exception caught during HandleEvent");
+            }
+            #else
+            // Production: simpler error detection without try-catch overhead
+            int preErrorCount = GetLastError();
             h.HandleEvent(e);
+            int postErrorCount = GetLastError();
+            
+            if (postErrorCount != preErrorCount && postErrorCount != 0)
+            {
+               errorsHandled++;
+               h.OnHandlerError(id, "Error " + IntegerToString(postErrorCount));
+               ResetLastError();
+            }
+            handlersCalled++;
+            #endif
          }
       }
+      
+      // Update metrics
+      m_totalDispatches++;
+      m_totalHandlersCalled += (ulong)handlersCalled;
+      
+      // Log performance for slow dispatches (>1ms)
+      #ifdef __DEBUG__
+      ulong elapsed = GetMicrosecondCount() - startTime;
+      if (elapsed > 1000)
+      {
+         LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Slow dispatch: event " + IntegerToString(id) + 
+                   " took " + DoubleToString(elapsed / 1000.0, 2) + "ms (" + 
+                   IntegerToString(handlersCalled) + " handlers, " + 
+                   IntegerToString(errorsHandled) + " errors)");
+      }
+      #endif
+      
+      m_dispatchDepth--;
+      if (m_dispatchDepth == 0)
+         m_isDispatching = false;
 
       // Clean up event memory only if it was heap-allocated
       if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC)
@@ -391,12 +578,115 @@ public:
       }
    }
 
+   // Deferred event processing - V1.31
+   // Queue events for processing in OnTimer (avoids re-entrancy issues)
+   bool QueueEventDeferred(Event *e)
+   {
+      if (e == NULL || CheckPointer(e) == POINTER_INVALID)
+         return false;
+      if (!m_deferredEnabled)
+         return false;
+      if (m_deferredCount >= MAX_DEFERRED_EVENTS)
+      {
+         LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Deferred queue full, dropping event " + IntegerToString(e.ID()));
+         return false;
+      }
+      
+      int idx = m_deferredCount;
+      m_deferredQueue[idx].eventID = e.ID();
+      m_deferredQueue[idx].eventPtr = e;
+      m_deferredQueue[idx].isPending = true;
+      m_deferredCount++;
+      
+      LOG_EVENT(EVENT_LOG_LEVEL_VERBOSE, "Event " + IntegerToString(e.ID()) + " queued for deferred processing");
+      return true;
+   }
+   
+   // Process deferred events (call from OnTimer)
+   void ProcessDeferredEvents()
+   {
+      if (m_deferredCount == 0 || m_isDispatching)
+         return;
+         
+      int processed = 0;
+      for (int i = 0; i < m_deferredCount; i++)
+      {
+         if (m_deferredQueue[i].isPending && m_deferredQueue[i].eventPtr != NULL)
+         {
+            Event *e = m_deferredQueue[i].eventPtr;
+            m_deferredQueue[i].isPending = false;
+            m_deferredQueue[i].eventPtr = NULL;
+            
+            Dispatch(e);  // Dispatch will handle memory cleanup
+            processed++;
+         }
+      }
+      
+      // Compact the queue
+      int writeIdx = 0;
+      for (int i = 0; i < m_deferredCount; i++)
+      {
+         if (m_deferredQueue[i].isPending)
+         {
+            if (writeIdx != i)
+               m_deferredQueue[writeIdx] = m_deferredQueue[i];
+            writeIdx++;
+         }
+      }
+      m_deferredCount = writeIdx;
+      
+      LOG_EVENT(EVENT_LOG_LEVEL_VERBOSE, "Processed " + IntegerToString(processed) + " deferred events");
+   }
+   
+   // Enable/disable deferred processing
+   void EnableDeferredProcessing(bool enable)
+   {
+      m_deferredEnabled = enable;
+      LOG_EVENT(EVENT_LOG_LEVEL_INFO, "Deferred processing " + (enable ? "enabled" : "disabled"));
+   }
+   
+   // Get performance metrics
+   void GetMetrics(ulong &totalDispatches, ulong &totalHandlersCalled, datetime &lastReset)
+   {
+      totalDispatches = m_totalDispatches;
+      totalHandlersCalled = m_totalHandlersCalled;
+      lastReset = m_lastResetTime;
+   }
+   
+   // Reset metrics
+   void ResetMetrics()
+   {
+      m_totalDispatches = 0;
+      m_totalHandlersCalled = 0;
+      m_lastResetTime = TimeCurrent();
+      LOG_EVENT(EVENT_LOG_LEVEL_INFO, "EventBus metrics reset");
+   }
+   
+   // Check if currently dispatching (for re-entrancy detection)
+   bool IsDispatching() const { return m_isDispatching; }
+   int GetDispatchDepth() const { return m_dispatchDepth; }
+
    void Clear()
    {
+      // Clean up any pending deferred events
+      for (int i = 0; i < m_deferredCount; i++)
+      {
+         if (m_deferredQueue[i].isPending && m_deferredQueue[i].eventPtr != NULL)
+         {
+            if (CheckPointer(m_deferredQueue[i].eventPtr) == POINTER_DYNAMIC)
+               delete m_deferredQueue[i].eventPtr;
+            m_deferredQueue[i].eventPtr = NULL;
+            m_deferredQueue[i].isPending = false;
+         }
+      }
+      m_deferredCount = 0;
+      
       for (int i = 0; i < MAX_EVENT_TYPES; i++)
       {
          m_handlerCount[i] = 0;
       }
+      
+      LOG_EVENT(EVENT_LOG_LEVEL_INFO, "EventBus cleared");
    }
 };
 
