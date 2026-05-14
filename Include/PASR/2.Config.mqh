@@ -31,6 +31,114 @@ enum ENUM_PATTERN_TYPE
 };
 
 /**
+ * ENUM_CONFIG_FIELD_ID - Identifiers for config fields used in diffing
+ * Allows detection of specific configuration changes at runtime
+ */
+enum ENUM_CONFIG_FIELD_ID
+{
+   FIELD_NONE = 0,
+   
+   // Market Fields
+   FIELD_ATR_PERIOD,
+   FIELD_ATR_MIN,
+   FIELD_ATR_MAX,
+   FIELD_MAX_SPREAD,
+   FIELD_USE_REGIME,
+   FIELD_MIN_TREND_STRENGTH,
+   FIELD_ALLOW_SIDEWAYS,
+   FIELD_REGIME_LOT_MULT_STRONG,
+   FIELD_REGIME_LOT_MULT_WEAK,
+   FIELD_REGIME_LOT_MULT_SIDE,
+   FIELD_REGIME_LOT_MULT_CHOP,
+   
+   // News Fields
+   FIELD_NEWS_LEVEL,
+   FIELD_NEWS_FREEZE,
+   
+   // Risk Fields
+   FIELD_RISK_PCT,
+   FIELD_LOT_SIZE,
+   FIELD_AUTO_LOT,
+   FIELD_MAX_DAILY_LOSS,
+   FIELD_MAGIC_NUM,
+   FIELD_ENTRY_MODE,
+   FIELD_TPSL_MODE,
+   FIELD_USE_MTF,
+   FIELD_HTF,
+   FIELD_HTF_LOOKBACK,
+   FIELD_QUALITY_LOT_MULT,
+   FIELD_MAX_POSITIONS,
+   FIELD_MAX_CONSECUTIVE_LOSS,
+   FIELD_MAX_TRADE_DURATION,
+   FIELD_ENTRY_COOLDOWN,
+   FIELD_SIGNAL_COOLDOWN,
+   FIELD_LOSS_COOLDOWN,
+   
+   // SR Fields
+   FIELD_SR_MODE,
+   FIELD_SR_LOOKBACK,
+   FIELD_SR_SWING_LOOKBACK,
+   FIELD_SR_TOUCH_BUFFER,
+   FIELD_SR_MIN_TOUCHES,
+   FIELD_SR_MIN_RANGE,
+   FIELD_SR_ATR_BUFFER,
+   FIELD_SR_BUFFER_STRONG,
+   FIELD_SR_BUFFER_WEAK,
+   FIELD_SR_ZONE_REUSE,
+   
+   // Pattern Fields
+   FIELD_PATTERN_LOOKBACK,
+   FIELD_PATTERN_MTF_BONUS,
+   FIELD_PATTERN_STRONG_ZONE_BONUS,
+   FIELD_PATTERN_STRONG_ZONE_THRESHOLD,
+   FIELD_PATTERN_MAX_SIGNAL_ATR,
+   FIELD_PATTERN_MOMENTUM_THRESHOLD,
+   FIELD_PATTERN_USE_WEIGHTS,
+   FIELD_PATTERN_ANTI_BREAKOUT,
+   FIELD_PATTERN_MARUBOZU_BODY,
+   FIELD_PATTERN_ENGULFING_MULT,
+   FIELD_PATTERN_DOMINANCE_GAP,
+   FIELD_PATTERN_SENSITIVITY,
+   FIELD_PATTERN_DEFAULT_SL_MULT,
+   FIELD_PATTERN_PINBAR_SL_MULT,
+   FIELD_PATTERN_INSIDEBAR_SL_MULT,
+   FIELD_PATTERN_HQ_THRESHOLD,
+   
+   // Recovery Fields
+   FIELD_RECOVERY_USE,
+   FIELD_RECOVERY_COOLDOWN,
+   FIELD_RECOVERY_MAX_ATTEMPTS,
+   FIELD_RECOVERY_LOT_MULT,
+   FIELD_RECOVERY_SCORE_THRESHOLD,
+   FIELD_RECOVERY_ZONE_TOLERANCE,
+   FIELD_RECOVERY_FAKEOUT_SENS,
+   
+   // Exit Fields
+   FIELD_EXIT_TRAILING,
+   FIELD_EXIT_PARTIAL,
+   FIELD_EXIT_ON_OPPOSITE,
+   FIELD_EXIT_TP_BUFFER,
+   FIELD_EXIT_SL_BUFFER,
+   FIELD_EXIT_MIN_TP_DIST,
+   FIELD_EXIT_MAX_TP_DIST,
+   FIELD_EXIT_TRAILING_START,
+   FIELD_EXIT_TRAILING_BUFFER,
+   FIELD_EXIT_PARTIAL_LOT_PCT,
+   FIELD_EXIT_PARTIAL_ATR,
+   
+   // AI Fields
+   FIELD_AI_USE,
+   FIELD_AI_TRAINING_WINDOW,
+   FIELD_AI_MIN_CONFIDENCE,
+   FIELD_AI_PATTERN_BONUS,
+   
+   // System Fields
+   FIELD_SYSTEM_DEBUG,
+   FIELD_SYSTEM_SAFE,
+   FIELD_SYSTEM_THROTTLE
+};
+
+/**
  * ID Event untuk Sistem Event-Driven (Static Dispatch)
  */
 enum ENUM_EVENT_ID
@@ -957,6 +1065,316 @@ struct StrategyConfig
       
       return result;
    }
+   
+   //+------------------------------------------------------------------+
+   //| Config Diffing Methods - Detect configuration changes            |
+   //+------------------------------------------------------------------+
+   
+   /**
+    * Compare this config with another and return array of changed field IDs
+    * @param other The other StrategyConfig to compare against
+    * @return ArrayInt containing ENUM_CONFIG_FIELD_ID values for changed fields
+    */
+   ArrayInt Compare(const StrategyConfig &other) const
+   {
+      ArrayInt changed;
+      ArrayResize(changed, 0);
+      
+      // Market fields comparison
+      if(market.atrPeriod != other.market.atrPeriod)
+         ArrayAdd(changed, FIELD_ATR_PERIOD);
+      if(market.atrMin != other.market.atrMin)
+         ArrayAdd(changed, FIELD_ATR_MIN);
+      if(market.atrMax != other.market.atrMax)
+         ArrayAdd(changed, FIELD_ATR_MAX);
+      if(market.maxSpread != other.market.maxSpread)
+         ArrayAdd(changed, FIELD_MAX_SPREAD);
+      if(market.useRegime != other.market.useRegime)
+         ArrayAdd(changed, FIELD_USE_REGIME);
+      if(market.minTrendStrength != other.market.minTrendStrength)
+         ArrayAdd(changed, FIELD_MIN_TREND_STRENGTH);
+      if(market.allowSideways != other.market.allowSideways)
+         ArrayAdd(changed, FIELD_ALLOW_SIDEWAYS);
+      if(market.regimeLotMultStrong != other.market.regimeLotMultStrong)
+         ArrayAdd(changed, FIELD_REGIME_LOT_MULT_STRONG);
+      if(market.regimeLotMultWeak != other.market.regimeLotMultWeak)
+         ArrayAdd(changed, FIELD_REGIME_LOT_MULT_WEAK);
+      if(market.regimeLotMultSide != other.market.regimeLotMultSide)
+         ArrayAdd(changed, FIELD_REGIME_LOT_MULT_SIDE);
+      if(market.regimeLotMultChop != other.market.regimeLotMultChop)
+         ArrayAdd(changed, FIELD_REGIME_LOT_MULT_CHOP);
+      
+      // News fields
+      if(news.level != other.news.level)
+         ArrayAdd(changed, FIELD_NEWS_LEVEL);
+      if(news.freeze != other.news.freeze)
+         ArrayAdd(changed, FIELD_NEWS_FREEZE);
+      
+      // Risk fields
+      if(risk.autoLot != other.risk.autoLot)
+         ArrayAdd(changed, FIELD_AUTO_LOT);
+      if(risk.pct != other.risk.pct)
+         ArrayAdd(changed, FIELD_RISK_PCT);
+      if(risk.lot != other.risk.lot)
+         ArrayAdd(changed, FIELD_LOT_SIZE);
+      if(risk.maxDailyLoss != other.risk.maxDailyLoss)
+         ArrayAdd(changed, FIELD_MAX_DAILY_LOSS);
+      if(risk.magic != other.risk.magic)
+         ArrayAdd(changed, FIELD_MAGIC_NUM);
+      if(risk.entryMode != other.risk.entryMode)
+         ArrayAdd(changed, FIELD_ENTRY_MODE);
+      if(risk.tpslMode != other.risk.tpslMode)
+         ArrayAdd(changed, FIELD_TPSL_MODE);
+      if(risk.useMTF != other.risk.useMTF)
+         ArrayAdd(changed, FIELD_USE_MTF);
+      if(risk.htf != other.risk.htf)
+         ArrayAdd(changed, FIELD_HTF);
+      if(risk.htfLookback != other.risk.htfLookback)
+         ArrayAdd(changed, FIELD_HTF_LOOKBACK);
+      if(risk.qualityLotMult != other.risk.qualityLotMult)
+         ArrayAdd(changed, FIELD_QUALITY_LOT_MULT);
+      if(risk.maxPositions != other.risk.maxPositions)
+         ArrayAdd(changed, FIELD_MAX_POSITIONS);
+      if(risk.maxConsecutiveLoss != other.risk.maxConsecutiveLoss)
+         ArrayAdd(changed, FIELD_MAX_CONSECUTIVE_LOSS);
+      if(risk.maxTradeDurationDays != other.risk.maxTradeDurationDays)
+         ArrayAdd(changed, FIELD_MAX_TRADE_DURATION);
+      if(risk.entryCooldownBars != other.risk.entryCooldownBars)
+         ArrayAdd(changed, FIELD_ENTRY_COOLDOWN);
+      if(risk.signalCooldownBars != other.risk.signalCooldownBars)
+         ArrayAdd(changed, FIELD_SIGNAL_COOLDOWN);
+      if(risk.lossCooldownBars != other.risk.lossCooldownBars)
+         ArrayAdd(changed, FIELD_LOSS_COOLDOWN);
+      
+      // SR fields
+      if(sr.mode != other.sr.mode)
+         ArrayAdd(changed, FIELD_SR_MODE);
+      if(sr.lookback != other.sr.lookback)
+         ArrayAdd(changed, FIELD_SR_LOOKBACK);
+      if(sr.swingLookback != other.sr.swingLookback)
+         ArrayAdd(changed, FIELD_SR_SWING_LOOKBACK);
+      if(sr.touchBufferATR != other.sr.touchBufferATR)
+         ArrayAdd(changed, FIELD_SR_TOUCH_BUFFER);
+      if(sr.minTouchesStrong != other.sr.minTouchesStrong)
+         ArrayAdd(changed, FIELD_SR_MIN_TOUCHES);
+      if(sr.minRangeATR != other.sr.minRangeATR)
+         ArrayAdd(changed, FIELD_SR_MIN_RANGE);
+      if(sr.atrBufferMult != other.sr.atrBufferMult)
+         ArrayAdd(changed, FIELD_SR_ATR_BUFFER);
+      if(sr.bufferMultStrong != other.sr.bufferMultStrong)
+         ArrayAdd(changed, FIELD_SR_BUFFER_STRONG);
+      if(sr.bufferMultWeak != other.sr.bufferMultWeak)
+         ArrayAdd(changed, FIELD_SR_BUFFER_WEAK);
+      if(sr.zoneReuseATR != other.sr.zoneReuseATR)
+         ArrayAdd(changed, FIELD_SR_ZONE_REUSE);
+      
+      // Pattern fields
+      if(pattern.lookback != other.pattern.lookback)
+         ArrayAdd(changed, FIELD_PATTERN_LOOKBACK);
+      if(pattern.mtfConfluenceBonus != other.pattern.mtfConfluenceBonus)
+         ArrayAdd(changed, FIELD_PATTERN_MTF_BONUS);
+      if(pattern.strongZoneBonus != other.pattern.strongZoneBonus)
+         ArrayAdd(changed, FIELD_PATTERN_STRONG_ZONE_BONUS);
+      if(pattern.strongZoneThreshold != other.pattern.strongZoneThreshold)
+         ArrayAdd(changed, FIELD_PATTERN_STRONG_ZONE_THRESHOLD);
+      if(pattern.maxSignalATR != other.pattern.maxSignalATR)
+         ArrayAdd(changed, FIELD_PATTERN_MAX_SIGNAL_ATR);
+      if(pattern.momentumThresholdATR != other.pattern.momentumThresholdATR)
+         ArrayAdd(changed, FIELD_PATTERN_MOMENTUM_THRESHOLD);
+      if(pattern.useWeights != other.pattern.useWeights)
+         ArrayAdd(changed, FIELD_PATTERN_USE_WEIGHTS);
+      if(pattern.antiBreakoutPct != other.pattern.antiBreakoutPct)
+         ArrayAdd(changed, FIELD_PATTERN_ANTI_BREAKOUT);
+      if(pattern.marubozuMinBodyPct != other.pattern.marubozuMinBodyPct)
+         ArrayAdd(changed, FIELD_PATTERN_MARUBOZU_BODY);
+      if(pattern.engulfingBodyMult != other.pattern.engulfingBodyMult)
+         ArrayAdd(changed, FIELD_PATTERN_ENGULFING_MULT);
+      if(pattern.minDominanceGap != other.pattern.minDominanceGap)
+         ArrayAdd(changed, FIELD_PATTERN_DOMINANCE_GAP);
+      if(pattern.sensitivityATR != other.pattern.sensitivityATR)
+         ArrayAdd(changed, FIELD_PATTERN_SENSITIVITY);
+      if(pattern.defaultSLMult != other.pattern.defaultSLMult)
+         ArrayAdd(changed, FIELD_PATTERN_DEFAULT_SL_MULT);
+      if(pattern.pinbarSLMult != other.pattern.pinbarSLMult)
+         ArrayAdd(changed, FIELD_PATTERN_PINBAR_SL_MULT);
+      if(pattern.insideBarSLMult != other.pattern.insideBarSLMult)
+         ArrayAdd(changed, FIELD_PATTERN_INSIDEBAR_SL_MULT);
+      if(pattern.hqThreshold != other.pattern.hqThreshold)
+         ArrayAdd(changed, FIELD_PATTERN_HQ_THRESHOLD);
+      
+      // Recovery fields
+      if(recovery.use != other.recovery.use)
+         ArrayAdd(changed, FIELD_RECOVERY_USE);
+      if(recovery.cooldownBars != other.recovery.cooldownBars)
+         ArrayAdd(changed, FIELD_RECOVERY_COOLDOWN);
+      if(recovery.maxAttempts != other.recovery.maxAttempts)
+         ArrayAdd(changed, FIELD_RECOVERY_MAX_ATTEMPTS);
+      if(recovery.lotMult != other.recovery.lotMult)
+         ArrayAdd(changed, FIELD_RECOVERY_LOT_MULT);
+      if(recovery.scoreThreshold != other.recovery.scoreThreshold)
+         ArrayAdd(changed, FIELD_RECOVERY_SCORE_THRESHOLD);
+      if(recovery.zoneToleranceATR != other.recovery.zoneToleranceATR)
+         ArrayAdd(changed, FIELD_RECOVERY_ZONE_TOLERANCE);
+      if(recovery.fakeoutSensitivity != other.recovery.fakeoutSensitivity)
+         ArrayAdd(changed, FIELD_RECOVERY_FAKEOUT_SENS);
+      
+      // Exit fields
+      if(exit.useTrailing != other.exit.useTrailing)
+         ArrayAdd(changed, FIELD_EXIT_TRAILING);
+      if(exit.usePartial != other.exit.usePartial)
+         ArrayAdd(changed, FIELD_EXIT_PARTIAL);
+      if(exit.exitOnOpposite != other.exit.exitOnOpposite)
+         ArrayAdd(changed, FIELD_EXIT_ON_OPPOSITE);
+      if(exit.tpBufferATR != other.exit.tpBufferATR)
+         ArrayAdd(changed, FIELD_EXIT_TP_BUFFER);
+      if(exit.slBufferATR != other.exit.slBufferATR)
+         ArrayAdd(changed, FIELD_EXIT_SL_BUFFER);
+      if(exit.minTPDistATR != other.exit.minTPDistATR)
+         ArrayAdd(changed, FIELD_EXIT_MIN_TP_DIST);
+      if(exit.maxTPDistATR != other.exit.maxTPDistATR)
+         ArrayAdd(changed, FIELD_EXIT_MAX_TP_DIST);
+      if(exit.trailingStartATR != other.exit.trailingStartATR)
+         ArrayAdd(changed, FIELD_EXIT_TRAILING_START);
+      if(exit.trailingBufferATR != other.exit.trailingBufferATR)
+         ArrayAdd(changed, FIELD_EXIT_TRAILING_BUFFER);
+      if(exit.partialLotPct != other.exit.partialLotPct)
+         ArrayAdd(changed, FIELD_EXIT_PARTIAL_LOT_PCT);
+      if(exit.partialATR != other.exit.partialATR)
+         ArrayAdd(changed, FIELD_EXIT_PARTIAL_ATR);
+      
+      // AI fields
+      if(ai.use != other.ai.use)
+         ArrayAdd(changed, FIELD_AI_USE);
+      if(ai.trainingWindow != other.ai.trainingWindow)
+         ArrayAdd(changed, FIELD_AI_TRAINING_WINDOW);
+      if(ai.minConfidence != other.ai.minConfidence)
+         ArrayAdd(changed, FIELD_AI_MIN_CONFIDENCE);
+      if(ai.patternBonus != other.ai.patternBonus)
+         ArrayAdd(changed, FIELD_AI_PATTERN_BONUS);
+      
+      // System fields
+      if(system.debug != other.system.debug)
+         ArrayAdd(changed, FIELD_SYSTEM_DEBUG);
+      if(system.safe != other.system.safe)
+         ArrayAdd(changed, FIELD_SYSTEM_SAFE);
+      if(system.orderThrottleMs != other.system.orderThrottleMs)
+         ArrayAdd(changed, FIELD_SYSTEM_THROTTLE);
+      
+      return changed;
+   }
+   
+   /**
+    * Check if a specific field has changed between this and other config
+    * @param other The other StrategyConfig to compare against
+    * @param fieldId The field ID to check
+    * @return true if the field value differs, false otherwise
+    */
+   bool HasChanged(const StrategyConfig &other, ENUM_CONFIG_FIELD_ID fieldId) const
+   {
+      switch(fieldId)
+      {
+         // Market fields
+         case FIELD_ATR_PERIOD: return market.atrPeriod != other.market.atrPeriod;
+         case FIELD_ATR_MIN: return market.atrMin != other.market.atrMin;
+         case FIELD_ATR_MAX: return market.atrMax != other.market.atrMax;
+         case FIELD_MAX_SPREAD: return market.maxSpread != other.market.maxSpread;
+         case FIELD_USE_REGIME: return market.useRegime != other.market.useRegime;
+         case FIELD_MIN_TREND_STRENGTH: return market.minTrendStrength != other.market.minTrendStrength;
+         case FIELD_ALLOW_SIDEWAYS: return market.allowSideways != other.market.allowSideways;
+         case FIELD_REGIME_LOT_MULT_STRONG: return market.regimeLotMultStrong != other.market.regimeLotMultStrong;
+         case FIELD_REGIME_LOT_MULT_WEAK: return market.regimeLotMultWeak != other.market.regimeLotMultWeak;
+         case FIELD_REGIME_LOT_MULT_SIDE: return market.regimeLotMultSide != other.market.regimeLotMultSide;
+         case FIELD_REGIME_LOT_MULT_CHOP: return market.regimeLotMultChop != other.market.regimeLotMultChop;
+         
+         // News fields
+         case FIELD_NEWS_LEVEL: return news.level != other.news.level;
+         case FIELD_NEWS_FREEZE: return news.freeze != other.news.freeze;
+         
+         // Risk fields
+         case FIELD_AUTO_LOT: return risk.autoLot != other.risk.autoLot;
+         case FIELD_RISK_PCT: return risk.pct != other.risk.pct;
+         case FIELD_LOT_SIZE: return risk.lot != other.risk.lot;
+         case FIELD_MAX_DAILY_LOSS: return risk.maxDailyLoss != other.risk.maxDailyLoss;
+         case FIELD_MAGIC_NUM: return risk.magic != other.risk.magic;
+         case FIELD_ENTRY_MODE: return risk.entryMode != other.risk.entryMode;
+         case FIELD_TPSL_MODE: return risk.tpslMode != other.risk.tpslMode;
+         case FIELD_USE_MTF: return risk.useMTF != other.risk.useMTF;
+         case FIELD_HTF: return risk.htf != other.risk.htf;
+         case FIELD_HTF_LOOKBACK: return risk.htfLookback != other.risk.htfLookback;
+         case FIELD_QUALITY_LOT_MULT: return risk.qualityLotMult != other.risk.qualityLotMult;
+         case FIELD_MAX_POSITIONS: return risk.maxPositions != other.risk.maxPositions;
+         case FIELD_MAX_CONSECUTIVE_LOSS: return risk.maxConsecutiveLoss != other.risk.maxConsecutiveLoss;
+         case FIELD_MAX_TRADE_DURATION: return risk.maxTradeDurationDays != other.risk.maxTradeDurationDays;
+         case FIELD_ENTRY_COOLDOWN: return risk.entryCooldownBars != other.risk.entryCooldownBars;
+         case FIELD_SIGNAL_COOLDOWN: return risk.signalCooldownBars != other.risk.signalCooldownBars;
+         case FIELD_LOSS_COOLDOWN: return risk.lossCooldownBars != other.risk.lossCooldownBars;
+         
+         // SR fields
+         case FIELD_SR_MODE: return sr.mode != other.sr.mode;
+         case FIELD_SR_LOOKBACK: return sr.lookback != other.sr.lookback;
+         case FIELD_SR_SWING_LOOKBACK: return sr.swingLookback != other.sr.swingLookback;
+         case FIELD_SR_TOUCH_BUFFER: return sr.touchBufferATR != other.sr.touchBufferATR;
+         case FIELD_SR_MIN_TOUCHES: return sr.minTouchesStrong != other.sr.minTouchesStrong;
+         case FIELD_SR_MIN_RANGE: return sr.minRangeATR != other.sr.minRangeATR;
+         case FIELD_SR_ATR_BUFFER: return sr.atrBufferMult != other.sr.atrBufferMult;
+         case FIELD_SR_BUFFER_STRONG: return sr.bufferMultStrong != other.sr.bufferMultStrong;
+         case FIELD_SR_BUFFER_WEAK: return sr.bufferMultWeak != other.sr.bufferMultWeak;
+         case FIELD_SR_ZONE_REUSE: return sr.zoneReuseATR != other.sr.zoneReuseATR;
+         
+         // Pattern fields
+         case FIELD_PATTERN_LOOKBACK: return pattern.lookback != other.pattern.lookback;
+         case FIELD_PATTERN_MTF_BONUS: return pattern.mtfConfluenceBonus != other.pattern.mtfConfluenceBonus;
+         case FIELD_PATTERN_STRONG_ZONE_BONUS: return pattern.strongZoneBonus != other.pattern.strongZoneBonus;
+         case FIELD_PATTERN_STRONG_ZONE_THRESHOLD: return pattern.strongZoneThreshold != other.pattern.strongZoneThreshold;
+         case FIELD_PATTERN_MAX_SIGNAL_ATR: return pattern.maxSignalATR != other.pattern.maxSignalATR;
+         case FIELD_PATTERN_MOMENTUM_THRESHOLD: return pattern.momentumThresholdATR != other.pattern.momentumThresholdATR;
+         case FIELD_PATTERN_USE_WEIGHTS: return pattern.useWeights != other.pattern.useWeights;
+         case FIELD_PATTERN_ANTI_BREAKOUT: return pattern.antiBreakoutPct != other.pattern.antiBreakoutPct;
+         case FIELD_PATTERN_MARUBOZU_BODY: return pattern.marubozuMinBodyPct != other.pattern.marubozuMinBodyPct;
+         case FIELD_PATTERN_ENGULFING_MULT: return pattern.engulfingBodyMult != other.pattern.engulfingBodyMult;
+         case FIELD_PATTERN_DOMINANCE_GAP: return pattern.minDominanceGap != other.pattern.minDominanceGap;
+         case FIELD_PATTERN_SENSITIVITY: return pattern.sensitivityATR != other.pattern.sensitivityATR;
+         case FIELD_PATTERN_DEFAULT_SL_MULT: return pattern.defaultSLMult != other.pattern.defaultSLMult;
+         case FIELD_PATTERN_PINBAR_SL_MULT: return pattern.pinbarSLMult != other.pattern.pinbarSLMult;
+         case FIELD_PATTERN_INSIDEBAR_SL_MULT: return pattern.insideBarSLMult != other.pattern.insideBarSLMult;
+         case FIELD_PATTERN_HQ_THRESHOLD: return pattern.hqThreshold != other.pattern.hqThreshold;
+         
+         // Recovery fields
+         case FIELD_RECOVERY_USE: return recovery.use != other.recovery.use;
+         case FIELD_RECOVERY_COOLDOWN: return recovery.cooldownBars != other.recovery.cooldownBars;
+         case FIELD_RECOVERY_MAX_ATTEMPTS: return recovery.maxAttempts != other.recovery.maxAttempts;
+         case FIELD_RECOVERY_LOT_MULT: return recovery.lotMult != other.recovery.lotMult;
+         case FIELD_RECOVERY_SCORE_THRESHOLD: return recovery.scoreThreshold != other.recovery.scoreThreshold;
+         case FIELD_RECOVERY_ZONE_TOLERANCE: return recovery.zoneToleranceATR != other.recovery.zoneToleranceATR;
+         case FIELD_RECOVERY_FAKEOUT_SENS: return recovery.fakeoutSensitivity != other.recovery.fakeoutSensitivity;
+         
+         // Exit fields
+         case FIELD_EXIT_TRAILING: return exit.useTrailing != other.exit.useTrailing;
+         case FIELD_EXIT_PARTIAL: return exit.usePartial != other.exit.usePartial;
+         case FIELD_EXIT_ON_OPPOSITE: return exit.exitOnOpposite != other.exit.exitOnOpposite;
+         case FIELD_EXIT_TP_BUFFER: return exit.tpBufferATR != other.exit.tpBufferATR;
+         case FIELD_EXIT_SL_BUFFER: return exit.slBufferATR != other.exit.slBufferATR;
+         case FIELD_EXIT_MIN_TP_DIST: return exit.minTPDistATR != other.exit.minTPDistATR;
+         case FIELD_EXIT_MAX_TP_DIST: return exit.maxTPDistATR != other.exit.maxTPDistATR;
+         case FIELD_EXIT_TRAILING_START: return exit.trailingStartATR != other.exit.trailingStartATR;
+         case FIELD_EXIT_TRAILING_BUFFER: return exit.trailingBufferATR != other.exit.trailingBufferATR;
+         case FIELD_EXIT_PARTIAL_LOT_PCT: return exit.partialLotPct != other.exit.partialLotPct;
+         case FIELD_EXIT_PARTIAL_ATR: return exit.partialATR != other.exit.partialATR;
+         
+         // AI fields
+         case FIELD_AI_USE: return ai.use != other.ai.use;
+         case FIELD_AI_TRAINING_WINDOW: return ai.trainingWindow != other.ai.trainingWindow;
+         case FIELD_AI_MIN_CONFIDENCE: return ai.minConfidence != other.ai.minConfidence;
+         case FIELD_AI_PATTERN_BONUS: return ai.patternBonus != other.ai.patternBonus;
+         
+         // System fields
+         case FIELD_SYSTEM_DEBUG: return system.debug != other.system.debug;
+         case FIELD_SYSTEM_SAFE: return system.safe != other.system.safe;
+         case FIELD_SYSTEM_THROTTLE: return system.orderThrottleMs != other.system.orderThrottleMs;
+         
+         default: return false;
+      }
+   }
 };
 
 //+------------------------------------------------------------------+
@@ -968,6 +1386,7 @@ class ConfigManager
 private:
    static ConfigManager *m_instance;
    StrategyConfig m_config;
+   StrategyConfig m_lastKnownConfig;  // Snapshot untuk deteksi perubahan
    bool m_initialized;
    
    // Constructor privat untuk singleton
@@ -994,8 +1413,58 @@ public:
       dest = m_config;
    }
    
+   //+------------------------------------------------------------------+
+   //| Config Diffing - Detect and track configuration changes          |
+   //+------------------------------------------------------------------+
+   
+   /**
+    * Get array of changed fields since last known config
+    * Automatically updates m_lastKnownConfig after comparison
+    * @return ArrayInt containing ENUM_CONFIG_FIELD_ID values for changed fields
+    */
+   ArrayInt GetChanges()
+   {
+      ArrayInt changed = m_config.Compare(m_lastKnownConfig);
+      
+      // Update last known config snapshot after getting changes
+      if(ArraySize(changed) > 0)
+      {
+         m_lastKnownConfig = m_config;
+      }
+      
+      return changed;
+   }
+   
+   /**
+    * Check if a specific field has changed since last known config
+    * @param fieldId The field ID to check
+    * @return true if the field value differs from last known
+    */
+   bool HasFieldChanged(ENUM_CONFIG_FIELD_ID fieldId) const
+   {
+      return m_config.HasChanged(m_lastKnownConfig, fieldId);
+   }
+   
+   /**
+    * Manually update the last known config snapshot
+    * Useful after applying changes or initialization
+    */
+   void UpdateLastKnownConfig()
+   {
+      m_lastKnownConfig = m_config;
+   }
+   
+   /**
+    * Reset last known config to match current config (clears diff state)
+    */
+   void ResetDiffState()
+   {
+      m_lastKnownConfig = m_config;
+   }
+   
    // Reload konfigurasi dari input parameters
    // Returns ValidationResult with detailed validation report
+   // Automatically updates m_lastKnownConfig on first init
    ValidationResult Reload()
    {
       LoadMarketParams();
@@ -1010,7 +1479,15 @@ public:
       m_initialized = true;
       
       // Run comprehensive validation and return result
-      return m_config.Validate();
+      ValidationResult result = m_config.Validate();
+      
+      // Initialize last known config on first successful reload
+      if(m_lastKnownConfig.market.atrPeriod == 0)  // Simple check for uninitialized state
+      {
+         m_lastKnownConfig = m_config;
+      }
+      
+      return result;
    }
    
    //+------------------------------------------------------------------+
@@ -1264,6 +1741,101 @@ void PrintConfigSummary()
    Print("Use MTF          : ", (cfg.risk.useMTF ? "true" : "false"));
    Print("Use Trailing     : ", (cfg.exit.useTrailing ? "true" : "false"));
 }
+
+//+------------------------------------------------------------------+
+//| EXAMPLE USAGE: Config Diffing in OnTick()                        |
+//| Add this to your EA's main file for runtime config change detect |
+//+------------------------------------------------------------------+
+/*
+// In your EA's global scope:
+StrategyConfig g_prevConfig;  // Store previous config snapshot
+
+void OnTick()
+{
+   // Get current config
+   const StrategyConfig &currentConfig = GetConfig();
+   
+   // Check for specific field changes (efficient single-field check)
+   if(currentConfig.HasChanged(g_prevConfig, FIELD_RISK_PCT))
+   {
+      // Risk percentage changed - recalculate lot sizes for open positions
+      Print("CONFIG CHANGE DETECTED: RiskPct changed from ", g_prevConfig.risk.pct, " to ", currentConfig.risk.pct);
+      RecalculateLotSizes();  // Your custom function
+   }
+   
+   if(currentConfig.HasChanged(g_prevConfig, FIELD_ATR_PERIOD))
+   {
+      // ATR Period changed - recalculate ATR-based values
+      Print("CONFIG CHANGE DETECTED: ATRPeriod changed");
+      RefreshATRIndicators();  // Your custom function
+   }
+   
+   if(currentConfig.HasChanged(g_prevConfig, FIELD_PATTERN_DEFAULT_SL_MULT))
+   {
+      // SL Multiplier changed - update stop losses
+      Print("CONFIG CHANGE DETECTED: Default SL Multiplier changed");
+      UpdateStopLosses();  // Your custom function
+   }
+   
+   // Or get all changed fields at once (for comprehensive updates)
+   ArrayInt changedFields = currentConfig.Compare(g_prevConfig);
+   if(ArraySize(changedFields) > 0)
+   {
+      Print("Total config fields changed: ", ArraySize(changedFields));
+      
+      // Process each changed field
+      for(int i = 0; i < ArraySize(changedFields); i++)
+      {
+         ENUM_CONFIG_FIELD_ID fieldId = (ENUM_CONFIG_FIELD_ID)changedFields[i];
+         
+         // Handle specific field changes with switch
+         switch(fieldId)
+         {
+            case FIELD_RISK_PCT:
+               OnRiskPctChanged(g_prevConfig.risk.pct, currentConfig.risk.pct);
+               break;
+            case FIELD_ATR_PERIOD:
+               OnATRPeriodChanged(g_prevConfig.market.atrPeriod, currentConfig.market.atrPeriod);
+               break;
+            case FIELD_MAX_POSITIONS:
+               OnMaxPositionsChanged(g_prevConfig.risk.maxPositions, currentConfig.risk.maxPositions);
+               break;
+            // Add more cases as needed...
+            default:
+               Print("Field changed: ", (string)fieldId);
+               break;
+         }
+      }
+      
+      // Update snapshot for next comparison
+      g_prevConfig = currentConfig;
+   }
+   
+   // Alternative: Use ConfigManager's built-in diff tracking
+   // ConfigManager::GetInstance()->GetChanges() returns changed fields and auto-updates snapshot
+   
+   // ... rest of your OnTick logic
+}
+
+// Helper functions for handling specific changes
+void OnRiskPctChanged(double oldValue, double newValue)
+{
+   Print("Risk % updated: ", oldValue, " -> ", newValue);
+   // Recalculate lot sizes only, no need to reload entire strategy
+}
+
+void OnATRPeriodChanged(int oldPeriod, int newPeriod)
+{
+   Print("ATR Period updated: ", oldPeriod, " -> ", newPeriod);
+   // Reinitialize ATR indicator with new period
+}
+
+void OnMaxPositionsChanged(int oldMax, int newMax)
+{
+   Print("Max Positions updated: ", oldMax, " -> ", newMax);
+   // Adjust position management logic
+}
+*/
 
 //+------------------------------------------------------------------+
 //| RecoveryEngine - Mengelola state persistensi untuk satu posisi  |
