@@ -14,6 +14,12 @@
 
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
+#include "12.MarketRegime.mqh"  // For MarketRegimeFilter
+
+//+------------------------------------------------------------------+
+//| Global pointer to MarketRegimeFilter (set in EA)                 |
+//+------------------------------------------------------------------+
+extern MarketRegimeFilter *g_regimeFilter;
 
 //+------------------------------------------------------------------+
 //| Subscribes: SignalGenerated, ConfigReload, EmergencyStop,        |
@@ -352,6 +358,21 @@ public:
          return false;
       }
 
+      // MARKET REGIME CHECK: Block trading in volatile chop or against strong trend
+      if(cfg.use_regime && CheckPointer(g_regimeFilter) != POINTER_INVALID)
+      {
+         if(!g_regimeFilter.IsTradingAllowed(plan.type, cfg.min_trend_strength, cfg.allow_sideways))
+         {
+            if (m_debugMode)
+            {
+               MarketRegimeState state = g_regimeFilter.GetRegime();
+               PrintFormat("[Exec Build] BLOCKED by Market Regime: %s | ADX=%.1f | TrendStrength=%.2f", 
+                           state.GetRegimeName(), state.adx, state.trendStrength);
+            }
+            return false;
+         }
+      }
+
       double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
       if (bid <= 0 || ask <= 0)
@@ -361,8 +382,22 @@ public:
          return false;
       }
 
-      plan.entry = (plan.type == ORDER_TYPE_BUY) ? ask : bid;
+      // REAL-TIME ENTRY CONFIRMATION: Verify price is still near zone
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double currentPrice = (plan.type == ORDER_TYPE_BUY) ? ask : bid;
+      double zoneTolerance = atrPoints * cfg.zone_reuse_atr * point; // Reuse zone tolerance for entry confirmation
+      double expectedZonePrice = (plan.type == ORDER_TYPE_BUY) ? support : resistance;
+      
+      if(MathAbs(currentPrice - expectedZonePrice) > zoneTolerance * 2.0)
+      {
+         if (m_debugMode)
+            PrintFormat("[Exec Build] ABORT: Price moved too far from zone. Current=%.5f, Zone=%.5f, Tolerance=%.5f",
+                        currentPrice, expectedZonePrice, zoneTolerance * 2.0);
+         return false;
+      }
+
+      plan.entry = (plan.type == ORDER_TYPE_BUY) ? ask : bid;
+      // point already declared above at line 380
       double atrPrice = atrPoints * point;
       double slBuffer = atrPoints * cfg.sl_buffer_atr * point;
       double tpBuffer = atrPoints * cfg.tp_buffer_atr * point;

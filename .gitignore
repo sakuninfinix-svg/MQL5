@@ -1,44 +1,71 @@
 ```
-# Compiled and binary files
-*.mq5
+# Compiled and build artifacts
 *.mqh
+*.mq5
 *.ex5
 *.ex4
-*.o
+*.os
+*.h
+*.hpp
+*.cpp
+*.c
 *.obj
+*.o
+*.dll
+*.so
+*.a
+*.lib
+*.exe
 *.out
 
-# Dependencies and build artifacts
-lib/
-libs/
-objects/
-tester/
-history/
-# MetaTrader specific
-*.set
-*.hst
-*.fxt
-*.csv
-*.log
-*.txt
+# Dependencies
+Include/
+Libraries/
+MQL5/Libraries/
+MQL5/Indicators/
+MQL5/Scripts/
+MQL5/Expert Advisors/
 
-# Environment and temporary files
-.env
-.env.local
+# Logs and temp files
+*.log
 *.tmp
-*.temp
+*.swp
 *.bak
+*.~*
 *.backup
 
-# Editors and IDEs
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+Debug/
+Release/
+x64/
+x86/
+build/
+dist/
+bin/
+obj/
 
 # OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
 # Logs and temp files 
  # Compiled and binary files 

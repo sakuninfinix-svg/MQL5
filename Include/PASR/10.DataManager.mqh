@@ -14,6 +14,12 @@
 
 #include "IManager.mqh"
 #include "2.Config.mqh"  // For ConfigSnapshot and CFG global instance
+#include "12.MarketRegime.mqh"  // For MarketRegimeFilter
+
+//+------------------------------------------------------------------+
+//| Global pointer to MarketRegimeFilter (set in EA)                 |
+//+------------------------------------------------------------------+
+extern MarketRegimeFilter *g_regimeFilter;
 
 //+------------------------------------------------------------------+
 //| Interface untuk Dependency Injection                             |

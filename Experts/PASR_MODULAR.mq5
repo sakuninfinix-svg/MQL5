@@ -30,6 +30,7 @@
 EventRecorder      *g_recorder = NULL;  // Defined here, declared extern in EventBus.mqh
 DashboardManager   *dashCtrl   = NULL;
 DataManager        *IManager::s_dataCache = NULL;
+MarketRegimeFilter *g_regimeFilter = &regimeFilter;  // Global pointer for managers to access regime filter
 
 //--- Manager Instances (Stack-allocated for automatic cleanup)
 MarketManager      market;
