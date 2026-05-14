@@ -1,57 +1,57 @@
 ```
-# MT4/MT5 MetaTrader files
+# MQL4/MT4 specific ignores
 *.ex4
 *.ex5
-*.mq4
 *.mqh
+*.mq4
 *.mq5
+*.gsc
+*.gch
+*.tpl
+*.set
+*.hst
+*.fxt
+*.csv
 
-# Compiled files
+# Compiled and build artifacts
 *.pyc
-*.class
+__pycache__/
 *.o
-*.exe
+*.obj
+*.out
 *.dll
 *.so
 *.a
-*.obj
-*.out
 
 # Dependencies
 node_modules/
 venv/
 .venv/
-__pycache__/
-dist/
-build/
-.mypy_cache/
-.pytest_cache/
-target/
-.gradle/
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# System files
-.DS_Store
-Thumbs.db
 .env
 .env.local
-*.env.*
+.env.*
 
 # Logs and temp files
 *.log
 *.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+
+# Build systems
+build/
+dist/
+target/
+.gradle/
 
 # Coverage
 coverage/
 htmlcov/
 .coverage
 
-# Compressed files
+# Compression files
 *.zip
 *.gz
 *.tar
