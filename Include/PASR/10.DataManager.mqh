@@ -13,7 +13,7 @@
 #define __DATA_MANAGER_MQH__
 
 #include "IManager.mqh"
-#include "2.Config.mqh"  // For ConfigSnapshot and CFG global instance
+#include "2.Config.mqh"  // For StrategyConfig and CFG global instance
 #include "12.MarketRegime.mqh"  // For MarketRegimeFilter
 
 //+------------------------------------------------------------------+
@@ -238,7 +238,7 @@ interface IDataProvider
    bool CanOpenTrade(double additionalRiskAmount);
    double CalculateLotSize(string symbol, double riskPct, double slDistancePoints, double qualityMultiplier = 1.0);
    double NormalizeVolume(string symbol, double vol) const;
-   ConfigSnapshot GetConfigCache() const;
+   void GetConfigCache(StrategyConfig &cfg) const;  // Changed: pass by reference
    ENUM_CACHE_STATE GetCacheState() const;  // New: Cache status accessor
    string GetCacheError() const;             // New: Error details
 };
@@ -267,7 +267,7 @@ private:
          return m_mgr.CalculateLotSize(symbol, riskPct, slDistancePoints, qualityMultiplier); 
       }
       virtual double NormalizeVolume(string symbol, double vol) const override { return m_mgr.NormalizeVolume(symbol, vol); }
-      virtual ConfigSnapshot GetConfigCache() const override { return m_mgr.GetConfigCache(); }
+      virtual void GetConfigCache(StrategyConfig &cfg) const override { m_mgr.GetConfigCache(cfg); }
    };
 
    CDataProviderProxy *m_proxy;
@@ -275,8 +275,8 @@ private:
    int m_atrHandle;
    int m_fractalHandle;
 
-   // Centralized Config Cache
-   ConfigSnapshot m_cfgCache;
+   // Centralized Config Cache - using StrategyConfig directly
+   StrategyConfig m_cfgCache;
    bool m_cfgInitialized;
 
    // Cache state tracking
@@ -347,17 +347,20 @@ public:
    // Initialize config cache from global CFG
    void InitConfigCache()
    {
-      m_cfgCache.CopyFrom(CFG);
+      GetConfig().CopyTo(m_cfgCache);
       m_cfgInitialized = true;
    }
 
-   // Get cached config value
-   ConfigSnapshot GetConfigCache() const { return m_cfgCache; }
+   // Get cached config value - copies to output parameter
+   void GetConfigCache(StrategyConfig &cfg) const
+   {
+      cfg = m_cfgCache;
+   }
 
    // Refresh config cache on reload
    void RefreshConfigCache()
    {
-      m_cfgCache.CopyFrom(CFG);
+      GetConfig().CopyTo(m_cfgCache);
    }
 
    virtual bool Init() override

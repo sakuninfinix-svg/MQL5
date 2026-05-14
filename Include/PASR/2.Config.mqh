@@ -789,6 +789,12 @@ struct StrategyConfig
       ai.Validate();
       system.Validate();
    }
+   
+   // Helper method to copy config (for caching purposes)
+   void CopyTo(StrategyConfig &dest) const
+   {
+      dest = m_config;
+   }
 };
 
 //+------------------------------------------------------------------+
@@ -1052,6 +1058,9 @@ const StrategyConfig& GetConfig()
 {
    return ConfigManager::GetInstance()->GetConfig();
 }
+
+// Macro for convenient read-only access to global config
+#define CFG GetConfig()
 
 // Backward compatibility wrapper - deprecated, use ConfigManager::GetInstance()->Reload() instead
 void SetCommonDefaults()
