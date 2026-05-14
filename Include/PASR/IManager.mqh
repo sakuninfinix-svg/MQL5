@@ -2,12 +2,12 @@
 //|                                                   IManager.mqh   |
 //|                                       Copyright 2026, Agsicentre |
 //|            Base Class for Event-Driven PASR EA Modules           |
-//|                         VERSION 2.0 - Enhanced Safety & Metrics  |
+//|                   VERSION 2.01 - Fixed SessionChangeEvent        |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "2.00"
+#property version "2.01"
 #property strict
 
 #ifndef __I_MANAGER_MQH__
@@ -175,6 +175,7 @@ public:
       MarketGateEvent *gateEvt = NULL;
       PauseToggleEvent *pauseEvt = NULL;
       NewsAlertEvent *newsEvt = NULL;
+      SessionChangeEvent *sessEvt = NULL;
       
       try
       {
@@ -280,6 +281,14 @@ public:
             pauseEvt = CAST_EVENT(PauseToggleEvent, e);
             if (CheckPointer(pauseEvt) != POINTER_INVALID)
                OnPauseToggle(pauseEvt);
+            else
+               success = false;
+            break;
+            
+         case EVENT_ID_SESSION_CHANGE:
+            sessEvt = CAST_EVENT(SessionChangeEvent, e);
+            if (CheckPointer(sessEvt) != POINTER_INVALID)
+               OnSessionChange(sessEvt);
             else
                success = false;
             break;
