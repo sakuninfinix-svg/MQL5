@@ -346,6 +346,112 @@ void LogWarning(const string paramName, const string message)
 }
 
 //+------------------------------------------------------------------+
+//| ValidationResult - Struct untuk pelaporan error validasi         |
+//+------------------------------------------------------------------+
+
+enum ENUM_VALIDATION_SEVERITY
+{
+   VALIDATION_INFO,      // Informasi normalisasi
+   VALIDATION_WARNING,   // Warning non-kritis
+   VALIDATION_ERROR,     // Error yang harus diperbaiki
+   VALIDATION_CRITICAL   // Error kritis yang menggagalkan validasi
+};
+
+struct ValidationIssue
+{
+   string field;
+   string message;
+   ENUM_VALIDATION_SEVERITY severity;
+   string defaultValue;
+   
+   ValidationIssue() : severity(VALIDATION_INFO) {}
+   
+   ValidationIssue(const string f, const string msg, 
+                   ENUM_VALIDATION_SEVERITY sev = VALIDATION_WARNING,
+                   const string defVal = "")
+   {
+      field = f;
+      message = msg;
+      severity = sev;
+      defaultValue = defVal;
+   }
+   
+   string ToString() const
+   {
+      string severityStr = "";
+      switch(severity)
+      {
+         case VALIDATION_INFO: severityStr = "INFO"; break;
+         case VALIDATION_WARNING: severityStr = "WARNING"; break;
+         case VALIDATION_ERROR: severityStr = "ERROR"; break;
+         case VALIDATION_CRITICAL: severityStr = "CRITICAL"; break;
+      }
+      return StringFormat("[%s] %s: %s%s", severityStr, field, message, 
+                         (defaultValue != "" ? " (Default: " + defaultValue + ")" : ""));
+   }
+};
+
+struct ValidationResult
+{
+   bool isValid;
+   ValidationIssue issues[];
+   int issueCount;
+   
+   ValidationResult() : isValid(true), issueCount(0) {}
+   
+   void AddIssue(const string field, const string message,
+                 ENUM_VALIDATION_SEVERITY severity = VALIDATION_WARNING,
+                 const string defaultValue = "")
+   {
+      int idx = ArrayResize(issues, ArraySize(issues) + 1);
+      issues[idx] = ValidationIssue(field, message, severity, defaultValue);
+      issueCount++;
+      
+      if(severity >= VALIDATION_ERROR)
+         isValid = false;
+   }
+   
+   void LogIssues() const
+   {
+      if(issueCount == 0) return;
+      
+      Print("=== VALIDATION REPORT ===");
+      for(int i = 0; i < issueCount; i++)
+      {
+         Print(issues[i].ToString());
+      }
+      Print("=========================");
+   }
+   
+   void Clear()
+   {
+      ArrayFree(issues);
+      issueCount = 0;
+      isValid = true;
+   }
+   
+   bool HasErrors() const
+   {
+      for(int i = 0; i < issueCount; i++)
+      {
+         if(issues[i].severity >= VALIDATION_ERROR)
+            return true;
+      }
+      return false;
+   }
+   
+   bool HasWarnings() const
+   {
+      for(int i = 0; i < issueCount; i++)
+      {
+         if(issues[i].severity == VALIDATION_WARNING)
+            return true;
+      }
+      return false;
+   }
+};
+
+//+------------------------------------------------------------------+
 //| DOMAIN-SPECIFIC VALIDATION RULES                                 |
 //| Centralized validation logic per configuration domain            |
 //+------------------------------------------------------------------+
@@ -777,8 +883,68 @@ struct StrategyConfig
    } system;
    
    // Master validation - calls all sub-struct validators
-   void Validate()
+   // Returns ValidationResult with detailed error reporting
+   ValidationResult Validate()
    {
+      ValidationResult result;
+      
+      // Market validation
+      if(market.atrMax < market.atrMin)
+      {
+         result.AddIssue("market.atrMax", 
+                        "must be >= atrMin. Auto-adjusted to atrMin.",
+                        VALIDATION_WARNING,
+                        DoubleToString(market.atrMin, _Digits));
+         market.atrMax = market.atrMin;
+      }
+      
+      // Risk validation - cross-field checks
+      if(risk.autoLot && risk.pct > 10.0)
+      {
+         result.AddIssue("risk.pct",
+                        "AutoLot risk > 10% is very high. Consider reducing.",
+                        VALIDATION_WARNING,
+                        "1.0-5.0 recommended");
+      }
+      
+      // Recovery validation - safety checks
+      if(recovery.use && recovery.maxAttempts > 5)
+      {
+         result.AddIssue("recovery.maxAttempts",
+                        "High recovery attempts may lead to overtrading.",
+                        VALIDATION_WARNING,
+                        "2-3 recommended");
+      }
+      
+      if(recovery.use && recovery.lotMult > 2.0)
+      {
+         result.AddIssue("recovery.lotMult",
+                        "High recovery lot multiplier increases risk significantly.",
+                        VALIDATION_WARNING,
+                        "1.0-1.5 recommended");
+      }
+      
+      // Exit validation - TP/SL consistency
+      if(exit.maxTPDistATR < exit.minTPDistATR)
+      {
+         result.AddIssue("exit.maxTPDistATR",
+                        "must be >= minTPDistATR. Auto-adjusted.",
+                        VALIDATION_ERROR,
+                        DoubleToString(exit.minTPDistATR, 2));
+         exit.maxTPDistATR = exit.minTPDistATR;
+      }
+      
+      // AI validation
+      if(ai.use && ai.trainingWindow < 100)
+      {
+         result.AddIssue("ai.trainingWindow",
+                        "Training window too small for meaningful AI learning.",
+                        VALIDATION_ERROR,
+                        "200+ recommended");
+         ai.trainingWindow = 200;
+      }
+      
+      // Call domain-specific validators (they handle their own logging)
       market.Validate();
       news.Validate();
       risk.Validate();
@@ -788,6 +954,8 @@ struct StrategyConfig
       exit.Validate();
       ai.Validate();
       system.Validate();
+      
+      return result;
    }
 };
 
@@ -827,7 +995,8 @@ public:
    }
    
    // Reload konfigurasi dari input parameters
-   void Reload()
+   // Returns ValidationResult with detailed validation report
+   ValidationResult Reload()
    {
       LoadMarketParams();
       LoadNewsParams();
@@ -839,6 +1008,9 @@ public:
       LoadAIParams();
       LoadSystemParams();
       m_initialized = true;
+      
+      // Run comprehensive validation and return result
+      return m_config.Validate();
    }
    
    //+------------------------------------------------------------------+
@@ -1063,9 +1235,9 @@ const StrategyConfig& GetConfig()
 #define CFG GetConfig()
 
 // Backward compatibility wrapper - deprecated, use ConfigManager::GetInstance()->Reload() instead
-void SetCommonDefaults()
+ValidationResult SetCommonDefaults()
 {
-   ConfigManager::GetInstance()->Reload();
+   return ConfigManager::GetInstance()->Reload();
 }
 
 //+------------------------------------------------------------------+
