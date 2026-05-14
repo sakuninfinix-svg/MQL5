@@ -86,7 +86,7 @@ private:
    // --- Zone Reuse Check ---
    bool IsZoneReuseBlocked(bool isBuy, double zonePrice, double atrPoints)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       MqlRates rates[];
       // FIX: Use closed bar (shift 1) to prevent repainting - only check against confirmed bar time
       if (CopyRates(m_symbol, m_period, 1, 1, rates) <= 0)
@@ -123,7 +123,7 @@ private:
    // --- Pattern Failure Cooldown ---
    bool IsPatternFailureBlocked(double zonePrice, double atrPoints)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       datetime now = TimeCurrent();
       double tol = atrPoints * cfg.zone_reuse_atr * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
 
@@ -152,7 +152,7 @@ private:
 
    void RegisterFailure(double zonePrice)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       int sz = ArraySize(m_failedZones);
       ArrayResize(m_failedZones, sz + 1);
       m_failedZones[sz].price = zonePrice;
@@ -166,13 +166,14 @@ private:
    // --- Signal Cooldown Management ---
    bool IsSignalCooldownActive(double price, double atrPoints)
    {
-      return IsSignalCooldownActiveWithCustomBars(price, atrPoints, m_data.GetConfigCache().signal_cooldown_bars);
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
+      return IsSignalCooldownActiveWithCustomBars(price, atrPoints, cfg.signal_cooldown_bars);
    }
 
    // NEW: Signal Cooldown dengan custom bars untuk dynamic cooldown
    bool IsSignalCooldownActiveWithCustomBars(double price, double atrPoints, int cooldownBars)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       datetime now = TimeCurrent();
 
       for (int i = ArraySize(m_signalCooldowns) - 1; i >= 0; i--)
@@ -191,7 +192,7 @@ private:
 
    void RegisterSignalCooldown(double price)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       int sz = ArraySize(m_signalCooldowns);
       ArrayResize(m_signalCooldowns, sz + 1);
       m_signalCooldowns[sz].price = price;
@@ -215,7 +216,7 @@ private:
    // --- MTF Bias Helper ---
    int GetMTFBias(double price, double htfSupport, double htfResistance, double atrPoints)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       if (!cfg.use_mtf)
          return 0;
 
@@ -301,7 +302,7 @@ private:
    {
       if(!ValidateCandleData(rates, shift)) return false;
       
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       double atrPrice = atrPoints * point;
       
@@ -333,7 +334,7 @@ private:
                             double atrPoints, double dynamicMult, string &reason,
                             const MqlRates &rates[], int zoneStrength = 0)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       double extreme = (dir == 1) ? rates[shift].low : rates[shift].high;
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       double zoneWidth = (atrPoints * dynamicMult) * point;
@@ -354,7 +355,7 @@ private:
    bool PassContextFilter(int shift, double atrPoints, string &reason,
                           const MqlRates &rates[], int dir)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       double o = rates[shift].open, h = rates[shift].high;
       double l = rates[shift].low, c = rates[shift].close;
       double range = h - l;
@@ -410,7 +411,7 @@ private:
                       double atrPoints, int supHtfAlign, int resHtfAlign,
                       int &bias, string &reason)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       bias = GetMTFBias(referencePrice, htfSupport, htfResistance, atrPoints);
 
       if (!cfg.use_mtf)
@@ -448,7 +449,7 @@ private:
                               double patternExtreme, string &reason,
                               const MqlRates &rates[])
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       double entryPrice = rates[shift].close;
       double target = (dir == 1) ? resistance : support;
 
@@ -494,7 +495,7 @@ private:
                          double supBufferMult, double resBufferMult,
                          int supHtfAlign, int resHtfAlign)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       ZeroMemory(decision);
       string reason = "No pattern detected";
 
@@ -642,7 +643,7 @@ private:
                              double supBufferMult, double resBufferMult,
                              int supHtfAlign, int resHtfAlign)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       ZeroMemory(decision);
       string reason = "No recovery pattern detected";
 
@@ -815,7 +816,7 @@ public:
          return;
       if (CheckPointer(m_data) == POINTER_INVALID)
          return;
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       if (!cfg.recovery_use || !m_marketEntryAllowed)
          return;
 

@@ -133,7 +133,7 @@ public:
          return false;
 
       m_data = IManager::GetGlobalDataManager();
-      string prefix = "AI_ml_" + IntegerToString((*m_data).GetConfigCache().magic) + "_" + _Symbol + "_";
+      string prefix = "AI_ml_" + IntegerToString(cfg.magic) + "_" + _Symbol + "_";
       m_datasetFilename = prefix + "data.csv";
       m_ticketMapFilename = prefix + "ticketmap.csv";
       m_outcomeFilename = prefix + "outcomes.csv";
@@ -150,14 +150,14 @@ public:
 
    virtual void OnNewBar(NewBarEvent *e) override
    {
-      if (!(*m_data).GetConfigCache().use_ai)
+      if (!cfg.use_ai)
          return;
-      DecayModel(0.98); // Use static decay or add to ConfigSnapshot
+      DecayModel(0.98); // Use static decay or add to StrategyConfig
    }
 
    virtual void OnHeartbeat(HeartbeatEvent *e) override
    {
-      const ConfigSnapshot cfg = (*m_data).GetConfigCache();
+      StrategyConfig cfg; (*m_data).GetConfigCache(cfg);
       if (!cfg.use_ai)
          return;
       if (TimeCurrent() - m_lastHeartbeat < 5)
@@ -168,7 +168,7 @@ public:
 
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
-      const ConfigSnapshot cfg = (*m_data).GetConfigCache();
+      StrategyConfig cfg; (*m_data).GetConfigCache(cfg);
       if (!cfg.use_ai || !e.signal.valid)
          return;
 
@@ -196,7 +196,7 @@ public:
 
    virtual void OnOrderExecution(OrderExecutionEvent *e) override
    {
-      if (!(*m_data).GetConfigCache().use_ai)
+      if (!cfg.use_ai)
          return;
       if (e.success)
       {
@@ -213,7 +213,7 @@ public:
 
    virtual void OnPositionUpdate(PositionUpdateEvent *e) override
    {
-      if (!(*m_data).GetConfigCache().use_ai)
+      if (!cfg.use_ai)
          return;
       if (e.isClosing)
       {
@@ -271,7 +271,7 @@ private:
       score += m_model.slWeight * NormalizeSLFeature(signal.slMultiplier);
       score += m_model.mtConfluenceWeight * NormalizeMultiTimeframeConfluence(signal);
       if (signal.patternType != PATTERN_NONE)
-         score += (*m_data).GetConfigCache().ai_pattern_bonus * 0.8;
+         score += cfg.ai_pattern_bonus * 0.8;
       return score;
    }
 
@@ -284,7 +284,7 @@ private:
       score += m_model.momentumWeight * NormalizeZoneFeature(signal.zonePrice, support, resistance);
       score += m_model.timeOfDayWeight * NormalizeTimeOfDayFeature();
       if (signal.patternType != PATTERN_NONE)
-         score += (*m_data).GetConfigCache().ai_pattern_bonus * 1.2;
+         score += cfg.ai_pattern_bonus * 1.2;
       return score;
    }
 
@@ -297,7 +297,7 @@ private:
       score += m_model.lossStreakWeight * NormalizeLossStreak();
       score += m_model.volNoiseWeight * NormalizeNoiseFeature();
       if (signal.patternType != PATTERN_NONE)
-         score += (*m_data).GetConfigCache().ai_pattern_bonus * 1.0;
+         score += cfg.ai_pattern_bonus * 1.0;
       return score;
    }
 
@@ -570,7 +570,7 @@ private:
 
    string ModelGVPrefix() const
    {
-      return "PASR_AI_" + IntegerToString((*m_data).GetConfigCache().magic) + "_" + _Symbol + "_";
+      return "PASR_AI_" + IntegerToString(cfg.magic) + "_" + _Symbol + "_";
    }
 
    void LoadModelState()
@@ -853,7 +853,7 @@ private:
          return;
       }
 
-      string exportFilename = "AI_ml_export_" + IntegerToString((*m_data).GetConfigCache().magic) + "_" + _Symbol + "_full.csv";
+      string exportFilename = "AI_ml_export_" + IntegerToString(cfg.magic) + "_" + _Symbol + "_full.csv";
       int handle = FileOpen(exportFilename, FILE_WRITE | FILE_CSV | FILE_ANSI);
       if (handle == INVALID_HANDLE)
       {

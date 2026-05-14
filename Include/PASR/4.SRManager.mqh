@@ -37,7 +37,7 @@ private:
    double CalculateZoneScore(double zonePrice, bool isSupport, int touchCount, 
                              double atrPoints, int htfAlignment, bool isBroken)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       double score = 50.0; // Base score
       
       // Touch count bonus (more touches = stronger zone, but diminishing returns)
@@ -160,7 +160,7 @@ public:
 
    virtual void OnNewBar(NewBarEvent *e) override
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       datetime times[];
       if (CopyTime(m_symbol, m_period, 0, 1, times) <= 0)
          return;
@@ -230,7 +230,7 @@ public:
    }
    void CheckZoneStatus(double atrPoints)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       if (m_targetSupport <= 0 || m_targetResistance <= 0)
          return;
 
@@ -324,7 +324,7 @@ public:
 
    void UpdateHTFZones()
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       if (!cfg.use_mtf) return;
 
       double htfHighs[], htfLows[];
@@ -341,7 +341,7 @@ public:
 
    bool IsTradableRange(double atrPoints)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       double spread = GetGlobalSpread();
       if(spread < 0) spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD); // Fallback
 
