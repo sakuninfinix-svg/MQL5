@@ -95,7 +95,9 @@ private:
       ctx.currentTick = tick;
 
       ArraySetAsSeries(ctx.rates, true);
-      if (CopyRates(_Symbol, _Period, 0, 3, ctx.rates) < 3)
+      // FIX: Copy from shift 1 to get CLOSED bars only (shift 0 is forming bar and will repaint)
+      // Copy 3 closed bars: [0]=last closed, [1]=2nd last closed, [2]=3rd last closed
+      if (CopyRates(_Symbol, _Period, 1, 3, ctx.rates) < 3)
       {
          if (m_debugMode)
             Log("Failed to fetch candles for fakeout detection");
@@ -103,6 +105,7 @@ private:
       }
 
       FakeoutResult signal;
+      // Note: ctx.rates[0] now refers to the last CLOSED bar (not forming bar)
       if (!PatternManager::DetectFakeout(ctx, signal))
       {
          return false;

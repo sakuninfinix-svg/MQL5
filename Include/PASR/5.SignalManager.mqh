@@ -88,7 +88,8 @@ private:
    {
       const ConfigSnapshot cfg = m_data.GetConfigCache();
       MqlRates rates[];
-      if (CopyRates(m_symbol, m_period, 0, 1, rates) <= 0)
+      // FIX: Use closed bar (shift 1) to prevent repainting - only check against confirmed bar time
+      if (CopyRates(m_symbol, m_period, 1, 1, rates) <= 0)
          return false;
       datetime currBar = rates[0].time;
 
@@ -102,7 +103,8 @@ private:
    void RegisterZoneUse(bool isBuy, double zonePrice)
    {
       MqlRates rates[];
-      if (CopyRates(m_symbol, m_period, 0, 1, rates) <= 0)
+      // FIX: Use closed bar (shift 1) to prevent repainting - register zone on confirmed bar
+      if (CopyRates(m_symbol, m_period, 1, 1, rates) <= 0)
          return;
       datetime currBar = rates[0].time;
 

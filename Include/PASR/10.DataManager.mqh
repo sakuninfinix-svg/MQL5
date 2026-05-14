@@ -177,7 +177,8 @@ public:
    void UpdateIndicators()
    {
       MqlRates rates[];
-      if (CopyRates(m_symbol, m_period, 0, 1, rates) <= 0)
+      // FIX: Use closed bar (shift 1) to prevent repainting - update indicators on confirmed bar data
+      if (CopyRates(m_symbol, m_period, 1, 1, rates) <= 0)
          return;
       datetime currentBar = rates[0].time;
       if (m_cache.barTime == currentBar && !m_cache.dirty)
