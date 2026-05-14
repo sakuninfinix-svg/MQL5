@@ -45,7 +45,8 @@ private:
 
    string MakePendingPrefix(ulong tsID) const
    {
-      return "PASR_PEND_" + IntegerToString(m_data.GetConfigCache().magic) + "_" + m_symbol + "_" + IntegerToString(tsID) + "_";
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
+      return "PASR_PEND_" + IntegerToString(cfg.magic) + "_" + m_symbol + "_" + IntegerToString(tsID) + "_";
    }
 
    void SavePendingState(const OrderPlan &plan, double zonePrice, double slMult, ulong tsID) const
@@ -64,7 +65,7 @@ private:
 
    void ScavengePendingGVs()
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       string pattern = "PASR_PEND_" + IntegerToString(cfg.magic) + "_" + m_symbol + "_";
       int total = GlobalVariablesTotal();
 
@@ -120,7 +121,7 @@ private:
    bool ValidateOrderLevels(ENUM_ORDER_TYPE type, double price, double sl, double tp,
                             double volume, string &reason, double atrPoints) const
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       double stopLevelPts = (double)SymbolInfoInteger(m_symbol, SYMBOL_TRADE_STOPS_LEVEL);
       double stopLevel = stopLevelPts * point;
@@ -225,7 +226,7 @@ public:
    {
       if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
          return;
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       if (GetTickCount64() - m_lastOrderTime < (ulong)cfg.order_throttle_ms)
       {
          if (m_debugMode)
@@ -284,7 +285,7 @@ public:
    {
       if (CheckPointer(e) == POINTER_INVALID || !m_initialized)
          return;
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       if (GetTickCount64() - m_lastOrderTime < (ulong)cfg.order_throttle_ms)
       {
          if (m_debugMode)
@@ -326,7 +327,8 @@ public:
    {
       if (m_debugMode)
          Print("[Execution] EMERGENCY STOP: Halting new orders.");
-      GlobalVariablesDeleteAll("PASR_PEND_" + IntegerToString(m_data.GetConfigCache().magic) + "_" + m_symbol + "_");
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
+      GlobalVariablesDeleteAll("PASR_PEND_" + IntegerToString(cfg.magic) + "_" + m_symbol + "_");
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -346,7 +348,7 @@ public:
    bool BuildOrderPlan(const SignalDecision &decision, OrderPlan &plan,
                        double support, double resistance, double atrPoints, ulong originalTicket = 0, double lotMultiplier = 1.0)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       ZeroMemory(plan);
       plan.type = decision.orderType;
       plan.atrUsed = atrPoints;
@@ -466,7 +468,7 @@ public:
 
    ulong Open(const OrderPlan &plan, double zonePrice, double slMult)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       if (plan.lot <= 0 || plan.entry <= 0 || plan.atrUsed <= 0)
       {
          if (m_debugMode)

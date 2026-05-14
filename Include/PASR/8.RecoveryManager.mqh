@@ -46,7 +46,7 @@ private:
 
    void ClearEngineGVs(ulong ticket)
    {
-      string prefix = "PASR_" + IntegerToString(m_data.GetConfigCache().magic) + "_" + IntegerToString(ticket) + "_";
+      string prefix = "PASR_" + IntegerToString(cfg.magic) + "_" + IntegerToString(ticket) + "_";
       GlobalVariablesDeleteAll(prefix);
    }
 
@@ -84,7 +84,7 @@ private:
    {
       if (CheckPointer(r) == POINTER_INVALID || !r.active)
          return false;
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
 
       PatternManager::FakeoutContext ctx;
       ctx.originalTicket = r.mainTicket;
@@ -183,7 +183,7 @@ private:
 
    void ProcessTrailingAndPartial(RecoveryEngine *r, const MqlTick &tick, double atrvalue)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       if (CheckPointer(r) == POINTER_INVALID || !r.active) return;
       if (!PositionSelectByTicket(r.mainTicket))
       {
@@ -361,7 +361,7 @@ private:
    {
       if (CheckPointer(r) == POINTER_INVALID || r.state != TRADE_STATE_RECOVERY)
          return;
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
 
       // Check if recovery cooldown is active
       if (TimeCurrent() < r.recoveryCooldownExpiry)
@@ -390,7 +390,7 @@ private:
 
    void VerifyAndCleanupEngines()
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       for (int i = ArraySize(engines) - 1; i >= 0; i--)
       {
          RecoveryEngine *r = engines[i];
@@ -503,7 +503,7 @@ public:
 
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
-      if (CheckPointer(e) == POINTER_INVALID || !m_data.GetConfigCache().exit_on_opposite)
+      if (CheckPointer(e) == POINTER_INVALID || !cfg.exit_on_opposite)
          return;
       CloseOppositePositions(e.signal.orderType);
    }
@@ -559,7 +559,7 @@ public:
    {
       if (!IManager::Init())
          return false;
-      m_trade.SetExpertMagicNumber(m_data.GetConfigCache().magic);
+      m_trade.SetExpertMagicNumber(cfg.magic);
       return true;
    }
 
@@ -572,7 +572,7 @@ public:
    void Register(ulong ticket, ENUM_ORDER_TYPE type, double entry, double tp,
                  double brokerSL, double atr, double lot, double zonePrice, double slMult = 1.0)
    {
-      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       double originalEntry = entry;
       double originalSL = brokerSL;
       double originalTP = tp;
