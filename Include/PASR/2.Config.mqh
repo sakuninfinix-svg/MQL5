@@ -560,6 +560,87 @@ struct ValidationResult
 };
 
 //+------------------------------------------------------------------+
+//| INSTRUMENT CONTEXT - Market-specific data for validation         |
+//+------------------------------------------------------------------+
+/**
+ * Context-aware validation requires instrument-specific data
+ * This struct captures key market characteristics for dynamic validation
+ */
+struct InstrumentContext
+{
+   string symbol;
+   double pointValue;
+   int    digits;
+   double averageSpread;    // Spread dalam poin
+   double atr14;            // ATR 14-period untuk referensi volatilitas
+   double tickSize;
+   double tickValue;
+   double contractSize;
+   
+   /**
+    * Constructor - otomatis mengisi data dari simbol aktif
+    * @param sym Nama simbol (kosongkan untuk simbol aktif)
+    */
+   InstrumentContext(const string sym = "")
+   {
+      string targetSymbol = (sym == "" || sym == NULL) ? _Symbol : sym;
+      symbol = targetSymbol;
+      
+      // Ambil properti instrumen
+      digits = (int)SymbolInfoInteger(targetSymbol, SYMBOL_DIGITS);
+      pointValue = SymbolInfoDouble(targetSymbol, SYMBOL_POINT);
+      tickSize = SymbolInfoDouble(targetSymbol, SYMBOL_TRADE_TICK_SIZE);
+      tickValue = SymbolInfoDouble(targetSymbol, SYMBOL_TRADE_TICK_VALUE);
+      contractSize = SymbolInfoDouble(targetSymbol, SYMBOL_TRADE_CONTRACT_SIZE);
+      
+      // Hitung average spread (dalam poin)
+      long spreadPoints = SymbolInfoInteger(targetSymbol, SYMBOL_SPREAD);
+      averageSpread = (double)spreadPoints * pointValue;
+      
+      // Hitung ATR14 sebagai referensi volatilitas
+      atr14 = CalculateATR14(targetSymbol);
+   }
+   
+   /**
+    * Helper untuk menghitung ATR14 dari simbol
+    */
+   double CalculateATR14(const string sym) const
+   {
+      int handle = iATR(sym, PERIOD_CURRENT, 14);
+      if(handle == INVALID_HANDLE)
+         return 0.0;
+      
+      double atrBuffer[];
+      ArraySetAsSeries(atrBuffer, true);
+      
+      if(CopyBuffer(handle, 0, 0, 1, atrBuffer) > 0)
+      {
+         IndicatorRelease(handle);
+         return atrBuffer[0];
+      }
+      
+      IndicatorRelease(handle);
+      return 0.0;
+   }
+   
+   /**
+    * Update context dengan data terbaru (untuk refresh berkala)
+    */
+   void Refresh()
+   {
+      *this = InstrumentContext(symbol);
+   }
+   
+   /**
+    * Validasi apakah context sudah terisi dengan benar
+    */
+   bool IsValid() const
+   {
+      return (symbol != "" && digits > 0 && pointValue > 0);
+   }
+};
+
+//+------------------------------------------------------------------+
 //| DOMAIN-SPECIFIC VALIDATION RULES                                 |
 //| Centralized validation logic per configuration domain            |
 //+------------------------------------------------------------------+
@@ -1067,6 +1148,151 @@ struct StrategyConfig
    }
    
    //+------------------------------------------------------------------+
+   //| Context-Aware Validation - Instrument-specific checks            |
+   //+------------------------------------------------------------------+
+   /**
+    * Validate configuration against specific instrument context
+    * Performs dynamic checks based on spread, volatility, and tick properties
+    * @param ctx InstrumentContext containing market data
+    * @return ValidationResult with context-specific issues
+    */
+   ValidationResult Validate(const InstrumentContext &ctx)
+   {
+      ValidationResult result = Validate(); // Start dengan validasi statis
+      
+      if(!ctx.IsValid())
+      {
+         result.AddIssue("InstrumentContext",
+                        "Invalid instrument context. Cannot perform context-aware validation.",
+                        VALIDATION_ERROR,
+                        ctx.symbol);
+         return result;
+      }
+      
+      // --- CONTEXT-AWARE CHECKS ---
+      
+      // 1. SL vs Spread: Pastikan SL tidak terlalu dekat dengan spread
+      double minSLPoints = exit.slBufferATR * GetATRValue();
+      double minRecommendedSL = ctx.averageSpread * 1.5; // SL minimal 1.5x spread
+      
+      if(minSLPoints < minRecommendedSL && minSLPoints > 0)
+      {
+         string msg = StringFormat(
+            "SL Distance (%.1f pts) terlalu kecil untuk spread %s (%.1f pts). " +
+            "Risiko tergerus spread tinggi. Minimal disarankan: %.1f pts.",
+            minSLPoints, ctx.symbol, ctx.averageSpread, minRecommendedSL
+         );
+         
+         result.AddIssue("exit.slBufferATR", msg, VALIDATION_ERROR, 
+                        StringFormat("%.2f ATR", minRecommendedSL / ctx.atr14));
+      }
+      
+      // 2. Trailing Points vs Tick Size: Pastikan trailing tidak lebih kecil dari tick
+      if(exit.useTrailing && exit.trailingBufferATR > 0)
+      {
+         double trailingPoints = exit.trailingBufferATR * GetATRValue();
+         if(trailingPoints < ctx.tickSize * 2)
+         {
+            string msg = StringFormat(
+               "Trailing buffer (%.1f pts) terlalu kecil untuk %s (tick size: %.1f pts). " +
+               "Trailing akan terlalu sering trigger. Minimal: %.1f pts",
+               trailingPoints, ctx.symbol, ctx.tickSize, ctx.tickSize * 2
+            );
+            result.AddIssue("exit.trailingBufferATR", msg, VALIDATION_WARNING,
+                           StringFormat("%.2f ATR", (ctx.tickSize * 2) / GetATRValue()));
+         }
+      }
+      
+      // 3. ATR Period vs Volatilitas: Cek relevansi ATR period dengan volatilitas saat ini
+      if(ctx.atr14 > 0 && market.atrPeriod > 50)
+      {
+         // ATR period terlalu besar untuk instrumen dengan volatilitas tinggi
+         double volatilityRatio = ctx.atr14 / (ctx.pointValue * 100);
+         if(volatilityRatio > 0.5) // Volatilitas tinggi
+         {
+            result.AddIssue("market.atrPeriod",
+                           StringFormat(
+                              "ATR Period (%d) mungkin terlalu lambat untuk %s dengan volatilitas tinggi. " +
+                              "Pertimbangkan nilai lebih kecil (10-20) untuk respons lebih cepat.",
+                              market.atrPeriod, ctx.symbol
+                           ),
+                           VALIDATION_WARNING,
+                           "10-20 untuk high volatility");
+         }
+      }
+      
+      // 4. Point Value Precision: Cek konsistensi digits dengan parameter
+      if(ctx.digits == 3 || ctx.digits == 5) // JPY pairs atau logam
+      {
+         if(sr.touchBufferATR < 0.5)
+         {
+            result.AddIssue("sr.touchBufferATR",
+                           StringFormat(
+                              "SR Touch Buffer terlalu kecil untuk %s (%d digits). " +
+                              "Dengan presisi ini, buffer < 0.5 ATR mungkin menyebabkan false touch.",
+                              ctx.symbol, ctx.digits
+                           ),
+                           VALIDATION_WARNING,
+                           "0.5-1.0 ATR recommended");
+         }
+      }
+      
+      // 5. Max Spread Filter vs Average Spread
+      if(market.maxSpread > 0 && market.maxSpread < ctx.averageSpread * 1.2)
+      {
+         result.AddIssue("market.maxSpread",
+                        StringFormat(
+                           "Max Spread (%.1f pts) terlalu dekat dengan average spread %s (%.1f pts). " +
+                           "Trading akan sering terblokir. Disarankan minimal %.1f pts",
+                           market.maxSpread, ctx.symbol, ctx.averageSpread, ctx.averageSpread * 2.0
+                        ),
+                        VALIDATION_WARNING,
+                        StringFormat("%.1f pts", ctx.averageSpread * 2.0));
+      }
+      
+      // 6. Recovery Zone Tolerance vs ATR
+      if(recovery.use && recovery.zoneToleranceATR > 0)
+      {
+         double zoneTolerancePts = recovery.zoneToleranceATR * GetATRValue();
+         if(zoneTolerancePts < ctx.averageSpread * 3)
+         {
+            result.AddIssue("recovery.zoneToleranceATR",
+                           StringFormat(
+                              "Recovery zone tolerance (%.1f pts) terlalu ketat untuk %s. " +
+                              "Dengan spread %.1f pts, re-entry mungkin sulit terpicu. Minimal: %.1f pts",
+                              zoneTolerancePts, ctx.symbol, ctx.averageSpread, ctx.averageSpread * 3
+                           ),
+                           VALIDATION_WARNING,
+                           StringFormat("%.2f ATR", (ctx.averageSpread * 3) / GetATRValue()));
+         }
+      }
+      
+      return result;
+   }
+   
+   /**
+    * Helper untuk mendapatkan nilai ATR saat ini (digunakan dalam validasi kontekstual)
+    */
+   double GetATRValue() const
+   {
+      int handle = iATR(_Symbol, PERIOD_CURRENT, market.atrPeriod);
+      if(handle == INVALID_HANDLE)
+         return 0.0;
+      
+      double atrBuffer[];
+      ArraySetAsSeries(atrBuffer, true);
+      
+      if(CopyBuffer(handle, 0, 0, 1, atrBuffer) > 0)
+      {
+         IndicatorRelease(handle);
+         return atrBuffer[0];
+      }
+      
+      IndicatorRelease(handle);
+      return 0.0;
+   }
+   
+   //+------------------------------------------------------------------+
    //| Config Diffing Methods - Detect configuration changes            |
    //+------------------------------------------------------------------+
    
@@ -1387,10 +1613,12 @@ private:
    static ConfigManager *m_instance;
    StrategyConfig m_config;
    StrategyConfig m_lastKnownConfig;  // Snapshot untuk deteksi perubahan
+   InstrumentContext m_instrumentCtx; // Context instrumen saat ini
+   string m_lastSymbol;               // Track simbol untuk deteksi perubahan
    bool m_initialized;
    
    // Constructor privat untuk singleton
-   ConfigManager() : m_initialized(false) {}
+   ConfigManager() : m_initialized(false), m_lastSymbol("") {}
    
 public:
    // Mendapatkan instance singleton
@@ -1403,6 +1631,9 @@ public:
    
    // Getter untuk membaca konfigurasi (const reference, read-only)
    const StrategyConfig& GetConfig() const { return m_config; }
+   
+   // Getter untuk instrument context
+   const InstrumentContext& GetInstrumentContext() const { return m_instrumentCtx; }
    
    // Check apakah sudah diinisialisasi
    bool IsInitialized() const { return m_initialized; }
@@ -1465,6 +1696,7 @@ public:
    // Reload konfigurasi dari input parameters
    // Returns ValidationResult with detailed validation report
    // Automatically updates m_lastKnownConfig on first init
+   // Performs context-aware validation if symbol changes
    ValidationResult Reload()
    {
       LoadMarketParams();
@@ -1476,10 +1708,47 @@ public:
       LoadExitParams();
       LoadAIParams();
       LoadSystemParams();
+      
+      // Refresh instrument context jika simbol berubah
+      bool symbolChanged = (_Symbol != m_lastSymbol);
+      if(symbolChanged || !m_instrumentCtx.IsValid())
+      {
+         m_instrumentCtx.Refresh();
+         m_lastSymbol = _Symbol;
+         
+         PrintFormat("[ConfigManager] Symbol changed to %s. Refreshed instrument context.", _Symbol);
+         PrintFormat("  Spread: %.1f pts, ATR14: %.5f, Tick Size: %.5f", 
+                    m_instrumentCtx.averageSpread, m_instrumentCtx.atr14, m_instrumentCtx.tickSize);
+      }
+      
       m_initialized = true;
       
-      // Run comprehensive validation and return result
-      ValidationResult result = m_config.Validate();
+      // Run comprehensive validation
+      ValidationResult result;
+      
+      if(symbolChanged || !m_lastKnownConfig.market.atrPeriod > 0)
+      {
+         // Gunakan validasi kontekstual jika simbol berubah atau pertama kali load
+         result = m_config.Validate(m_instrumentCtx);
+         
+         if(result.HasErrors())
+         {
+            PrintFormat("[ConfigManager] CRITICAL: Context-aware validation failed for %s", _Symbol);
+            result.LogIssues();
+            return result;
+         }
+         
+         if(result.HasWarnings())
+         {
+            PrintFormat("[ConfigManager] Warnings detected for %s configuration:", _Symbol);
+            result.LogIssues();
+         }
+      }
+      else
+      {
+         // Validasi standar (tanpa context) untuk reload rutin
+         result = m_config.Validate();
+      }
       
       // Initialize last known config on first successful reload
       if(m_lastKnownConfig.market.atrPeriod == 0)  // Simple check for uninitialized state
@@ -1982,5 +2251,91 @@ public:
 
    RecoveryEngine() { Reset(); }
 };
+
+//+------------------------------------------------------------------+
+//| CONTOH PENGGUNAAN CONTEXT-AWARE VALIDATION DI EA                 |
+//+------------------------------------------------------------------+
+/*
+// Di file EA utama (.mq5):
+
+#include <PASR/2.Config.mqh>
+
+ConfigManager* g_configMgr = NULL;
+
+int OnInit()
+{
+   g_configMgr = ConfigManager::GetInstance();
+   
+   // Load dan validasi konfigurasi dengan context-aware validation
+   ValidationResult result = g_configMgr->Reload();
+   
+   if(result.HasErrors())
+   {
+      Print("CRITICAL: Configuration validation failed. EA cannot start.");
+      result.LogIssues();
+      return(INIT_FAILED);
+   }
+   
+   if(result.HasWarnings())
+   {
+      Print("WARNING: Configuration has warnings. Review and adjust parameters.");
+      result.LogIssues();
+      // Lanjutkan, tapi user harus aware
+   }
+   
+   return(INIT_SUCCEEDED);
+}
+
+void OnTick()
+{
+   // Cek apakah ada perubahan konfigurasi (misal: user mengubah input saat running)
+   ArrayInt changes = g_configMgr->GetChanges();
+   if(ArraySize(changes) > 0)
+   {
+      PrintFormat("Config changed: %d fields updated", ArraySize(changes));
+      
+      // Handle perubahan spesifik
+      for(int i = 0; i < ArraySize(changes); i++)
+      {
+         ENUM_CONFIG_FIELD_ID fieldId = (ENUM_CONFIG_FIELD_ID)changes[i];
+         
+         if(fieldId == FIELD_RISK_PCT)
+         {
+            // Recalculate lot size saja, tidak perlu reload seluruh pattern
+            RecalculateLotSizes();
+         }
+         else if(fieldId == FIELD_EXIT_TRAILING_ENABLED || fieldId == FIELD_EXIT_TRAILING_POINTS)
+         {
+            // Update trailing stops untuk posisi yang ada
+            UpdateTrailingStops();
+         }
+      }
+   }
+   
+   // Dapatkan instrument context untuk keputusan trading
+   const InstrumentContext& ctx = g_configMgr->GetInstrumentContext();
+   
+   // Contoh: Skip trading jika spread terlalu tinggi relatif terhadap rata-rata
+   long currentSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   double currentSpreadPts = currentSpread * ctx.pointValue;
+   
+   if(currentSpreadPts > ctx.averageSpread * 2.5)
+   {
+      PrintFormat("Spread spike detected (%.1f pts vs avg %.1f pts). Skipping entry.", 
+                 currentSpreadPts, ctx.averageSpread);
+      return;
+   }
+   
+   // Lanjutkan dengan logika trading normal...
+}
+
+// Refresh context secara berkala (misal: setiap hari atau saat symbol berubah)
+void OnTrade()
+{
+   // Jika user mengganti simbol chart, context akan otomatis refresh di Reload()
+   // Tapi bisa juga manual refresh jika diperlukan
+   g_configMgr->GetInstrumentContext().Refresh();
+}
+*/
 
 #endif // __CONFIG_MQH__

@@ -1,27 +1,14 @@
 ```
-# MQL4/MT4 specific ignores
-*.ex4
-*.ex5
-*.mqh
-*.mq4
-*.mq5
-*.gsc
-*.gch
-*.tpl
-*.set
-*.hst
-*.fxt
-*.csv
-
 # Compiled and build artifacts
-*.pyc
-__pycache__/
 *.o
 *.obj
 *.out
 *.dll
 *.so
 *.a
+*.class
+*.pyc
+__pycache__/
 
 # Dependencies
 node_modules/
@@ -29,29 +16,55 @@ venv/
 .venv/
 .env
 .env.local
-.env.*
+*.env.*
 
-# Logs and temp files
-*.log
-*.tmp
-*.swp
+# Build directories
+dist/
+build/
+target/
+*.exe
 
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Build systems
-build/
-dist/
-target/
-.gradle/
+# Logs and temp files
+*.log
+*.tmp
+
+# System files
+.DS_Store
+Thumbs.db
 
 # Coverage
 coverage/
 htmlcov/
 .coverage
 
-# Compression files
+# Python specific
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Java specific
+*.jar
+*.war
+*.ear
+.gradle/
+
+# C/C++ specific
+*.a
+*.dylib
+*.so
+
+# Web specific
+*.min.js
+*.min.css
+
+# Archives
 *.zip
 *.gz
 *.tar
