@@ -424,6 +424,11 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   // Process deferred events first (if enabled)
+   EventBus *bus = EventBus::Instance();
+   if(CheckPointer(bus) != POINTER_INVALID)
+      bus.ProcessDeferredEvents();
+   
    // Dispatch heartbeat for periodic tasks (UI update, health checks, etc)
    DispatchEvent(new HeartbeatEvent(2));
 }
