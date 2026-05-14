@@ -131,6 +131,12 @@ public:
    void SetDataManager(DataManager *manager) { m_data = manager; }
    DataManager *GetDataManager() const { return m_data; }
 
+   // Override GetHandlerName for better debug logging
+   virtual string GetHandlerName() const override
+   {
+      return m_name;
+   }
+
    virtual void RefreshConfigCache()
    {
       m_debugMode = CFG.system.debug;

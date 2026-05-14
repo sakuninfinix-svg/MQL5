@@ -457,7 +457,7 @@ void OnTick()
    //--- Update Market Regime on every tick (lightweight check)
    if(CFG.market.useRegime)
    {
-      regimeFilter.UpdateRegime(eaCfg.symbolName, eaCfg.timeframe);
+      regimeFilter.Update();  // Updated: Use correct method name from MarketRegime v2.0
    }
 
    //--- Check for new bar using CopyTime (MQL5 Best Practice)

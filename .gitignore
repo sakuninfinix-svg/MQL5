@@ -1,21 +1,42 @@
 ```
-# Compiled and binary files
+# Compiled files
 *.mq5
-*.ex5
 *.mq4
+*.ex5
 *.ex4
+
+# Build artifacts
+*.dll
+*.so
+*.dylib
+*.exe
+
+# Dependencies
+lib/
+libs/
 
 # Logs and temp files
 *.log
 *.tmp
-*.swp
+*.temp
 
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # Environment
 .env
 .env.local
 *.env.*
+
+# Coverage and testing
+coverage/
+htmlcov/
+.coverage
+
+# OS files
+.DS_Store
+Thumbs.db
 ```
