@@ -566,8 +566,11 @@ struct ConfigSnapshot
    int recovery_timeout_bars;
    double recovery_hard_stop_pct;
    
-   // Exit
+   // Execution & Slippage
    int order_throttle_ms;
+   int max_slippage_points;  // NEW: Maximum allowed slippage in points
+   
+   // Exit
    bool use_trailing;
    bool use_partial_close;
    bool exit_on_opposite;
@@ -709,8 +712,11 @@ struct ConfigSnapshot
       recovery_timeout_bars = cfg.recovery.recoveryTimeoutBars;
       recovery_hard_stop_pct = cfg.recovery.hardStopLossPct;
       
-      // Exit
+      // Execution & Slippage
       order_throttle_ms = cfg.system.orderThrottleMs;
+      max_slippage_points = cfg.execution.maxSlippagePoints;  // NEW
+      
+      // Exit
       use_trailing = cfg.exit.useTrailing;
       use_partial_close = cfg.exit.usePartial;
       exit_on_opposite = cfg.exit.exitOnOpposite;
@@ -844,8 +850,11 @@ struct ConfigSnapshot
       cfg.recovery.recoveryTimeoutBars = recovery_timeout_bars;
       cfg.recovery.hardStopLossPct = recovery_hard_stop_pct;
       
-      // Exit
+      // Execution & Slippage
       cfg.system.orderThrottleMs = order_throttle_ms;
+      cfg.execution.maxSlippagePoints = max_slippage_points;  // NEW
+      
+      // Exit
       cfg.exit.useTrailing = use_trailing;
       cfg.exit.usePartial = use_partial_close;
       cfg.exit.exitOnOpposite = exit_on_opposite;

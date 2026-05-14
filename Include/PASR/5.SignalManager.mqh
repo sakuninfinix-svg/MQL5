@@ -234,11 +234,13 @@ private:
    //| PRIVATE: Signal Detection Logic (Core Business)                 |
    //+------------------------------------------------------------------+
 private:
-   // === DATA VALIDATION - FIX: Prevent outlier/stale data ===
+   // === DATA VALIDATION - FIX: Prevent look-ahead bias and outlier/stale data ===
    bool ValidateCandleData(const MqlRates &rates[], int shift)
    {
       if(shift >= ArraySize(rates) || shift < 0) return false;
       
+      // LOOK-AHEAD BIAS FIX: Ensure we only use confirmed closed bars
+      // Shift 0 in our array = last CLOSED bar (already shifted by 1 in FetchCandleBatch)
       double currentRange = rates[shift].high - rates[shift].low;
       double prevRange = (shift + 1 < ArraySize(rates)) ? rates[shift + 1].high - rates[shift + 1].low : currentRange;
       
@@ -261,6 +263,14 @@ private:
          return false;
       }
       
+      // Volume validation (if available)
+      if(rates[shift].tick_volume <= 0)
+      {
+         if(m_debugMode)
+            PrintFormat("[SignalManager] Zero volume at shift %d - possible data gap", shift);
+         // Don't reject - some brokers have zero volume on historical data
+      }
+      
       // Gap detection: Large gap from previous close (risky but not rejected)
       if(shift + 1 < ArraySize(rates))
       {
@@ -272,6 +282,46 @@ private:
                           shift, gap, gap / prevRange);
             // Don't reject - gaps are valid market behavior, just log for awareness
          }
+      }
+      
+      // DOJI detection: Very small body relative to range (indecision candle)
+      double body = MathAbs(rates[shift].close - rates[shift].open);
+      if(currentRange > 0 && (body / currentRange) < 0.1)
+      {
+         if(m_debugMode)
+            PrintFormat("[SignalManager] Doji candle at shift %d - indecision, lower confidence", shift);
+         // Don't reject, but could be used for signal scoring
+      }
+      
+      return true;
+   }
+   
+   // === ENHANCED DATA VALIDATION with ATR normalization ===
+   bool ValidateCandleDataWithATR(const MqlRates &rates[], int shift, double atrPoints)
+   {
+      if(!ValidateCandleData(rates, shift)) return false;
+      
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double atrPrice = atrPoints * point;
+      
+      // Normalize range by ATR to detect abnormal candles
+      double rangeInATR = (rates[shift].high - rates[shift].low) / atrPrice;
+      
+      // Reject candles that are too large (> 3x ATR) - potential spike/anomaly
+      if(rangeInATR > cfg.max_signal_atr * 1.5)
+      {
+         if(m_debugMode)
+            PrintFormat("[SignalManager] Candle too large: %.2f ATR (max %.2f)", rangeInATR, cfg.max_signal_atr * 1.5);
+         return false;
+      }
+      
+      // Warn on very small candles (< 0.2x ATR) - low momentum
+      if(rangeInATR < 0.2)
+      {
+         if(m_debugMode)
+            PrintFormat("[SignalManager] Candle very small: %.2f ATR - low momentum", rangeInATR);
+         // Don't reject, but affects scoring
       }
       
       return true;

@@ -490,6 +490,24 @@ public:
          }
       }
 
+      // SLIPPAGE MITIGATION: Dynamic deviation based on volatility and spread
+      double currentSpread = SymbolInfoInteger(m_symbol, SYMBOL_SPREAD) * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double atrPrice = plan.atrUsed * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      
+      // Calculate dynamic deviation: base 10 points + ATR-based adjustment + spread buffer
+      double deviationPoints = 10.0;
+      if(atrPrice > 0)
+      {
+         // Add 20% of ATR as slippage buffer in volatile markets
+         deviationPoints += (atrPrice * 0.2) / SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      }
+      // Add spread compensation
+      deviationPoints += currentSpread / SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      
+      // Cap maximum deviation to prevent excessive slippage
+      int maxDeviation = cfg.max_slippage_points > 0 ? cfg.max_slippage_points : 50;
+      int finalDeviation = (int)MathMin(deviationPoints, maxDeviation);
+
       request.action = TRADE_ACTION_DEAL;
       request.symbol = m_symbol; // Use m_symbol
       request.magic = cfg.magic;
@@ -497,32 +515,79 @@ public:
       request.price = plan.entry;
       request.sl = plan.brokerSL;
       request.tp = plan.tp;
-      request.deviation = 30;
+      request.deviation = finalDeviation;  // DYNAMIC SLIPPAGE CONTROL
       request.type_time = ORDER_TIME_GTC;
 
-      // Use cached filling mode
-      if ((m_fillingMode & SYMBOL_FILLING_IOC) != 0)
-         request.type_filling = ORDER_FILLING_IOC;
-      else if ((m_fillingMode & SYMBOL_FILLING_FOK) != 0)
-         request.type_filling = ORDER_FILLING_FOK;
+      // Use cached filling mode with fallback strategy
+      if ((m_fillingMode & SYMBOL_FILLING_FOK) != 0)
+         request.type_filling = ORDER_FILLING_FOK;  // Try FOK first (all-or-nothing)
+      else if ((m_fillingMode & SYMBOL_FILLING_IOC) != 0)
+         request.type_filling = ORDER_FILLING_IOC;  // Then IOC (immediate-or-cancel)
       else
-         request.type_filling = ORDER_FILLING_RETURN;
+         request.type_filling = ORDER_FILLING_RETURN;  // Fallback to RETURN
 
       ulong tsID = GetTickCount64() % 10000000000;
-      request.comment = plan.comment + "#" + (string)tsID;
+      request.comment = plan.comment + "#".String(tsID);
 
       SavePendingState(plan, zonePrice, slMult, tsID);
-      if (!OrderSendAsync(request, result))
+      
+      // EXECUTION WITH RETRY LOGIC
+      int retryCount = 0;
+      const int MAX_RETRIES = 2;
+      bool success = false;
+      
+      while(retryCount < MAX_RETRIES && !success)
+      {
+         if(OrderSendAsync(request, result))
+         {
+            // Check if request was accepted by server
+            if(result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_PLACED)
+            {
+               success = true;
+               break;
+            }
+            else
+            {
+               // Log rejection reason
+               if(m_debugMode)
+                  PrintFormat("[Exec Open] Request rejected: Retcode=%d, Comment=%s", 
+                              result.retcode, result.comment);
+            }
+         }
+         else
+         {
+            int err = GetLastError();
+            if(m_debugMode)
+               PrintFormat("[Exec Async] OrderSend failed (attempt %d/%d): Error %d", 
+                           retryCount + 1, MAX_RETRIES, err);
+         }
+         
+         retryCount++;
+         if(retryCount < MAX_RETRIES)
+         {
+            // Brief delay before retry (100ms)
+            Sleep(100);
+            // Refresh prices for retry
+            MqlTick tick;
+            if(SymbolInfoTick(m_symbol, tick))
+            {
+               request.price = (plan.type == ORDER_TYPE_BUY) ? tick.ask : tick.bid;
+            }
+         }
+      }
+      
+      if(!success)
       {
          DeletePendingStateById(tsID);
-         if (m_debugMode)
-            PrintFormat("[Exec Async] OrderSend failed: %d", GetLastError());
+         if(m_debugMode)
+            PrintFormat("[Exec Open] Failed after %d retries. Last retcode: %d", 
+                        retryCount, result.retcode);
          return 0;
       }
 
       if (m_debugMode)
-         PrintFormat("[Exec Async] Request sent: %s %.2f @ %.5f | ID: %d",
-                     EnumToString(plan.type), plan.lot, plan.entry, tsID);
+         PrintFormat("[Exec Async] Request sent: %s %.2f @ %.5f | Deviation: %d pts | ID: %d",
+                     EnumToString(plan.type), plan.lot, request.price, finalDeviation, tsID);
 
       return tsID;
    }

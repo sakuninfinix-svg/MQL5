@@ -81,13 +81,16 @@ public:
    int supHtfAlign, resHtfAlign;
    int supStrength, resStrength;
    double atrPoints;
+   double supScore, resScore;  // NEW: SR Zone Scores
 
    ZoneUpdateEvent(double sup, double res, double htfSup, double htfRes,
                    bool supBroken, bool resBroken, double supMult, double resMult,
-                   int supAlign, int resAlign, int supStr, int resStr, double atr)
+                   int supAlign, int resAlign, int supStr, int resStr, double atr,
+                   double supSc = 50.0, double resSc = 50.0)  // Default scores for backward compatibility
        : Event(5), support(sup), resistance(res), htfSupport(htfSup), htfResistance(htfRes),
          isSupBroken(supBroken), isResBroken(resBroken), supBufferMult(supMult), resBufferMult(resMult),
-         supHtfAlign(supAlign), resHtfAlign(resAlign), supStrength(supStr), resStrength(resStr), atrPoints(atr) {}
+         supHtfAlign(supAlign), resHtfAlign(resAlign), supStrength(supStr), resStrength(resStr), 
+         atrPoints(atr), supScore(supSc), resScore(resSc) {}
 
    virtual int ID() const override { return EVENT_ID_ZONE_UPDATE; }
 };

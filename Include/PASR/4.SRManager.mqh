@@ -30,6 +30,39 @@ private:
    int m_resHtfAlignment;
    int m_supStrength; // NEW: Zone strength (touch count)
    int m_resStrength;
+   double m_supScore; // NEW: SR zone scoring (0-100)
+   double m_resScore;
+   
+   // Helper: Calculate SR Zone Score based on multiple factors
+   double CalculateZoneScore(double zonePrice, bool isSupport, int touchCount, 
+                             double atrPoints, int htfAlignment, bool isBroken)
+   {
+      const ConfigSnapshot cfg = m_data.GetConfigCache();
+      double score = 50.0; // Base score
+      
+      // Touch count bonus (more touches = stronger zone, but diminishing returns)
+      if(touchCount >= cfg.min_touches_strong)
+         score += 25.0 * MathMin(1.0, (double)touchCount / (cfg.min_touches_strong * 2));
+      else if(touchCount <= 1)
+         score -= 15.0;
+      
+      // HTF Alignment bonus
+      if(htfAlignment == 1)
+         score += 20.0; // Aligned with HTF
+      else if(htfAlignment == -1)
+         score -= 20.0; // Contra HTF
+      
+      // Broken zone penalty
+      if(isBroken)
+         score -= 30.0;
+      
+      // Fresh zone bonus (not tested recently)
+      if(touchCount == 0)
+         score += 10.0;
+      
+      // Normalize to 0-100 range
+      return MathMax(0.0, MathMin(100.0, score));
+   }
    
    // Helper: Cek apakah level sudah ditembus oleh harga Close bar yang sudah tertutup
    bool IsBroken(double price, bool isSupport, int bars)
@@ -37,7 +70,7 @@ private:
       if (price <= 0) return false;
       MqlRates rates[];
       ArraySetAsSeries(rates, true);
-      // Mengambil bar yang sudah tertutup (mulai dari shift 1)
+      // LOOK-AHEAD BIAS FIX: Mengambil bar yang sudah tertutup (mulai dari shift 1)
       if (CopyRates(m_symbol, m_period, 1, bars, rates) < bars) return false;
 
       for (int i = 0; i < bars; i++)
@@ -176,6 +209,9 @@ public:
 
       UpdateHTFZones();
       CheckZoneStatus(m_data.GetATRPoints());
+      
+      // Calculate SR Zone Scores after zone status is updated
+      CalculateScores(m_data.GetATRPoints());
 
       if(m_debugMode) {
          DrawOrMoveHLine("ResLine", m_targetResistance, clrRed);
@@ -188,7 +224,8 @@ public:
           m_supBufferMult, m_resBufferMult,
           m_supHtfAlignment, m_resHtfAlignment,
           m_supStrength, m_resStrength,
-          m_data.GetATRPoints());
+          m_data.GetATRPoints(),
+          m_supScore, m_resScore);  // Pass SR scores to event
       DispatchEvent(zoneEvent);
    }
    void CheckZoneStatus(double atrPoints)
@@ -271,6 +308,19 @@ public:
             m_resHtfAlignment = 0;
       }
    }
+   
+   // NEW: Calculate SR Zone Scores
+   void CalculateScores(double atrPoints)
+   {
+      m_supScore = CalculateZoneScore(m_targetSupport, true, m_supStrength, atrPoints, m_supHtfAlignment, m_isSupportBroken);
+      m_resScore = CalculateZoneScore(m_targetResistance, false, m_resStrength, atrPoints, m_resHtfAlignment, m_isResistanceBroken);
+      
+      if(m_debugMode)
+      {
+         PrintFormat("[SRManager] Zone Scores - Support: %.1f (Strength=%d, HTF=%d), Resistance: %.1f (Strength=%d, HTF=%d)",
+                     m_supScore, m_supStrength, m_supHtfAlignment, m_resScore, m_resStrength, m_resHtfAlignment);
+      }
+   }
 
    void UpdateHTFZones()
    {
@@ -314,6 +364,8 @@ public:
    int ResHtfAlignment() const { return m_resHtfAlignment; }
    int SupStrength() const { return m_supStrength; }
    int ResStrength() const { return m_resStrength; }
+   double SupScore() const { return m_supScore; }  // NEW: SR Score getter
+   double ResScore() const { return m_resScore; }
 };
 
 #endif
