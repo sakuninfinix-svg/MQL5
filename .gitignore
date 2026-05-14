@@ -1,68 +1,158 @@
 ```
-# Compiled and binary files
-*.pyc
-*.class
-*.o
-*.obj
-*.exe
-*.dll
-*.so
-*.a
-*.out
-
-# Dependencies
-node_modules/
-venv/
-.venv/
-__pycache__/
-dist/
-build/
-target/
-.gradle/
-.mypy_cache/
-.pytest_cache/
-
-# Editors/IDE
+# Editor/IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *.tmp
+*.ex5 
+*.ex4 
+*.os 
+*.h 
+*.hpp 
+*.cpp 
+*.c 
+*.obj 
+*.o 
+*.dll 
+*.so 
+*.a 
+*.lib 
+*.exe 
+*.out 
+ 
+ # Dependencies 
+ MQL5/Libraries/ 
+ MQL5/Indicators/ 
+ MQL5/Scripts/ 
+ MQL5/Expert Advisors/ 
+ MQL5/.continue/  
+ MQL5/Files/  
+ MQL5/Images/  
+ MQL5/Profiles/  
+ MQL5/Experts/Advisors/  
+ MQL5/Experts/Examples/  
+ MQL5/Experts/Free Robots/  
+ MQL5/Include/Arrays/  
+ MQL5/Include/Canvas/  
+ MQL5/Include/ChartObjects/  
+ MQL5/Include/Charts/  
+ MQL5/Include/Controls/  
+ MQL5/Include/Expert/  
+ MQL5/Include/Generic/  
+ MQL5/Include/Math/  
+ MQL5/Include/Graphics/  
+ MQL5/Include/OpenCL/  
+ MQL5/Include/Strings/  
+ MQL5/Include/Trade/  
+ MQL5/Include/Tools/  
+ MQL5/Include/WinAPI  
+ MQL5/Include/MovingAverages.mqh  
+ MQL5/Include/VirtualKeys.mqh  
+ MQL5/Include/StdLibErr.mqh  
+ MQL5/Include/Object.mqh
 
-# System/Environment
-.DS_Store
-Thumbs.db
-.env
-.env.local
+ # MetaQuotes cache 
+ tester/ 
+ logs/ 
+  
+# Editor/IDE 
+.vscode/ 
+.idea/ 
+*.suo 
+*.user 
+*.userosscache 
+*.sln.docstates 
+*.swp 
+ *.bak 
+ *.~* 
+ *.backup 
+ *.swo 
+ *.tmp  
+  
+ # Build outputs 
+ Debug/ 
+ Release/ 
+ x64/ 
+ x86/ 
+ build/ 
+ dist/ 
+ bin/ 
+ obj/ 
+  
+ # OS generated files 
+ .DS_Store 
+ .DS_Store? 
+ ._* 
+ .Spotlight-V100 
+ .Trashes 
+ ehthumbs.db 
+ Thumbs.db 
+ desktop.ini 
+  
+  # Dependencies and build artifacts  
+  lib/  
+  libs/  
+  objects/  
+  tester/  
+  history/  
+
+  # MetaTrader specific  
+  *.set  
+  *.hst  
+  *.fxt  
+  *.csv  
+   *.log  
+  *.tmp  
+  *.swp  
+  *.txt  
+      
+  # Environment and temporary files  
+   .env  
+   .env.local  
+  .env.*  
+  *.tmp  
+  *.temp  
+  *.bak  
+  *.backup  
+       
+  # Dependencies  
+  node_modules/  
+  .venv/  
+  venv/  
+  __pycache__/  
+  .mypy_cache/  
+  .pytest_cache/  
+  .julia/  
+  zig*/  
+      
+  # Coverage reports  
+  coverage/  
+  htmlcov/  
+  .coverage  
+      
+  # Compressed files  
+  *.zip  
+  *.gz  
+  *.tar  
+  *.tgz  
+  *.bz2  
+  *.xz  
+  *.7z  
+  *.rar  
+  *.zst  
+  *.lz4  
+  *.lzh  
+  *.cab  
+  *.arj  
+  *.rpm  
+  *.deb  
+  *.Z  
+  *.lz  
+  *.lzo  
+  *.tar.gz  
+  *.tar.bz2  
+  *.tar.xz  
+  *.tar.zst 
 *.env.*
-
-# Logs and coverage
-*.log
-coverage/
-htmlcov/
-.coverage
-
-# Compressed files
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
 ```
