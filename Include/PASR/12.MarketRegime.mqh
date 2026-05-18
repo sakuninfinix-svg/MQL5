@@ -23,7 +23,15 @@
 #define __MARKET_REGIME_MQH__
 
 #include "IManager.mqh"
-#include "10.DataManager.mqh"
+// NOTE: Do NOT include 10.DataManager.mqh here to avoid circular dependency!
+// DataManager is accessed via pointer (forward declaration below)
+
+//+------------------------------------------------------------------+
+//| Forward Declaration: DataManager                                 |
+//| NOTE: Do NOT include 10.DataManager.mqh here to avoid circular   |
+//|       dependency. The actual class is defined in that file.      |
+//+------------------------------------------------------------------+
+class DataManager;
 
 //+------------------------------------------------------------------+
 //| ENUMS: Market Regime Types                                       |
