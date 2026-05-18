@@ -14,7 +14,8 @@
 
 #include "IManager.mqh"
 #include "2.Config.mqh"  // For StrategyConfig and CFG global instance
-#include "12.MarketRegime.mqh"  // For MarketRegimeFilter
+// NOTE: Do NOT include 12.MarketRegime.mqh here to avoid circular dependency!
+// MarketRegimeFilter is accessed via extern pointer g_regimeFilter (forward declaration below)
 
 //+------------------------------------------------------------------+
 //| Utility Functions Class (Non-Data Utilities)                     |
@@ -209,6 +210,13 @@ public:
    
    datetime GetLastUpdate() const { return m_lastUpdate; }
 };
+
+//+------------------------------------------------------------------+
+//| Forward Declaration: MarketRegimeFilter                          |
+//| NOTE: Do NOT include 12.MarketRegime.mqh here to avoid circular  |
+//|       dependency. The actual class is defined in that file.      |
+//+------------------------------------------------------------------+
+class MarketRegimeFilter;
 
 //+------------------------------------------------------------------+
 //| Global pointer to MarketRegimeFilter (set in EA)                 |
