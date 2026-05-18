@@ -15,6 +15,7 @@
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
 #include "12.MarketRegime.mqh"  // For MarketRegimeFilter
+#include <Trade/Trade.mqh>      // MQL5 CTrade class for order management
 
 //+------------------------------------------------------------------+
 //| Global pointer to MarketRegimeFilter (set in EA)                 |
@@ -34,6 +35,9 @@ private:
    double m_avgSlippage;         // Average slippage tracking
    double m_avgFillTime;         // Average fill time in milliseconds
    ulong m_totalExecutions;      // Total execution count for stats
+   
+   // MQL5 CTrade instance for order management
+   CTrade m_trade;
    
    // Advanced execution statistics
    struct ExecutionStats
@@ -607,11 +611,18 @@ public:
          return 0;
       }
 
-      MqlTradeRequest request;
-      MqlTradeResult result;
-      ZeroMemory(request);
-      ZeroMemory(result);
-
+      // MQL5 CTrade-based order execution with native error handling
+      ResetLastError();
+      
+      // Set trade parameters
+      m_trade.SetExpertMagicNumber(cfg.magic);
+      m_trade.SetDeviationInPoints(CalculateDynamicDeviation(
+         plan.atrUsed * SymbolInfoDouble(m_symbol, SYMBOL_POINT),
+         SymbolInfoInteger(m_symbol, SYMBOL_SPREAD) * SymbolInfoDouble(m_symbol, SYMBOL_POINT),
+         cfg.max_slippage_points > 0 ? cfg.max_slippage_points : 50));
+      m_trade.SetTypeFilling((ENUM_ORDER_TYPE_FILLING)m_fillingMode);
+      m_trade.SetAsyncMode(true);  // Use async mode for better performance
+      
       // IMPROVE: Check free margin before sending request
       double marginRequired = 0;
       if (OrderCalcMargin(plan.type, m_symbol, plan.lot, plan.entry, marginRequired))
@@ -623,146 +634,90 @@ public:
          }
       }
 
-      // SLIPPAGE MITIGATION: Dynamic deviation based on volatility and spread
-      double currentSpread = SymbolInfoInteger(m_symbol, SYMBOL_SPREAD) * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
-      double atrPrice = plan.atrUsed * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
-      
-      // Use enhanced dynamic deviation calculation with execution quality
-      int finalDeviation = CalculateDynamicDeviation(atrPrice, currentSpread, 
-                                                     cfg.max_slippage_points > 0 ? cfg.max_slippage_points : 50);
-
-      request.action = TRADE_ACTION_DEAL;
-      request.symbol = m_symbol; // Use m_symbol
-      request.magic = cfg.magic;
-      request.volume = plan.lot;
-      request.price = plan.entry;
-      request.sl = plan.brokerSL;
-      request.tp = plan.tp;
-      request.deviation = finalDeviation;  // DYNAMIC SLIPPAGE CONTROL
-      request.type_time = ORDER_TIME_GTC;
-
-      // Use cached filling mode with fallback strategy
-      if ((m_fillingMode & SYMBOL_FILLING_FOK) != 0)
-         request.type_filling = ORDER_FILLING_FOK;  // Try FOK first (all-or-nothing)
-      else if ((m_fillingMode & SYMBOL_FILLING_IOC) != 0)
-         request.type_filling = ORDER_FILLING_IOC;  // Then IOC (immediate-or-cancel)
-      else
-         request.type_filling = ORDER_FILLING_RETURN;  // Fallback to RETURN
-
       ulong tsID = GetTickCount64() % 10000000000;
-      request.comment = plan.comment + "#".String(tsID);
-
+      string comment = plan.comment + "#".String(tsID);
+      
       SavePendingState(plan, zonePrice, slMult, tsID);
       
       // Track execution start time for fill time measurement
       ulong startTime = GetTickCount64();
       
-      // EXECUTION WITH RETRY LOGIC AND STATISTICS TRACKING
-      int retryCount = 0;
-      const int MAX_RETRIES = 2;
+      // EXECUTION WITH CTrade AND STATISTICS TRACKING
       bool success = false;
       double actualSlippagePoints = 0.0;
+      ulong ticket = 0;
       
-      while(retryCount < MAX_RETRIES && !success)
+      // Execute trade using CTrade
+      if (plan.type == ORDER_TYPE_BUY)
       {
-         if(OrderSendAsync(request, result))
-         {
-            // Check if request was accepted by server
-            if(result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_PLACED)
-            {
-               success = true;
-               
-               // Calculate actual slippage if we have execution price
-               if(result.order > 0 || result.deal > 0)
-               {
-                  double execPrice = result.price;
-                  if(execPrice > 0)
-                  {
-                     double requestedPrice = request.price;
-                     actualSlippagePoints = MathAbs(execPrice - requestedPrice) / 
-                                           SymbolInfoDouble(m_symbol, SYMBOL_POINT);
-                  }
-               }
-               break;
-            }
-            else
-            {
-               // Log rejection reason and track statistics
-               m_stats.rejectedOrders++;
-               if(m_debugMode)
-                  PrintFormat("[Exec Open] Request rejected: Retcode=%d, Comment=%s", 
-                              result.retcode, result.comment);
-            }
-         }
-         else
-         {
-            int err = GetLastError();
-            if(m_debugMode)
-               PrintFormat("[Exec Async] OrderSend failed (attempt %d/%d): Error %d", 
-                           retryCount + 1, MAX_RETRIES, err);
-         }
+         ticket = m_trade.Buy(plan.lot, m_symbol, plan.entry, plan.brokerSL, plan.tp, comment);
+      }
+      else if (plan.type == ORDER_TYPE_SELL)
+      {
+         ticket = m_trade.Sell(plan.lot, m_symbol, plan.entry, plan.brokerSL, plan.tp, comment);
+      }
+      
+      if (ticket > 0)
+      {
+         success = true;
          
-         retryCount++;
-         if(retryCount < MAX_RETRIES)
+         // Get execution result from CTrade
+         MqlTradeResult result;
+         if (m_trade.ResultRetcode())
          {
-            // Brief delay before retry (100ms)
-            Sleep(100);
-            // Refresh prices for retry
-            MqlTick tick;
-            if(SymbolInfoTick(m_symbol, tick))
+            // Calculate actual slippage if we have execution price
+            double execPrice = m_trade.ResultPrice();
+            if (execPrice > 0)
             {
-               request.price = (plan.type == ORDER_TYPE_BUY) ? tick.ask : tick.bid;
+               actualSlippagePoints = MathAbs(execPrice - plan.entry) / 
+                                     SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+            }
+            
+            // Update statistics
+            m_stats.successfulFills++;
+            m_stats.avgSlippagePoints = ((m_stats.avgSlippagePoints * (m_stats.successfulFills - 1)) + 
+                                         actualSlippagePoints) / m_stats.successfulFills;
+            
+            if (actualSlippagePoints > m_stats.maxSlippagePoints)
+               m_stats.maxSlippagePoints = actualSlippagePoints;
+            
+            ulong fillTimeMs = GetTickCount64() - startTime;
+            m_stats.avgFillTimeMs = ((m_stats.avgFillTimeMs * (m_stats.successfulFills - 1)) + 
+                                     (double)fillTimeMs) / m_stats.successfulFills;
+            m_stats.lastExecutionTime = GetTickCount64();
+            
+            if (m_debugMode)
+            {
+               string reasoning = BuildExecutionReasoning(plan, zonePrice, 
+                                                          (ENUM_ORDER_RESULT)m_trade.ResultRetcode(), 
+                                                          actualSlippagePoints);
+               PrintFormat("[Exec CTrade] %s | Ticket=%d | FillTime=%dms", reasoning, ticket, fillTimeMs);
             }
          }
       }
-      
-      // Calculate fill time
-      ulong fillTimeMs = GetTickCount64() - startTime;
+      else
+      {
+         // Trade failed - get error from CTrade
+         int err = m_trade.ResultRetcode();
+         if (err == 0) err = GetLastError();
+         
+         m_stats.rejectedOrders++;
+         DeletePendingStateById(tsID);
+         
+         if (m_debugMode)
+            PrintFormat("[Exec CTrade] Failed: Retcode=%d", err);
+      }
       
       // Update statistics regardless of success/failure
       m_stats.totalAttempts++;
       m_totalExecutions++;
       
-      if(success)
-      {
-         m_stats.successfulFills++;
-         
-         // Update rolling average slippage
-         m_stats.avgSlippagePoints = ((m_stats.avgSlippagePoints * (m_stats.successfulFills - 1)) + 
-                                      actualSlippagePoints) / m_stats.successfulFills;
-         
-         // Track max slippage
-         if(actualSlippagePoints > m_stats.maxSlippagePoints)
-            m_stats.maxSlippagePoints = actualSlippagePoints;
-         
-         // Update average fill time
-         m_stats.avgFillTimeMs = ((m_stats.avgFillTimeMs * (m_stats.successfulFills - 1)) + 
-                                  (double)fillTimeMs) / m_stats.successfulFills;
-         
-         m_stats.lastExecutionTime = GetTickCount64();
-         
-         if(m_debugMode)
-         {
-            string reasoning = BuildExecutionReasoning(plan, zonePrice, 
-                                                       (ENUM_ORDER_RESULT)result.retcode, 
-                                                       actualSlippagePoints);
-            PrintFormat("[Exec Async] %s | FillTime=%dms", reasoning, fillTimeMs);
-         }
-      }
-      else
-      {
-         DeletePendingStateById(tsID);
-         if(m_debugMode)
-            PrintFormat("[Exec Open] Failed after %d retries. Last retcode: %d | FillTime=%dms", 
-                        retryCount, result.retcode, fillTimeMs);
-      }
-      
       // Update execution metrics after each attempt
       UpdateExecutionMetrics();
 
       if (m_debugMode && success)
-         PrintFormat("[Exec Async] Request sent: %s %.2f @ %.5f | Deviation: %d pts | ID: %d | Slippage: %.1f pts",
-                     EnumToString(plan.type), plan.lot, request.price, finalDeviation, tsID, actualSlippagePoints);
+         PrintFormat("[Exec CTrade] Order sent: %s %.2f @ %.5f | Ticket: %d | Slippage: %.1f pts",
+                     EnumToString(plan.type), plan.lot, plan.entry, ticket, actualSlippagePoints);
 
       return success ? tsID : 0;
    }

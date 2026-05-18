@@ -474,41 +474,22 @@ public:
          IEventHandler *h = m_handlersByType[id][i].handler;
          if (h != NULL && CheckPointer(h) != POINTER_INVALID)
          {
-            // Try-catch pattern for error handling with detailed logging
-            #ifdef __DEBUG__
-            try
-            {
-               h.HandleEvent(e);
-               handlersCalled++;
-            }
-            catch(const std::exception &ex)
-            {
-               errorsHandled++;
-               string handlerName = (CheckPointer(h) != POINTER_INVALID) ? h.GetHandlerName() : "Unknown";
-               LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Exception in handler [" + handlerName + "] for event " + IntegerToString(id) + ": " + ex.Description());
-               h.OnHandlerError(id, "Exception: " + ex.Description());
-            }
-            catch(...)
-            {
-               errorsHandled++;
-               string handlerName = (CheckPointer(h) != POINTER_INVALID) ? h.GetHandlerName() : "Unknown";
-               LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Unknown exception in handler [" + handlerName + "] for event " + IntegerToString(id));
-               h.OnHandlerError(id, "Unknown exception");
-            }
-            #else
-            // Production: simpler error detection without try-catch overhead
+            // MQL5 native error handling: ResetLastError before, check GetLastError after
+            ResetLastError();
             int preErrorCount = GetLastError();
-            h.HandleEvent(e);
-            int postErrorCount = GetLastError();
             
+            h.HandleEvent(e);
+            
+            int postErrorCount = GetLastError();
             if (postErrorCount != preErrorCount && postErrorCount != 0)
             {
                errorsHandled++;
+               string handlerName = (CheckPointer(h) != POINTER_INVALID) ? h.GetHandlerName() : "Unknown";
+               LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Error in handler [" + handlerName + "] for event " + IntegerToString(id) + ": Error " + IntegerToString(postErrorCount));
                h.OnHandlerError(id, "Error " + IntegerToString(postErrorCount));
                ResetLastError();
             }
             handlersCalled++;
-            #endif
          }
       }
       

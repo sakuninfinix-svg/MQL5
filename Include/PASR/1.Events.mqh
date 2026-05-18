@@ -378,27 +378,31 @@ void ReplayRecordedEvents()
          if (wasRecording)
             g_recorder.Stop();
 
-         // Dispatch with error handling
-         try
+         // MQL5 native error handling: use GetLastError() pattern instead of try-catch
+         ResetLastError();
+         int preErrorCount = GetLastError();
+         
+         EventBus *bus = EventBus::Instance();
+         if (CheckPointer(bus) != POINTER_INVALID)
          {
-            EventBus *bus = EventBus::Instance();
-            if (CheckPointer(bus) != POINTER_INVALID)
+            bus.Dispatch(e);
+            
+            int postErrorCount = GetLastError();
+            if (postErrorCount == preErrorCount || postErrorCount == 0)
             {
-               bus.Dispatch(e);
                successCount++;
             }
             else
             {
-               LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "EventBus instance is null during replay");
-               delete e;
+               LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Error during event dispatch for type " + IntegerToString(eventType));
+               ResetLastError();
                failCount++;
             }
          }
-         catch(...)
+         else
          {
-            LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Exception during event replay for type " + IntegerToString(eventType));
-            if (CheckPointer(e) == POINTER_DYNAMIC)
-               delete e;
+            LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "EventBus instance is null during replay");
+            delete e;
             failCount++;
          }
 
