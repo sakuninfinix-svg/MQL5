@@ -4,25 +4,6 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Adaptive AI & Signal Scoring Module                   |
 //+------------------------------------------------------------------+
-// AUDIT & FIX LOG (v2.01)
-// BUG-01: volNoiseWeight tidak disimpan/dimuat via GlobalVariable → weight reset setiap Init
-// BUG-02: Neural Network bukan "2-layer sequential" — hidden2 baca input langsung bukan dari
-//         hidden1_output, sehingga ini sebenarnya 2 node paralel, bukan deep network
-// BUG-03: Backpropagation salah karena arsitektur NN tidak konsisten (ikut BUG-02)
-// BUG-04: NormalizeNoiseFeature() mengembalikan 1.0 saat noise TINGGI (jam transisi),
-//         seharusnya noise tinggi = skor RENDAH agar sinyal dihindari
-// BUG-05: nnWeight tumbuh terlalu cepat — hanya butuh 7 sample untuk capai max 35%
-//         (0.05 * 7 = 0.35), seharusnya lebih lambat
-// BUG-06: NormalizeMultiTimeframeConfluence() — Period()*4 tidak selalu menghasilkan
-//         timeframe valid (contoh: H4*4 = 960, tidak ada di enum ENUM_TIMEFRAMES)
-// BUG-07: cfg tidak konsisten — OnHeartbeat & OnSignalGenerated redeclare cfg lokal,
-//         sementara OnOrderExecution & OnPositionUpdate pakai cfg inherited (bisa stale)
-// BUG-08: ExportDatasetForExternalTraining() hanya tulis header, tidak ada data aktual
-// BUG-09: m_data tidak dicek null sebelum dereference di beberapa fungsi
-// BUG-10: DecayModel() mendekay NN weights tapi tidak mendekay NN bias weights
-// FIX: Semua bug di atas sudah diperbaiki
-//+------------------------------------------------------------------+
-
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
 #property version   "2.01"
