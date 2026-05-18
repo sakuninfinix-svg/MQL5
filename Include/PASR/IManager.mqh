@@ -183,144 +183,144 @@ public:
       NewsAlertEvent *newsEvt = NULL;
       SessionChangeEvent *sessEvt = NULL;
       
-      try
+      // MQL5 native error handling: use GetLastError() pattern instead of try-catch
+      ResetLastError();
+      int preErrorCount = GetLastError();
+      
+      switch (eventID)
       {
-         switch (eventID)
-         {
-         case EVENT_ID_PRICE_UPDATE:
-            priceEvt = CAST_EVENT(PriceUpdateEvent, e);
-            if (CheckPointer(priceEvt) != POINTER_INVALID)
-               OnPriceUpdate(priceEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_NEW_BAR:
-            barEvt = CAST_EVENT(NewBarEvent, e);
-            if (CheckPointer(barEvt) != POINTER_INVALID)
-               OnNewBar(barEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_HEARTBEAT:
-            hbEvt = CAST_EVENT(HeartbeatEvent, e);
-            if (CheckPointer(hbEvt) != POINTER_INVALID)
-               OnHeartbeat(hbEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_CONFIG_RELOAD:
-            cfgEvt = CAST_EVENT(ConfigReloadEvent, e);
-            if (CheckPointer(cfgEvt) != POINTER_INVALID)
-               OnConfigReload(cfgEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_EMERGENCY_STOP:
-            emergEvt = CAST_EVENT(EmergencyStopEvent, e);
-            if (CheckPointer(emergEvt) != POINTER_INVALID)
-               OnEmergencyStop(emergEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_SIGNAL_GENERATED:
-            sigEvt = CAST_EVENT(SignalGeneratedEvent, e);
-            if (CheckPointer(sigEvt) != POINTER_INVALID)
-               OnSignalGenerated(sigEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_RECOVERY_OPPORTUNITY:
-            recOppEvt = CAST_EVENT(RecoveryOpportunityEvent, e);
-            if (CheckPointer(recOppEvt) != POINTER_INVALID)
-               OnRecoveryOpportunity(recOppEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_RECOVERY_SIGNAL:
-            recSigEvt = CAST_EVENT(RecoverySignalEvent, e);
-            if (CheckPointer(recSigEvt) != POINTER_INVALID)
-               OnRecoverySignal(recSigEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_ORDER_EXECUTION:
-            ordEvt = CAST_EVENT(OrderExecutionEvent, e);
-            if (CheckPointer(ordEvt) != POINTER_INVALID)
-               OnOrderExecution(ordEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_POSITION_UPDATE:
-            posEvt = CAST_EVENT(PositionUpdateEvent, e);
-            if (CheckPointer(posEvt) != POINTER_INVALID)
-               OnPositionUpdate(posEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_ZONE_UPDATE:
-            zoneEvt = CAST_EVENT(ZoneUpdateEvent, e);
-            if (CheckPointer(zoneEvt) != POINTER_INVALID)
-               OnZoneUpdate(zoneEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_MARKET_GATE:
-            gateEvt = CAST_EVENT(MarketGateEvent, e);
-            if (CheckPointer(gateEvt) != POINTER_INVALID)
-               OnMarketGate(gateEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_PAUSE_TOGGLE:
-            pauseEvt = CAST_EVENT(PauseToggleEvent, e);
-            if (CheckPointer(pauseEvt) != POINTER_INVALID)
-               OnPauseToggle(pauseEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_SESSION_CHANGE:
-            sessEvt = CAST_EVENT(SessionChangeEvent, e);
-            if (CheckPointer(sessEvt) != POINTER_INVALID)
-               OnSessionChange(sessEvt);
-            else
-               success = false;
-            break;
-            
-         case EVENT_ID_NEWS_ALERT:
-            newsEvt = CAST_EVENT(NewsAlertEvent, e);
-            if (CheckPointer(newsEvt) != POINTER_INVALID)
-               OnNewsAlert(newsEvt);
-            else
-               success = false;
-            break;
-            
-         default:
-            OnCustomEvent(e);
-            break;
-         }
+      case EVENT_ID_PRICE_UPDATE:
+         priceEvt = CAST_EVENT(PriceUpdateEvent, e);
+         if (CheckPointer(priceEvt) != POINTER_INVALID)
+            OnPriceUpdate(priceEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_NEW_BAR:
+         barEvt = CAST_EVENT(NewBarEvent, e);
+         if (CheckPointer(barEvt) != POINTER_INVALID)
+            OnNewBar(barEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_HEARTBEAT:
+         hbEvt = CAST_EVENT(HeartbeatEvent, e);
+         if (CheckPointer(hbEvt) != POINTER_INVALID)
+            OnHeartbeat(hbEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_CONFIG_RELOAD:
+         cfgEvt = CAST_EVENT(ConfigReloadEvent, e);
+         if (CheckPointer(cfgEvt) != POINTER_INVALID)
+            OnConfigReload(cfgEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_EMERGENCY_STOP:
+         emergEvt = CAST_EVENT(EmergencyStopEvent, e);
+         if (CheckPointer(emergEvt) != POINTER_INVALID)
+            OnEmergencyStop(emergEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_SIGNAL_GENERATED:
+         sigEvt = CAST_EVENT(SignalGeneratedEvent, e);
+         if (CheckPointer(sigEvt) != POINTER_INVALID)
+            OnSignalGenerated(sigEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_RECOVERY_OPPORTUNITY:
+         recOppEvt = CAST_EVENT(RecoveryOpportunityEvent, e);
+         if (CheckPointer(recOppEvt) != POINTER_INVALID)
+            OnRecoveryOpportunity(recOppEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_RECOVERY_SIGNAL:
+         recSigEvt = CAST_EVENT(RecoverySignalEvent, e);
+         if (CheckPointer(recSigEvt) != POINTER_INVALID)
+            OnRecoverySignal(recSigEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_ORDER_EXECUTION:
+         ordEvt = CAST_EVENT(OrderExecutionEvent, e);
+         if (CheckPointer(ordEvt) != POINTER_INVALID)
+            OnOrderExecution(ordEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_POSITION_UPDATE:
+         posEvt = CAST_EVENT(PositionUpdateEvent, e);
+         if (CheckPointer(posEvt) != POINTER_INVALID)
+            OnPositionUpdate(posEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_ZONE_UPDATE:
+         zoneEvt = CAST_EVENT(ZoneUpdateEvent, e);
+         if (CheckPointer(zoneEvt) != POINTER_INVALID)
+            OnZoneUpdate(zoneEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_MARKET_GATE:
+         gateEvt = CAST_EVENT(MarketGateEvent, e);
+         if (CheckPointer(gateEvt) != POINTER_INVALID)
+            OnMarketGate(gateEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_PAUSE_TOGGLE:
+         pauseEvt = CAST_EVENT(PauseToggleEvent, e);
+         if (CheckPointer(pauseEvt) != POINTER_INVALID)
+            OnPauseToggle(pauseEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_SESSION_CHANGE:
+         sessEvt = CAST_EVENT(SessionChangeEvent, e);
+         if (CheckPointer(sessEvt) != POINTER_INVALID)
+            OnSessionChange(sessEvt);
+         else
+            success = false;
+         break;
+         
+      case EVENT_ID_NEWS_ALERT:
+         newsEvt = CAST_EVENT(NewsAlertEvent, e);
+         if (CheckPointer(newsEvt) != POINTER_INVALID)
+            OnNewsAlert(newsEvt);
+         else
+            success = false;
+         break;
+         
+      default:
+         OnCustomEvent(e);
+         break;
       }
-      catch(const std::exception &ex)
+      
+      // Check for errors after handler execution
+      int postErrorCount = GetLastError();
+      if (postErrorCount != preErrorCount && postErrorCount != 0)
       {
          success = false;
-         PrintFormat("[%s] ERROR: Exception in handler for %s: %s", m_name, eventName, ex.Description());
-      }
-      catch(...)
-      {
-         success = false;
-         PrintFormat("[%s] ERROR: Unknown exception in handler for %s", m_name, eventName);
+         PrintFormat("[%s] ERROR: Handler error for %s: Error %d", m_name, eventName, postErrorCount);
+         ResetLastError();
       }
       
       // Calculate latency
