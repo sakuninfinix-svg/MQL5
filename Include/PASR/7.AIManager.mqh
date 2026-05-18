@@ -3,10 +3,11 @@
 //|                                                   AIManager.mqh  |
 //|                                       Copyright 2026, Agsicentre |
 //|            Adaptive AI & Signal Scoring Module                   |
+//|                   VERSION 2.02 - Enhanced Stability & Fixes      |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.01"
+#property version   "2.02"
 #property strict
 
 #ifndef __AI_MANAGER_MQH__
@@ -66,10 +67,14 @@ private:
       int    driftDetectionWindow;
       // Neural Network Weights (2-layer sequential)
       double nn_hidden1_w1, nn_hidden1_w2, nn_hidden1_w3, nn_hidden1_bias;
-      double nn_hidden2_w1, nn_hidden2_w2, nn_hidden2_bias; // [BUG-02 FIX] hidden2 hanya 1 input (dari hidden1)
+      double nn_hidden2_w1, nn_hidden2_bias; // [BUG-02 FIX] hidden2 hanya 1 input (dari hidden1)
       double nn_output_w1,  nn_output_w2,  nn_output_bias;
       double nnLearningRate;
       int    nnTrainingSamples;
+      // Safety & validation
+      bool   initialized;
+      datetime lastUpdateTime;
+      int    validationCounter;
    } m_model;
 
    datetime m_lastHeartbeat;
@@ -109,6 +114,7 @@ public:
                  m_outcomeFilename(""),
                  m_loggedSamples(0)
    {
+      // Initialize model with safe defaults
       m_model.bias               = 0.55;
       m_model.atrWeight          = 0.18;
       m_model.spreadWeight       = 0.14;
@@ -126,19 +132,20 @@ public:
       m_model.recentWinRate        = -1.0;
       m_model.longTermWinRate      = -1.0;
       m_model.driftDetectionWindow = 50;
-      // [BUG-02 FIX] Hidden2 hanya punya 2 weight (input dari hidden1 node tunggal)
-      // Layer 1: 3 input → 1 hidden node
+      // Neural Network: Layer 1 (3 inputs → 1 node, ReLU)
       m_model.nn_hidden1_w1 = 0.3; m_model.nn_hidden1_w2 = 0.3;
       m_model.nn_hidden1_w3 = 0.3; m_model.nn_hidden1_bias = 0.1;
-      // Layer 2: 1 input (dari hidden1) → 2 hidden nodes
-      m_model.nn_hidden2_w1 = 0.5; m_model.nn_hidden2_w2 = 0.5;
-      m_model.nn_hidden2_bias = 0.1;
-      // Output: 2 inputs (dari hidden2 node a & b, tapi kita pakai 1 hidden2 node)
-      // Disederhanakan: output = w1 * hidden1_out + w2 * hidden2_out + bias
+      // Layer 2: 1 input (dari hidden1) → 1 node (ReLU)
+      m_model.nn_hidden2_w1 = 0.5; m_model.nn_hidden2_bias = 0.1;
+      // Output layer: combine h1 dan h2 (residual-like connection)
       m_model.nn_output_w1  = 0.5; m_model.nn_output_w2  = 0.5;
       m_model.nn_output_bias = 0.1;
       m_model.nnLearningRate    = 0.01;
       m_model.nnTrainingSamples = 0;
+      // Safety fields
+      m_model.initialized       = true;
+      m_model.lastUpdateTime    = TimeCurrent();
+      m_model.validationCounter = 0;
    }
 
    virtual void RefreshConfigCache() override
@@ -162,11 +169,22 @@ public:
          return false;
 
       m_data = IManager::GetGlobalDataManager();
+      
+      // Safety check: validate DataManager pointer
+      if (CheckPointer(m_data) == POINTER_INVALID)
+      {
+         Log("❌ CRITICAL: DataManager is NULL during AIManager initialization");
+         return false;
+      }
+      
       string prefix        = "AI_ml_" + IntegerToString(cfg.magic) + "_" + _Symbol + "_";
       m_datasetFilename    = prefix + "data.csv";
       m_ticketMapFilename  = prefix + "ticketmap.csv";
       m_outcomeFilename    = prefix + "outcomes.csv";
+      
       LoadModelState();
+      
+      Log("✅ AIManager initialized successfully. NN samples: " + IntegerToString(m_model.nnTrainingSamples));
       return true;
    }
 
@@ -198,7 +216,13 @@ public:
 
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
-      // [BUG-07 FIX] Hapus redeclaration cfg lokal, pakai cfg inherited
+      // Safety check: validate event pointer
+      if (CheckPointer(e) == POINTER_INVALID)
+      {
+         Log("⚠️ OnSignalGenerated: NULL event pointer");
+         return;
+      }
+      
       if (!cfg.use_ai || !e.signal.valid)
          return;
 
@@ -226,8 +250,16 @@ public:
 
    virtual void OnOrderExecution(OrderExecutionEvent *e) override
    {
+      // Safety check: validate event pointer
+      if (CheckPointer(e) == POINTER_INVALID)
+      {
+         Log("⚠️ OnOrderExecution: NULL event pointer");
+         return;
+      }
+      
       if (!cfg.use_ai)
          return;
+         
       if (e.success)
       {
          AttachTicketToRecentSample(e.ticket);
@@ -243,8 +275,16 @@ public:
 
    virtual void OnPositionUpdate(PositionUpdateEvent *e) override
    {
+      // Safety check: validate event pointer
+      if (CheckPointer(e) == POINTER_INVALID)
+      {
+         Log("⚠️ OnPositionUpdate: NULL event pointer");
+         return;
+      }
+      
       if (!cfg.use_ai)
          return;
+         
       if (e.isClosing)
       {
          LabelSampleOutcome(e.ticket, e.unrealizedPnL);
@@ -471,8 +511,10 @@ private:
    double EvaluateNeuralNetwork(const SignalDecision &signal, const double atrPoints,
                                 const double support, const double resistance) const
    {
-      // [BUG-02 FIX] Arsitektur diperbaiki menjadi benar-benar sequential
-
+      // Safety: validate model state
+      if (!m_model.initialized)
+         return 0.5; // Neutral score for uninitialized model
+      
       // Input features (normalized 0-1)
       double input1 = NormalizeATRFeature(atrPoints);
       double input2 = NormalizeVolatilityFeature();
@@ -500,8 +542,10 @@ private:
    void TrainNeuralNetwork(const SignalDecision &signal, const double atrPoints,
                            const double support, const double resistance, bool actualOutcome)
    {
-      // [BUG-03 FIX] Forward pass & backprop konsisten dengan arsitektur yang benar
-
+      // Safety: prevent training on uninitialized model
+      if (!m_model.initialized)
+         return;
+      
       // --- Forward Pass ---
       double input1 = NormalizeATRFeature(atrPoints);
       double input2 = NormalizeVolatilityFeature();
@@ -550,10 +594,14 @@ private:
       m_model.nn_hidden1_bias -= m_model.nnLearningRate * d_h1;
 
       m_model.nnTrainingSamples++;
+      m_model.validationCounter++;
 
       // Learning rate decay setiap 100 sample
       if (m_model.nnTrainingSamples % 100 == 0 && m_model.nnLearningRate > 0.001)
          m_model.nnLearningRate *= 0.95;
+
+      // Update last update timestamp
+      m_model.lastUpdateTime = TimeCurrent();
 
       Log("NN trained #" + IntegerToString(m_model.nnTrainingSamples) +
           " | Error: " + DoubleToString(error, 4));
@@ -574,23 +622,26 @@ private:
    void LoadModelState()
    {
       string prefix = ModelGVPrefix();
-      if (GlobalVariableCheck(prefix + "bias"))      m_model.bias             = GlobalVariableGet(prefix + "bias");
-      if (GlobalVariableCheck(prefix + "atr"))       m_model.atrWeight        = GlobalVariableGet(prefix + "atr");
-      if (GlobalVariableCheck(prefix + "spread"))    m_model.spreadWeight     = GlobalVariableGet(prefix + "spread");
-      if (GlobalVariableCheck(prefix + "sl"))        m_model.slWeight         = GlobalVariableGet(prefix + "sl");
-      if (GlobalVariableCheck(prefix + "momentum"))  m_model.momentumWeight   = GlobalVariableGet(prefix + "momentum");
-      if (GlobalVariableCheck(prefix + "loss"))      m_model.lossStreakWeight  = GlobalVariableGet(prefix + "loss");
+      
+      // Load all model weights from Global Variables
+      if (GlobalVariableCheck(prefix + "bias"))       m_model.bias             = GlobalVariableGet(prefix + "bias");
+      if (GlobalVariableCheck(prefix + "atr"))        m_model.atrWeight        = GlobalVariableGet(prefix + "atr");
+      if (GlobalVariableCheck(prefix + "spread"))     m_model.spreadWeight     = GlobalVariableGet(prefix + "spread");
+      if (GlobalVariableCheck(prefix + "sl"))         m_model.slWeight         = GlobalVariableGet(prefix + "sl");
+      if (GlobalVariableCheck(prefix + "momentum"))   m_model.momentumWeight   = GlobalVariableGet(prefix + "momentum");
+      if (GlobalVariableCheck(prefix + "loss"))       m_model.lossStreakWeight = GlobalVariableGet(prefix + "loss");
       // [BUG-01 FIX] volNoiseWeight sekarang dimuat
-      if (GlobalVariableCheck(prefix + "volnoise"))  m_model.volNoiseWeight   = GlobalVariableGet(prefix + "volnoise");
-      if (GlobalVariableCheck(prefix + "volatility"))   m_model.volatilityWeight   = GlobalVariableGet(prefix + "volatility");
-      if (GlobalVariableCheck(prefix + "timeofday"))    m_model.timeOfDayWeight    = GlobalVariableGet(prefix + "timeofday");
+      if (GlobalVariableCheck(prefix + "volnoise"))   m_model.volNoiseWeight   = GlobalVariableGet(prefix + "volnoise");
+      if (GlobalVariableCheck(prefix + "volatility")) m_model.volatilityWeight = GlobalVariableGet(prefix + "volatility");
+      if (GlobalVariableCheck(prefix + "timeofday"))  m_model.timeOfDayWeight  = GlobalVariableGet(prefix + "timeofday");
       if (GlobalVariableCheck(prefix + "mtconfluence")) m_model.mtConfluenceWeight = GlobalVariableGet(prefix + "mtconfluence");
-      if (GlobalVariableCheck(prefix + "volume"))       m_model.volumeWeight       = GlobalVariableGet(prefix + "volume");
+      if (GlobalVariableCheck(prefix + "volume"))     m_model.volumeWeight     = GlobalVariableGet(prefix + "volume");
       if (GlobalVariableCheck(prefix + "trendexpert"))    m_model.trendExpertWeight    = GlobalVariableGet(prefix + "trendexpert");
       if (GlobalVariableCheck(prefix + "meanrevexpert"))  m_model.meanRevExpertWeight  = GlobalVariableGet(prefix + "meanrevexpert");
       if (GlobalVariableCheck(prefix + "momentumexpert")) m_model.momentumExpertWeight = GlobalVariableGet(prefix + "momentumexpert");
       if (GlobalVariableCheck(prefix + "recentwr"))   m_model.recentWinRate   = GlobalVariableGet(prefix + "recentwr");
       if (GlobalVariableCheck(prefix + "longtermwr")) m_model.longTermWinRate = GlobalVariableGet(prefix + "longtermwr");
+      
       // NN weights
       if (GlobalVariableCheck(prefix + "nn_h1w1")) m_model.nn_hidden1_w1   = GlobalVariableGet(prefix + "nn_h1w1");
       if (GlobalVariableCheck(prefix + "nn_h1w2")) m_model.nn_hidden1_w2   = GlobalVariableGet(prefix + "nn_h1w2");
@@ -605,14 +656,20 @@ private:
       if (GlobalVariableCheck(prefix + "nn_lr"))   m_model.nnLearningRate  = GlobalVariableGet(prefix + "nn_lr");
       if (GlobalVariableCheck(prefix + "nn_ts"))   m_model.nnTrainingSamples = (int)GlobalVariableGet(prefix + "nn_ts");
 
+      // Mark model as initialized after loading
+      m_model.initialized = true;
       m_lastSavedWinRate = -1.0;
       m_modelDirty       = true;
       SaveModelState();
+      
+      Log("📥 Model state loaded. NN samples: " + IntegerToString(m_model.nnTrainingSamples));
    }
 
    void SaveModelState()
    {
       string prefix = ModelGVPrefix();
+      
+      // Save all model weights to Global Variables
       GlobalVariableSet(prefix + "bias",     m_model.bias);
       GlobalVariableSet(prefix + "atr",      m_model.atrWeight);
       GlobalVariableSet(prefix + "spread",   m_model.spreadWeight);
@@ -630,6 +687,7 @@ private:
       GlobalVariableSet(prefix + "momentumexpert", m_model.momentumExpertWeight);
       GlobalVariableSet(prefix + "recentwr",   m_model.recentWinRate);
       GlobalVariableSet(prefix + "longtermwr", m_model.longTermWinRate);
+      
       // NN weights
       GlobalVariableSet(prefix + "nn_h1w1", m_model.nn_hidden1_w1);
       GlobalVariableSet(prefix + "nn_h1w2", m_model.nn_hidden1_w2);
@@ -849,8 +907,12 @@ private:
 
    void AdaptModelToPerformance()
    {
-      // [BUG-09 FIX] Cek null pointer
-      if (CheckPointer(m_data) == POINTER_INVALID) return;
+      // Safety: validate DataManager pointer
+      if (CheckPointer(m_data) == POINTER_INVALID)
+      {
+         Log("⚠️ AdaptModelToPerformance: DataManager is NULL");
+         return;
+      }
 
       PerformanceStats stats = (*m_data).GetPerformanceStats();
       int total = stats.safeTotal + stats.aggTotal;
