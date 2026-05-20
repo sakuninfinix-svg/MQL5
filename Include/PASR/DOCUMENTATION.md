@@ -134,13 +134,17 @@ graph TD
 - **Thread Safety:** ✅ Safe (immutable definitions).
 - **Jangan Ubah:** Enum value yang sudah ada (bisa break backward compatibility).
 
-### 2. `2.Config.mqh`
-- **Tanggung Jawab:** Definisi `struct Config` dan `ConfigSnapshot`.
+### 2. `2.Config.Types.mqh` & `2.Config.Manager.mqh`
+- **Tanggung Jawab:** 
+  - `2.Config.Types.mqh`: Definisi enums, structs (`StrategyConfig`, `ConfigSnapshot`, `InstrumentContext`), input parameters, dan helper functions.
+  - `2.Config.Manager.mqh`: Class `ConfigManager` (singleton) untuk manajemen konfigurasi dan `RecoveryEngine` untuk state persistence.
 - **Fitur Kunci:**
   - `ConfigSnapshot`: Immutable copy dari config saat ini.
   - `CopyFrom()/CopyTo()`: Atomic transfer data.
+  - `ConfigManager`: Singleton untuk akses konfigurasi terpusat.
+  - `RecoveryEngine`: Recovery state setelah restart/disconnect.
 - **Akses:** Read-only untuk semua manager setelah inisialisasi.
-- **Cara Extend:** Tambahkan field baru di struct `Config`, lalu update `CopyFrom/CopyTo`.
+- **Cara Extend:** Tambahkan field baru di struct `StrategyConfig`, lalu update `CopyFrom/CopyTo`.
 
 ### 3. `3.Logger.mqh`
 - **Tanggung Jawab:** Logging terpusat (File, Terminal, Email).
@@ -196,7 +200,7 @@ graph TD
 
 ```
 1. EA Init
-   ├─ Load Config (2.Config.mqh)
+   ├─ Load Config (2.Config.Types.mqh + 2.Config.Manager.mqh)
    ├─ Init DataManager (10.DataManager.mqh)
    ├─ Init SignalManager (5.SignalManager.mqh)
    ├─ Init TradeManager (6.TradeManager.mqh)
