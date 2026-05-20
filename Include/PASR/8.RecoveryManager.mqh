@@ -3,18 +3,21 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Position Recovery & Fakeout Management Module         |
 //+------------------------------------------------------------------+
-//| V2.02 FIXES:                                                     |
-//| - RM-BUG-FIX-1 [CRITICAL]: ClearEngineGVs() referenced `cfg`    |
-//|   that was never declared in local scope → runtime NULL crash.   |
-//|   FIX: Added StrategyConfig cfg declaration inside the method.   |
-//| - RM-BUG-FIX-2 [HIGH]: GV key prefix missing AccountLogin.       |
-//|   FIX: Added AccountInfoInteger(ACCOUNT_LOGIN) to all GV keys    |
-//|   to prevent cross-account / cross-instance GV collision.        |
+//| V2.03 FIXES:                                                     |
+//| - RM-BUG-FIX-3 [CRITICAL]: Replaced undefined CFG macro with    |
+//|   Config() accessor (IManager v2.11 m_cfg cached field).        |
+//|   CFG.risk.magic / CFG.risk.exit_on_opposite were never defined  |
+//|   anywhere — caused compile error / undefined behaviour.         |
+//| - RM-BUG-FIX-4 [MEDIUM]: Init() CFG.risk.magic fixed same way.  |
+//|                                                                  |
+//| V2.02 FIXES (previous):                                         |
+//| - RM-BUG-FIX-1 [CRITICAL]: ClearEngineGVs() cfg undeclared.    |
+//| - RM-BUG-FIX-2 [HIGH]: GV keys now include ACCOUNT_LOGIN prefix.|
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.02"
+#property version   "2.03"
 #property strict
 
 #ifndef __RECOVERY_MANAGER_MQH__
@@ -27,7 +30,7 @@
 #include "12.MarketRegime.mqh"
 
 //+------------------------------------------------------------------+
-//| Recovery Statistics - Tracking & Scoring                         |
+//| Recovery Statistics                                              |
 //+------------------------------------------------------------------+
 struct RecoveryStats
 {
@@ -57,8 +60,8 @@ struct RecoveryStats
 
    double GetQualityScore() const
    {
-      double s = GetSuccessRate()        * 40.0;
-      double f = GetFakeoutRecoveryRate()* 30.0;
+      double s = GetSuccessRate()         * 40.0;
+      double f = GetFakeoutRecoveryRate() * 30.0;
       double p = MathMin(30.0, (avgRecoveryProfit > 0 ? avgRecoveryProfit : 0) * 3.0);
       return MathMin(100.0, s + f + p);
    }
@@ -82,6 +85,7 @@ private:
    double m_minRegimeScore;
 
 private:
+   // Override to ensure m_cfg is always fresh before subclass methods use it
    virtual void RefreshConfigCache() override { IManager::RefreshConfigCache(); }
 
    int FindEngineIndex(ulong ticket)
@@ -95,17 +99,15 @@ private:
       return -1;
    }
 
-   // RM-BUG-FIX-1: cfg was undeclared in this scope — now fetched explicitly.
-   // RM-BUG-FIX-2: Account login prepended to prevent cross-account GV collision.
+   // RM-BUG-FIX-1+2: cfg fetched from DataManager; account login in GV key.
    void ClearEngineGVs(ulong ticket)
    {
-      StrategyConfig cfg; m_data.GetConfigCache(cfg); // FIX: was previously undeclared
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       string prefix = "PASR_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_"
                     + IntegerToString(cfg.magic) + "_" + IntegerToString(ticket) + "_";
-      string varName;
       for(int i = GlobalVariablesTotal() - 1; i >= 0; i--)
       {
-         varName = GlobalVariableName(i);
+         string varName = GlobalVariableName(i);
          if(StringFind(varName, prefix) == 0)
             GlobalVariableDel(varName);
       }
@@ -161,10 +163,8 @@ private:
                            r.mainTicket, reason, profitPoints, wasRecovered ? "Yes" : "No");
          }
          else if(m_debugMode)
-         {
             PrintFormat("[Recovery] Failed to close %d: Error %d (%s)",
                         r.mainTicket, GetLastError(), m_trade.ResultRetcodeDescription());
-         }
       }
 
       ClearEngineGVs(r.mainTicket);
@@ -205,7 +205,7 @@ private:
       if(signal.level < 2)
       {
          if(m_debugMode)
-            Log(StringFormat("Fakeout low confidence (%.2f). Continuing to recovery mode.", signal.confidence));
+            Log(StringFormat("Fakeout low confidence (%.2f). Continuing to recovery.", signal.confidence));
          return false;
       }
 
@@ -237,7 +237,7 @@ private:
 
       if(m_trade.PositionModify(r.mainTicket, newSL, currentTP))
       {
-         r.lastKnownATR = atrvalue;
+         r.lastKnownATR     = atrvalue;
          r.recoveryAttempts++;
          m_stats.fakeoutsDetected++;
          m_stats.fakeoutsRecovered++;
@@ -256,9 +256,8 @@ private:
 
    void ProcessTrailingAndPartial(RecoveryEngine *r, const MqlTick &tick, double atrvalue)
    {
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      if(!cfg.use_trailing || !r.active) return;
-
+      // Use cached m_cfg — no extra struct copy (IM-OPT-1)
+      if(!Config().use_trailing || !r.active) return;
       if(!PositionSelectByTicket(r.mainTicket)) return;
 
       ENUM_POSITION_TYPE type      = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
@@ -276,26 +275,26 @@ private:
 
       if(type == POSITION_TYPE_BUY)
       {
-         if(profitATR >= cfg.lock_profit_atr)
-            newSL = MathMax(newSL, openPrice + atr * cfg.lock_offset_atr);
-         if(profitATR >= cfg.trail_activation_atr)
-            newSL = MathMax(newSL, curPrice - atr * cfg.trail_step_atr);
+         if(profitATR >= Config().lock_profit_atr)
+            newSL = MathMax(newSL, openPrice + atr * Config().lock_offset_atr);
+         if(profitATR >= Config().trail_activation_atr)
+            newSL = MathMax(newSL, curPrice - atr * Config().trail_step_atr);
       }
       else
       {
-         double trailBase = openPrice - atr * cfg.lock_offset_atr;
-         if(profitATR >= cfg.lock_profit_atr)
+         double trailBase = openPrice - atr * Config().lock_offset_atr;
+         if(profitATR >= Config().lock_profit_atr)
             newSL = MathMin(newSL == 0 ? trailBase : newSL, trailBase);
-         if(profitATR >= cfg.trail_activation_atr)
+         if(profitATR >= Config().trail_activation_atr)
          {
-            double dynamicSL = NormalizeDouble(curPrice + atr * cfg.trail_step_atr, _Digits);
+            double dynamicSL = NormalizeDouble(curPrice + atr * Config().trail_step_atr, _Digits);
             newSL = (newSL == 0) ? dynamicSL : MathMin(newSL, dynamicSL);
          }
       }
 
-      if(cfg.partial_close_lot_pct > 0 && profitATR >= cfg.partial_close_atr && !r.partialClosed)
+      if(Config().partial_close_lot_pct > 0 && profitATR >= Config().partial_close_atr && !r.partialClosed)
       {
-         double closeLot = m_data.NormalizeVolume(_Symbol, curLot * cfg.partial_close_lot_pct);
+         double closeLot = m_data.NormalizeVolume(_Symbol, curLot * Config().partial_close_lot_pct);
          if(closeLot > 0 && m_trade.PositionClosePartial(r.mainTicket, closeLot))
          {
             r.partialClosed = true;
@@ -316,24 +315,23 @@ private:
 
    bool AttemptRecovery(RecoveryEngine *r)
    {
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-
-      if(r.recoveryAttempts >= cfg.max_recovery_attempts)
+      if(r.recoveryAttempts >= Config().max_recovery_attempts)
       {
          if(m_debugMode)
             PrintFormat("[Recovery] Max attempts (%d/%d) reached for %d",
-                        r.recoveryAttempts, cfg.max_recovery_attempts, r.mainTicket);
+                        r.recoveryAttempts, Config().max_recovery_attempts, r.mainTicket);
          return false;
       }
 
       r.state = TRADE_STATE_RECOVERY;
       r.recoveryAttempts++;
-      r.recoveryCooldownExpiry = TimeCurrent() + (cfg.recovery_cooldown_bars * PeriodSeconds(_Period));
+      r.recoveryCooldownExpiry = TimeCurrent()
+         + (Config().recovery_cooldown_bars * PeriodSeconds(_Period));
       r.SaveState();
 
       if(m_debugMode)
          PrintFormat("[Recovery] Attempt %d/%d for ticket %d",
-                     r.recoveryAttempts, cfg.max_recovery_attempts, r.mainTicket);
+                     r.recoveryAttempts, Config().max_recovery_attempts, r.mainTicket);
 
       RecoverySignalEvent *ev = new RecoverySignalEvent(r.mainTicket, r.direction, r.entryPrice,
                                                          r.lastKnownATR, r.recoveryAttempts);
@@ -343,12 +341,10 @@ private:
 
    void CheckRecoveryTimeout(RecoveryEngine *r)
    {
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-
-      if(r.recoveryAttempts >= cfg.max_recovery_attempts)
+      if(r.recoveryAttempts >= Config().max_recovery_attempts)
       {
          PrintFormat("[Recovery] Timeout: max attempts %d/%d for %d",
-                     r.recoveryAttempts, cfg.max_recovery_attempts, r.mainTicket);
+                     r.recoveryAttempts, Config().max_recovery_attempts, r.mainTicket);
          ClearEngineGVs(r.mainTicket);
          r.Reset();
          return;
@@ -356,10 +352,7 @@ private:
       if(r.state != TRADE_STATE_NORMAL) return;
 
       ENUM_POSITION_TYPE type      = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      double             openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
       double             slPrice   = PositionGetDouble(POSITION_SL);
-      double             tpPrice   = PositionGetDouble(POSITION_TP);
-      double             curLot    = PositionGetDouble(POSITION_VOLUME);
       double             curPrice  = (type == POSITION_TYPE_BUY)
          ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
          : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -367,17 +360,17 @@ private:
       bool slHit = (type == POSITION_TYPE_BUY)
          ? (slPrice > 0 && curPrice <= slPrice)
          : (slPrice > 0 && curPrice >= slPrice);
-
       if(!slHit) return;
 
       bool cooldownActive = (r.recoveryCooldownExpiry > 0 && TimeCurrent() < r.recoveryCooldownExpiry);
       if(cooldownActive) return;
 
-      if(cfg.recovery_use && r.recoveryAttempts < cfg.max_recovery_attempts)
+      if(Config().recovery_use && r.recoveryAttempts < Config().max_recovery_attempts)
       {
          PrintFormat("[Recovery] SL hit on %d, recovery attempt %d/%d",
-                     r.mainTicket, r.recoveryAttempts + 1, cfg.max_recovery_attempts);
-         r.recoveryCooldownExpiry = TimeCurrent() + (cfg.recovery_cooldown_bars * PeriodSeconds(_Period));
+                     r.mainTicket, r.recoveryAttempts + 1, Config().max_recovery_attempts);
+         r.recoveryCooldownExpiry = TimeCurrent()
+            + (Config().recovery_cooldown_bars * PeriodSeconds(_Period));
          r.lastKnownATR = m_data.GetATRPoints();
          r.SaveState();
          AttemptRecovery(r);
@@ -393,16 +386,13 @@ private:
 
    void CheckExpiryAndForcedClose(RecoveryEngine *r)
    {
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-
-      if(cfg.max_trade_duration_days > 0 && r.entryTime > 0)
+      if(Config().max_trade_duration_days > 0 && r.entryTime > 0)
       {
-         if(TimeCurrent() > r.entryTime + (cfg.max_trade_duration_days * 86400))
+         if(TimeCurrent() > r.entryTime + (Config().max_trade_duration_days * 86400))
          {
             PrintFormat("[Recovery] Trade %d expired after %d days. Force closing.",
-                        r.mainTicket, cfg.max_trade_duration_days);
+                        r.mainTicket, Config().max_trade_duration_days);
             CloseActivePosition(r, "MaxDurationExpiry");
-            return;
          }
       }
    }
@@ -431,7 +421,8 @@ public:
    virtual bool Init() override
    {
       if(!IManager::Init()) return false;
-      m_trade.SetExpertMagicNumber(CFG.risk.magic);
+      // RM-BUG-FIX-3: use Config() accessor — CFG macro never existed
+      m_trade.SetExpertMagicNumber(Config().magic);
       return true;
    }
 
@@ -443,12 +434,12 @@ public:
       AddEvent(EVENT_ID_RECOVERY_OPPORTUNITY);
       AddEvent(EVENT_ID_EMERGENCY_STOP);
       AddEvent(EVENT_ID_CONFIG_RELOAD);
+      AddEvent(EVENT_ID_SIGNAL_GENERATED);
    }
 
    virtual void OnPositionUpdate(PositionUpdateEvent *e) override
    {
       if(CheckPointer(e) == POINTER_INVALID) return;
-
       if(e.isClosed)
       {
          int idx = FindEngineIndex(e.ticket);
@@ -514,7 +505,6 @@ public:
    virtual void OnNewBar(NewBarEvent *e) override
    {
       if(CheckPointer(e) == POINTER_INVALID) return;
-
       for(int i = 0; i < ArraySize(engines); i++)
       {
          RecoveryEngine *r = engines[i];
@@ -551,8 +541,8 @@ public:
    virtual void OnConfigReload(ConfigReloadEvent *e) override
    {
       IManager::OnConfigReload(e);
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      m_trade.SetExpertMagicNumber(cfg.magic);
+      // Config() now returns refreshed m_cfg after IManager::OnConfigReload
+      m_trade.SetExpertMagicNumber(Config().magic);
    }
 
    virtual void OnRecoveryOpportunity(RecoveryOpportunityEvent *e) override
@@ -564,8 +554,7 @@ public:
       if(CheckPointer(r) == POINTER_INVALID || !r.active) return;
       if(r.state != TRADE_STATE_RECOVERY) return;
 
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      if(r.recoveryAttempts >= cfg.max_recovery_attempts)
+      if(r.recoveryAttempts >= Config().max_recovery_attempts)
       {
          PrintFormat("[Recovery] Max recovery attempts reached for %d. Closing.", r.mainTicket);
          CloseActivePosition(r, "MaxRecoveryAttempts");
@@ -579,17 +568,18 @@ public:
       DispatchEvent(update);
    }
 
+   // RM-BUG-FIX-3: was CFG.risk.exit_on_opposite — CFG undefined, use Config()
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
-      if(CheckPointer(e) == POINTER_INVALID || !CFG.risk.exit_on_opposite) return;
+      if(CheckPointer(e) == POINTER_INVALID || !Config().exit_on_opposite) return;
 
       for(int i = 0; i < ArraySize(engines); i++)
       {
          RecoveryEngine *r = engines[i];
          if(CheckPointer(r) == POINTER_INVALID || !r.active) continue;
 
-         bool isOpposite = (r.direction == 1 && e.direction == -1) ||
-                           (r.direction == -1 && e.direction == 1);
+         bool isOpposite = (r.direction ==  1 && e.direction == -1) ||
+                           (r.direction == -1 && e.direction ==  1);
          if(isOpposite)
             CloseActivePosition(r, "OppositeSignal");
       }
@@ -601,48 +591,42 @@ public:
       if(idx < 0) return false;
       RecoveryEngine *r = engines[idx];
       if(CheckPointer(r) == POINTER_INVALID || !r.active) return false;
-
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       if(!PositionSelectByTicket(ticket)) return false;
 
-      double curLot = PositionGetDouble(POSITION_VOLUME);
-      double atr    = m_data.GetATRPoints() * _Point;
-      double pcDist = r.lastKnownATR * cfg.partial_close_atr * _Point;
+      double curLot  = PositionGetDouble(POSITION_VOLUME);
+      double pcDist  = r.lastKnownATR * Config().partial_close_atr * _Point;
 
-      ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      ENUM_POSITION_TYPE type      = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      double             openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
 
       targetPrice = (type == POSITION_TYPE_BUY)
          ? openPrice + pcDist
          : openPrice - pcDist;
-      closeLot = m_data.NormalizeVolume(_Symbol, curLot * cfg.partial_close_lot_pct);
+      closeLot = m_data.NormalizeVolume(_Symbol, curLot * Config().partial_close_lot_pct);
 
       if(closeLot <= 0) return false;
 
-      if(PositionSelectByTicket(ticket))
+      double curPrice = (type == POSITION_TYPE_BUY)
+         ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
+         : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+      bool atTarget = (type == POSITION_TYPE_BUY)
+         ? curPrice >= targetPrice
+         : curPrice <= targetPrice;
+
+      if(atTarget && !r.partialClosed)
       {
-         double curPrice = (type == POSITION_TYPE_BUY)
-            ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
-            : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-
-         bool atTarget = (type == POSITION_TYPE_BUY)
-            ? curPrice >= targetPrice
-            : curPrice <= targetPrice;
-
-         if(atTarget && !r.partialClosed)
+         if(m_trade.PositionClosePartial(ticket, closeLot))
          {
-            if(m_trade.PositionClosePartial(ticket, closeLot))
-            {
-               r.partialClosed = true;
-               ClearEngineGVs(ticket);
-               return true;
-            }
+            r.partialClosed = true;
+            ClearEngineGVs(ticket);
+            return true;
          }
       }
       return false;
    }
 
-   RecoveryStats GetStats() const { return m_stats; }
+   RecoveryStats GetStats()          const { return m_stats; }
    int           GetActiveEngineCount() const
    {
       int cnt = 0;
