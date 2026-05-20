@@ -3,17 +3,24 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Multi-Timeframe Market Regime & Volatility Filter     |
 //|                                                                  |
-//| VERSION 2.01 FIXES:                                              |
-//| - FIX: offsetof() compile error → manual loop for high/low      |
-//| - FIX: ENUM_TIMEFRAMES calc (PeriodSeconds*4) → lookup table    |
-//| - FIX: 9x CopyRates/bar → pass regimes to IsMTFConfirmed/Align  |
-//| - FIX: ArrayInsert() sliding window → manual shift loop         |
-//| - FIX: BuildReasoning() dead private method → used in GetReason |
+//| VERSION 2.02 FIXES (post code-audit):                           |
+//| - FIX: double-write history buffer → ReadADX/ReadATR helpers    |
+//|         no side-effects; Update() shifts history ONCE per bar   |
+//| - FIX: CalculateVolatilityRatio reads m_atrHistory[0] directly  |
+//|         removes re-call to CalculateATR (was double-insert)     |
+//| - FIX: Remove redundant CopyBuffer(50) in Update() — m_atrHistory|
+//|         already is the sliding window, no need to re-copy        |
+//| - FIX: DetectTransition logic — return true on any regime change |
+//|         counter-based settling replaces broken < 3 check        |
+//| - FIX: GetLotMultiplier baseMult default=1.0 — compile error    |
+//|         when called without argument from DataManager           |
+//| - FIX: GetHigherTF ceiling — PERIOD_W1 → MN1, MN1 stays MN1   |
+//| - KEEP: all v2.01 fixes                                          |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "2.01"
+#property version "2.02"
 #property strict
 
 #ifndef __MARKET_REGIME_MQH__
@@ -150,7 +157,7 @@ private:
 
    //+------------------------------------------------------------------+
    //| [v2.01 FIX] Higher/LongTerm TF via lookup table                  |
-   //| PeriodSeconds()*N returned raw seconds, not valid ENUM_TIMEFRAMES |
+   //| [v2.02 FIX] Added W1 and MN1 ceiling cases                       |
    //+------------------------------------------------------------------+
    static ENUM_TIMEFRAMES GetHigherTF(ENUM_TIMEFRAMES tf)
    {
@@ -163,7 +170,9 @@ private:
          case PERIOD_H1:  return PERIOD_H4;
          case PERIOD_H4:  return PERIOD_D1;
          case PERIOD_D1:  return PERIOD_W1;
-         default:         return PERIOD_D1;
+         case PERIOD_W1:  return PERIOD_MN1;
+         case PERIOD_MN1: return PERIOD_MN1;  // ceiling
+         default:         return PERIOD_W1;
       }
    }
 
@@ -226,47 +235,43 @@ private:
    }
 
    //+------------------------------------------------------------------+
-   //| [v2.01 FIX] Sliding window via manual shift (ArrayInsert wrong)  |
+   //| [v2.02 FIX] ReadADX / ReadATR — pure read, NO history side-effect|
+   //| History is updated ONCE per bar in Update() via ShiftAndInsert() |
    //+------------------------------------------------------------------+
-   double CalculateADX(ENUM_TIMEFRAMES tf)
+   double ReadADX(int handle) const
    {
-      int handle = INVALID_HANDLE;
-      if(tf == m_tfTrading)   handle = m_handleADX;
-      else if(tf == m_tfHigher)    handle = m_handleADX_Higher;
-      else if(tf == m_tfLongTerm)  handle = m_handleADX_LongTerm;
       if(handle == INVALID_HANDLE) return 25.0;
+      return GetIndicatorValue(handle, 0, 1, 25.0);  // shift=1: use last closed bar
+   }
 
-      double adx = GetIndicatorValue(handle, 0, 0, 25.0);
+   double ReadATR(int handle) const
+   {
+      if(handle == INVALID_HANDLE) return 0.001;
+      return GetIndicatorValue(handle, 0, 1, 0.001);  // shift=1: use last closed bar
+   }
 
-      // Manual shift: newest value at index 0
+   void ShiftAndInsertADX(double value)
+   {
       for(int i = m_historySize - 1; i > 0; i--)
          m_adxHistory[i] = m_adxHistory[i - 1];
-      m_adxHistory[0] = adx;
-
-      return adx;
+      m_adxHistory[0] = value;
    }
 
-   double CalculateATR(ENUM_TIMEFRAMES tf)
+   void ShiftAndInsertATR(double value)
    {
-      int handle = INVALID_HANDLE;
-      if(tf == m_tfTrading)   handle = m_handleATR;
-      else if(tf == m_tfHigher)    handle = m_handleATR_Higher;
-      else if(tf == m_tfLongTerm)  handle = m_handleATR_LongTerm;
-      if(handle == INVALID_HANDLE) return 0.001;
-
-      double atr = GetIndicatorValue(handle, 0, 0, 0.001);
-
-      // Manual shift: newest value at index 0
       for(int i = m_historySize - 1; i > 0; i--)
          m_atrHistory[i] = m_atrHistory[i - 1];
-      m_atrHistory[0] = atr;
-
-      return atr;
+      m_atrHistory[0] = value;
    }
 
-   double CalculateVolatilityRatio(ENUM_TIMEFRAMES tf, int lookback = 50)
+   //+------------------------------------------------------------------+
+   //| [v2.02 FIX] CalculateVolatilityRatio — reads m_atrHistory[0]    |
+   //| directly, NO call to ReadATR/CalculateATR (eliminates double-    |
+   //| insert that was caused by calling CalculateATR inside this fn)   |
+   //+------------------------------------------------------------------+
+   double CalculateVolatilityRatio(int lookback = 50) const
    {
-      double currentATR = CalculateATR(tf);
+      double currentATR = m_atrHistory[0];
       int historyCount  = ArraySize(m_atrHistory);
       if(historyCount < 2) return 1.0;
 
@@ -281,59 +286,46 @@ private:
    }
 
    //+------------------------------------------------------------------+
-   //| [v2.01 FIX] offsetof() removed → manual loop for high/low       |
+   //| [v2.02 FIX] DetermineRegime — uses ReadADX (no history write)   |
+   //| called AFTER history has already been updated in Update()        |
    //+------------------------------------------------------------------+
-   ENUM_MARKET_REGIME DetermineRegime(ENUM_TIMEFRAMES tf)
+   ENUM_MARKET_REGIME DetermineRegime(int adxHandle)
    {
-      double adx = CalculateADX(tf);
-
-      MqlRates rates[];
-      ArraySetAsSeries(rates, true);
-      if(CopyRates(m_symbol, tf, 1, 50, rates) < 50) return REGIME_NONE;
-
-      // Manual scan for highest/lowest (offsetof not available in MQL5)
-      double highestHigh = -DBL_MAX;
-      double lowestLow   =  DBL_MAX;
-      for(int i = 0; i < 20; i++)
-      {
-         if(rates[i].high > highestHigh) highestHigh = rates[i].high;
-         if(rates[i].low  < lowestLow)   lowestLow   = rates[i].low;
-      }
-
-      double range   = highestHigh - lowestLow;
-      double avgBody = 0;
-      for(int i = 0; i < 20; i++) avgBody += MathAbs(rates[i].close - rates[i].open);
-      avgBody /= 20.0;
-      if(avgBody <= 0.0) avgBody = range * 0.1;
+      double adx = ReadADX(adxHandle);
+      double atrRatio = CalculateVolatilityRatio(20);
 
       if(adx > 35)                              return REGIME_TRENDING_STRONG;
       else if(adx > 25)                         return REGIME_TRENDING_WEAK;
-      else if(adx < 20 && range < avgBody * 3)  return REGIME_RANGING_SIDEWAYS;
-      else if(adx < 25 && range > avgBody * 5)  return REGIME_CHOPPY_HIGH_VOL;
+      else if(adx < 20 && atrRatio < 0.9)       return REGIME_RANGING_SIDEWAYS;
+      else if(adx < 25 && atrRatio > 1.4)       return REGIME_CHOPPY_HIGH_VOL;
       else                                      return REGIME_TRANSITION;
    }
 
-   ENUM_VOLATILITY_REGIME DetermineVolatilityRegime(ENUM_TIMEFRAMES tf)
+   ENUM_VOLATILITY_REGIME DetermineVolatilityRegime() const
    {
-      double ratio = CalculateVolatilityRatio(tf, 50);
+      double ratio = CalculateVolatilityRatio(50);
       if(ratio < 0.7) return VOLATILITY_LOW;
       if(ratio > 1.3) return VOLATILITY_HIGH;
       return VOLATILITY_MEDIUM;
    }
 
+   //+------------------------------------------------------------------+
+   //| [v2.02 FIX] DetectTransition — always returns true on change     |
+   //| counter-based decay replaces broken "< 3" settled check          |
+   //+------------------------------------------------------------------+
    bool DetectTransition(ENUM_MARKET_REGIME current, ENUM_MARKET_REGIME previous)
    {
       if(current != previous)
       {
-         m_stableCounter = 0;
-         m_transitionCounter++;
-         return (m_transitionCounter < 3);
+         m_stableCounter      = 0;
+         m_transitionCounter  = MathMin(m_transitionCounter + 1, 10);
+         return true;  // always transition when regime changes
       }
       else
       {
-         m_transitionCounter = 0;
+         m_transitionCounter  = MathMax(0, m_transitionCounter - 1);
          m_stableCounter++;
-         return false;
+         return (m_transitionCounter > 0);  // still transition until fully settled
       }
    }
 
@@ -449,7 +441,9 @@ public:
    }
 
    //+------------------------------------------------------------------+
-   //| Update: compute all 3 regimes once, pass to helpers              |
+   //| [v2.02 FIX] Update — history shifted ONCE per bar.              |
+   //| ReadADX/ReadATR are pure reads. DetermineRegime uses ReadADX.   |
+   //| No redundant CopyBuffer(50) block — m_atrHistory covers this.   |
    //+------------------------------------------------------------------+
    void Update()
    {
@@ -457,31 +451,27 @@ public:
       if(currentBarTime == m_lastUpdate && m_lastUpdate != 0) return;
       m_lastUpdate = currentBarTime;
 
-      // Compute regimes once — reused by IsMTFConfirmed / GetTrendAlignment
-      ENUM_MARKET_REGIME tradingRegime  = DetermineRegime(m_tfTrading);
-      ENUM_MARKET_REGIME higherRegime   = DetermineRegime(m_tfHigher);
-      ENUM_MARKET_REGIME longTermRegime = DetermineRegime(m_tfLongTerm);
-      ENUM_VOLATILITY_REGIME volRegime  = DetermineVolatilityRegime(m_tfTrading);
+      // Step 1: Read all indicator values (pure read, no side effects)
+      double adxTrading   = ReadADX(m_handleADX);
+      double atrTrading   = ReadATR(m_handleATR);
+
+      // Step 2: Update history ONCE per bar
+      ShiftAndInsertADX(adxTrading);
+      ShiftAndInsertATR(atrTrading);
+
+      // Step 3: Compute regimes using ReadADX (no history write)
+      ENUM_MARKET_REGIME tradingRegime  = DetermineRegime(m_handleADX);
+      ENUM_MARKET_REGIME higherRegime   = DetermineRegime(m_handleADX_Higher);
+      ENUM_MARKET_REGIME longTermRegime = DetermineRegime(m_handleADX_LongTerm);
+      ENUM_VOLATILITY_REGIME volRegime  = DetermineVolatilityRegime();
 
       bool isTransition = DetectTransition(tradingRegime, m_previousRegime);
 
-      double trendStrength = CalculateADX(m_tfTrading);
-      double currentATR    = CalculateATR(m_tfTrading);
-
-      // Average ATR from indicator buffer (50 bars)
-      double avgATR = currentATR;
-      double atrBuf[];
-      ArrayResize(atrBuf, 50);
-      if(CopyBuffer(m_handleATR, 0, 1, 50, atrBuf) >= 50)
-      {
-         double s = 0;
-         for(int i = 0; i < 50; i++) s += atrBuf[i];
-         avgATR = s / 50.0;
-      }
-      double atrRatio = (avgATR > 0.0) ? (currentATR / avgATR) : 1.0;
+      // Step 4: ATR ratio from history (no extra CopyBuffer needed)
+      double atrRatio = CalculateVolatilityRatio(50);
 
       double regimeScore     = CalculateRegimeScore(isTransition ? REGIME_TRANSITION : tradingRegime,
-                                                    trendStrength, atrRatio);
+                                                    adxTrading, atrRatio);
       double volatilityScore = CalculateVolatilityScore(atrRatio);
 
       m_cachedRegimeScore     = regimeScore;
@@ -496,7 +486,7 @@ public:
       m_currentResult.volRegime       = volRegime;
       m_currentResult.regimeScore     = regimeScore;
       m_currentResult.volatilityScore = volatilityScore;
-      m_currentResult.trendStrength   = trendStrength;
+      m_currentResult.trendStrength   = adxTrading;
       m_currentResult.atrRatio        = atrRatio;
       m_currentResult.isTransition    = isTransition;
       m_currentResult.mtfConfirmed    = mtfConfirmed;
@@ -531,7 +521,11 @@ public:
    bool IsTrending() const { return m_currentResult.regime == REGIME_TRENDING_STRONG || m_currentResult.regime == REGIME_TRENDING_WEAK; }
    bool IsRanging()  const { return m_currentResult.regime == REGIME_RANGING_SIDEWAYS; }
 
-   double GetLotMultiplier(double baseMult,
+   //+------------------------------------------------------------------+
+   //| [v2.02 FIX] baseMult default=1.0 — fixes compile error when     |
+   //| called without argument from DataManager::CalculateLotSize()    |
+   //+------------------------------------------------------------------+
+   double GetLotMultiplier(double baseMult = 1.0,
                            double strongMult = 1.5, double weakMult = 1.0,
                            double sideMult   = 0.7, double chopMult = 0.5) const
    {
