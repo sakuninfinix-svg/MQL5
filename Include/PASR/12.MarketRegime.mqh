@@ -3,17 +3,27 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Multi-Timeframe Market Regime & Volatility Filter     |
 //|                                                                  |
-//| VERSION 2.01 FIXES:                                              |
-//| - FIX: offsetof() compile error → manual loop for high/low      |
-//| - FIX: ENUM_TIMEFRAMES calc (PeriodSeconds*4) → lookup table    |
-//| - FIX: 9x CopyRates/bar → pass regimes to IsMTFConfirmed/Align  |
-//| - FIX: ArrayInsert() sliding window → manual shift loop         |
-//| - FIX: BuildReasoning() dead private method → used in GetReason |
+//| VERSION 2.02 FIXES (Audit 2026-05-20):                          |
+//| - CRITICAL: CalculateADX/ATR had side-effect (history insert)   |
+//|   called multiple times per Update() → history double-written.  |
+//|   FIX: Split read (ReadIndicator) from write (UpdateHistory).   |
+//| - CRITICAL: CalculateVolatilityRatio called CalculateATR again  |
+//|   causing duplicate insert. FIX: reads m_atrHistory[0] directly.|
+//| - HIGH: DetermineRegime called CopyRates 3x per Update (50 bars)|
+//|   FIX: DetermineRegimeFromValues() uses pre-read ADX + ATR ratio.|
+//| - HIGH: Redundant CopyBuffer(atrBuf,50) in Update() after fix.  |
+//|   FIX: Removed; avgATR now from m_atrHistory sliding window.    |
+//| - MEDIUM: DetectTransition() returned inverted logic.           |
+//|   FIX: returns true on change, false when stably settled.       |
+//| - MEDIUM: GetLotMultiplier() missing default for baseMult param.|
+//|   FIX: baseMult = 1.0 default added.                            |
+//| - MINOR: GetHigherTF() ceiling for W1/MN1 was PERIOD_D1 (lower).|
+//|   FIX: W1→MN1, MN1→MN1 ceiling added.                          |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
-#property link "agsicentre.wordpress.com"
-#property version "2.01"
+#property link      "agsicentre.wordpress.com"
+#property version   "2.02"
 #property strict
 
 #ifndef __MARKET_REGIME_MQH__
@@ -61,15 +71,15 @@ struct RegimeResult
 
    RegimeResult()
    {
-      regime        = REGIME_NONE;
-      volRegime     = VOLATILITY_MEDIUM;
-      regimeScore   = 0.0;
+      regime          = REGIME_NONE;
+      volRegime       = VOLATILITY_MEDIUM;
+      regimeScore     = 0.0;
       volatilityScore = 0.5;
-      trendStrength = 0.0;
-      atrRatio      = 1.0;
-      isTransition  = false;
-      mtfConfirmed  = false;
-      tfAlignment   = 0;
+      trendStrength   = 0.0;
+      atrRatio        = 1.0;
+      isTransition    = false;
+      mtfConfirmed    = false;
+      tfAlignment     = 0;
    }
 
    double GetMinSignalThreshold(double baseThreshold = 0.5) const
@@ -90,19 +100,19 @@ struct RegimeResult
       string regimeStr;
       switch(regime)
       {
-         case REGIME_TRENDING_STRONG:  regimeStr = "Strong Trend"; break;
-         case REGIME_TRENDING_WEAK:    regimeStr = "Weak Trend";   break;
-         case REGIME_RANGING_SIDEWAYS: regimeStr = "Ranging";      break;
+         case REGIME_TRENDING_STRONG:  regimeStr = "Strong Trend";    break;
+         case REGIME_TRENDING_WEAK:    regimeStr = "Weak Trend";      break;
+         case REGIME_RANGING_SIDEWAYS: regimeStr = "Ranging";         break;
          case REGIME_CHOPPY_HIGH_VOL:  regimeStr = "Choppy High Vol"; break;
-         case REGIME_TRANSITION:       regimeStr = "Transition";   break;
-         default:                      regimeStr = "Unknown";      break;
+         case REGIME_TRANSITION:       regimeStr = "Transition";      break;
+         default:                      regimeStr = "Unknown";         break;
       }
       string volStr;
       switch(volRegime)
       {
-         case VOLATILITY_LOW:    volStr = "Low Vol";  break;
-         case VOLATILITY_MEDIUM: volStr = "Med Vol";  break;
-         case VOLATILITY_HIGH:   volStr = "High Vol"; break;
+         case VOLATILITY_LOW:    volStr = "Low Vol";     break;
+         case VOLATILITY_MEDIUM: volStr = "Med Vol";     break;
+         case VOLATILITY_HIGH:   volStr = "High Vol";    break;
          default:                volStr = "Unknown Vol"; break;
       }
       return StringFormat("%s + %s (Score: %.2f)%s",
@@ -150,7 +160,7 @@ private:
 
    //+------------------------------------------------------------------+
    //| [v2.01 FIX] Higher/LongTerm TF via lookup table                  |
-   //| PeriodSeconds()*N returned raw seconds, not valid ENUM_TIMEFRAMES |
+   //| [v2.02 FIX] W1→MN1 ceiling, MN1→MN1 (was returning D1 always)   |
    //+------------------------------------------------------------------+
    static ENUM_TIMEFRAMES GetHigherTF(ENUM_TIMEFRAMES tf)
    {
@@ -163,7 +173,9 @@ private:
          case PERIOD_H1:  return PERIOD_H4;
          case PERIOD_H4:  return PERIOD_D1;
          case PERIOD_D1:  return PERIOD_W1;
-         default:         return PERIOD_D1;
+         case PERIOD_W1:  return PERIOD_MN1;  // [v2.02 FIX]
+         case PERIOD_MN1: return PERIOD_MN1;  // [v2.02 FIX] ceiling
+         default:         return PERIOD_W1;
       }
    }
 
@@ -185,12 +197,12 @@ private:
    {
       ReleaseIndicators();
 
-      m_handleADX         = iADX(m_symbol, m_tfTrading,  14);
-      m_handleATR         = iATR(m_symbol, m_tfTrading,  14);
-      m_handleADX_Higher  = iADX(m_symbol, m_tfHigher,   14);
-      m_handleATR_Higher  = iATR(m_symbol, m_tfHigher,   14);
-      m_handleADX_LongTerm= iADX(m_symbol, m_tfLongTerm, 14);
-      m_handleATR_LongTerm= iATR(m_symbol, m_tfLongTerm, 14);
+      m_handleADX          = iADX(m_symbol, m_tfTrading,   14);
+      m_handleATR          = iATR(m_symbol, m_tfTrading,   14);
+      m_handleADX_Higher   = iADX(m_symbol, m_tfHigher,    14);
+      m_handleATR_Higher   = iATR(m_symbol, m_tfHigher,    14);
+      m_handleADX_LongTerm = iADX(m_symbol, m_tfLongTerm,  14);
+      m_handleATR_LongTerm = iATR(m_symbol, m_tfLongTerm,  14);
 
       if(m_handleADX == INVALID_HANDLE || m_handleATR == INVALID_HANDLE ||
          m_handleADX_Higher == INVALID_HANDLE || m_handleATR_Higher == INVALID_HANDLE ||
@@ -210,63 +222,49 @@ private:
 
    void ReleaseIndicators()
    {
-      if(m_handleADX         != INVALID_HANDLE) { IndicatorRelease(m_handleADX);          m_handleADX         = INVALID_HANDLE; }
-      if(m_handleATR         != INVALID_HANDLE) { IndicatorRelease(m_handleATR);          m_handleATR         = INVALID_HANDLE; }
-      if(m_handleADX_Higher  != INVALID_HANDLE) { IndicatorRelease(m_handleADX_Higher);   m_handleADX_Higher  = INVALID_HANDLE; }
-      if(m_handleATR_Higher  != INVALID_HANDLE) { IndicatorRelease(m_handleATR_Higher);   m_handleATR_Higher  = INVALID_HANDLE; }
-      if(m_handleADX_LongTerm!= INVALID_HANDLE) { IndicatorRelease(m_handleADX_LongTerm); m_handleADX_LongTerm= INVALID_HANDLE; }
-      if(m_handleATR_LongTerm!= INVALID_HANDLE) { IndicatorRelease(m_handleATR_LongTerm); m_handleATR_LongTerm= INVALID_HANDLE; }
+      if(m_handleADX          != INVALID_HANDLE) { IndicatorRelease(m_handleADX);          m_handleADX          = INVALID_HANDLE; }
+      if(m_handleATR          != INVALID_HANDLE) { IndicatorRelease(m_handleATR);          m_handleATR          = INVALID_HANDLE; }
+      if(m_handleADX_Higher   != INVALID_HANDLE) { IndicatorRelease(m_handleADX_Higher);   m_handleADX_Higher   = INVALID_HANDLE; }
+      if(m_handleATR_Higher   != INVALID_HANDLE) { IndicatorRelease(m_handleATR_Higher);   m_handleATR_Higher   = INVALID_HANDLE; }
+      if(m_handleADX_LongTerm != INVALID_HANDLE) { IndicatorRelease(m_handleADX_LongTerm); m_handleADX_LongTerm = INVALID_HANDLE; }
+      if(m_handleATR_LongTerm != INVALID_HANDLE) { IndicatorRelease(m_handleATR_LongTerm); m_handleATR_LongTerm = INVALID_HANDLE; }
    }
 
-   double GetIndicatorValue(int handle, int buffer, int shift, double fallback = 0.0) const
+   //+------------------------------------------------------------------+
+   //| [v2.02 FIX] Pure read — NO history side effect                   |
+   //| v2.01 CalculateADX/ATR had manual shift inside → double-write    |
+   //| when called >1x per Update(). Now separated: read vs. update.    |
+   //+------------------------------------------------------------------+
+   double ReadIndicator(int handle, double fallback = 0.0) const
    {
       double value[1];
-      if(CopyBuffer(handle, buffer, shift, 1, value) < 1) return fallback;
+      // Use shift=1 (last closed bar) for stability
+      if(CopyBuffer(handle, 0, 1, 1, value) < 1) return fallback;
       return value[0];
    }
 
    //+------------------------------------------------------------------+
-   //| [v2.01 FIX] Sliding window via manual shift (ArrayInsert wrong)  |
+   //| [v2.02 FIX] History update called ONCE per Update()              |
    //+------------------------------------------------------------------+
-   double CalculateADX(ENUM_TIMEFRAMES tf)
+   void UpdateHistoryOnce(double adxVal, double atrVal)
    {
-      int handle = INVALID_HANDLE;
-      if(tf == m_tfTrading)   handle = m_handleADX;
-      else if(tf == m_tfHigher)    handle = m_handleADX_Higher;
-      else if(tf == m_tfLongTerm)  handle = m_handleADX_LongTerm;
-      if(handle == INVALID_HANDLE) return 25.0;
-
-      double adx = GetIndicatorValue(handle, 0, 0, 25.0);
-
-      // Manual shift: newest value at index 0
       for(int i = m_historySize - 1; i > 0; i--)
+      {
          m_adxHistory[i] = m_adxHistory[i - 1];
-      m_adxHistory[0] = adx;
-
-      return adx;
-   }
-
-   double CalculateATR(ENUM_TIMEFRAMES tf)
-   {
-      int handle = INVALID_HANDLE;
-      if(tf == m_tfTrading)   handle = m_handleATR;
-      else if(tf == m_tfHigher)    handle = m_handleATR_Higher;
-      else if(tf == m_tfLongTerm)  handle = m_handleATR_LongTerm;
-      if(handle == INVALID_HANDLE) return 0.001;
-
-      double atr = GetIndicatorValue(handle, 0, 0, 0.001);
-
-      // Manual shift: newest value at index 0
-      for(int i = m_historySize - 1; i > 0; i--)
          m_atrHistory[i] = m_atrHistory[i - 1];
-      m_atrHistory[0] = atr;
-
-      return atr;
+      }
+      m_adxHistory[0] = adxVal;
+      m_atrHistory[0] = atrVal;
    }
 
-   double CalculateVolatilityRatio(ENUM_TIMEFRAMES tf, int lookback = 50)
+   //+------------------------------------------------------------------+
+   //| [v2.02 FIX] Reads m_atrHistory directly — no CalculateATR call  |
+   //| Previous CalculateVolatilityRatio() called CalculateATR() which  |
+   //| triggered another history insert = double-write bug.             |
+   //+------------------------------------------------------------------+
+   double CalculateVolatilityRatioFromHistory(int lookback = 50) const
    {
-      double currentATR = CalculateATR(tf);
+      double currentATR = m_atrHistory[0];
       int historyCount  = ArraySize(m_atrHistory);
       if(historyCount < 2) return 1.0;
 
@@ -281,59 +279,45 @@ private:
    }
 
    //+------------------------------------------------------------------+
-   //| [v2.01 FIX] offsetof() removed → manual loop for high/low       |
+   //| [v2.02 FIX] DetermineRegime no longer calls CopyRates for all 3 |
+   //| timeframes. Uses pre-read ADX + ATR ratio from history.          |
+   //| Removes 3x CopyRates(50 bars) bottleneck per Update() call.      |
    //+------------------------------------------------------------------+
-   ENUM_MARKET_REGIME DetermineRegime(ENUM_TIMEFRAMES tf)
+   ENUM_MARKET_REGIME DetermineRegimeFromValues(double adx, double atrRatio) const
    {
-      double adx = CalculateADX(tf);
-
-      MqlRates rates[];
-      ArraySetAsSeries(rates, true);
-      if(CopyRates(m_symbol, tf, 1, 50, rates) < 50) return REGIME_NONE;
-
-      // Manual scan for highest/lowest (offsetof not available in MQL5)
-      double highestHigh = -DBL_MAX;
-      double lowestLow   =  DBL_MAX;
-      for(int i = 0; i < 20; i++)
-      {
-         if(rates[i].high > highestHigh) highestHigh = rates[i].high;
-         if(rates[i].low  < lowestLow)   lowestLow   = rates[i].low;
-      }
-
-      double range   = highestHigh - lowestLow;
-      double avgBody = 0;
-      for(int i = 0; i < 20; i++) avgBody += MathAbs(rates[i].close - rates[i].open);
-      avgBody /= 20.0;
-      if(avgBody <= 0.0) avgBody = range * 0.1;
-
-      if(adx > 35)                              return REGIME_TRENDING_STRONG;
-      else if(adx > 25)                         return REGIME_TRENDING_WEAK;
-      else if(adx < 20 && range < avgBody * 3)  return REGIME_RANGING_SIDEWAYS;
-      else if(adx < 25 && range > avgBody * 5)  return REGIME_CHOPPY_HIGH_VOL;
-      else                                      return REGIME_TRANSITION;
+      if(adx > 35)                               return REGIME_TRENDING_STRONG;
+      else if(adx > 25)                          return REGIME_TRENDING_WEAK;
+      else if(adx < 20 && atrRatio < 0.9)        return REGIME_RANGING_SIDEWAYS;
+      else if(adx < 25 && atrRatio > 1.4)        return REGIME_CHOPPY_HIGH_VOL;
+      else                                       return REGIME_TRANSITION;
    }
 
-   ENUM_VOLATILITY_REGIME DetermineVolatilityRegime(ENUM_TIMEFRAMES tf)
+   ENUM_VOLATILITY_REGIME DetermineVolatilityRegime(double atrRatio) const
    {
-      double ratio = CalculateVolatilityRatio(tf, 50);
-      if(ratio < 0.7) return VOLATILITY_LOW;
-      if(ratio > 1.3) return VOLATILITY_HIGH;
+      if(atrRatio < 0.7) return VOLATILITY_LOW;
+      if(atrRatio > 1.3) return VOLATILITY_HIGH;
       return VOLATILITY_MEDIUM;
    }
 
+   //+------------------------------------------------------------------+
+   //| [v2.02 FIX] DetectTransition() had inverted logic:               |
+   //| Old: return (counter < 3) → returns false after 3 changes (bug) |
+   //| New: returns true while changing, false once stably settled.     |
+   //+------------------------------------------------------------------+
    bool DetectTransition(ENUM_MARKET_REGIME current, ENUM_MARKET_REGIME previous)
    {
       if(current != previous)
       {
-         m_stableCounter = 0;
-         m_transitionCounter++;
-         return (m_transitionCounter < 3);
+         m_stableCounter     = 0;
+         m_transitionCounter = MathMin(m_transitionCounter + 1, 10);
+         return true;  // Always transition when regime changes
       }
       else
       {
-         m_transitionCounter = 0;
+         m_transitionCounter = MathMax(0, m_transitionCounter - 1);
          m_stableCounter++;
-         return false;
+         // Still considered transitioning until counter fully drains
+         return (m_transitionCounter > 0);
       }
    }
 
@@ -360,9 +344,6 @@ private:
       return 0.9 - (atrRatio - 0.5) / 1.5 * 0.8;
    }
 
-   //+------------------------------------------------------------------+
-   //| [v2.01 FIX] Accept pre-computed regimes → no redundant CopyRates |
-   //+------------------------------------------------------------------+
    int GetTrendAlignment(ENUM_MARKET_REGIME trading,
                          ENUM_MARKET_REGIME higher,
                          ENUM_MARKET_REGIME longTerm) const
@@ -381,9 +362,6 @@ private:
       return GetTrendAlignment(trading, higher, longTerm) >= 2;
    }
 
-   //+------------------------------------------------------------------+
-   //| [v2.01 FIX] BuildReasoning() now actually used by GetReasoning() |
-   //+------------------------------------------------------------------+
    string BuildReasoning() const
    {
       string regStr;
@@ -409,9 +387,8 @@ public:
 
    MarketRegimeFilter()
    {
-      m_symbol  = _Symbol;
+      m_symbol     = _Symbol;
       m_tfTrading  = _Period;
-      // [v2.01 FIX] use lookup table instead of PeriodSeconds()*N
       m_tfHigher   = GetHigherTF(_Period);
       m_tfLongTerm = GetLongTermTF(_Period);
 
@@ -422,15 +399,15 @@ public:
       m_handleADX_LongTerm = INVALID_HANDLE;
       m_handleATR_LongTerm = INVALID_HANDLE;
 
-      m_lastUpdate          = 0;
-      m_historySize         = 100;
-      m_previousRegime      = REGIME_NONE;
-      m_transitionCounter   = 0;
-      m_stableCounter       = 0;
-      m_cachedRegimeScore   = 0.0;
+      m_lastUpdate            = 0;
+      m_historySize           = 100;
+      m_previousRegime        = REGIME_NONE;
+      m_transitionCounter     = 0;
+      m_stableCounter         = 0;
+      m_cachedRegimeScore     = 0.0;
       m_cachedVolatilityScore = 0.5;
-      m_cachedScoreTime     = 0;
-      m_data                = NULL;
+      m_cachedScoreTime       = 0;
+      m_data                  = NULL;
 
       CreateIndicators();
    }
@@ -449,7 +426,9 @@ public:
    }
 
    //+------------------------------------------------------------------+
-   //| Update: compute all 3 regimes once, pass to helpers              |
+   //| Update: v2.02 — single read per indicator, single history write  |
+   //| Flow: Read ADX/ATR for all 3 TF → UpdateHistoryOnce (trading TF) |
+   //|       → DetermineRegime from values → DetectTransition → scores  |
    //+------------------------------------------------------------------+
    void Update()
    {
@@ -457,38 +436,41 @@ public:
       if(currentBarTime == m_lastUpdate && m_lastUpdate != 0) return;
       m_lastUpdate = currentBarTime;
 
-      // Compute regimes once — reused by IsMTFConfirmed / GetTrendAlignment
-      ENUM_MARKET_REGIME tradingRegime  = DetermineRegime(m_tfTrading);
-      ENUM_MARKET_REGIME higherRegime   = DetermineRegime(m_tfHigher);
-      ENUM_MARKET_REGIME longTermRegime = DetermineRegime(m_tfLongTerm);
-      ENUM_VOLATILITY_REGIME volRegime  = DetermineVolatilityRegime(m_tfTrading);
+      // [v2.02 FIX] Read all indicator values ONCE — pure read, no side effect
+      double adxTrading   = ReadIndicator(m_handleADX,          25.0);
+      double atrTrading   = ReadIndicator(m_handleATR,           0.001);
+      double adxHigher    = ReadIndicator(m_handleADX_Higher,   25.0);
+      double adxLongTerm  = ReadIndicator(m_handleADX_LongTerm, 25.0);
+      double atrHigher    = ReadIndicator(m_handleATR_Higher,    0.001);
+      double atrLongTerm  = ReadIndicator(m_handleATR_LongTerm,  0.001);
 
+      // [v2.02 FIX] Update history EXACTLY ONCE per bar (trading TF only)
+      UpdateHistoryOnce(adxTrading, atrTrading);
+
+      // [v2.02 FIX] Volatility ratio from history — no extra CalculateATR call
+      double atrRatioTrading   = CalculateVolatilityRatioFromHistory(50);
+
+      // For higher/longterm ATR ratio: simple current/history[0] proxy
+      double atrRatioHigher    = (m_atrHistory[1] > 0.0) ? (atrHigher    / m_atrHistory[1]) : 1.0;
+      double atrRatioLongTerm  = (m_atrHistory[1] > 0.0) ? (atrLongTerm  / m_atrHistory[1]) : 1.0;
+
+      // [v2.02 FIX] DetermineRegime uses pre-read values — no CopyRates bottleneck
+      ENUM_MARKET_REGIME tradingRegime  = DetermineRegimeFromValues(adxTrading,  atrRatioTrading);
+      ENUM_MARKET_REGIME higherRegime   = DetermineRegimeFromValues(adxHigher,   atrRatioHigher);
+      ENUM_MARKET_REGIME longTermRegime = DetermineRegimeFromValues(adxLongTerm, atrRatioLongTerm);
+      ENUM_VOLATILITY_REGIME volRegime  = DetermineVolatilityRegime(atrRatioTrading);
+
+      // [v2.02 FIX] DetectTransition returns true while changing, false when settled
       bool isTransition = DetectTransition(tradingRegime, m_previousRegime);
 
-      double trendStrength = CalculateADX(m_tfTrading);
-      double currentATR    = CalculateATR(m_tfTrading);
-
-      // Average ATR from indicator buffer (50 bars)
-      double avgATR = currentATR;
-      double atrBuf[];
-      ArrayResize(atrBuf, 50);
-      if(CopyBuffer(m_handleATR, 0, 1, 50, atrBuf) >= 50)
-      {
-         double s = 0;
-         for(int i = 0; i < 50; i++) s += atrBuf[i];
-         avgATR = s / 50.0;
-      }
-      double atrRatio = (avgATR > 0.0) ? (currentATR / avgATR) : 1.0;
-
       double regimeScore     = CalculateRegimeScore(isTransition ? REGIME_TRANSITION : tradingRegime,
-                                                    trendStrength, atrRatio);
-      double volatilityScore = CalculateVolatilityScore(atrRatio);
+                                                    adxTrading, atrRatioTrading);
+      double volatilityScore = CalculateVolatilityScore(atrRatioTrading);
 
       m_cachedRegimeScore     = regimeScore;
       m_cachedVolatilityScore = volatilityScore;
       m_cachedScoreTime       = currentBarTime;
 
-      // [v2.01 FIX] pass pre-computed regimes — no extra CopyRates calls
       bool mtfConfirmed = IsMTFConfirmed(tradingRegime, higherRegime, longTermRegime);
       int  tfAlignment  = GetTrendAlignment(tradingRegime, higherRegime, longTermRegime);
 
@@ -496,8 +478,8 @@ public:
       m_currentResult.volRegime       = volRegime;
       m_currentResult.regimeScore     = regimeScore;
       m_currentResult.volatilityScore = volatilityScore;
-      m_currentResult.trendStrength   = trendStrength;
-      m_currentResult.atrRatio        = atrRatio;
+      m_currentResult.trendStrength   = adxTrading;
+      m_currentResult.atrRatio        = atrRatioTrading;
       m_currentResult.isTransition    = isTransition;
       m_currentResult.mtfConfirmed    = mtfConfirmed;
       m_currentResult.tfAlignment     = tfAlignment;
@@ -531,9 +513,16 @@ public:
    bool IsTrending() const { return m_currentResult.regime == REGIME_TRENDING_STRONG || m_currentResult.regime == REGIME_TRENDING_WEAK; }
    bool IsRanging()  const { return m_currentResult.regime == REGIME_RANGING_SIDEWAYS; }
 
-   double GetLotMultiplier(double baseMult,
-                           double strongMult = 1.5, double weakMult = 1.0,
-                           double sideMult   = 0.7, double chopMult = 0.5) const
+   //+------------------------------------------------------------------+
+   //| [v2.02 FIX] baseMult = 1.0 default added                         |
+   //| DataManager::CalculateLotSize() calls GetLotMultiplier() without |
+   //| arguments → compile error if no default. Fixed here.             |
+   //+------------------------------------------------------------------+
+   double GetLotMultiplier(double baseMult   = 1.0,
+                           double strongMult = 1.5,
+                           double weakMult   = 1.0,
+                           double sideMult   = 0.7,
+                           double chopMult   = 0.5) const
    {
       if(m_currentResult.isTransition) return 0.0;
       switch(m_currentResult.regime)
@@ -556,11 +545,9 @@ public:
       }
    }
 
-   bool   HasConfluence()    const { return m_currentResult.mtfConfirmed; }
-   string GetDescription()   const { return m_currentResult.Description(); }
-
-   // [v2.01 FIX] GetReasoning() now delegates to BuildReasoning() instead of duplicating
-   string GetReasoning() const { return BuildReasoning(); }
+   bool   HasConfluence()  const { return m_currentResult.mtfConfirmed; }
+   string GetDescription() const { return m_currentResult.Description(); }
+   string GetReasoning()   const { return BuildReasoning(); }
 };
 
 #endif
