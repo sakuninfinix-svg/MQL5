@@ -52,12 +52,11 @@ struct SRLevel
                lastTouchTime(0), lastTouchShift(-1) {}
                
    // Helper: Check if price is within zone
-   bool IsPriceInZone(double price, double bufferPoints) const
+   bool IsPriceInZone(double checkPrice, double bufferPoints) const
    {
-      double zoneRange = (top - bottom);
-      double extendedTop = top + bufferPoints;
+      double extendedTop    = top    + bufferPoints;
       double extendedBottom = bottom - bufferPoints;
-      return (price >= extendedBottom && price <= extendedTop);
+      return (checkPrice >= extendedBottom && checkPrice <= extendedTop);
    }
    
    // Helper: Get zone midpoint
@@ -130,13 +129,13 @@ private:
                              double atrPoints, int htfAlignment, bool isBroken)
    {
       StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      double score = 50.0; // Base score
+      double score = 30.0; // [PATCH SR-12] Base lowered from 50 to 30 for more discrimination
       
       // Touch count bonus (more touches = stronger zone, but diminishing returns)
       if(touchCount >= cfg.min_touches_strong)
          score += 25.0 * MathMin(1.0, (double)touchCount / (cfg.min_touches_strong * 2));
       else if(touchCount <= 1)
-         score -= 15.0;
+         score -= 10.0;
       
       // HTF Alignment bonus
       if(htfAlignment == 1)
@@ -148,9 +147,9 @@ private:
       if(isBroken)
          score -= 30.0;
       
-      // Fresh zone bonus (not tested recently)
+      // Fresh zone bonus (not tested recently) - reduced from 10 to 5
       if(touchCount == 0)
-         score += 10.0;
+         score += 5.0;
       
       // Normalize to 0-100 range
       return MathMax(0.0, MathMin(100.0, score));
@@ -169,21 +168,21 @@ private:
    // Helper: Cek apakah level sudah ditembus oleh harga Close bar yang sudah tertutup
    bool IsBroken(double price, bool isSupport, int bars)
    {
-      if (price <= 0) return false;
+      if(price <= 0) return false;
       MqlRates rates[];
       ArraySetAsSeries(rates, true);
-      // LOOK-AHEAD BIAS FIX: Mengambil bar yang sudah tertutup (mulai dari shift 1)
-      if (CopyRates(m_symbol, m_period, 1, bars, rates) < bars) return false;
+      // LOOK-AHEAD BIAS FIX: bar yang sudah tertutup (mulai dari shift 1)
+      if(CopyRates(m_symbol, m_period, 1, bars, rates) < bars) return false;
 
-      for (int i = 0; i < bars; i++)
+      for(int i = 0; i < bars; i++)
       {
-         if (isSupport && rates[i].close < price) return true;
-         if (!isSupport && rates[i].close > price) return true;
+         if(isSupport  && rates[i].close < price) return true;
+         if(!isSupport && rates[i].close > price) return true;
       }
       return false;
    }
    
-   // Enhanced: Check if level is a flip level (Support became Resistance or vice versa)
+   // [PATCH SR-10] Fixed: cross detection logic was inverted
    bool IsFlipLevel(double price, const MqlRates rates[], int lookback)
    {
       if(price <= 0 || ArraySize(rates) < lookback) return false;
@@ -193,29 +192,29 @@ private:
       
       for(int i = 1; i < lookback; i++)
       {
-         // Price crossed above
-         if(rates[i].low <= price && rates[i-1].close > price)
+         // Close crosses above price level (breakout up)
+         if(rates[i-1].close < price && rates[i].close > price)
             crossesAbove++;
-         // Price crossed below
-         if(rates[i].high >= price && rates[i-1].close < price)
+         // Close crosses below price level (breakout down)
+         if(rates[i-1].close > price && rates[i].close < price)
             crossesBelow++;
       }
       
-      // If both crosses happened, it's a flip level
+      // Flip: both directions happened
       return (crossesAbove >= 1 && crossesBelow >= 1);
    }
    
-   // Helper: Mencari Swing Fractal terdekat dengan CopyHigh/CopyLow (MQL5 Best Practice)
+   // [PATCH SR-03] Fixed available bound: -3 instead of -2 to prevent lows[i+1] OOB
    double FindNearestSwing(bool isSupport, int maxBars, int &foundShift, const double &highs[], const double &lows[])
    {
       foundShift = -1;
-      int available = MathMin(maxBars, ArraySize(highs) - 2);
+      int available = MathMin(maxBars, ArraySize(highs) - 3); // -3: i+1 safe at i==available
 
-      for (int i = 2; i <= available; i++)
+      for(int i = 2; i <= available; i++)
       {
-         if (isSupport)
+         if(isSupport)
          {
-            if (lows[i] < lows[i + 1] && lows[i] < lows[i - 1])
+            if(lows[i] < lows[i + 1] && lows[i] < lows[i - 1])
             {
                foundShift = i;
                return lows[i];
@@ -223,7 +222,7 @@ private:
          }
          else
          {
-            if (highs[i] > highs[i + 1] && highs[i] > highs[i - 1])
+            if(highs[i] > highs[i + 1] && highs[i] > highs[i - 1])
             {
                foundShift = i;
                return highs[i];
@@ -235,7 +234,7 @@ private:
    
    // Enhanced: Scan for swing high/low in specific timeframe
    bool ScanTimeframeSwings(ENUM_TIMEFRAMES tf, const MqlRates rates[], 
-                           SRLevel &outSupport, SRLevel &outResistance, double atrPoints)
+                           SRLevel &outSupport, SRLevel &outResistance, double atrPrice)
    {
       StrategyConfig cfg; m_data.GetConfigCache(cfg);
       int lookback = cfg.sr_lookback;
@@ -249,108 +248,100 @@ private:
       for(int i = 0; i < ArraySize(rates); i++)
       {
          highs[i] = rates[i].high;
-         lows[i] = rates[i].low;
+         lows[i]  = rates[i].low;
       }
       
       ArraySetAsSeries(highs, true);
       ArraySetAsSeries(lows, true);
       
-      // Find extreme levels
       int supShift = -1, resShift = -1;
-      double swingSup = FindNearestSwing(true, lookback, supShift, highs, lows);
+      double swingSup = FindNearestSwing(true,  lookback, supShift, highs, lows);
       double swingRes = FindNearestSwing(false, lookback, resShift, highs, lows);
       
-      // Also check absolute extremes
-      double extSup = lows[ArrayMinimum(lows, 0, lookback)];
+      double extSup = lows [ArrayMinimum(lows,  0, lookback)];
       double extRes = highs[ArrayMaximum(highs, 0, lookback)];
       
-      // Choose best levels
-      double finalSup = (swingSup > 0 && !IsBroken(swingSup, true, 5)) ? swingSup : extSup;
+      double finalSup = (swingSup > 0 && !IsBroken(swingSup, true,  5)) ? swingSup : extSup;
       double finalRes = (swingRes > 0 && !IsBroken(swingRes, false, 5)) ? swingRes : extRes;
       
       if(finalSup <= 0 || finalRes <= 0) return false;
       
-      // Build support level
-      outSupport.price = finalSup;
-      outSupport.bottom = finalSup - (atrPoints * 0.2 * _Point);
-      outSupport.top = finalSup + (atrPoints * 0.3 * _Point);
+      // [PATCH SR-02] Zone boundaries: atrPrice is already in price units, NO extra *_Point
+      outSupport.price          = finalSup;
+      outSupport.bottom         = finalSup - (atrPrice * 0.2);
+      outSupport.top            = finalSup + (atrPrice * 0.3);
       outSupport.timeframeFound = tf;
-      outSupport.isFlip = IsFlipLevel(finalSup, rates, lookback);
-      outSupport.touchCount = CountTouches(finalSup, true, lookback, rates, atrPoints);
-      outSupport.isFresh = (outSupport.touchCount <= 1);
+      outSupport.isFlip         = IsFlipLevel(finalSup, rates, lookback);
+      outSupport.touchCount     = CountTouches(finalSup, true,  lookback, rates, atrPrice);
+      outSupport.isFresh        = (outSupport.touchCount <= 1);
       outSupport.lastTouchShift = supShift;
       
-      // Build resistance level
-      outResistance.price = finalRes;
-      outResistance.bottom = finalRes - (atrPoints * 0.3 * _Point);
-      outResistance.top = finalRes + (atrPoints * 0.2 * _Point);
+      outResistance.price          = finalRes;
+      outResistance.bottom         = finalRes - (atrPrice * 0.3);
+      outResistance.top            = finalRes + (atrPrice * 0.2);
       outResistance.timeframeFound = tf;
-      outResistance.isFlip = IsFlipLevel(finalRes, rates, lookback);
-      outResistance.touchCount = CountTouches(finalRes, false, lookback, rates, atrPoints);
-      outResistance.isFresh = (outResistance.touchCount <= 1);
+      outResistance.isFlip         = IsFlipLevel(finalRes, rates, lookback);
+      outResistance.touchCount     = CountTouches(finalRes, false, lookback, rates, atrPrice);
+      outResistance.isFresh        = (outResistance.touchCount <= 1);
       outResistance.lastTouchShift = resShift;
       
-      // Calculate scores
       int htfAlignSup = 0, htfAlignRes = 0;
-      outSupport.score = CalculateLevelScore(outSupport, htfAlignSup, atrPoints);
-      outResistance.score = CalculateLevelScore(outResistance, htfAlignRes, atrPoints);
+      outSupport.score    = CalculateLevelScore(outSupport,    htfAlignSup, atrPrice);
+      outResistance.score = CalculateLevelScore(outResistance, htfAlignRes, atrPrice);
       
-      // Convert to strength enum
-      outSupport.strength = ScoreToStrength(outSupport.score);
+      outSupport.strength    = ScoreToStrength(outSupport.score);
       outResistance.strength = ScoreToStrength(outResistance.score);
       
       return true;
    }
    
-   // Helper: Count how many times price touched a level
-   int CountTouches(double price, bool isSupport, int lookback, const MqlRates rates[], double atrPoints)
+   // [PATCH SR-02] touchZone: atrPrice already in price units, NO extra *_Point
+   int CountTouches(double price, bool isSupport, int lookback, const MqlRates rates[], double atrPrice)
    {
       if(price <= 0 || ArraySize(rates) < lookback) return 0;
       
-      double touchZone = atrPoints * 0.5 * _Point;
+      double touchZone = atrPrice * 0.5; // price units
       int touches = 0;
       
       for(int i = 0; i < lookback && i < ArraySize(rates); i++)
       {
          if(isSupport)
          {
-            if(MathAbs(rates[i].low - price) <= touchZone)
-               touches++;
+            if(MathAbs(rates[i].low  - price) <= touchZone) touches++;
          }
          else
          {
-            if(MathAbs(rates[i].high - price) <= touchZone)
-               touches++;
+            if(MathAbs(rates[i].high - price) <= touchZone) touches++;
          }
       }
-      
       return touches;
    }
    
-   // Helper: Calculate comprehensive level score
-   double CalculateLevelScore(const SRLevel &level, int &htfAlignment, double atrPoints)
+   // [PATCH SR-12] Base score lowered, fresh bonus reduced for better discrimination
+   double CalculateLevelScore(const SRLevel &level, int &htfAlignment, double atrPrice)
    {
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      double score = 50.0; // Base score
+      double score = 30.0; // Base lowered from 50
       
-      // Touch count component (max 25 points)
-      double touchScore = MathMin(25.0, level.touchCount * 5.0);
-      if(level.touchCount == 0) touchScore = 10.0; // Fresh level bonus
+      // Touch count component (max 30 points)
+      double touchScore;
+      if(level.touchCount == 0)
+         touchScore = 5.0;  // Fresh: minimal bonus, not 10
+      else
+         touchScore = MathMin(30.0, level.touchCount * 8.0);
       score += touchScore;
       
-      // Timeframe weight component (max 25 points)
+      // Timeframe weight component (max 20 points)
       double tfWeight = GetTimeframeWeight(level.timeframeFound);
-      score += tfWeight * 25.0;
+      score += tfWeight * 20.0;
       
-      // Flip level bonus (max 15 points)
+      // Flip level bonus (15 points)
       if(level.isFlip)
          score += 15.0;
       
-      // Freshness bonus (max 10 points)
+      // Freshness bonus (5 points) - reduced from 10
       if(level.isFresh)
-         score += 10.0;
+         score += 5.0;
       
-      // HTF alignment will be calculated separately
       htfAlignment = 0; // To be set by caller
       
       return MathMax(0.0, MathMin(100.0, score));
@@ -369,7 +360,7 @@ private:
       }
    }
    
-   // Helper: Merge nearby levels into single zone
+   // [PATCH SR-07] Merge now propagates isFlip, isFresh, lastTouchTime
    void MergeNearbyLevels(SRLevel &levels[], int &count, double mergeThresholdPoints)
    {
       if(count < 2) return;
@@ -385,19 +376,23 @@ private:
                double distancePoints = MathAbs(levels[i].price - levels[j].price) / _Point;
                if(distancePoints <= mergeThresholdPoints)
                {
-                  // Merge level j into level i
-                  levels[i].price = (levels[i].price + levels[j].price) / 2.0;
-                  levels[i].top = MathMax(levels[i].top, levels[j].top);
-                  levels[i].bottom = MathMin(levels[i].bottom, levels[j].bottom);
+                  levels[i].price      = (levels[i].price + levels[j].price) / 2.0;
+                  levels[i].top        = MathMax(levels[i].top,    levels[j].top);
+                  levels[i].bottom     = MathMin(levels[i].bottom, levels[j].bottom);
                   levels[i].touchCount += levels[j].touchCount;
-                  levels[i].score = MathMax(levels[i].score, levels[j].score);
-                  levels[i].strength = ScoreToStrength(levels[i].score);
+                  levels[i].score      = MathMax(levels[i].score,  levels[j].score);
+                  levels[i].strength   = ScoreToStrength(levels[i].score);
+                  
+                  // [PATCH SR-07] Propagate flip/fresh metadata
+                  levels[i].isFlip        = levels[i].isFlip || levels[j].isFlip;
+                  levels[i].isFresh       = levels[i].isFresh && levels[j].isFresh;
+                  levels[i].lastTouchTime = MathMax(levels[i].lastTouchTime, levels[j].lastTouchTime);
                   
                   // Keep higher timeframe
                   if(GetTimeframeWeight(levels[j].timeframeFound) > GetTimeframeWeight(levels[i].timeframeFound))
                      levels[i].timeframeFound = levels[j].timeframeFound;
                   
-                  // Shift remaining levels
+                  // Compact array
                   for(int k = j; k < count - 1; k++)
                      levels[k] = levels[k + 1];
                   
@@ -409,47 +404,36 @@ private:
       }
    }
    
-   // Helper untuk menggambar garis
    void DrawOrMoveHLine(string name, double price, color clr)
    {
-      // Performa: Cek apakah harga berubah sebelum update objek
-      if (ObjectFind(0, name) >= 0)
+      if(ObjectFind(0, name) >= 0)
       {
          double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
-         if (MathAbs(ObjectGetDouble(0, name, OBJPROP_PRICE) - price) < point)
+         if(MathAbs(ObjectGetDouble(0, name, OBJPROP_PRICE) - price) < point)
             return;
       }
 
-      if (ObjectFind(0, name) < 0)
+      if(ObjectFind(0, name) < 0)
          ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
-      ObjectSetDouble(0, name, OBJPROP_PRICE, price);
+      ObjectSetDouble (0, name, OBJPROP_PRICE, price);
       ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
       ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DOT);
       ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
    }
    
-   // Helper: Build detailed reasoning string
    string BuildReasoning(const SRResult &result)
    {
+      if(!result.found) return "No valid SR level detected";
+      
       string reason = "";
-      
-      if(!result.found)
-         return "No valid SR level detected";
-      
-      reason += StringFormat("Type: %s | ", (result.type == POSITION_TYPE_BUY) ? "Support" : "Resistance");
-      reason += StringFormat("Strength: %s | ", EnumToString(result.strengthGrade));
+      reason += StringFormat("Type: %s | ",       (result.type == POSITION_TYPE_BUY) ? "Support" : "Resistance");
+      reason += StringFormat("Strength: %s | ",    EnumToString(result.strengthGrade));
       reason += StringFormat("Score: %.1f/100 | ", result.level.score);
-      reason += StringFormat("Touches: %d | ", result.level.touchCount);
-      reason += StringFormat("TF: %s | ", EnumToString(result.level.timeframeFound));
-      
-      if(result.level.isFlip)
-         reason += "Flip Level (SBR/RBS) | ";
-      
-      if(result.level.isFresh)
-         reason += "Fresh Level | ";
-      
+      reason += StringFormat("Touches: %d | ",     result.level.touchCount);
+      reason += StringFormat("TF: %s | ",           EnumToString(result.level.timeframeFound));
+      if(result.level.isFlip)  reason += "Flip Level (SBR/RBS) | ";
+      if(result.level.isFresh) reason += "Fresh Level | ";
       reason += StringFormat("Rejection Quality: %.2f", result.rejectionQuality);
-      
       return reason;
    }
 
@@ -471,13 +455,11 @@ public:
                  m_lastScanTime(0),
                  m_signalStabilityCount(0)
    {
-      // Initialize MTF array
       m_mtfArray[0] = PERIOD_M15;
       m_mtfArray[1] = PERIOD_H1;
       m_mtfArray[2] = PERIOD_H4;
       m_mtfArray[3] = PERIOD_D1;
       
-      // Initialize weights
       m_mtfWeights[0] = 0.4;
       m_mtfWeights[1] = 0.6;
       m_mtfWeights[2] = 0.8;
@@ -488,7 +470,7 @@ public:
 
    virtual void RefreshConfigCache() override
    {
-      IManager::RefreshConfigCache(); // Sync m_debugMode dari base class
+      IManager::RefreshConfigCache();
    }
 
    virtual void OnConfigReload(ConfigReloadEvent *e) override
@@ -502,62 +484,56 @@ public:
    }
 
    //+------------------------------------------------------------------+
-   //| Main Evaluation Method - Enhanced with scoring system            |
+   //| Main Evaluation Method                                           |
+   //| [PATCH SR-01] Removed dead 'Config' parameter, use StrategyConfig|
+   //| [PATCH SR-04] Scan throttled to closed bar time (shift 1)        |
    //+------------------------------------------------------------------+
-   SRResult Evaluate(const Config &cfg, const MqlRates rates[], int shift, double atr)
+   SRResult Evaluate(const MqlRates rates[], int shift, double atrPrice)
    {
       SRResult result;
       
-      // Validate inputs
-      if(ArraySize(rates) < 10 || atr <= 0)
+      if(ArraySize(rates) < 10 || atrPrice <= 0)
       {
          result.reasoning = "Invalid input: insufficient data or ATR";
          return result;
       }
       
-      StrategyConfig stratCfg;
-      m_data.GetConfigCache(stratCfg);
-      
-      // Perform multi-timeframe scan if needed
-      datetime currentTime = rates[shift].time;
-      if(currentTime != m_lastScanTime || m_levelCount == 0)
+      // [PATCH SR-04] Use closed bar time to throttle scan, not active bar
+      datetime closedBarTime = iTime(m_symbol, m_period, 1);
+      if(closedBarTime != m_lastScanTime || m_levelCount == 0)
       {
-         ScanMultiTimeframe(rates, atr);
-         m_lastScanTime = currentTime;
+         ScanMultiTimeframe(rates, atrPrice);
+         m_lastScanTime = closedBarTime;
       }
       
-      // Find nearest significant levels
       SRLevel nearestSup, nearestRes;
       if(FindNearestSignificantLevels(rates[shift].close, nearestSup, nearestRes))
       {
-         // Determine which is closer
          double distSup = (rates[shift].close - nearestSup.price) / _Point;
          double distRes = (nearestRes.price - rates[shift].close) / _Point;
          
          if(distSup <= distRes && distSup > 0)
          {
-            result.found = true;
-            result.type = POSITION_TYPE_BUY;
-            result.distance = distSup;
-            result.strengthGrade = nearestSup.strength;
-            result.rejectionQuality = CalculateRejectionQuality(nearestSup, rates, shift, atr);
-            result.level = nearestSup;
+            result.found            = true;
+            result.type             = POSITION_TYPE_BUY;
+            result.distance         = distSup;
+            result.strengthGrade    = nearestSup.strength;
+            result.rejectionQuality = CalculateRejectionQuality(nearestSup, rates, shift, atrPrice);
+            result.level            = nearestSup;
          }
          else if(distRes > 0)
          {
-            result.found = true;
-            result.type = POSITION_TYPE_SELL;
-            result.distance = distRes;
-            result.strengthGrade = nearestRes.strength;
-            result.rejectionQuality = CalculateRejectionQuality(nearestRes, rates, shift, atr);
-            result.level = nearestRes;
+            result.found            = true;
+            result.type             = POSITION_TYPE_SELL;
+            result.distance         = distRes;
+            result.strengthGrade    = nearestRes.strength;
+            result.rejectionQuality = CalculateRejectionQuality(nearestRes, rates, shift, atrPrice);
+            result.level            = nearestRes;
          }
       }
       
-      // Build reasoning
       result.reasoning = BuildReasoning(result);
       
-      // Store for stability check
       if(result.found && result.rejectionQuality > 0.5)
       {
          if(m_lastResult.found && 
@@ -577,8 +553,6 @@ public:
       }
       
       m_lastResult = result;
-      
-      // Update legacy members for backward compatibility
       UpdateLegacyMembers(result);
       
       return result;
@@ -587,110 +561,72 @@ public:
    //+------------------------------------------------------------------+
    //| Scan multiple timeframes for SR levels                           |
    //+------------------------------------------------------------------+
-   void ScanMultiTimeframe(const MqlRates rates[], double atrPoints)
+   void ScanMultiTimeframe(const MqlRates rates[], double atrPrice)
    {
       m_levelCount = 0;
-      
       StrategyConfig cfg; m_data.GetConfigCache(cfg);
       
-      // Scan each timeframe
       for(int i = 0; i < 4; i++)
       {
          ENUM_TIMEFRAMES tf = m_mtfArray[i];
-         
-         // Skip if not configured for MTF
-         if(!cfg.use_mtf && tf != m_period)
-            continue;
+         if(!cfg.use_mtf && tf != m_period) continue;
          
          MqlRates tfRates[];
          ArraySetAsSeries(tfRates, true);
-         
          int copied = CopyRates(m_symbol, tf, 1, cfg.sr_lookback + 10, tfRates);
-         if(copied < 10)
-            continue;
+         if(copied < 10) continue;
          
          SRLevel sup, res;
-         if(ScanTimeframeSwings(tf, tfRates, sup, res, atrPoints))
+         if(ScanTimeframeSwings(tf, tfRates, sup, res, atrPrice))
          {
-            // Add to levels array
-            if(m_levelCount < MAX_LEVELS)
-            {
-               m_levels[m_levelCount++] = sup;
-            }
-            if(m_levelCount < MAX_LEVELS)
-            {
-               m_levels[m_levelCount++] = res;
-            }
+            if(m_levelCount < MAX_LEVELS) m_levels[m_levelCount++] = sup;
+            if(m_levelCount < MAX_LEVELS) m_levels[m_levelCount++] = res;
          }
       }
       
-      // Merge nearby levels
       if(m_levelCount >= 2)
-      {
          MergeNearbyLevels(m_levels, m_levelCount, ZONE_MERGE_THRESHOLD_POINTS);
-      }
       
-      // Sort by score (highest first)
       SortLevelsByScore();
    }
    
-   // Helper: Sort levels by score descending
    void SortLevelsByScore()
    {
       for(int i = 0; i < m_levelCount - 1; i++)
-      {
          for(int j = i + 1; j < m_levelCount; j++)
-         {
             if(m_levels[j].score > m_levels[i].score)
             {
-               SRLevel temp = m_levels[i];
-               m_levels[i] = m_levels[j];
-               m_levels[j] = temp;
+               SRLevel temp  = m_levels[i];
+               m_levels[i]   = m_levels[j];
+               m_levels[j]   = temp;
             }
-         }
-      }
    }
    
-   // Helper: Find nearest significant support and resistance
    bool FindNearestSignificantLevels(double currentPrice, SRLevel &outSup, SRLevel &outRes)
    {
       if(m_levelCount == 0) return false;
       
       double bestSupDist = DBL_MAX;
       double bestResDist = DBL_MAX;
-      bool foundSup = false;
-      bool foundRes = false;
+      bool foundSup = false, foundRes = false;
       
       for(int i = 0; i < m_levelCount; i++)
       {
          double dist = currentPrice - m_levels[i].price;
-         
-         // Support (below price)
          if(dist > 0 && dist < bestSupDist)
-         {
-            bestSupDist = dist;
-            outSup = m_levels[i];
-            foundSup = true;
-         }
-         
-         // Resistance (above price)
+         { bestSupDist = dist; outSup = m_levels[i]; foundSup = true; }
          if(dist < 0 && MathAbs(dist) < bestResDist)
-         {
-            bestResDist = MathAbs(dist);
-            outRes = m_levels[i];
-            foundRes = true;
-         }
+         { bestResDist = MathAbs(dist); outRes = m_levels[i]; foundRes = true; }
       }
-      
       return (foundSup || foundRes);
    }
    
-   // Helper: Calculate rejection quality (0-1)
-   double CalculateRejectionQuality(const SRLevel &level, const MqlRates rates[], int shift, double atr)
+   // [PATCH SR-08] Base quality reset to 0.0 for proper discrimination
+   double CalculateRejectionQuality(const SRLevel &level, const MqlRates rates[], int shift, double atrPrice)
    {
-      if(ArraySize(rates) < shift + 5) return 0.5;
+      if(ArraySize(rates) < shift + 5) return 0.0;
       
-      double quality = 0.5; // Base quality
+      double quality = 0.0; // Base 0, not 0.5
       
       // Factor 1: Strength contribution (40%)
       quality += (level.score / 100.0) * 0.4;
@@ -698,15 +634,16 @@ public:
       // Factor 2: Recent rejection wicks (30%)
       double avgWickRatio = 0;
       int wickCount = 0;
-      double touchZone = atr * 0.5 * _Point;
+      double touchZone = atrPrice * 0.5; // price units
       
       for(int i = shift; i < MathMin(shift + 5, ArraySize(rates)); i++)
       {
-         if(MathAbs(rates[i].low - level.price) <= touchZone || 
+         if(MathAbs(rates[i].low  - level.price) <= touchZone ||
             MathAbs(rates[i].high - level.price) <= touchZone)
          {
             double body = MathAbs(rates[i].open - rates[i].close);
-            double wick = MathMax(rates[i].high, rates[i].low) - MathMin(rates[i].high, rates[i].low) - body;
+            double range = rates[i].high - rates[i].low;
+            double wick  = range - body;
             if(body > 0)
             {
                avgWickRatio += wick / body;
@@ -714,25 +651,21 @@ public:
             }
          }
       }
-      
       if(wickCount > 0)
       {
          avgWickRatio /= wickCount;
-         quality += MathMin(0.3, avgWickRatio * 0.3);
+         quality += MathMin(0.3, avgWickRatio * 0.15); // More conservative scaling
       }
       
       // Factor 3: Flip level bonus (20%)
-      if(level.isFlip)
-         quality += 0.2;
+      if(level.isFlip)  quality += 0.2;
       
       // Factor 4: Fresh level bonus (10%)
-      if(level.isFresh)
-         quality += 0.1;
+      if(level.isFresh) quality += 0.1;
       
       return MathMax(0.0, MathMin(1.0, quality));
    }
    
-   // Helper: Update legacy members for backward compatibility
    void UpdateLegacyMembers(const SRResult &result)
    {
       if(result.found)
@@ -740,14 +673,14 @@ public:
          if(result.type == POSITION_TYPE_BUY)
          {
             m_targetSupport = result.level.price;
-            m_supScore = result.level.score;
-            m_supStrength = result.level.touchCount;
+            m_supScore      = result.level.score;
+            m_supStrength   = result.level.touchCount;
          }
          else
          {
             m_targetResistance = result.level.price;
-            m_resScore = result.level.score;
-            m_resStrength = result.level.touchCount;
+            m_resScore         = result.level.score;
+            m_resStrength      = result.level.touchCount;
          }
       }
    }
@@ -756,60 +689,48 @@ public:
    {
       StrategyConfig cfg; m_data.GetConfigCache(cfg);
       datetime times[];
-      if (CopyTime(m_symbol, m_period, 0, 1, times) <= 0)
-         return;
+      if(CopyTime(m_symbol, m_period, 0, 1, times) <= 0) return;
       
-      double extRes = 0, extSup = 0, swRes = 0, swSup = 0;
-      int swResShift = -1, swSupShift = -1;
       int lookback = MathMax(cfg.sr_lookback, cfg.swing_lookback) + 2;
       double highs[], lows[];
       ArraySetAsSeries(highs, true);
-      ArraySetAsSeries(lows, true);
+      ArraySetAsSeries(lows,  true);
 
-      if (CopyHigh(m_symbol, m_period, 1, lookback, highs) <= 0 || CopyLow(m_symbol, m_period, 1, lookback, lows) <= 0)
+      if(CopyHigh(m_symbol, m_period, 1, lookback, highs) <= 0 ||
+         CopyLow (m_symbol, m_period, 1, lookback, lows)  <= 0)
          return;
 
-      extRes = highs[ArrayMaximum(highs, 0, cfg.sr_lookback)];
-      extSup = lows[ArrayMinimum(lows, 0, cfg.sr_lookback)];
+      double extRes = highs[ArrayMaximum(highs, 0, cfg.sr_lookback)];
+      double extSup = lows [ArrayMinimum(lows,  0, cfg.sr_lookback)];
 
-      // 2. Ambil Data Swing (Fractal terdekat < 50 bar)
-      swRes = FindNearestSwing(false, cfg.swing_lookback, swResShift, highs, lows);
-      swSup = FindNearestSwing(true, cfg.swing_lookback, swSupShift, highs, lows);
+      int swResShift = -1, swSupShift = -1;
+      double swRes = FindNearestSwing(false, cfg.swing_lookback, swResShift, highs, lows);
+      double swSup = FindNearestSwing(true,  cfg.swing_lookback, swSupShift, highs, lows);
 
-      // Logic Pemilihan berdasarkan Mode
-      if (cfg.sr_mode == SR_EXTREME)
+      if(cfg.sr_mode == SR_EXTREME)
       {
          m_targetResistance = extRes;
-         m_targetSupport = extSup;
+         m_targetSupport    = extSup;
       }
-      else if (cfg.sr_mode == SR_SWING)
+      else if(cfg.sr_mode == SR_SWING)
       {
          m_targetResistance = (swRes > 0) ? swRes : extRes;
-         m_targetSupport = (swSup > 0) ? swSup : extSup;
+         m_targetSupport    = (swSup > 0) ? swSup : extSup;
       }
       else
       {
-         // Evaluasi Resistance
-         if (swRes > 0 && !IsBroken(swRes, false, 5) && (IsBroken(extRes, false, 10) || swResShift < 15))
-            m_targetResistance = swRes;
-         else
-            m_targetResistance = extRes;
-         // Evaluasi Support
-         if (swSup > 0 && !IsBroken(swSup, true, 5) && (IsBroken(extSup, true, 10) || swSupShift < 15))
-            m_targetSupport = swSup;
-         else
-            m_targetSupport = extSup;
+         m_targetResistance = (swRes > 0 && !IsBroken(swRes, false, 5) && (IsBroken(extRes, false, 10) || swResShift < 15)) ? swRes : extRes;
+         m_targetSupport    = (swSup > 0 && !IsBroken(swSup, true,  5) && (IsBroken(extSup, true,  10) || swSupShift < 15)) ? swSup : extSup;
       }
 
       UpdateHTFZones();
       CheckZoneStatus(m_data.GetATRPoints());
-      
-      // Calculate SR Zone Scores after zone status is updated
       CalculateScores(m_data.GetATRPoints());
 
-      if(m_debugMode) {
+      if(m_debugMode)
+      {
          DrawOrMoveHLine("ResLine", m_targetResistance, clrRed);
-         DrawOrMoveHLine("SupLine", m_targetSupport, clrBlue);
+         DrawOrMoveHLine("SupLine", m_targetSupport,    clrBlue);
       }
 
       ZoneUpdateEvent *zoneEvent = new ZoneUpdateEvent(
@@ -819,267 +740,146 @@ public:
           m_supHtfAlignment, m_resHtfAlignment,
           m_supStrength, m_resStrength,
           m_data.GetATRPoints(),
-          m_supScore, m_resScore);  // Pass SR scores to event
+          m_supScore, m_resScore);
       DispatchEvent(zoneEvent);
    }
    
    void CheckZoneStatus(double atrPoints)
    {
       StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      if (m_targetSupport <= 0 || m_targetResistance <= 0)
-         return;
+      if(m_targetSupport <= 0 || m_targetResistance <= 0) return;
 
-      // Filter "rusak" dinamis berdasarkan mode
       int barsToCheck = (cfg.sr_mode == SR_EXTREME) ? 10 : 5;
-      m_isSupportBroken = IsBroken(m_targetSupport, true, barsToCheck);
+      m_isSupportBroken    = IsBroken(m_targetSupport,    true,  barsToCheck);
       m_isResistanceBroken = IsBroken(m_targetResistance, false, barsToCheck);
 
-      // Jika mode EXTREME, gunakan buffer statis agar lebih "Safe" sesuai filosofi Extreme SR
-      if (cfg.sr_mode == SR_EXTREME)
+      if(cfg.sr_mode == SR_EXTREME)
       {
          m_resBufferMult = m_supBufferMult = (cfg.entry_mode == MODE_SAFE) ? 0.5 : 0.8;
          return;
       }
 
-      // Hitung Touch Count untuk menentukan Buffer Mult dengan CopyHigh/CopyLow
       int supTouches = 0, resTouches = 0;
       double touchZone = (atrPoints * cfg.touch_buffer_atr) * _Point;
-
       double lows[], highs[];
-      ArraySetAsSeries(lows, true);
+      ArraySetAsSeries(lows,  true);
       ArraySetAsSeries(highs, true);
 
-      if (CopyLow(m_symbol, m_period, 1, cfg.sr_lookback, lows) > 0 &&
-          CopyHigh(m_symbol, m_period, 1, cfg.sr_lookback, highs) > 0)
+      if(CopyLow (m_symbol, m_period, 1, cfg.sr_lookback, lows)  > 0 &&
+         CopyHigh(m_symbol, m_period, 1, cfg.sr_lookback, highs) > 0)
       {
-         for (int i = 0; i < cfg.sr_lookback; i++)
+         for(int i = 0; i < cfg.sr_lookback; i++)
          {
-            if (MathAbs(lows[i] - m_targetSupport) < touchZone)
-               supTouches++;
-            if (MathAbs(highs[i] - m_targetResistance) < touchZone)
-               resTouches++;
+            if(MathAbs(lows [i] - m_targetSupport)    < touchZone) supTouches++;
+            if(MathAbs(highs[i] - m_targetResistance) < touchZone) resTouches++;
          }
       }
 
-      // Store zone strength
       m_supStrength = supTouches;
       m_resStrength = resTouches;
 
-      // Tentukan Multiplier Dinamis untuk Support
-      if (m_isSupportBroken) m_supBufferMult = cfg.buffer_mult_weak;
-      else if (supTouches >= cfg.min_touches_strong) m_supBufferMult = cfg.buffer_mult_strong;
-      else if (supTouches <= 1) m_supBufferMult = cfg.atr_buffer_mult;
-      else m_supBufferMult = 0.65;
+      m_supBufferMult = m_isSupportBroken    ? cfg.buffer_mult_weak :
+                        (supTouches >= cfg.min_touches_strong) ? cfg.buffer_mult_strong :
+                        (supTouches <= 1)    ? cfg.atr_buffer_mult : 0.65;
 
-      // Tentukan Multiplier Dinamis untuk Resistance
-      if (m_isResistanceBroken) m_resBufferMult = cfg.buffer_mult_weak;
-      else if (resTouches >= cfg.min_touches_strong) m_resBufferMult = cfg.buffer_mult_strong;
-      else if (resTouches <= 1)
-         m_resBufferMult = cfg.atr_buffer_mult;
-      else
-         m_resBufferMult = 0.65;
+      m_resBufferMult = m_isResistanceBroken ? cfg.buffer_mult_weak :
+                        (resTouches >= cfg.min_touches_strong) ? cfg.buffer_mult_strong :
+                        (resTouches <= 1)    ? cfg.atr_buffer_mult : 0.65;
 
-      // --- HTF Alignment Integration -
       m_resHtfAlignment = 0;
-
-      if (cfg.use_mtf && m_htfSupport > 0 && m_htfResistance > 0)
+      if(cfg.use_mtf && m_htfSupport > 0 && m_htfResistance > 0)
       {
          double htfZoneBuffer = (atrPoints * cfg.atr_buffer_mult) * _Point;
          
-         // Support Alignment
-         if (m_targetSupport <= m_htfSupport + htfZoneBuffer && m_targetSupport >= m_htfSupport - htfZoneBuffer)
-            m_supHtfAlignment = 1;
-         else if (m_targetSupport >= m_htfResistance - htfZoneBuffer)
-            m_supHtfAlignment = -1;
-         else
-            m_supHtfAlignment = 0;
+         m_supHtfAlignment = (m_targetSupport <= m_htfSupport + htfZoneBuffer && m_targetSupport >= m_htfSupport - htfZoneBuffer) ? 1 :
+                             (m_targetSupport >= m_htfResistance - htfZoneBuffer) ? -1 : 0;
 
-         // Resistance Alignment
-         if (m_targetResistance >= m_htfResistance - htfZoneBuffer && m_targetResistance <= m_htfResistance + htfZoneBuffer)
-            m_resHtfAlignment = 1;
-         else if (m_targetResistance <= m_htfSupport + htfZoneBuffer)
-            m_resHtfAlignment = -1;
-         else
-            m_resHtfAlignment = 0;
+         m_resHtfAlignment = (m_targetResistance >= m_htfResistance - htfZoneBuffer && m_targetResistance <= m_htfResistance + htfZoneBuffer) ? 1 :
+                             (m_targetResistance <= m_htfSupport + htfZoneBuffer) ? -1 : 0;
       }
    }
    
-   // NEW: Calculate SR Zone Scores
    void CalculateScores(double atrPoints)
    {
-      m_supScore = CalculateZoneScore(m_targetSupport, true, m_supStrength, atrPoints, m_supHtfAlignment, m_isSupportBroken);
+      m_supScore = CalculateZoneScore(m_targetSupport,    true,  m_supStrength, atrPoints, m_supHtfAlignment, m_isSupportBroken);
       m_resScore = CalculateZoneScore(m_targetResistance, false, m_resStrength, atrPoints, m_resHtfAlignment, m_isResistanceBroken);
       
       if(m_debugMode)
-      {
-         PrintFormat("[SRManager] Zone Scores - Support: %.1f (Strength=%d, HTF=%d), Resistance: %.1f (Strength=%d, HTF=%d)",
-                     m_supScore, m_supStrength, m_supHtfAlignment, m_resScore, m_resStrength, m_resHtfAlignment);
-      }
+         PrintFormat("[SRManager] Scores - Sup: %.1f (T=%d,HTF=%d), Res: %.1f (T=%d,HTF=%d)",
+                     m_supScore, m_supStrength, m_supHtfAlignment,
+                     m_resScore, m_resStrength, m_resHtfAlignment);
    }
 
+   // [PATCH SR-09] ArrayMaximum/ArrayMinimum with explicit count
    void UpdateHTFZones()
    {
       StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      if (!cfg.use_mtf) return;
+      if(!cfg.use_mtf) return;
 
       double htfHighs[], htfLows[];
       ArraySetAsSeries(htfHighs, true);
-      ArraySetAsSeries(htfLows, true);
+      ArraySetAsSeries(htfLows,  true);
 
-      if (CopyHigh(m_symbol, cfg.htf, 1, cfg.htf_lookback, htfHighs) > 0 &&
-          CopyLow(m_symbol, cfg.htf, 1, cfg.htf_lookback, htfLows) > 0)
-      {
-         m_htfResistance = htfHighs[ArrayMaximum(htfHighs)];
-         m_htfSupport = htfLows[ArrayMinimum(htfLows)];
-      }
+      int copiedH = CopyHigh(m_symbol, cfg.htf, 1, cfg.htf_lookback, htfHighs);
+      int copiedL = CopyLow (m_symbol, cfg.htf, 1, cfg.htf_lookback, htfLows);
+      
+      if(copiedH > 0) m_htfResistance = htfHighs[ArrayMaximum(htfHighs, 0, copiedH)];
+      if(copiedL > 0) m_htfSupport    = htfLows [ArrayMinimum(htfLows,  0, copiedL)];
    }
 
+   // [PATCH SR-05] Replaced undefined GetGlobalSpread() with inline spread calculation
    bool IsTradableRange(double atrPoints)
    {
       StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      double spread = GetGlobalSpread();
-      if(spread < 0) spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD); // Fallback
+      double point  = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double spread = (point > 0)
+         ? (SymbolInfoDouble(m_symbol, SYMBOL_ASK) - SymbolInfoDouble(m_symbol, SYMBOL_BID)) / point
+         : (double)SymbolInfoInteger(m_symbol, SYMBOL_SPREAD);
 
       double minRange = MathMax(atrPoints * cfg.min_range_atr, spread * 5.0);
-      double rangePts = (m_targetResistance - m_targetSupport) / _Point;
-
+      double rangePts = (m_targetResistance - m_targetSupport) / point;
       return (rangePts >= minRange);
    }
 
    //+------------------------------------------------------------------+
-   //| Enhanced Helper Methods                                          |
+   //| Getters                                                          |
    //+------------------------------------------------------------------+
-   
-   // Get nearest strong level (support or resistance)
    SRLevel GetNearestStrongLevel(double currentPrice, bool preferSupport = true)
    {
       SRLevel result;
       double bestDist = DBL_MAX;
-      
       for(int i = 0; i < m_levelCount; i++)
       {
-         // Only consider strong levels
-         if(m_levels[i].strength < SR_MODERATE)
-            continue;
-         
+         if(m_levels[i].strength < SR_MODERATE) continue;
          double dist = MathAbs(currentPrice - m_levels[i].price);
-         if(dist < bestDist)
-         {
-            bestDist = dist;
-            result = m_levels[i];
-         }
+         if(dist < bestDist) { bestDist = dist; result = m_levels[i]; }
       }
-      
       return result;
    }
    
-   // Check if price is at support zone
-   bool IsPriceAtSupport(double currentPrice, double bufferPoints = 0) const
-   {
-      if(m_targetSupport <= 0) return false;
-      return (currentPrice >= m_targetSupport - bufferPoints && 
-              currentPrice <= m_targetSupport + bufferPoints);
-   }
-   
-   // Check if price is at resistance zone
-   bool IsPriceAtResistance(double currentPrice, double bufferPoints = 0) const
-   {
-      if(m_targetResistance <= 0) return false;
-      return (currentPrice >= m_targetResistance - bufferPoints && 
-              currentPrice <= m_targetResistance + bufferPoints);
-   }
-   
-   // Check if signal is stable (debouncing)
-   bool IsSignalStable(int requiredTicks = 3) const
-   {
-      return m_signalStabilityCount >= requiredTicks;
-   }
-   
-   // Get level count
-   int GetLevelCount() const { return m_levelCount; }
-   
-   // Get specific level by index
-   SRLevel GetLevel(int index) const
-   {
-      if(index >= 0 && index < m_levelCount)
-         return m_levels[index];
-      return SRLevel();
-   }
+   bool IsPriceAtSupport   (double p, double buf = 0) const { return m_targetSupport    > 0 && p >= m_targetSupport    - buf && p <= m_targetSupport    + buf; }
+   bool IsPriceAtResistance(double p, double buf = 0) const { return m_targetResistance > 0 && p >= m_targetResistance - buf && p <= m_targetResistance + buf; }
+   bool IsSignalStable(int requiredTicks = 3) const { return m_signalStabilityCount >= requiredTicks; }
+   int  GetLevelCount() const { return m_levelCount; }
+   SRLevel GetLevel(int index) const { return (index >= 0 && index < m_levelCount) ? m_levels[index] : SRLevel(); }
 
-   // Getters (legacy - backward compatibility)
-   double Support() const { return m_targetSupport; }
-   double Resistance() const { return m_targetResistance; }
-   double HTFSupport() const { return m_htfSupport; }
-   double HTFResistance() const { return m_htfResistance; }
-   bool IsSupportBroken() const { return m_isSupportBroken; }
-   bool IsResistanceBroken() const { return m_isResistanceBroken; }
-   double SupBufferMult() const { return m_supBufferMult; }
-   double ResBufferMult() const { return m_resBufferMult; }
-   int SupHtfAlignment() const { return m_supHtfAlignment; }
-   int ResHtfAlignment() const { return m_resHtfAlignment; }
-   int SupStrength() const { return m_supStrength; }
-   int ResStrength() const { return m_resStrength; }
-   double SupScore() const { return m_supScore; }
-   double ResScore() const { return m_resScore; }
-   
-   // New getters
-   SRResult GetLastResult() const { return m_lastResult; }
-   int GetSignalStabilityCount() const { return m_signalStabilityCount; }
+   double Support()          const { return m_targetSupport; }
+   double Resistance()       const { return m_targetResistance; }
+   double HTFSupport()       const { return m_htfSupport; }
+   double HTFResistance()    const { return m_htfResistance; }
+   bool   IsSupportBroken()  const { return m_isSupportBroken; }
+   bool   IsResistanceBroken()const{ return m_isResistanceBroken; }
+   double SupBufferMult()    const { return m_supBufferMult; }
+   double ResBufferMult()    const { return m_resBufferMult; }
+   int    SupHtfAlignment()  const { return m_supHtfAlignment; }
+   int    ResHtfAlignment()  const { return m_resHtfAlignment; }
+   int    SupStrength()      const { return m_supStrength; }
+   int    ResStrength()      const { return m_resStrength; }
+   double SupScore()         const { return m_supScore; }
+   double ResScore()         const { return m_resScore; }
+   SRResult GetLastResult()  const { return m_lastResult; }
+   int    GetSignalStabilityCount() const { return m_signalStabilityCount; }
 };
-
-//+------------------------------------------------------------------+
-//| Example Usage in OnTick()                                        |
-//+------------------------------------------------------------------+
-/*
-// Global declarations
-SRManager g_srManager;
-Config g_config;
-
-int OnInit()
-{
-   g_srManager.Initialize();
-   return(INIT_SUCCEEDED);
-}
-
-void OnTick()
-{
-   // Get latest rates
-   MqlRates rates[];
-   ArraySetAsSeries(rates, true);
-   if(CopyRates(_Symbol, _Period, 0, 100, rates) < 100)
-      return;
-   
-   // Get ATR
-   double atr = g_marketManager.GetATRPoints(); // Assuming MarketManager exists
-   
-   // Evaluate SR levels
-   SRResult srResult = g_srManager.Evaluate(g_config, rates, 0, atr);
-   
-   if(srResult.found)
-   {
-      Print("SR Level Found: ", srResult.reasoning);
-      
-      // Check if actionable
-      if(srResult.IsActionable(0.6))
-      {
-         if(srResult.type == POSITION_TYPE_BUY)
-         {
-            // Consider buy near support
-            Print("Strong Support detected at ", srResult.level.price);
-         }
-         else
-         {
-            // Consider sell near resistance
-            Print("Strong Resistance detected at ", srResult.level.price);
-         }
-      }
-   }
-   
-   // Legacy compatibility
-   double support = g_srManager.Support();
-   double resistance = g_srManager.Resistance();
-}
-*/
 
 #endif
 //+------------------------------------------------------------------+
