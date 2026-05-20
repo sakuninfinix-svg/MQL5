@@ -480,17 +480,25 @@ private:
    double NormalizeVolumeFeature() const
    {
       long vol[20];
-      if(CopyTickVolume(_Symbol, _Period, 0, 20, vol) < 20) return 0.5;
-      long avg = 0;
-      for(int i = 0; i < 20; i++) avg += vol[i];
-      avg /= 20;
-      return (avg == 0) ? 0.5 : MathMin(1.0, (double)vol[0] / avg);
+      // FIX: CopyTickVolume returns count of copied ticks, not boolean
+      // Use shift=1 to avoid current forming bar, get last 20 completed ticks
+      if(CopyTickVolume(_Symbol, _Period, 1, 20, vol) < 20) return 0.5;
+      
+      long sum = 0;
+      for(int i = 0; i < 20; i++) sum += vol[i];
+      long avg = sum / 20;
+      
+      // Avoid division by zero and clamp result
+      if(avg == 0) return 0.5;
+      double ratio = (double)vol[0] / avg;
+      return MathMax(0.0, MathMin(2.0, ratio));  // Allow some headroom above 1.0
    }
 
    double NormalizeMomentumFeature() const
    {
       MqlRates bars[14];
-      if(CopyRates(_Symbol, _Period, 0, 14, bars) < 14) return 0.5;
+      // FIX: Use shift=1 to avoid current forming bar - use last 14 CLOSED bars
+      if(CopyRates(_Symbol, _Period, 1, 14, bars) < 14) return 0.5;
       double momentum = bars[0].close - bars[13].close;
       double maxMove  = 0;
       for(int i = 1; i < 14; i++) maxMove = MathMax(maxMove, MathAbs(bars[i].close - bars[0].close));
@@ -513,7 +521,8 @@ private:
    double NormalizeRSIFeature() const
    {
       MqlRates bars[15];
-      if(CopyRates(_Symbol, _Period, 0, 15, bars) < 15) return 0.5;
+      // FIX: Use shift=1 to avoid current forming bar - use last 15 CLOSED bars for RSI calculation
+      if(CopyRates(_Symbol, _Period, 1, 15, bars) < 15) return 0.5;
       double gains = 0, losses = 0;
       for(int i = 0; i < 14; i++)
       {
@@ -529,7 +538,8 @@ private:
    double NormalizeCandleBodyRatio() const
    {
       MqlRates bar[1];
-      if(CopyRates(_Symbol, _Period, 0, 1, bar) < 1) return 0.5;
+      // FIX: Use shift=1 to get last CLOSED bar, not current forming bar
+      if(CopyRates(_Symbol, _Period, 1, 1, bar) < 1) return 0.5;
       double body  = MathAbs(bar[0].close - bar[0].open);
       double range = bar[0].high - bar[0].low;
       return (range == 0) ? 0.5 : MathMin(1.0, body / range);
@@ -538,7 +548,8 @@ private:
    double NormalizeEMADistanceFeature() const
    {
       MqlRates bars[20];
-      if(CopyRates(_Symbol, _Period, 0, 20, bars) < 20) return 0.5;
+      // FIX: Use shift=1 to avoid current forming bar - use last 20 CLOSED bars
+      if(CopyRates(_Symbol, _Period, 1, 20, bars) < 20) return 0.5;
       double ema = bars[19].close;
       double k   = 2.0 / 21.0;
       for(int i = 18; i >= 0; i--) ema = bars[i].close * k + ema * (1.0 - k);

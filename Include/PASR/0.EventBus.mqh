@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                  0.EventBus.mqh  |
 //|                                       Copyright 2026, Agsicentre |
-//|            Event-Driven Core for PASR EA - V1.31                 |
+//|            Event-Driven Core for PASR EA - V1.31 (PATCHED)        |
 //|                                                                  |
 //| FEATURES:                                                        |
 //| - Safe memory management with auto-cleanup                       |
@@ -103,25 +103,27 @@ class EventRecorder;
 extern EventRecorder *g_recorder;
 
 //+------------------------------------------------------------------+
-//| Generic Event Handler Interface - V1.31                          |
-//| Added: error handling support with try-catch pattern             |
+//| Generic Event Handler Base Class - V1.31 (PATCHED)               |
+//| PATCH: Converted from 'interface' to 'class'.                    |
+//| MQL5 'interface' keyword does NOT allow method bodies.            |
+//| Using abstract class with pure virtual + default implementations. |
 //+------------------------------------------------------------------+
-interface IEventHandler
+class IEventHandler
 {
 public:
    virtual void HandleEvent(Event *e) = 0;
    
-   // Optional: Error handler for this specific handler
-   virtual void OnHandlerError(int eventId, string errorMsg) 
-   { 
+   virtual void OnHandlerError(int eventId, string errorMsg)
+   {
       LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Handler error on event " + IntegerToString(eventId) + ": " + errorMsg);
    }
    
-   // Optional: Get handler name for debug logging
-   virtual string GetHandlerName() const 
-   { 
-      return "UnknownHandler"; 
+   virtual string GetHandlerName() const
+   {
+      return "UnknownHandler";
    }
+   
+   virtual ~IEventHandler() {}
 };
 
 //+------------------------------------------------------------------+
@@ -299,7 +301,7 @@ public:
       return m_instance;
    }
 
-   static void Release()
+   static void Destroy()
    {
       if (m_instance != NULL)
       {
@@ -308,31 +310,20 @@ public:
       }
    }
 
-   // Register handler for specific event type - O(1) operation
-   // OPTIMIZATION V1.31: Added wildcard subscriptions via event groups
+   // Subscribe handler to specific event type
+   // Returns false if slot is full or handler already registered
    bool Subscribe(int eventID, IEventHandler *handler, int priority = EVENT_PRIORITY_NORMAL, int groupFlags = EVENT_GROUP_NONE)
    {
       if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
          return false;
       if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
          return false;
-      
-      // Priority validation with warnings for critical events
-      #ifdef __DEBUG__
-      if (eventID == 5 && !IS_CRITICAL_PRIORITY(priority)) // EVENT_ID_EMERGENCY_STOP is 5
-         Print("WARNING: Emergency stop event should have CRITICAL priority (0-10). Current: ", priority);
-      if (eventID == 1 && !IS_HIGH_PRIORITY(priority)) // EVENT_ID_PRICE_UPDATE is 1
-         Print("WARNING: Price update event should have HIGH priority (11-50). Current: ", priority);
-      #endif
 
       int total = m_handlerCount[eventID];
       if (total >= MAX_HANDLERS_PER_EVENT)
-      {
-         LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Handler limit reached for event " + IntegerToString(eventID));
          return false;
-      }
 
-      // Avoid duplicate subscriptions
+      // Check for duplicate registration
       for (int i = 0; i < total; i++)
       {
          if (m_handlersByType[eventID][i].handler == handler)
@@ -366,6 +357,7 @@ public:
    }
    
    // Wildcard subscription: subscribe to all events in a group
+   // PATCH: Added per-slot capacity guard to prevent overflow
    bool SubscribeToGroup(int groupFlag, IEventHandler *handler, int priority = EVENT_PRIORITY_NORMAL)
    {
       if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
@@ -373,16 +365,16 @@ public:
       if (groupFlag == EVENT_GROUP_NONE)
          return false;
          
+      // WARNING: Subscribes handler to ALL MAX_EVENT_TYPES slots.
+      // Each consumes one entry from MAX_HANDLERS_PER_EVENT (16 max per slot).
       int subscribed = 0;
-      // Subscribe to all event types that match the group
-      // Note: This requires event types to be properly categorized in Events.mqh
-      // For now, we store the group flag for future matching during dispatch
       for (int i = 0; i < MAX_EVENT_TYPES; i++)
       {
-         // Store group subscription as a special handler entry
-         // Actual matching happens during dispatch based on event group
-         if (Subscribe(i, handler, priority, groupFlag))
-            subscribed++;
+         if (m_handlerCount[i] < MAX_HANDLERS_PER_EVENT)
+         {
+            if (Subscribe(i, handler, priority, groupFlag))
+               subscribed++;
+         }
       }
       
       LOG_EVENT(EVENT_LOG_LEVEL_INFO, "Wildcard subscription to group " + IntegerToString(groupFlag) + 
@@ -474,14 +466,12 @@ public:
          IEventHandler *h = m_handlersByType[id][i].handler;
          if (h != NULL && CheckPointer(h) != POINTER_INVALID)
          {
-            // MQL5 native error handling: ResetLastError before, check GetLastError after
+            // PATCH: ResetLastError() sets error to 0, so preErrorCount was always 0 - useless.
+            // Correct pattern: reset, call, then check postError directly.
             ResetLastError();
-            int preErrorCount = GetLastError();
-            
             h.HandleEvent(e);
-            
             int postErrorCount = GetLastError();
-            if (postErrorCount != preErrorCount && postErrorCount != 0)
+            if (postErrorCount != 0)
             {
                errorsHandled++;
                string handlerName = (CheckPointer(h) != POINTER_INVALID) ? h.GetHandlerName() : "Unknown";
@@ -520,14 +510,25 @@ public:
       }
    }
    
-   // 
+   // Batch dispatch - PATCHED V1.31: added re-entrancy guard + metrics update + error handling
    // Reduces overhead when firing multiple events of same type
    void DispatchBatch(int eventID, Event *&events[], int count)
    {
       if (count <= 0)
          return;
       if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
+      {
+         // Clean up all events on invalid ID
+         for (int i = 0; i < count; i++)
+         {
+            if (events[i] != NULL && CheckPointer(events[i]) == POINTER_DYNAMIC)
+            {
+               delete events[i];
+               events[i] = NULL;
+            }
+         }
          return;
+      }
       
       int total = m_handlerCount[eventID];
       if (total == 0)
@@ -544,6 +545,13 @@ public:
          return;
       }
       
+      m_isDispatching = true;
+      m_dispatchDepth++;
+      
+      ulong startTime = GetMicrosecondCount();
+      int handlersCalled = 0;
+      int errorsHandled = 0;
+      
       // Process each event through all handlers
       for (int e = 0; e < count; e++)
       {
@@ -551,34 +559,75 @@ public:
             continue;
             
          bool isHeapAllocated = (CheckPointer(events[e]) == POINTER_DYNAMIC);
+         bool eventCancelled = false;
          
-         // Record event
+         // Record event once before dispatching
          if (CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
          {
             g_recorder.Record(events[e]);
          }
          
-         // Execute all handlers for this event
+         // Execute all handlers for this event with error handling
          for (int i = 0; i < total; i++)
          {
+            // Check cancellation flag (if event supports it)
+            if (events[e].IsCancelled())
+            {
+               eventCancelled = true;
+               LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Event " + IntegerToString(eventID) + 
+                         " cancelled during batch dispatch after " + IntegerToString(i) + " handlers");
+               break;
+            }
+            
             IEventHandler *h = m_handlersByType[eventID][i].handler;
             if (h != NULL && CheckPointer(h) != POINTER_INVALID)
             {
+               ResetLastError();
                h.HandleEvent(events[e]);
+               int postErrorCount = GetLastError();
+               if (postErrorCount != 0)
+               {
+                  errorsHandled++;
+                  string handlerName = (CheckPointer(h) != POINTER_INVALID) ? h.GetHandlerName() : "Unknown";
+                  LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Error in handler [" + handlerName + "] for batch event " + IntegerToString(eventID) + ": Error " + IntegerToString(postErrorCount));
+                  h.OnHandlerError(eventID, "Error " + IntegerToString(postErrorCount));
+                  ResetLastError();
+               }
+               handlersCalled++;
             }
          }
          
-         // Clean up if heap-allocated
+         // Clean up if heap-allocated (always, regardless of cancellation)
          if (isHeapAllocated && CheckPointer(events[e]) == POINTER_DYNAMIC)
          {
             delete events[e];
             events[e] = NULL;
          }
       }
+      
+      // Update metrics
+      m_totalDispatches += (ulong)count;
+      m_totalHandlersCalled += (ulong)handlersCalled;
+      
+      // Log performance for slow batch dispatches (>2ms)
+      #ifdef __DEBUG__
+      ulong elapsed = GetMicrosecondCount() - startTime;
+      if (elapsed > 2000)
+      {
+         LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Slow batch dispatch: event " + IntegerToString(eventID) + 
+                   " took " + DoubleToString(elapsed / 1000.0, 2) + "ms (" + 
+                   IntegerToString(count) + " events, " + IntegerToString(handlersCalled) + " handlers, " + 
+                   IntegerToString(errorsHandled) + " errors)");
+      }
+      #endif
+      
+      m_dispatchDepth--;
+      if(m_dispatchDepth == 0) m_isDispatching = false;
    }
 
    // Deferred event processing - V1.31
    // Queue events for processing in OnTimer (avoids re-entrancy issues)
+   // PATCH: Added memory cleanup on queue-full drop
    bool QueueEventDeferred(Event *e)
    {
       if (e == NULL || CheckPointer(e) == POINTER_INVALID)
@@ -588,6 +637,9 @@ public:
       if (m_deferredCount >= MAX_DEFERRED_EVENTS)
       {
          LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Deferred queue full, dropping event " + IntegerToString(e.ID()));
+         // Prevent memory leak: delete dynamic event that cannot be queued
+         if (CheckPointer(e) == POINTER_DYNAMIC)
+            delete e;
          return false;
       }
       
