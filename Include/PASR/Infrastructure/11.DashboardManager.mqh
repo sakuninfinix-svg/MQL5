@@ -20,7 +20,7 @@
 #ifndef __DASHBOARD_MANAGER_MQH__
 #define __DASHBOARD_MANAGER_MQH__
 
-#include "IManager.mqh"
+#include "../Core/IManager.mqh"
 
 //+------------------------------------------------------------------+
 //| DashboardManager                                                 |

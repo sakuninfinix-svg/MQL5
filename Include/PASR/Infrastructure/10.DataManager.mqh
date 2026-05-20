@@ -12,7 +12,7 @@
 #ifndef __DATA_MANAGER_MQH__
 #define __DATA_MANAGER_MQH__
 
-#include "IManager.mqh"
+#include "../Core/IManager.mqh"
 #include "2.Config.Types.mqh"  // For StrategyConfig and CFG global instance
 #include "2.Config.Manager.mqh"
 // NOTE: Do NOT include 12.MarketRegime.mqh here to avoid circular dependency!

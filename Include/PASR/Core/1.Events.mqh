@@ -23,10 +23,9 @@
 #ifndef __EVENTS_MQH__
 #define __EVENTS_MQH__
 
-// REFACTORED: Updated path
-#include "Core/0.EventBus.mqh"
-// REFACTORED: Updated path
-#include "Core/2.Config.Types.mqh"
+// REFACTORED: Same directory includes
+#include "0.EventBus.mqh"
+#include "2.Config.Types.mqh"
 // Forward declaration to reduce coupling - Config.Manager.mqh not needed directly
 // class ConfigManager; // Uncomment if ConfigManager is used in this file
 

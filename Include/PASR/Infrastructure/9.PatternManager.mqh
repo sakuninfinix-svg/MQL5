@@ -23,8 +23,8 @@
 #ifndef __PATTERN_MANAGER_MQH__
 #define __PATTERN_MANAGER_MQH__
 
-#include "2.Config.Types.mqh"
-#include "2.Config.Manager.mqh"
+#include "../Core/2.Config.Types.mqh"
+#include "../Core/2.Config.Manager.mqh"
 
 //+------------------------------------------------------------------+
 //| Enum for Pattern Quality Grade                                   |

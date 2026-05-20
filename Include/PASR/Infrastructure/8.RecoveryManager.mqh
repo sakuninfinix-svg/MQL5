@@ -24,7 +24,7 @@
 #define __RECOVERY_MANAGER_MQH__
 
 #include <Trade/Trade.mqh>
-#include "IManager.mqh"
+#include "../Core/IManager.mqh"
 #include "10.DataManager.mqh"
 #include "9.PatternManager.mqh"
 #include "12.MarketRegime.mqh"

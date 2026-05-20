@@ -15,8 +15,8 @@
 #ifndef __ZONE_MANAGER_MQH__
 #define __ZONE_MANAGER_MQH__
 
-#include "IManager.mqh"
-#include "10.DataManager.mqh"
+#include "../Core/IManager.mqh"
+#include "../Infrastructure/10.DataManager.mqh"
 #include "4.SRManager.mqh"
 
 //+------------------------------------------------------------------+

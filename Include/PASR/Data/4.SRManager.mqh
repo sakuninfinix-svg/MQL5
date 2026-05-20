@@ -16,8 +16,8 @@
 #ifndef __SR_MANAGER_MQH__
 #define __SR_MANAGER_MQH__
 
-#include "IManager.mqh"
-#include "10.DataManager.mqh"
+#include "../Core/IManager.mqh"
+#include "../Infrastructure/10.DataManager.mqh"
 
 //+------------------------------------------------------------------+
 //| SR Level Types                                                   |

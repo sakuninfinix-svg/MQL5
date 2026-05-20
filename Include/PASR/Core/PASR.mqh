@@ -1,7 +1,8 @@
 //+------------------------------------------------------------------+
 //|                                                        PASR.mqh  |
 //|                                       Copyright 2026, Agsicentre |
-//|            PASR EA — Master Include File v1.00                  |
+//|            PASR EA — Master Include File v4.00                  |
+//|                   Refactored Folder Structure                   |
 //+------------------------------------------------------------------+
 //| PURPOSE                                                          |
 //| Replaces the numeric-prefix file-ordering convention.            |
@@ -16,7 +17,7 @@
 //|   ... (14 files, order must be manually maintained)              |
 //|                                                                  |
 //| AFTER (safe):                                                    |
-//|   #include <PASR/PASR.mqh>   // one line, always correct         |
+//|   #include <PASR/Core/PASR.mqh>   // one line, always correct    |
 //|                                                                  |
 //| DEPENDENCY LAYERS                                                |
 //|   Layer 0: Core infrastructure (no deps)                         |
@@ -30,7 +31,7 @@
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "1.00"
+#property version   "4.00"
 #property strict
 
 #ifndef __PASR_MQH__
@@ -47,23 +48,24 @@
 #include "2.Config.Manager.mqh"
 
 // ── Layer 2: Data & Market ────────────────────────────────────────
-#include "10.DataManager.mqh"
-#include "3.MarketManager.mqh"
-#include "12.MarketRegime.mqh"
+#include "../Data/3.MarketManager.mqh"
+#include "../Data/3.ZoneManager.mqh"
+#include "../Infrastructure/10.DataManager.mqh"
+#include "../Infrastructure/12.MarketRegime.mqh"
 
 // ── Layer 3: Analysis ─────────────────────────────────────────────
-#include "4.SRManager.mqh"
-#include "9.PatternManager.mqh"
+#include "../Data/4.SRManager.mqh"
+#include "../Infrastructure/9.PatternManager.mqh"
 
 // ── Layer 4: Signal & AI ──────────────────────────────────────────
-#include "5.SignalManager.mqh"
-#include "7.AIManager.mqh"
+#include "../Strategy/5.SignalManager.mqh"
+#include "../Strategy/AI/7.AIManager.mqh"
 
 // ── Layer 5: Execution & Recovery ────────────────────────────────
-#include "6.ExecutionManager.mqh"
-#include "8.RecoveryManager.mqh"
+#include "../Strategy/6.ExecutionManager.mqh"
+#include "../Infrastructure/8.RecoveryManager.mqh"
 
 // ── Layer 6: UI (no business logic deps required) ─────────────────
-#include "11.DashboardManager.mqh"
+#include "../Infrastructure/11.DashboardManager.mqh"
 
 #endif // __PASR_MQH__

@@ -29,7 +29,7 @@
 #ifndef __MARKET_REGIME_MQH__
 #define __MARKET_REGIME_MQH__
 
-#include "IManager.mqh"
+#include "../Core/IManager.mqh"
 // NOTE: Do NOT include 10.DataManager.mqh here to avoid circular dependency!
 
 class DataManager;
