@@ -12,9 +12,10 @@
 
 //--- Include Dependencies (Ordered by initialization priority)
 #include <PASR/0.EventBus.mqh>
+#include <PASR/2.Config.Types.mqh>
+#include <PASR/2.Config.Manager.mqh>
 #include <PASR/1.Events.mqh>
 #include <PASR/IManager.mqh>
-#include <PASR/2.Config.mqh>
 #include <PASR/3.MarketManager.mqh>
 #include <PASR/4.SRManager.mqh>
 #include <PASR/5.SignalManager.mqh>

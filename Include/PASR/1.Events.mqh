@@ -20,7 +20,8 @@
 #define __EVENTS_MQH__
 
 #include "0.EventBus.mqh"
-#include "2.Config.mqh"
+#include "2.Config.Types.mqh"
+#include "2.Config.Manager.mqh"
 
 //--- Optimized cast macro with type safety
 #define CAST_EVENT(className, eventPtr) ((className *)eventPtr)

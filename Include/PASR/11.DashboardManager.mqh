@@ -18,7 +18,8 @@
 #include <Controls/Panel.mqh>
 #include <Graphics/Graphic.mqh>
 #include <Trade/Trade.mqh>
-#include "2.Config.mqh"
+#include "2.Config.Types.mqh"
+#include "2.Config.Manager.mqh"
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
 

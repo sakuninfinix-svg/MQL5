@@ -21,7 +21,8 @@
 #define __PATTERN_MANAGER_MQH__
 
 // PatternManager membutuhkan akses ke CFG dan ENUM_PATTERN_TYPE
-#include "2.Config.mqh"
+#include "2.Config.Types.mqh"
+#include "2.Config.Manager.mqh"
 
 //+------------------------------------------------------------------+
 //| Enum for Pattern Quality Grade                                   |
