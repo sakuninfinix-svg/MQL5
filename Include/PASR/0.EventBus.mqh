@@ -510,14 +510,25 @@ public:
       }
    }
    
-   // Batch dispatch - PATCHED: added re-entrancy guard + metrics update
+   // Batch dispatch - PATCHED V1.31: added re-entrancy guard + metrics update + error handling
    // Reduces overhead when firing multiple events of same type
    void DispatchBatch(int eventID, Event *&events[], int count)
    {
       if (count <= 0)
          return;
       if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
+      {
+         // Clean up all events on invalid ID
+         for (int i = 0; i < count; i++)
+         {
+            if (events[i] != NULL && CheckPointer(events[i]) == POINTER_DYNAMIC)
+            {
+               delete events[i];
+               events[i] = NULL;
+            }
+         }
          return;
+      }
       
       int total = m_handlerCount[eventID];
       if (total == 0)
@@ -537,6 +548,10 @@ public:
       m_isDispatching = true;
       m_dispatchDepth++;
       
+      ulong startTime = GetMicrosecondCount();
+      int handlersCalled = 0;
+      int errorsHandled = 0;
+      
       // Process each event through all handlers
       for (int e = 0; e < count; e++)
       {
@@ -544,24 +559,45 @@ public:
             continue;
             
          bool isHeapAllocated = (CheckPointer(events[e]) == POINTER_DYNAMIC);
+         bool eventCancelled = false;
          
-         // Record event
+         // Record event once before dispatching
          if (CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
          {
             g_recorder.Record(events[e]);
          }
          
-         // Execute all handlers for this event
+         // Execute all handlers for this event with error handling
          for (int i = 0; i < total; i++)
          {
+            // Check cancellation flag (if event supports it)
+            if (events[e].IsCancelled())
+            {
+               eventCancelled = true;
+               LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Event " + IntegerToString(eventID) + 
+                         " cancelled during batch dispatch after " + IntegerToString(i) + " handlers");
+               break;
+            }
+            
             IEventHandler *h = m_handlersByType[eventID][i].handler;
             if (h != NULL && CheckPointer(h) != POINTER_INVALID)
             {
+               ResetLastError();
                h.HandleEvent(events[e]);
+               int postErrorCount = GetLastError();
+               if (postErrorCount != 0)
+               {
+                  errorsHandled++;
+                  string handlerName = (CheckPointer(h) != POINTER_INVALID) ? h.GetHandlerName() : "Unknown";
+                  LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Error in handler [" + handlerName + "] for batch event " + IntegerToString(eventID) + ": Error " + IntegerToString(postErrorCount));
+                  h.OnHandlerError(eventID, "Error " + IntegerToString(postErrorCount));
+                  ResetLastError();
+               }
+               handlersCalled++;
             }
          }
          
-         // Clean up if heap-allocated
+         // Clean up if heap-allocated (always, regardless of cancellation)
          if (isHeapAllocated && CheckPointer(events[e]) == POINTER_DYNAMIC)
          {
             delete events[e];
@@ -569,8 +605,22 @@ public:
          }
       }
       
+      // Update metrics
       m_totalDispatches += (ulong)count;
-      m_totalHandlersCalled += (ulong)(count * total);
+      m_totalHandlersCalled += (ulong)handlersCalled;
+      
+      // Log performance for slow batch dispatches (>2ms)
+      #ifdef __DEBUG__
+      ulong elapsed = GetMicrosecondCount() - startTime;
+      if (elapsed > 2000)
+      {
+         LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Slow batch dispatch: event " + IntegerToString(eventID) + 
+                   " took " + DoubleToString(elapsed / 1000.0, 2) + "ms (" + 
+                   IntegerToString(count) + " events, " + IntegerToString(handlersCalled) + " handlers, " + 
+                   IntegerToString(errorsHandled) + " errors)");
+      }
+      #endif
+      
       m_dispatchDepth--;
       if(m_dispatchDepth == 0) m_isDispatching = false;
    }
