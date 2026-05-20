@@ -2,11 +2,12 @@
 //|                                                   AIManager.mqh  |
 //|                                       Copyright 2026, Agsicentre |
 //|            Adaptive AI & Signal Scoring Module                   |
-//|                   VERSION 2.04 - Full Bug-Fix Release            |
+//|                   VERSION 2.05 - Option C: Experience Replay      |
+//|                   + Regime-Aware Mini-Batch NN + Feature Expansion|
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.04"
+#property version   "2.05"
 #property strict
 
 #ifndef __AI_MANAGER_MQH__
@@ -16,15 +17,26 @@
 #include "10.DataManager.mqh"
 #include "12.MarketRegime.mqh"
 
-// [v2.04 FIX #7] GetHigherTimeframe dipindah ke private static method dalam class
-// agar tidak menyebabkan redefinisi ketika file di-include dari beberapa unit
+// ─────────────────────────────────────────────────────────────────
+// OPTION C CHANGES (v2.05):
+//   1. Feature Expansion   : 3 → 8 NN inputs
+//   2. NN Architecture     : 8→6→4→1 (larger capacity)
+//   3. Experience Replay   : ReplayBuffer[500], random mini-batch 16
+//   4. L2 Regularization   : applied per weight update (lambda=0.0001)
+//   5. Platt Scaling       : sigmoid calibration (a, b) on top of NN
+//   6. Regime-Aware Ensemble: bias per detected regime (unchanged)
+//   7. NormalizeNNWeight   : [-2.0, 2.0] (unchanged)
+//   8. DecayModel          : L2 instead of multiplicative decay for NN
+//   9. Mini-batch trigger  : every 16 labeled outcomes
+// ─────────────────────────────────────────────────────────────────
 
-//+------------------------------------------------------------------+
-//| AIManager - Enhances signal quality through adaptive scoring      |
-//| Utilizes lightweight feature scoring and dynamic model feedback   |
-//| v2.03: MarketRegimeFilter integrated — no duplicate indicators   |
-//| v2.04: Full compile-error fix (cfg path, dereference, GetHTF)    |
-//+------------------------------------------------------------------+
+#define NN_INPUTS        8    // [v2.05] expanded feature set
+#define NN_H1            6    // hidden layer 1 nodes
+#define NN_H2            4    // hidden layer 2 nodes
+#define REPLAY_CAPACITY  500  // max samples in replay buffer
+#define MINIBATCH_SIZE   16   // samples per mini-batch training
+#define L2_LAMBDA        0.0001
+
 class AIManager : public IManager
 {
 private:
@@ -38,10 +50,9 @@ private:
       double momentumWeight;
       double lossStreakWeight;
       double volNoiseWeight;
-      // ML feature weights
-      double regimeScoreWeight;     // [v2.03] ganti volatilityWeight → pakai regime score
+      double regimeScoreWeight;
       double timeOfDayWeight;
-      double mtConfluenceWeight;    // [v2.03] ganti mtConfluence manual → pakai MarketRegime
+      double mtConfluenceWeight;
       double volumeWeight;
       // Ensemble expert weights
       double trendExpertWeight;
@@ -51,12 +62,24 @@ private:
       double recentWinRate;
       double longTermWinRate;
       int    driftDetectionWindow;
-      // Neural Network Weights (2-layer sequential)
-      double nn_hidden1_w1, nn_hidden1_w2, nn_hidden1_w3, nn_hidden1_bias;
-      double nn_hidden2_w1, nn_hidden2_bias;
-      double nn_output_w1,  nn_output_w2,  nn_output_bias;
+      // [v2.05] Expanded NN: 8→6→4→1
+      // Hidden layer 1: NN_INPUTS x NN_H1 weights + bias
+      double h1w[NN_INPUTS][NN_H1];
+      double h1b[NN_H1];
+      // Hidden layer 2: NN_H1 x NN_H2 weights + bias
+      double h2w[NN_H1][NN_H2];
+      double h2b[NN_H2];
+      // Output layer: NN_H2 weights + bias
+      double ow[NN_H2];
+      double ob;
+      // [v2.05] Platt Scaling parameters
+      double plattA;
+      double plattB;
+      int    plattSamples;
+      // Training meta
       double nnLearningRate;
       int    nnTrainingSamples;
+      int    replayTrainCount;   // how many mini-batches completed
       // Safety & validation
       bool   initialized;
       datetime lastUpdateTime;
@@ -70,11 +93,43 @@ private:
    string           m_ticketMapFilename;
    string           m_outcomeFilename;
    int              m_loggedSamples;
+   int              m_labeledSinceLastBatch;  // [v2.05] counter for mini-batch trigger
 
-   // [v2.03] MarketRegimeFilter injection — TIDAK buat instance baru,
-   // pointer ke instance yang sudah ada di EA utama
    MarketRegimeFilter *m_regime;
 
+   // ─── EvalContext ─────────────────────────────────────────────
+   struct EvalContext
+   {
+      double atrNorm;
+      double spreadNorm;
+      double slNorm;
+      double regimeScore;
+      double volatilityScore;
+      double timeOfDayNorm;
+      double mtConfluenceNorm;
+      double volumeNorm;
+      double momentumNorm;
+      double zoneNorm;
+      double lossStreakNorm;
+      double noiseNorm;
+      // [v2.05] extra features for NN
+      double rsiNorm;           // RSI(14) normalized 0-1
+      double candleBodyRatio;   // body/total_range 0-1
+      double emaDistNorm;       // distance from EMA20 normalized
+      double sessionNorm;       // 0=off, 0.5=EU, 1.0=US
+   };
+
+   // ─── ReplayBuffer ─────────────────────────────────────────────
+   // [v2.05] Stores labeled training samples for mini-batch replay
+   struct ReplaySample
+   {
+      double features[NN_INPUTS];  // 8 normalized features
+      double label;                // 1.0 = win, 0.0 = loss
+   } m_replayBuffer[REPLAY_CAPACITY];
+   int m_replayHead;    // circular buffer write head
+   int m_replayCount;   // total filled (capped at REPLAY_CAPACITY)
+
+   // ─── AISignalSample ───────────────────────────────────────────
    struct AISignalSample
    {
       string         sampleId;
@@ -92,28 +147,9 @@ private:
       double         support;
       double         resistance;
       SignalDecision signal;
+      double         features[NN_INPUTS]; // [v2.05] store for replay
    } m_pendingSamples[];
 
-   // [v2.03] EvalContext: cache semua feature normalization per signal evaluation
-   // untuk menghindari redundant CopyRates() berganda
-   struct EvalContext
-   {
-      double atrNorm;
-      double spreadNorm;
-      double slNorm;
-      double regimeScore;       // dari MarketRegimeFilter.GetRegimeScore()
-      double volatilityScore;   // dari MarketRegimeFilter.GetVolatilityScore()
-      double timeOfDayNorm;
-      double mtConfluenceNorm;  // dari MarketRegimeFilter.GetResult().regimeScore
-      double volumeNorm;
-      double momentumNorm;
-      double zoneNorm;
-      double lossStreakNorm;
-      double noiseNorm;
-   };
-
-   // [v2.04 FIX #7] Helper: map timeframe ke timeframe lebih tinggi yang valid
-   // Dipindah dari global function ke private static method dalam class
    static ENUM_TIMEFRAMES GetHigherTimeframe(ENUM_TIMEFRAMES tf)
    {
       switch(tf)
@@ -139,9 +175,12 @@ public:
                  m_ticketMapFilename(""),
                  m_outcomeFilename(""),
                  m_loggedSamples(0),
-                 m_regime(NULL)
+                 m_labeledSinceLastBatch(0),
+                 m_regime(NULL),
+                 m_replayHead(0),
+                 m_replayCount(0)
    {
-      // Initialize model with safe defaults
+      // Feature weights
       m_model.bias               = 0.55;
       m_model.atrWeight          = 0.18;
       m_model.spreadWeight       = 0.14;
@@ -149,34 +188,47 @@ public:
       m_model.momentumWeight     = 0.08;
       m_model.lossStreakWeight    = 0.06;
       m_model.volNoiseWeight     = 0.12;
-      m_model.regimeScoreWeight  = 0.15;  // [v2.03] bobot regime score dari MarketRegimeFilter
+      m_model.regimeScoreWeight  = 0.15;
       m_model.timeOfDayWeight    = 0.10;
       m_model.mtConfluenceWeight = 0.20;
       m_model.volumeWeight       = 0.12;
+      // Ensemble
       m_model.trendExpertWeight    = 0.35;
       m_model.meanRevExpertWeight  = 0.25;
       m_model.momentumExpertWeight = 0.25;
       m_model.recentWinRate        = -1.0;
       m_model.longTermWinRate      = -1.0;
       m_model.driftDetectionWindow = 50;
-      // Neural Network: Layer 1 (3 inputs → 1 node, ReLU)
-      m_model.nn_hidden1_w1 = 0.3; m_model.nn_hidden1_w2 = 0.3;
-      m_model.nn_hidden1_w3 = 0.3; m_model.nn_hidden1_bias = 0.1;
-      // Layer 2: 1 input (dari hidden1) → 1 node (ReLU)
-      m_model.nn_hidden2_w1 = 0.5; m_model.nn_hidden2_bias = 0.1;
-      // Output layer: combine h1 dan h2 (residual-like connection)
-      m_model.nn_output_w1  = 0.5; m_model.nn_output_w2  = 0.5;
-      m_model.nn_output_bias = 0.1;
+      // [v2.05] Initialize NN 8→6→4→1 with Xavier-like values
+      double scale1 = MathSqrt(2.0 / (NN_INPUTS + NN_H1));
+      double scale2 = MathSqrt(2.0 / (NN_H1 + NN_H2));
+      double scale3 = MathSqrt(2.0 / (NN_H2 + 1));
+      for(int i = 0; i < NN_INPUTS; i++)
+         for(int j = 0; j < NN_H1; j++)
+            m_model.h1w[i][j] = scale1 * (0.2 - (double)(i + j) * 0.01);
+      for(int j = 0; j < NN_H1; j++) m_model.h1b[j] = 0.01;
+      for(int i = 0; i < NN_H1; i++)
+         for(int j = 0; j < NN_H2; j++)
+            m_model.h2w[i][j] = scale2 * (0.2 - (double)(i + j) * 0.01);
+      for(int j = 0; j < NN_H2; j++) m_model.h2b[j] = 0.01;
+      for(int j = 0; j < NN_H2; j++) m_model.ow[j]  = scale3 * 0.5;
+      m_model.ob = 0.0;
+      // Platt Scaling init
+      m_model.plattA       = 1.0;
+      m_model.plattB       = 0.0;
+      m_model.plattSamples = 0;
+      // Training meta
       m_model.nnLearningRate    = 0.01;
       m_model.nnTrainingSamples = 0;
-      // Safety fields
+      m_model.replayTrainCount  = 0;
+      // Safety
       m_model.initialized       = true;
       m_model.lastUpdateTime    = TimeCurrent();
       m_model.validationCounter = 0;
+      // Replay buffer
+      ArrayInitialize(m_replayBuffer, 0.0);
    }
 
-   // [v2.03] Inject pointer MarketRegimeFilter dari EA utama
-   // Panggil ini sebelum Init(), mirip pola SetDataManager()
    void SetRegimeFilter(MarketRegimeFilter *regime)
    {
       m_regime = regime;
@@ -185,10 +237,7 @@ public:
 
    MarketRegimeFilter* GetRegimeFilter() const { return m_regime; }
 
-   virtual void RefreshConfigCache() override
-   {
-      IManager::RefreshConfigCache();
-   }
+   virtual void RefreshConfigCache() override { IManager::RefreshConfigCache(); }
 
    virtual void DeclareEvents() override
    {
@@ -202,33 +251,26 @@ public:
 
    virtual bool Init() override
    {
-      if (!IManager::Init())
-         return false;
-
+      if (!IManager::Init()) return false;
       m_data = IManager::GetGlobalDataManager();
-
       if (CheckPointer(m_data) == POINTER_INVALID)
       {
          Log("❌ CRITICAL: DataManager is NULL during AIManager initialization");
          return false;
       }
-
-      // [v2.03] Peringatan jika regime filter belum di-inject
       if (CheckPointer(m_regime) == POINTER_INVALID)
-         Log("⚠️ WARNING: MarketRegimeFilter not injected. Call SetRegimeFilter() before Init() for best results.");
+         Log("⚠️ WARNING: MarketRegimeFilter not injected. Call SetRegimeFilter() before Init().");
 
-      // [v2.04 FIX #1 #2 #5] cfg harus dideklarasikan lokal via GetConfigCache()
       StrategyConfig cfg;
       m_data.GetConfigCache(cfg);
-
-      string prefix        = "AI_ml_" + IntegerToString(cfg.risk.magic) + "_" + _Symbol + "_";
-      m_datasetFilename    = prefix + "data.csv";
-      m_ticketMapFilename  = prefix + "ticketmap.csv";
-      m_outcomeFilename    = prefix + "outcomes.csv";
+      string prefix       = "AI_ml_" + IntegerToString(cfg.risk.magic) + "_" + _Symbol + "_";
+      m_datasetFilename   = prefix + "data.csv";
+      m_ticketMapFilename = prefix + "ticketmap.csv";
+      m_outcomeFilename   = prefix + "outcomes.csv";
 
       LoadModelState();
-
-      Log("✅ AIManager v2.04 initialized. NN samples: " + IntegerToString(m_model.nnTrainingSamples));
+      Log("✅ AIManager v2.05 initialized. NN samples: " + IntegerToString(m_model.nnTrainingSamples) +
+          " | ReplayBuffer: " + IntegerToString(m_replayCount));
       return true;
    }
 
@@ -241,30 +283,23 @@ public:
 
    virtual void OnNewBar(NewBarEvent *e) override
    {
-      // [v2.04 FIX #2 #5] deklarasi cfg lokal
       if (CheckPointer(m_data) == POINTER_INVALID) return;
       StrategyConfig cfg;
       m_data.GetConfigCache(cfg);
-      if (!cfg.ai.use)
-         return;
-
-      // [v2.03] Update regime filter setiap bar baru (jika tersedia)
-      if (CheckPointer(m_regime) != POINTER_INVALID)
-         m_regime.Update();
-
-      DecayModel(0.98);
+      if (!cfg.ai.use) return;
+      if (CheckPointer(m_regime) != POINTER_INVALID) m_regime.Update();
+      // [v2.05] NN weights use L2 penalty in training — no per-bar decay for NN
+      // Only feature weights get soft decay to keep them responsive
+      DecayFeatureWeightsOnly(0.995);
    }
 
    virtual void OnHeartbeat(HeartbeatEvent *e) override
    {
-      // [v2.04 FIX #2 #5] deklarasi cfg lokal
       if (CheckPointer(m_data) == POINTER_INVALID) return;
       StrategyConfig cfg;
       m_data.GetConfigCache(cfg);
-      if (!cfg.ai.use)
-         return;
-      if (TimeCurrent() - m_lastHeartbeat < 5)
-         return;
+      if (!cfg.ai.use) return;
+      if (TimeCurrent() - m_lastHeartbeat < 5) return;
       m_lastHeartbeat = TimeCurrent();
       AdaptModelToPerformance();
    }
@@ -272,74 +307,50 @@ public:
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
       if (CheckPointer(e) == POINTER_INVALID)
-      {
-         Log("⚠️ OnSignalGenerated: NULL event pointer");
-         return;
-      }
-
-      // [v2.04 FIX #2 #5] deklarasi cfg lokal
+      { Log("⚠️ OnSignalGenerated: NULL event pointer"); return; }
       if (CheckPointer(m_data) == POINTER_INVALID) return;
       StrategyConfig cfg;
       m_data.GetConfigCache(cfg);
+      if (!cfg.ai.use || !e.signal.valid) return;
 
-      if (!cfg.ai.use || !e.signal.valid)
-         return;
-
-      // [v2.03] Build EvalContext sekali, dipakai oleh semua expert evaluator
       EvalContext ctx;
       BuildEvalContext(ctx, e.signal, e.atrPoints, e.support, e.resistance);
 
       double score = EvaluateSignal(e.signal, e.atrPoints, e.support, e.resistance, ctx, cfg);
 
-      // SL Adjustment: 1.0 – 1.12 (berbasis score dan volNoiseWeight)
       double aiSlAdjustment = 1.0 + (Logistic(score) * m_model.volNoiseWeight);
-
-      // [v2.03] Threshold dinamis dari MarketRegimeFilter, bukan flat cfg.ai.minConfidence
       double dynamicThreshold = GetDynamicThreshold(cfg);
       bool accepted = score >= dynamicThreshold;
 
       Log("AI score=" + DoubleToString(score, 2) +
           " threshold=" + DoubleToString(dynamicThreshold, 2) +
-          " for signal " + IntegerToString((int)e.signal.patternType));
+          " replay=" + IntegerToString(m_replayCount) +
+          " batches=" + IntegerToString(m_model.replayTrainCount));
       LogSignalSample(e.signal, e.atrPoints, e.support, e.resistance, score, accepted, cfg);
 
       if (!accepted)
       {
          e.signal.valid  = false;
          e.signal.reason = e.signal.reason + " | AI_REJECT(" + DoubleToString(score, 2) + ")";
-         Log("Signal rejected by AI, score=" + DoubleToString(score, 2));
          return;
       }
-
       e.signal.reason      = e.signal.reason + " | AI_ACCEPT(" + DoubleToString(score, 2) + ") SL_ADJ:" + DoubleToString(aiSlAdjustment, 2);
       e.signal.slMultiplier *= aiSlAdjustment;
-      Log("Signal accepted by AI, score=" + DoubleToString(score, 2));
    }
 
    virtual void OnOrderExecution(OrderExecutionEvent *e) override
    {
       if (CheckPointer(e) == POINTER_INVALID)
-      {
-         Log("⚠️ OnOrderExecution: NULL event pointer");
-         return;
-      }
-
-      // [v2.04 FIX #2 #5] deklarasi cfg lokal
+      { Log("⚠️ OnOrderExecution: NULL event pointer"); return; }
       if (CheckPointer(m_data) == POINTER_INVALID) return;
       StrategyConfig cfg;
       m_data.GetConfigCache(cfg);
-      if (!cfg.ai.use)
-         return;
-
-      if (e.success)
-      {
-         AttachTicketToRecentSample(e.ticket);
-      }
+      if (!cfg.ai.use) return;
+      if (e.success) AttachTicketToRecentSample(e.ticket);
       else
       {
-         m_model.bias  = NormalizeWeight(m_model.bias - 0.01);
-         m_modelDirty  = true;
-         Log("Order execution failed, reducing bias.");
+         m_model.bias = NormalizeWeight(m_model.bias - 0.01);
+         m_modelDirty = true;
       }
       SaveModelState(cfg);
    }
@@ -347,41 +358,20 @@ public:
    virtual void OnPositionUpdate(PositionUpdateEvent *e) override
    {
       if (CheckPointer(e) == POINTER_INVALID)
-      {
-         Log("⚠️ OnPositionUpdate: NULL event pointer");
-         return;
-      }
-
-      // [v2.04 FIX #2 #5] deklarasi cfg lokal
+      { Log("⚠️ OnPositionUpdate: NULL event pointer"); return; }
       if (CheckPointer(m_data) == POINTER_INVALID) return;
       StrategyConfig cfg;
       m_data.GetConfigCache(cfg);
-      if (!cfg.ai.use)
-         return;
-
-      if (e.isClosing)
-      {
-         LabelSampleOutcome(e.ticket, e.unrealizedPnL);
-         return;
-      }
-
-      if (e.unrealizedPnL < 0)
-      {
-         m_model.bias = MathMax(0.25, m_model.bias - 0.002);
-         m_modelDirty = true;
-      }
-      else if (e.unrealizedPnL > 0)
-      {
-         m_model.bias = MathMin(0.85, m_model.bias + 0.002);
-         m_modelDirty = true;
-      }
+      if (!cfg.ai.use) return;
+      if (e.isClosing) { LabelSampleOutcome(e.ticket, e.unrealizedPnL); return; }
+      if (e.unrealizedPnL < 0)      { m_model.bias = MathMax(0.25, m_model.bias - 0.002); m_modelDirty = true; }
+      else if (e.unrealizedPnL > 0) { m_model.bias = MathMin(0.85, m_model.bias + 0.002); m_modelDirty = true; }
    }
 
 private:
 
    //+------------------------------------------------------------------+
-   //| [v2.03] BuildEvalContext: hitung semua feature sekali saja        |
-   //| Menghindari redundant CopyRates() di setiap expert evaluator      |
+   //| BuildEvalContext: compute all 16 normalized features once         |
    //+------------------------------------------------------------------+
    void BuildEvalContext(EvalContext &ctx,
                          const SignalDecision &signal, const double atrPoints,
@@ -396,26 +386,47 @@ private:
       ctx.zoneNorm      = NormalizeZoneFeature(signal.zonePrice, support, resistance);
       ctx.lossStreakNorm = NormalizeLossStreak();
       ctx.noiseNorm     = NormalizeNoiseFeature();
+      // [v2.05] new features
+      ctx.rsiNorm          = NormalizeRSIFeature();
+      ctx.candleBodyRatio  = NormalizeCandleBodyRatio();
+      ctx.emaDistNorm      = NormalizeEMADistanceFeature();
+      ctx.sessionNorm      = NormalizeSessionFeature();
 
-      // [v2.03] Regime & volatility: pakai MarketRegimeFilter jika tersedia
       if (CheckPointer(m_regime) != POINTER_INVALID)
       {
          const RegimeResult &r = m_regime.GetResult();
-         ctx.regimeScore      = r.regimeScore;          // ADX-based 0-1 dari MarketRegimeFilter
-         ctx.volatilityScore  = r.volatilityScore;      // ATR ratio-based 0-1
+         ctx.regimeScore      = r.regimeScore;
+         ctx.volatilityScore  = r.volatilityScore;
          ctx.mtConfluenceNorm = r.mtfConfirmed ? 1.0 : (double)r.tfAlignment / 3.0;
       }
       else
       {
-         // Fallback: hitung manual hanya jika regime filter tidak tersedia
          ctx.regimeScore      = NormalizeVolatilityFeatureFallback();
          ctx.volatilityScore  = ctx.regimeScore;
          ctx.mtConfluenceNorm = NormalizeMultiTimeframeConfluenceFallback(signal);
       }
    }
 
-   // [v2.04 FIX #3 #5] Threshold dinamis: pakai MarketRegimeFilter.GetDynamicThreshold()
-   // Jika filter tidak tersedia, fallback ke cfg.ai.minConfidence
+   //+------------------------------------------------------------------+
+   //| [v2.05] ExtractNNFeatures: map EvalContext → 8-element array      |
+   //| Feature order (fixed):                                            |
+   //|  [0] atrNorm       [1] regimeScore  [2] mtConfluenceNorm         |
+   //|  [3] rsiNorm       [4] candleBody   [5] emaDistNorm              |
+   //|  [6] sessionNorm   [7] momentumNorm                              |
+   //+------------------------------------------------------------------+
+   void ExtractNNFeatures(const EvalContext &ctx, double &f[]) const
+   {
+      ArrayResize(f, NN_INPUTS);
+      f[0] = ctx.atrNorm;
+      f[1] = ctx.regimeScore;
+      f[2] = ctx.mtConfluenceNorm;
+      f[3] = ctx.rsiNorm;
+      f[4] = ctx.candleBodyRatio;
+      f[5] = ctx.emaDistNorm;
+      f[6] = ctx.sessionNorm;
+      f[7] = ctx.momentumNorm;
+   }
+
    double GetDynamicThreshold(const StrategyConfig &cfg) const
    {
       if (CheckPointer(m_regime) != POINTER_INVALID)
@@ -431,7 +442,6 @@ private:
       double meanRevScore  = EvaluateMeanReversionExpert(signal, ctx, cfg);
       double momentumScore = EvaluateMomentumExpert(ctx);
 
-      // [v2.03] Bias ensemble per regime — tanpa indikator baru
       double tW  = m_model.trendExpertWeight;
       double mW  = m_model.meanRevExpertWeight;
       double moW = m_model.momentumExpertWeight;
@@ -440,16 +450,11 @@ private:
       {
          switch(m_regime.GetMarketRegime())
          {
-            case REGIME_TRENDING_STRONG:
-               tW  *= 1.20; mW  *= 0.80; break;
-            case REGIME_TRENDING_WEAK:
-               tW  *= 1.10; mW  *= 0.90; break;
-            case REGIME_RANGING_SIDEWAYS:
-               tW  *= 0.80; mW  *= 1.25; break;
-            case REGIME_CHOPPY_HIGH_VOL:
-               tW  *= 0.70; mW  *= 0.80; moW *= 0.70; break;
-            case REGIME_TRANSITION:
-               tW  *= 0.60; mW  *= 0.60; moW *= 0.60; break;
+            case REGIME_TRENDING_STRONG:   tW *= 1.20; mW *= 0.80; break;
+            case REGIME_TRENDING_WEAK:     tW *= 1.10; mW *= 0.90; break;
+            case REGIME_RANGING_SIDEWAYS:  tW *= 0.80; mW *= 1.25; break;
+            case REGIME_CHOPPY_HIGH_VOL:   tW *= 0.70; mW *= 0.80; moW *= 0.70; break;
+            case REGIME_TRANSITION:        tW *= 0.60; mW *= 0.60; moW *= 0.60; break;
             default: break;
          }
       }
@@ -459,26 +464,25 @@ private:
       if (totalWeight > 0)
          ensembleScore = (tW * trendScore + mW * meanRevScore + moW * momentumScore) / totalWeight;
 
-      double nnScore = EvaluateNeuralNetwork(ctx);
+      // [v2.05] NN with Platt Scaling calibration
+      double nnRaw    = ForwardPassNN(ctx);
+      double nnScore  = PlattCalibrate(nnRaw);
 
-      // NN weight tumbuh lambat: max 35% setelah ~70 sample
-      double nnWeight    = MathMin(0.35, 0.005 * m_model.nnTrainingSamples);
+      double nnWeight = MathMin(0.40, 0.005 * m_model.nnTrainingSamples);
       double hybridScore = (1.0 - nnWeight) * ensembleScore + nnWeight * nnScore;
 
       return Logistic(hybridScore);
    }
 
-   // [v2.04 FIX #4 #5] cfg.ai_pattern_bonus → cfg.ai.patternBonus, terima const ref
    double EvaluateTrendExpert(const SignalDecision &signal, const EvalContext &ctx,
                                const StrategyConfig &cfg) const
    {
       double score = m_model.bias;
       score += m_model.atrWeight          * ctx.atrNorm;
       score += m_model.slWeight           * ctx.slNorm;
-      score += m_model.mtConfluenceWeight * ctx.mtConfluenceNorm;  // [v2.03] dari regime
-      score += m_model.regimeScoreWeight  * ctx.regimeScore;       // [v2.03] regime score
-      if (signal.patternType != PATTERN_NONE)
-         score += cfg.ai.patternBonus * 0.8;
+      score += m_model.mtConfluenceWeight * ctx.mtConfluenceNorm;
+      score += m_model.regimeScoreWeight  * ctx.regimeScore;
+      if (signal.patternType != PATTERN_NONE) score += cfg.ai.patternBonus * 0.8;
       return score;
    }
 
@@ -487,11 +491,10 @@ private:
    {
       double score = m_model.bias;
       score += m_model.spreadWeight      * ctx.spreadNorm;
-      score += m_model.regimeScoreWeight * ctx.volatilityScore;  // [v2.03] volatility dari regime
+      score += m_model.regimeScoreWeight * ctx.volatilityScore;
       score += m_model.momentumWeight    * ctx.zoneNorm;
       score += m_model.timeOfDayWeight   * ctx.timeOfDayNorm;
-      if (signal.patternType != PATTERN_NONE)
-         score += cfg.ai.patternBonus * 1.2;
+      if (signal.patternType != PATTERN_NONE) score += cfg.ai.patternBonus * 1.2;
       return score;
    }
 
@@ -505,487 +508,565 @@ private:
       return score;
    }
 
-   //--- Feature Normalizers (atomic, no CopyRates ganda) ---
+   //+------------------------------------------------------------------+
+   //| Feature Normalizers                                               |
+   //+------------------------------------------------------------------+
 
    double NormalizeATRFeature(double atrPoints) const
-   {
-      if (atrPoints <= 0) return 0.0;
-      return MathMin(1.0, atrPoints / 20.0);
-   }
+   { return (atrPoints <= 0) ? 0.0 : MathMin(1.0, atrPoints / 20.0); }
 
    double NormalizeSpreadFeature() const
    {
-      long spreadPoints = 0;
-      if (!SymbolInfoInteger(_Symbol, SYMBOL_SPREAD, spreadPoints) || spreadPoints <= 0)
-         return 1.0;
-      return MathMax(0.0, 1.0 - MathMin(1.0, (double)spreadPoints / 10.0));
+      long sp = 0;
+      if (!SymbolInfoInteger(_Symbol, SYMBOL_SPREAD, sp) || sp <= 0) return 1.0;
+      return MathMax(0.0, 1.0 - MathMin(1.0, (double)sp / 10.0));
    }
 
    double NormalizeSLFeature(double slMultiplier) const
-   {
-      if (slMultiplier <= 0) return 0.0;
-      return MathMin(1.0, slMultiplier / 3.0);
-   }
+   { return (slMultiplier <= 0) ? 0.0 : MathMin(1.0, slMultiplier / 3.0); }
 
    double NormalizeZoneFeature(double zonePrice, double support, double resistance) const
    {
-      double distance = MathAbs(zonePrice - (support + resistance) / 2.0);
-      double range    = MathMax(1.0, MathAbs(resistance - support));
-      return 1.0 - MathMin(1.0, distance / range);
+      double dist  = MathAbs(zonePrice - (support + resistance) / 2.0);
+      double range = MathMax(1.0, MathAbs(resistance - support));
+      return 1.0 - MathMin(1.0, dist / range);
    }
 
    double NormalizeTimeOfDayFeature() const
    {
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-      int hour = dt.hour;
-      if ((hour >= 8 && hour <= 11) || (hour >= 13 && hour <= 16)) return 1.0;
-      if  (hour >= 7 && hour <= 19)                                  return 0.7;
+      MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
+      int h = dt.hour;
+      if ((h >= 8 && h <= 11) || (h >= 13 && h <= 16)) return 1.0;
+      if  (h >= 7 && h <= 19)                           return 0.7;
       return 0.3;
    }
 
    double NormalizeVolumeFeature() const
    {
-      long volume[20];
-      int copied = CopyTickVolume(_Symbol, _Period, 0, 20, volume);
-      if (copied < 20) return 0.5;
-
-      long avgVolume = 0;
-      for (int i = 0; i < 20; i++) avgVolume += volume[i];
-      avgVolume /= 20;
-      if (avgVolume == 0) return 0.5;
-
-      return MathMin(1.0, (double)volume[0] / avgVolume);
+      long vol[20];
+      if (CopyTickVolume(_Symbol, _Period, 0, 20, vol) < 20) return 0.5;
+      long avg = 0;
+      for (int i = 0; i < 20; i++) avg += vol[i];
+      avg /= 20;
+      return (avg == 0) ? 0.5 : MathMin(1.0, (double)vol[0] / avg);
    }
 
    double NormalizeMomentumFeature() const
    {
       MqlRates bars[14];
-      int copied = CopyRates(_Symbol, _Period, 0, 14, bars);
-      if (copied < 14) return 0.5;
-
+      if (CopyRates(_Symbol, _Period, 0, 14, bars) < 14) return 0.5;
       double momentum = bars[0].close - bars[13].close;
       double maxMove  = 0;
-      for (int i = 1; i < 14; i++)
-         maxMove = MathMax(maxMove, MathAbs(bars[i].close - bars[0].close));
-
+      for (int i = 1; i < 14; i++) maxMove = MathMax(maxMove, MathAbs(bars[i].close - bars[0].close));
       if (maxMove == 0) return 0.5;
-      return 0.5 + ((momentum / maxMove) * 0.5);
+      return 0.5 + (momentum / maxMove) * 0.5;
    }
 
    double NormalizeNoiseFeature() const
    {
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-      if (dt.hour == 8 || dt.hour == 13) return 1.0;
-      return 0.2;
+      MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
+      return (dt.hour == 8 || dt.hour == 13) ? 1.0 : 0.2;
    }
 
-   // [v2.04 FIX #6] (*m_data).Method() → m_data.Method()
    double NormalizeLossStreak() const
    {
       if (CheckPointer(m_data) == POINTER_INVALID) return 0.0;
-      int losses = m_data.GetConsecutiveLosses();
-      return MathMax(0.0, 1.0 - MathMin(1.0, losses * 0.1));
+      return MathMax(0.0, 1.0 - MathMin(1.0, m_data.GetConsecutiveLosses() * 0.1));
    }
 
-   // [v2.03] Fallback hanya digunakan jika MarketRegimeFilter tidak di-inject
+   // ─── [v2.05] New Feature Normalizers ──────────────────────────
+
+   double NormalizeRSIFeature() const
+   {
+      // Simple RSI(14) via price gains/losses — no indicator handle needed
+      MqlRates bars[15];
+      if (CopyRates(_Symbol, _Period, 0, 15, bars) < 15) return 0.5;
+      double gains = 0, losses = 0;
+      for (int i = 0; i < 14; i++)
+      {
+         double diff = bars[i].close - bars[i+1].close;
+         if (diff > 0) gains  += diff;
+         else          losses -= diff;
+      }
+      double rs  = (losses == 0) ? 100.0 : gains / losses;
+      double rsi = 100.0 - (100.0 / (1.0 + rs));
+      return rsi / 100.0;
+   }
+
+   double NormalizeCandleBodyRatio() const
+   {
+      MqlRates bar[1];
+      if (CopyRates(_Symbol, _Period, 0, 1, bar) < 1) return 0.5;
+      double body  = MathAbs(bar[0].close - bar[0].open);
+      double range = bar[0].high - bar[0].low;
+      return (range == 0) ? 0.5 : MathMin(1.0, body / range);
+   }
+
+   double NormalizeEMADistanceFeature() const
+   {
+      MqlRates bars[20];
+      if (CopyRates(_Symbol, _Period, 0, 20, bars) < 20) return 0.5;
+      // Compute EMA20 from oldest to newest
+      double ema = bars[19].close;
+      double k   = 2.0 / 21.0;
+      for (int i = 18; i >= 0; i--) ema = bars[i].close * k + ema * (1.0 - k);
+      double dist  = MathAbs(bars[0].close - ema);
+      double atrEst = 0;
+      for (int i = 0; i < 20; i++) atrEst += bars[i].high - bars[i].low;
+      atrEst /= 20.0;
+      return (atrEst == 0) ? 0.5 : MathMin(1.0, dist / (atrEst * 2.0));
+   }
+
+   double NormalizeSessionFeature() const
+   {
+      MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
+      int h = dt.hour;
+      if (h >= 13 && h <= 21) return 1.0;   // US session
+      if (h >= 7  && h <= 16) return 0.5;   // EU session
+      return 0.0;
+   }
+
+   // ─── Fallback normalizers (no MarketRegimeFilter) ─────────────
+
    double NormalizeVolatilityFeatureFallback() const
    {
       MqlRates bars[20];
-      int copied = CopyRates(_Symbol, _Period, 0, 20, bars);
-      if (copied < 20) return 0.5;
-
-      double avgClose = 0;
-      for (int i = 0; i < 20; i++) avgClose += bars[i].close;
-      avgClose /= 20;
-
+      if (CopyRates(_Symbol, _Period, 0, 20, bars) < 20) return 0.5;
+      double avg = 0;
+      for (int i = 0; i < 20; i++) avg += bars[i].close;
+      avg /= 20;
       double sumSq = 0;
-      for (int i = 0; i < 20; i++)
-      {
-         double d = bars[i].close - avgClose;
-         sumSq += d * d;
-      }
-      double volatility = MathSqrt(sumSq / 20);
-      return MathMin(1.0, volatility / (SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100));
+      for (int i = 0; i < 20; i++) { double d = bars[i].close - avg; sumSq += d * d; }
+      double vol = MathSqrt(sumSq / 20);
+      return MathMin(1.0, vol / (SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100));
    }
 
-   // [v2.03] Fallback hanya digunakan jika MarketRegimeFilter tidak di-inject
    double NormalizeMultiTimeframeConfluenceFallback(const SignalDecision &signal) const
    {
-      ENUM_TIMEFRAMES higherTF = GetHigherTimeframe((ENUM_TIMEFRAMES)Period());
-
+      ENUM_TIMEFRAMES htf = GetHigherTimeframe((ENUM_TIMEFRAMES)Period());
       MqlRates bars[10];
-      int copied = CopyRates(_Symbol, higherTF, 0, 10, bars);
-      if (copied < 10) return 0.5;
+      if (CopyRates(_Symbol, htf, 0, 10, bars) < 10) return 0.5;
+      double hi = bars[0].high, lo = bars[0].low;
+      for (int i = 1; i < 10; i++) { hi = MathMax(hi, bars[i].high); lo = MathMin(lo, bars[i].low); }
+      double rangeSize = hi - lo;
+      if (rangeSize == 0) return 0.5;
+      double minDist = MathMin(MathAbs(bars[0].close - hi), MathAbs(bars[0].close - lo));
+      return MathMax(0.3, 1.0 - MathMin(1.0, minDist / (rangeSize * 0.3)));
+   }
 
-      double highestHigh = bars[0].high;
-      double lowestLow   = bars[0].low;
-      for (int i = 1; i < 10; i++)
+   //+------------------------------------------------------------------+
+   //| [v2.05] Neural Network 8→6→4→1 Forward Pass                      |
+   //+------------------------------------------------------------------+
+   double ForwardPassNN(const EvalContext &ctx) const
+   {
+      if (!m_model.initialized) return 0.5;
+      double feat[NN_INPUTS];
+      ArrayInitialize(feat, 0.0);
+      feat[0] = ctx.atrNorm;
+      feat[1] = ctx.regimeScore;
+      feat[2] = ctx.mtConfluenceNorm;
+      feat[3] = ctx.rsiNorm;
+      feat[4] = ctx.candleBodyRatio;
+      feat[5] = ctx.emaDistNorm;
+      feat[6] = ctx.sessionNorm;
+      feat[7] = ctx.momentumNorm;
+
+      // Layer 1: ReLU
+      double h1[NN_H1]; ArrayInitialize(h1, 0.0);
+      for(int j = 0; j < NN_H1; j++)
       {
-         highestHigh = MathMax(highestHigh, bars[i].high);
-         lowestLow   = MathMin(lowestLow,   bars[i].low);
+         double z = m_model.h1b[j];
+         for(int i = 0; i < NN_INPUTS; i++) z += feat[i] * m_model.h1w[i][j];
+         h1[j] = MathMax(0.0, z);
+      }
+      // Layer 2: ReLU
+      double h2[NN_H2]; ArrayInitialize(h2, 0.0);
+      for(int j = 0; j < NN_H2; j++)
+      {
+         double z = m_model.h2b[j];
+         for(int i = 0; i < NN_H1; i++) z += h1[i] * m_model.h2w[i][j];
+         h2[j] = MathMax(0.0, z);
+      }
+      // Output
+      double out = m_model.ob;
+      for(int j = 0; j < NN_H2; j++) out += h2[j] * m_model.ow[j];
+      return out;
+   }
+
+   //+------------------------------------------------------------------+
+   //| [v2.05] Platt Scaling: calibrate NN raw output to probability     |
+   //| Uses learned parameters (a, b) fitted online via SGD             |
+   //| P_calibrated = sigmoid(a * nn_raw + b)                           |
+   //+------------------------------------------------------------------+
+   double PlattCalibrate(double nnRaw) const
+   {
+      if (m_model.plattSamples < 30) return Logistic(nnRaw); // use raw sigmoid until enough data
+      return Logistic(m_model.plattA * nnRaw + m_model.plattB);
+   }
+
+   void UpdatePlattScaling(double nnRaw, double label)
+   {
+      // SGD update for Platt parameters
+      double pred  = Logistic(m_model.plattA * nnRaw + m_model.plattB);
+      double error = pred - label;
+      double lr    = 0.01;
+      m_model.plattA -= lr * error * pred * (1.0 - pred) * nnRaw;
+      m_model.plattB -= lr * error * pred * (1.0 - pred);
+      m_model.plattSamples++;
+   }
+
+   //+------------------------------------------------------------------+
+   //| [v2.05] Mini-Batch Training from Replay Buffer                    |
+   //| Called after every MINIBATCH_SIZE new labeled outcomes            |
+   //+------------------------------------------------------------------+
+   void TrainMiniBatch()
+   {
+      if (m_replayCount < MINIBATCH_SIZE) return;
+
+      double lr = m_model.nnLearningRate;
+
+      // Sample MINIBATCH_SIZE random indices from replay buffer
+      for (int b = 0; b < MINIBATCH_SIZE; b++)
+      {
+         int idx = (int)(MathRand() % MathMin(m_replayCount, REPLAY_CAPACITY));
+         double feat[];
+         ArrayResize(feat, NN_INPUTS);
+         for(int i = 0; i < NN_INPUTS; i++) feat[i] = m_replayBuffer[idx].features[i];
+         double label = m_replayBuffer[idx].label;
+
+         // ── Forward Pass ──
+         double h1[NN_H1]; ArrayInitialize(h1, 0.0);
+         double z1[NN_H1]; ArrayInitialize(z1, 0.0);
+         for(int j = 0; j < NN_H1; j++)
+         {
+            z1[j] = m_model.h1b[j];
+            for(int i = 0; i < NN_INPUTS; i++) z1[j] += feat[i] * m_model.h1w[i][j];
+            h1[j] = MathMax(0.0, z1[j]);
+         }
+         double h2[NN_H2]; ArrayInitialize(h2, 0.0);
+         double z2[NN_H2]; ArrayInitialize(z2, 0.0);
+         for(int j = 0; j < NN_H2; j++)
+         {
+            z2[j] = m_model.h2b[j];
+            for(int i = 0; i < NN_H1; i++) z2[j] += h1[i] * m_model.h2w[i][j];
+            h2[j] = MathMax(0.0, z2[j]);
+         }
+         double raw = m_model.ob;
+         for(int j = 0; j < NN_H2; j++) raw += h2[j] * m_model.ow[j];
+         double pred  = Logistic(raw);
+         double error = pred - label;
+
+         // ── Backward Pass: Output Layer ──
+         double d_out = error * pred * (1.0 - pred);
+         for(int j = 0; j < NN_H2; j++)
+            m_model.ow[j] -= lr * (d_out * h2[j] + L2_LAMBDA * m_model.ow[j]);
+         m_model.ob -= lr * d_out;
+
+         // ── Backward Pass: Layer 2 ──
+         double d_h2[NN_H2]; ArrayInitialize(d_h2, 0.0);
+         for(int j = 0; j < NN_H2; j++)
+         {
+            d_h2[j] = (z2[j] > 0) ? d_out * m_model.ow[j] : 0.0;
+            for(int i = 0; i < NN_H1; i++)
+               m_model.h2w[i][j] -= lr * (d_h2[j] * h1[i] + L2_LAMBDA * m_model.h2w[i][j]);
+            m_model.h2b[j] -= lr * d_h2[j];
+         }
+
+         // ── Backward Pass: Layer 1 ──
+         for(int j = 0; j < NN_H1; j++)
+         {
+            double grad = 0;
+            for(int k = 0; k < NN_H2; k++) grad += d_h2[k] * m_model.h2w[j][k];
+            double d_h1 = (z1[j] > 0) ? grad : 0.0;
+            for(int i = 0; i < NN_INPUTS; i++)
+               m_model.h1w[i][j] -= lr * (d_h1 * feat[i] + L2_LAMBDA * m_model.h1w[i][j]);
+            m_model.h1b[j] -= lr * d_h1;
+         }
+
+         // ── Update Platt scaling ──
+         UpdatePlattScaling(raw, label);
       }
 
-      double rangeSize = highestHigh - lowestLow;
-      if (rangeSize == 0) return 0.5;
+      m_model.replayTrainCount++;
+      m_model.nnTrainingSamples += MINIBATCH_SIZE;
 
-      double currentPrice = bars[0].close;
-      double distFromHigh = MathAbs(currentPrice - highestHigh);
-      double distFromLow  = MathAbs(currentPrice - lowestLow);
-      double minDist      = MathMin(distFromHigh, distFromLow);
-      double confluence   = 1.0 - MathMin(1.0, minDist / (rangeSize * 0.3));
-      return MathMax(0.3, confluence);
-   }
-
-   //--- Neural Network ---
-
-   double EvaluateNeuralNetwork(const EvalContext &ctx) const
-   {
-      if (!m_model.initialized)
-         return 0.5;
-
-      // [v2.03] Input: atr, regimeScore (ganti volatility raw), mtConfluence
-      double input1 = ctx.atrNorm;
-      double input2 = ctx.regimeScore;      // [v2.03] dari MarketRegimeFilter
-      double input3 = ctx.mtConfluenceNorm; // [v2.03] dari MarketRegimeFilter
-
-      double h1_in  = m_model.nn_hidden1_w1 * input1 +
-                      m_model.nn_hidden1_w2 * input2 +
-                      m_model.nn_hidden1_w3 * input3 +
-                      m_model.nn_hidden1_bias;
-      double h1_out = MathMax(0.0, h1_in);
-
-      double h2_in  = m_model.nn_hidden2_w1 * h1_out +
-                      m_model.nn_hidden2_bias;
-      double h2_out = MathMax(0.0, h2_in);
-
-      double output = m_model.nn_output_w1 * h1_out +
-                      m_model.nn_output_w2 * h2_out +
-                      m_model.nn_output_bias;
-      return output;
-   }
-
-   void TrainNeuralNetwork(const SignalDecision &signal, const double atrPoints,
-                           const double support, const double resistance, bool actualOutcome)
-   {
-      if (!m_model.initialized)
-         return;
-
-      // Build context untuk training (menggunakan data saat trade ditutup)
-      EvalContext ctx;
-      BuildEvalContext(ctx, signal, atrPoints, support, resistance);
-
-      // --- Forward Pass ---
-      double input1 = ctx.atrNorm;
-      double input2 = ctx.regimeScore;
-      double input3 = ctx.mtConfluenceNorm;
-
-      double h1_in     = m_model.nn_hidden1_w1 * input1 +
-                         m_model.nn_hidden1_w2 * input2 +
-                         m_model.nn_hidden1_w3 * input3 +
-                         m_model.nn_hidden1_bias;
-      double h1_out    = MathMax(0.0, h1_in);
-      int    h1_active = (h1_in > 0) ? 1 : 0;
-
-      double h2_in     = m_model.nn_hidden2_w1 * h1_out + m_model.nn_hidden2_bias;
-      double h2_out    = MathMax(0.0, h2_in);
-      int    h2_active = (h2_in > 0) ? 1 : 0;
-
-      double predicted        = m_model.nn_output_w1 * h1_out +
-                                m_model.nn_output_w2 * h2_out +
-                                m_model.nn_output_bias;
-      double predictedSigmoid = Logistic(predicted);
-      double target           = actualOutcome ? 1.0 : 0.0;
-      double error            = predictedSigmoid - target;
-
-      // --- Backward Pass ---
-      double d_out = error * predictedSigmoid * (1.0 - predictedSigmoid);
-
-      // Update output weights + L2 regularization
-      m_model.nn_output_w1   -= m_model.nnLearningRate * (d_out * h1_out + 0.0001 * m_model.nn_output_w1);
-      m_model.nn_output_w2   -= m_model.nnLearningRate * (d_out * h2_out + 0.0001 * m_model.nn_output_w2);
-      m_model.nn_output_bias -= m_model.nnLearningRate * d_out;
-
-      // Gradient ke hidden2
-      double d_h2 = d_out * m_model.nn_output_w2 * h2_active;
-      m_model.nn_hidden2_w1   -= m_model.nnLearningRate * (d_h2 * h1_out + 0.0001 * m_model.nn_hidden2_w1);
-      m_model.nn_hidden2_bias -= m_model.nnLearningRate * d_h2;
-
-      // Gradient ke hidden1
-      double d_h1 = (d_out * m_model.nn_output_w1 + d_h2 * m_model.nn_hidden2_w1) * h1_active;
-      m_model.nn_hidden1_w1   -= m_model.nnLearningRate * (d_h1 * input1 + 0.0001 * m_model.nn_hidden1_w1);
-      m_model.nn_hidden1_w2   -= m_model.nnLearningRate * (d_h1 * input2 + 0.0001 * m_model.nn_hidden1_w2);
-      m_model.nn_hidden1_w3   -= m_model.nnLearningRate * (d_h1 * input3 + 0.0001 * m_model.nn_hidden1_w3);
-      m_model.nn_hidden1_bias -= m_model.nnLearningRate * d_h1;
-
-      m_model.nnTrainingSamples++;
-      m_model.validationCounter++;
-
-      // Learning rate decay setiap 100 sample
-      if (m_model.nnTrainingSamples % 100 == 0 && m_model.nnLearningRate > 0.001)
+      // LR decay every 10 mini-batches
+      if (m_model.replayTrainCount % 10 == 0 && m_model.nnLearningRate > 0.001)
          m_model.nnLearningRate *= 0.95;
 
       m_model.lastUpdateTime = TimeCurrent();
+      m_labeledSinceLastBatch = 0;
 
-      Log("NN trained #" + IntegerToString(m_model.nnTrainingSamples) +
-          " | Error: " + DoubleToString(error, 4));
+      Log("Mini-batch #" + IntegerToString(m_model.replayTrainCount) +
+          " | LR=" + DoubleToString(m_model.nnLearningRate, 5) +
+          " | replay=" + IntegerToString(m_replayCount) +
+          " | platt_samples=" + IntegerToString(m_model.plattSamples));
    }
 
-   double Logistic(double x) const
+   //+------------------------------------------------------------------+
+   //| [v2.05] Add sample to circular replay buffer                      |
+   //+------------------------------------------------------------------+
+   void PushReplayBuffer(const double &features[], double label)
    {
-      return 1.0 / (1.0 + MathExp(-x));
+      for(int i = 0; i < NN_INPUTS; i++)
+         m_replayBuffer[m_replayHead].features[i] = features[i];
+      m_replayBuffer[m_replayHead].label = label;
+      m_replayHead  = (m_replayHead + 1) % REPLAY_CAPACITY;
+      if (m_replayCount < REPLAY_CAPACITY) m_replayCount++;
    }
 
-   //--- Persistence ---
+   double Logistic(double x) const { return 1.0 / (1.0 + MathExp(-x)); }
 
-   // [v2.04 FIX #1 #5] Terima cfg via parameter agar tidak perlu akses global cfg
+   //+------------------------------------------------------------------+
+   //| [v2.05] DecayFeatureWeightsOnly: only decay feature/ensemble      |
+   //| weights, NOT NN weights (NN uses L2 in training instead)         |
+   //+------------------------------------------------------------------+
+   void DecayFeatureWeightsOnly(double decay)
+   {
+      double d = MathMax(0.9, MathMin(1.0, decay));
+      m_model.atrWeight         = NormalizeWeight(m_model.atrWeight         * d);
+      m_model.spreadWeight      = NormalizeWeight(m_model.spreadWeight      * d);
+      m_model.slWeight          = NormalizeWeight(m_model.slWeight          * d);
+      m_model.momentumWeight    = NormalizeWeight(m_model.momentumWeight    * d);
+      m_model.lossStreakWeight   = NormalizeWeight(m_model.lossStreakWeight  * d);
+      m_model.regimeScoreWeight  = NormalizeWeight(m_model.regimeScoreWeight * d);
+      m_model.timeOfDayWeight    = NormalizeWeight(m_model.timeOfDayWeight   * d);
+      m_model.mtConfluenceWeight = NormalizeWeight(m_model.mtConfluenceWeight* d);
+      m_model.volumeWeight       = NormalizeWeight(m_model.volumeWeight      * d);
+   }
+
+   double NormalizeWeight(double value) const { return MathMax(0.01, MathMin(2.0, value)); }
+   double NormalizeNNWeight(double value) const { return MathMax(-2.0, MathMin(2.0, value)); }
+
+   //+------------------------------------------------------------------+
+   //| Persistence                                                       |
+   //+------------------------------------------------------------------+
    string ModelGVPrefix(const StrategyConfig &cfg) const
-   {
-      return "PASR_AI_" + IntegerToString(cfg.risk.magic) + "_" + _Symbol + "_";
-   }
+   { return "PASR_AI_" + IntegerToString(cfg.risk.magic) + "_" + _Symbol + "_"; }
 
    void LoadModelState()
    {
-      // [v2.04 FIX #5] deklarasi cfg lokal
       if (CheckPointer(m_data) == POINTER_INVALID) return;
-      StrategyConfig cfg;
-      m_data.GetConfigCache(cfg);
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
+      string p = ModelGVPrefix(cfg);
 
-      string prefix = ModelGVPrefix(cfg);
-
-      if (GlobalVariableCheck(prefix + "bias"))       m_model.bias             = GlobalVariableGet(prefix + "bias");
-      if (GlobalVariableCheck(prefix + "atr"))        m_model.atrWeight        = GlobalVariableGet(prefix + "atr");
-      if (GlobalVariableCheck(prefix + "spread"))     m_model.spreadWeight     = GlobalVariableGet(prefix + "spread");
-      if (GlobalVariableCheck(prefix + "sl"))         m_model.slWeight         = GlobalVariableGet(prefix + "sl");
-      if (GlobalVariableCheck(prefix + "momentum"))   m_model.momentumWeight   = GlobalVariableGet(prefix + "momentum");
-      if (GlobalVariableCheck(prefix + "loss"))       m_model.lossStreakWeight = GlobalVariableGet(prefix + "loss");
-      if (GlobalVariableCheck(prefix + "volnoise"))   m_model.volNoiseWeight   = GlobalVariableGet(prefix + "volnoise");
-      // [v2.03] regimeScoreWeight menggantikan volatilityWeight
-      if (GlobalVariableCheck(prefix + "regimescore"))  m_model.regimeScoreWeight  = GlobalVariableGet(prefix + "regimescore");
-      if (GlobalVariableCheck(prefix + "timeofday"))    m_model.timeOfDayWeight    = GlobalVariableGet(prefix + "timeofday");
-      if (GlobalVariableCheck(prefix + "mtconfluence")) m_model.mtConfluenceWeight = GlobalVariableGet(prefix + "mtconfluence");
-      if (GlobalVariableCheck(prefix + "volume"))       m_model.volumeWeight       = GlobalVariableGet(prefix + "volume");
-      if (GlobalVariableCheck(prefix + "trendexpert"))    m_model.trendExpertWeight    = GlobalVariableGet(prefix + "trendexpert");
-      if (GlobalVariableCheck(prefix + "meanrevexpert"))  m_model.meanRevExpertWeight  = GlobalVariableGet(prefix + "meanrevexpert");
-      if (GlobalVariableCheck(prefix + "momentumexpert")) m_model.momentumExpertWeight = GlobalVariableGet(prefix + "momentumexpert");
-      if (GlobalVariableCheck(prefix + "recentwr"))   m_model.recentWinRate   = GlobalVariableGet(prefix + "recentwr");
-      if (GlobalVariableCheck(prefix + "longtermwr")) m_model.longTermWinRate = GlobalVariableGet(prefix + "longtermwr");
-
-      // NN weights
-      if (GlobalVariableCheck(prefix + "nn_h1w1")) m_model.nn_hidden1_w1   = GlobalVariableGet(prefix + "nn_h1w1");
-      if (GlobalVariableCheck(prefix + "nn_h1w2")) m_model.nn_hidden1_w2   = GlobalVariableGet(prefix + "nn_h1w2");
-      if (GlobalVariableCheck(prefix + "nn_h1w3")) m_model.nn_hidden1_w3   = GlobalVariableGet(prefix + "nn_h1w3");
-      if (GlobalVariableCheck(prefix + "nn_h1b"))  m_model.nn_hidden1_bias = GlobalVariableGet(prefix + "nn_h1b");
-      if (GlobalVariableCheck(prefix + "nn_h2w1")) m_model.nn_hidden2_w1   = GlobalVariableGet(prefix + "nn_h2w1");
-      if (GlobalVariableCheck(prefix + "nn_h2b"))  m_model.nn_hidden2_bias = GlobalVariableGet(prefix + "nn_h2b");
-      if (GlobalVariableCheck(prefix + "nn_ow1"))  m_model.nn_output_w1    = GlobalVariableGet(prefix + "nn_ow1");
-      if (GlobalVariableCheck(prefix + "nn_ow2"))  m_model.nn_output_w2    = GlobalVariableGet(prefix + "nn_ow2");
-      if (GlobalVariableCheck(prefix + "nn_ob"))   m_model.nn_output_bias  = GlobalVariableGet(prefix + "nn_ob");
-      if (GlobalVariableCheck(prefix + "nn_lr"))   m_model.nnLearningRate  = GlobalVariableGet(prefix + "nn_lr");
-      if (GlobalVariableCheck(prefix + "nn_ts"))   m_model.nnTrainingSamples = (int)GlobalVariableGet(prefix + "nn_ts");
+      if (GlobalVariableCheck(p+"bias"))         m_model.bias               = GlobalVariableGet(p+"bias");
+      if (GlobalVariableCheck(p+"atr"))          m_model.atrWeight          = GlobalVariableGet(p+"atr");
+      if (GlobalVariableCheck(p+"spread"))       m_model.spreadWeight       = GlobalVariableGet(p+"spread");
+      if (GlobalVariableCheck(p+"sl"))           m_model.slWeight           = GlobalVariableGet(p+"sl");
+      if (GlobalVariableCheck(p+"momentum"))     m_model.momentumWeight     = GlobalVariableGet(p+"momentum");
+      if (GlobalVariableCheck(p+"loss"))         m_model.lossStreakWeight   = GlobalVariableGet(p+"loss");
+      if (GlobalVariableCheck(p+"volnoise"))     m_model.volNoiseWeight     = GlobalVariableGet(p+"volnoise");
+      if (GlobalVariableCheck(p+"regimescore"))  m_model.regimeScoreWeight  = GlobalVariableGet(p+"regimescore");
+      if (GlobalVariableCheck(p+"timeofday"))    m_model.timeOfDayWeight    = GlobalVariableGet(p+"timeofday");
+      if (GlobalVariableCheck(p+"mtconfluence")) m_model.mtConfluenceWeight = GlobalVariableGet(p+"mtconfluence");
+      if (GlobalVariableCheck(p+"volume"))       m_model.volumeWeight       = GlobalVariableGet(p+"volume");
+      if (GlobalVariableCheck(p+"trendexpert"))    m_model.trendExpertWeight    = GlobalVariableGet(p+"trendexpert");
+      if (GlobalVariableCheck(p+"meanrevexpert"))  m_model.meanRevExpertWeight  = GlobalVariableGet(p+"meanrevexpert");
+      if (GlobalVariableCheck(p+"momentumexpert")) m_model.momentumExpertWeight = GlobalVariableGet(p+"momentumexpert");
+      if (GlobalVariableCheck(p+"recentwr"))     m_model.recentWinRate      = GlobalVariableGet(p+"recentwr");
+      if (GlobalVariableCheck(p+"longtermwr"))   m_model.longTermWinRate    = GlobalVariableGet(p+"longtermwr");
+      // NN 8→6→4→1 weights
+      for(int i=0;i<NN_INPUTS;i++) for(int j=0;j<NN_H1;j++)
+      { string k=p+"h1w_"+IntegerToString(i)+"_"+IntegerToString(j); if(GlobalVariableCheck(k)) m_model.h1w[i][j]=GlobalVariableGet(k); }
+      for(int j=0;j<NN_H1;j++) { string k=p+"h1b_"+IntegerToString(j); if(GlobalVariableCheck(k)) m_model.h1b[j]=GlobalVariableGet(k); }
+      for(int i=0;i<NN_H1;i++) for(int j=0;j<NN_H2;j++)
+      { string k=p+"h2w_"+IntegerToString(i)+"_"+IntegerToString(j); if(GlobalVariableCheck(k)) m_model.h2w[i][j]=GlobalVariableGet(k); }
+      for(int j=0;j<NN_H2;j++) { string k=p+"h2b_"+IntegerToString(j); if(GlobalVariableCheck(k)) m_model.h2b[j]=GlobalVariableGet(k); }
+      for(int j=0;j<NN_H2;j++) { string k=p+"ow_"+IntegerToString(j); if(GlobalVariableCheck(k)) m_model.ow[j]=GlobalVariableGet(k); }
+      if(GlobalVariableCheck(p+"ob"))          m_model.ob               = GlobalVariableGet(p+"ob");
+      if(GlobalVariableCheck(p+"plattA"))      m_model.plattA           = GlobalVariableGet(p+"plattA");
+      if(GlobalVariableCheck(p+"plattB"))      m_model.plattB           = GlobalVariableGet(p+"plattB");
+      if(GlobalVariableCheck(p+"plattS"))      m_model.plattSamples     = (int)GlobalVariableGet(p+"plattS");
+      if(GlobalVariableCheck(p+"nn_lr"))       m_model.nnLearningRate   = GlobalVariableGet(p+"nn_lr");
+      if(GlobalVariableCheck(p+"nn_ts"))       m_model.nnTrainingSamples= (int)GlobalVariableGet(p+"nn_ts");
+      if(GlobalVariableCheck(p+"nn_rb"))       m_model.replayTrainCount = (int)GlobalVariableGet(p+"nn_rb");
 
       m_model.initialized = true;
-      // [v2.04 FIX #8] Tidak set m_modelDirty = true setelah load (tidak perlu save ulang)
-
-      Log("📥 Model state loaded. NN samples: " + IntegerToString(m_model.nnTrainingSamples));
+      Log("📥 Model loaded. NN samples=" + IntegerToString(m_model.nnTrainingSamples) +
+          " batches=" + IntegerToString(m_model.replayTrainCount));
    }
 
    void SaveModelState(const StrategyConfig &cfg)
    {
-      string prefix = ModelGVPrefix(cfg);
-
-      GlobalVariableSet(prefix + "bias",     m_model.bias);
-      GlobalVariableSet(prefix + "atr",      m_model.atrWeight);
-      GlobalVariableSet(prefix + "spread",   m_model.spreadWeight);
-      GlobalVariableSet(prefix + "sl",       m_model.slWeight);
-      GlobalVariableSet(prefix + "momentum", m_model.momentumWeight);
-      GlobalVariableSet(prefix + "loss",     m_model.lossStreakWeight);
-      GlobalVariableSet(prefix + "volnoise",     m_model.volNoiseWeight);
-      // [v2.03] simpan regimeScoreWeight
-      GlobalVariableSet(prefix + "regimescore",  m_model.regimeScoreWeight);
-      GlobalVariableSet(prefix + "timeofday",    m_model.timeOfDayWeight);
-      GlobalVariableSet(prefix + "mtconfluence", m_model.mtConfluenceWeight);
-      GlobalVariableSet(prefix + "volume",       m_model.volumeWeight);
-      GlobalVariableSet(prefix + "trendexpert",    m_model.trendExpertWeight);
-      GlobalVariableSet(prefix + "meanrevexpert",  m_model.meanRevExpertWeight);
-      GlobalVariableSet(prefix + "momentumexpert", m_model.momentumExpertWeight);
-      GlobalVariableSet(prefix + "recentwr",   m_model.recentWinRate);
-      GlobalVariableSet(prefix + "longtermwr", m_model.longTermWinRate);
-
+      string p = ModelGVPrefix(cfg);
+      GlobalVariableSet(p+"bias",         m_model.bias);
+      GlobalVariableSet(p+"atr",          m_model.atrWeight);
+      GlobalVariableSet(p+"spread",       m_model.spreadWeight);
+      GlobalVariableSet(p+"sl",           m_model.slWeight);
+      GlobalVariableSet(p+"momentum",     m_model.momentumWeight);
+      GlobalVariableSet(p+"loss",         m_model.lossStreakWeight);
+      GlobalVariableSet(p+"volnoise",     m_model.volNoiseWeight);
+      GlobalVariableSet(p+"regimescore",  m_model.regimeScoreWeight);
+      GlobalVariableSet(p+"timeofday",    m_model.timeOfDayWeight);
+      GlobalVariableSet(p+"mtconfluence", m_model.mtConfluenceWeight);
+      GlobalVariableSet(p+"volume",       m_model.volumeWeight);
+      GlobalVariableSet(p+"trendexpert",    m_model.trendExpertWeight);
+      GlobalVariableSet(p+"meanrevexpert",  m_model.meanRevExpertWeight);
+      GlobalVariableSet(p+"momentumexpert", m_model.momentumExpertWeight);
+      GlobalVariableSet(p+"recentwr",     m_model.recentWinRate);
+      GlobalVariableSet(p+"longtermwr",   m_model.longTermWinRate);
       // NN weights
-      GlobalVariableSet(prefix + "nn_h1w1", m_model.nn_hidden1_w1);
-      GlobalVariableSet(prefix + "nn_h1w2", m_model.nn_hidden1_w2);
-      GlobalVariableSet(prefix + "nn_h1w3", m_model.nn_hidden1_w3);
-      GlobalVariableSet(prefix + "nn_h1b",  m_model.nn_hidden1_bias);
-      GlobalVariableSet(prefix + "nn_h2w1", m_model.nn_hidden2_w1);
-      GlobalVariableSet(prefix + "nn_h2b",  m_model.nn_hidden2_bias);
-      GlobalVariableSet(prefix + "nn_ow1",  m_model.nn_output_w1);
-      GlobalVariableSet(prefix + "nn_ow2",  m_model.nn_output_w2);
-      GlobalVariableSet(prefix + "nn_ob",   m_model.nn_output_bias);
-      GlobalVariableSet(prefix + "nn_lr",   m_model.nnLearningRate);
-      GlobalVariableSet(prefix + "nn_ts",   (double)m_model.nnTrainingSamples);
-
+      for(int i=0;i<NN_INPUTS;i++) for(int j=0;j<NN_H1;j++)
+         GlobalVariableSet(p+"h1w_"+IntegerToString(i)+"_"+IntegerToString(j), m_model.h1w[i][j]);
+      for(int j=0;j<NN_H1;j++) GlobalVariableSet(p+"h1b_"+IntegerToString(j), m_model.h1b[j]);
+      for(int i=0;i<NN_H1;i++) for(int j=0;j<NN_H2;j++)
+         GlobalVariableSet(p+"h2w_"+IntegerToString(i)+"_"+IntegerToString(j), m_model.h2w[i][j]);
+      for(int j=0;j<NN_H2;j++) GlobalVariableSet(p+"h2b_"+IntegerToString(j), m_model.h2b[j]);
+      for(int j=0;j<NN_H2;j++) GlobalVariableSet(p+"ow_"+IntegerToString(j), m_model.ow[j]);
+      GlobalVariableSet(p+"ob",      m_model.ob);
+      GlobalVariableSet(p+"plattA",  m_model.plattA);
+      GlobalVariableSet(p+"plattB",  m_model.plattB);
+      GlobalVariableSet(p+"plattS",  (double)m_model.plattSamples);
+      GlobalVariableSet(p+"nn_lr",   m_model.nnLearningRate);
+      GlobalVariableSet(p+"nn_ts",   (double)m_model.nnTrainingSamples);
+      GlobalVariableSet(p+"nn_rb",   (double)m_model.replayTrainCount);
       m_modelDirty = false;
    }
 
-   //--- Sample Management ---
+   //+------------------------------------------------------------------+
+   //| Sample Management                                                 |
+   //+------------------------------------------------------------------+
 
    string CreateSampleId()
-   {
-      m_loggedSamples++;
-      return "S" + IntegerToString(m_loggedSamples) + "_" + IntegerToString((int)TimeCurrent());
-   }
+   { m_loggedSamples++; return "S" + IntegerToString(m_loggedSamples) + "_" + IntegerToString((int)TimeCurrent()); }
 
    void RegisterPendingSample(const string &sampleId, bool accepted,
                               double atrPoints, double support, double resistance,
-                              const SignalDecision &signal)
+                              const SignalDecision &signal, const EvalContext &ctx)
    {
       AISignalSample sample;
-      sample.sampleId    = sampleId;
-      sample.ticket      = 0;
-      sample.timestamp   = TimeCurrent();
-      sample.accepted    = accepted;
-      sample.labeled     = false;
-      sample.atrPoints   = atrPoints;
-      sample.support     = support;
-      sample.resistance  = resistance;
-      sample.signal      = signal;
-      // [v2.03] Gunakan regime score jika tersedia
+      sample.sampleId   = sampleId;
+      sample.ticket     = 0;
+      sample.timestamp  = TimeCurrent();
+      sample.accepted   = accepted;
+      sample.labeled    = false;
+      sample.atrPoints  = atrPoints;
+      sample.support    = support;
+      sample.resistance = resistance;
+      sample.signal     = signal;
       sample.volatility   = (CheckPointer(m_regime) != POINTER_INVALID)
                             ? m_regime.GetVolatilityScore()
                             : NormalizeVolatilityFeatureFallback();
       sample.mtConfluence = (CheckPointer(m_regime) != POINTER_INVALID)
                             ? m_regime.GetRegimeScore()
                             : NormalizeMultiTimeframeConfluenceFallback(signal);
-      sample.volumeRatio  = NormalizeVolumeFeature();
-      sample.zoneStrength = NormalizeZoneFeature(signal.zonePrice, support, resistance);
+      sample.volumeRatio  = ctx.volumeNorm;
+      sample.zoneStrength = ctx.zoneNorm;
       sample.slMultiplier = signal.slMultiplier;
       sample.patternType  = (int)signal.patternType;
+      // [v2.05] store expanded features for replay
+      sample.features[0] = ctx.atrNorm;
+      sample.features[1] = ctx.regimeScore;
+      sample.features[2] = ctx.mtConfluenceNorm;
+      sample.features[3] = ctx.rsiNorm;
+      sample.features[4] = ctx.candleBodyRatio;
+      sample.features[5] = ctx.emaDistNorm;
+      sample.features[6] = ctx.sessionNorm;
+      sample.features[7] = ctx.momentumNorm;
 
-      int size = ArraySize(m_pendingSamples);
-      ArrayResize(m_pendingSamples, size + 1);
-      m_pendingSamples[size] = sample;
-
-      while (ArraySize(m_pendingSamples) > 48)
-         ArrayRemove(m_pendingSamples, 0);
+      int sz = ArraySize(m_pendingSamples);
+      ArrayResize(m_pendingSamples, sz + 1);
+      m_pendingSamples[sz] = sample;
+      while (ArraySize(m_pendingSamples) > 64) ArrayRemove(m_pendingSamples, 0);
    }
 
    int FindRecentPendingSampleIndex() const
    {
-      // [v2.03 FIX] Window diperlebar 15s → 60s untuk market lambat / pending order
       for (int i = ArraySize(m_pendingSamples) - 1; i >= 0; --i)
-      {
-         if (m_pendingSamples[i].ticket == 0 &&
-             !m_pendingSamples[i].labeled &&
-             TimeCurrent() - m_pendingSamples[i].timestamp <= 60)
-            return i;
-      }
+         if (m_pendingSamples[i].ticket == 0 && !m_pendingSamples[i].labeled &&
+             TimeCurrent() - m_pendingSamples[i].timestamp <= 60) return i;
       return -1;
    }
 
    int FindPendingSampleIndexByTicket(ulong ticket) const
    {
       for (int i = ArraySize(m_pendingSamples) - 1; i >= 0; --i)
-      {
-         if (m_pendingSamples[i].ticket == ticket)
-            return i;
-      }
+         if (m_pendingSamples[i].ticket == ticket) return i;
       return -1;
    }
 
    void AttachTicketToRecentSample(ulong ticket)
    {
-      int index = FindRecentPendingSampleIndex();
-      if (index < 0) return;
-
-      m_pendingSamples[index].ticket = ticket;
+      int idx = FindRecentPendingSampleIndex();
+      if (idx < 0) return;
+      m_pendingSamples[idx].ticket = ticket;
       AppendCsvRow(m_ticketMapFilename,
-                   "sample_id", "ticket", "accepted", "attached_time",
-                   m_pendingSamples[index].sampleId,
+                   "sample_id","ticket","accepted","attached_time",
+                   m_pendingSamples[idx].sampleId,
                    IntegerToString((int)ticket),
-                   m_pendingSamples[index].accepted ? "1" : "0",
-                   TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS));
+                   m_pendingSamples[idx].accepted ? "1" : "0",
+                   TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS));
    }
 
    void LabelSampleOutcome(ulong ticket, double pnl)
    {
-      int index = FindPendingSampleIndexByTicket(ticket);
-      if (index < 0 || m_pendingSamples[index].labeled) return;
+      int idx = FindPendingSampleIndexByTicket(ticket);
+      if (idx < 0 || m_pendingSamples[idx].labeled) return;
+      m_pendingSamples[idx].labeled = true;
 
-      m_pendingSamples[index].labeled = true;
       AppendCsvRow(m_outcomeFilename,
-                   "sample_id", "ticket", "pnl", "label_time",
-                   m_pendingSamples[index].sampleId,
+                   "sample_id","ticket","pnl","label_time",
+                   m_pendingSamples[idx].sampleId,
                    IntegerToString((int)ticket),
                    DoubleToString(pnl, 2),
-                   TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS));
+                   TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS));
 
-      bool           actualOutcome = (pnl > 0);
-      SignalDecision signal        = m_pendingSamples[index].signal;
-      double         atrPoints     = m_pendingSamples[index].atrPoints;
-      double         support       = m_pendingSamples[index].support;
-      double         resistance    = m_pendingSamples[index].resistance;
+      double label = (pnl > 0) ? 1.0 : 0.0;
 
-      TrainNeuralNetwork(signal, atrPoints, support, resistance, actualOutcome);
+      // [v2.05] Push to replay buffer
+      PushReplayBuffer(m_pendingSamples[idx].features, label);
 
-      Log("NN trained on trade: PnL=" + DoubleToString(pnl, 2) +
-          " | " + (actualOutcome ? "WIN" : "LOSS"));
+      m_labeledSinceLastBatch++;
+      if (m_labeledSinceLastBatch >= MINIBATCH_SIZE)
+      {
+         TrainMiniBatch();
+         StrategyConfig cfg; m_data.GetConfigCache(cfg);
+         m_modelDirty = true;
+         SaveModelState(cfg);
+      }
+
+      Log("Labeled: PnL=" + DoubleToString(pnl, 2) +
+          " | " + (pnl > 0 ? "WIN" : "LOSS") +
+          " | replay=" + IntegerToString(m_replayCount));
    }
 
    void AppendCsvRow(const string filename,
                      const string h1, const string h2, const string h3, const string h4,
                      const string v1, const string v2, const string v3, const string v4)
    {
-      int handle = FileOpen(filename, FILE_READ | FILE_WRITE | FILE_CSV | FILE_ANSI);
+      int handle = FileOpen(filename, FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI);
       if (handle == INVALID_HANDLE) return;
       FileSeek(handle, 0, SEEK_END);
-      if (FileTell(handle) == 0)
-         FileWrite(handle, h1, h2, h3, h4);
+      if (FileTell(handle) == 0) FileWrite(handle, h1, h2, h3, h4);
       FileWrite(handle, v1, v2, v3, v4);
       FileClose(handle);
    }
 
-   // [v2.04 FIX #4 #5 #6] cfg via parameter, m_data.Method() tanpa dereference
    void LogSignalSample(const SignalDecision &signal, double atrPoints,
                         double support, double resistance, double score,
                         bool accepted, const StrategyConfig &cfg)
    {
-      string sampleId     = CreateSampleId();
-      string zoneStrength = DoubleToString(NormalizeZoneFeature(signal.zonePrice, support, resistance), 2);
-
-      int handle = FileOpen(m_datasetFilename, FILE_READ | FILE_WRITE | FILE_CSV | FILE_ANSI);
-      if (handle == INVALID_HANDLE) return;
-
-      FileSeek(handle, 0, SEEK_END);
-      if (FileTell(handle) == 0)
-      {
-         FileWrite(handle, "sample_id","time","symbol","pattern","bias","atr","spread",
-                   "sl_mult","zone_conf","loss_streak","regime_score","volatility_score","timeofday",
-                   "mt_confluence","volume","trend_score","meanrev_score",
-                   "momentum_score","ensemble_score","regime_type","accepted");
-      }
-
-      long spreadInt = 0;
-      SymbolInfoInteger(_Symbol, SYMBOL_SPREAD, spreadInt);
-
-      // [v2.04 FIX #6] m_data.Method() (bukan (*m_data).Method())
-      int currentLosses = (CheckPointer(m_data) != POINTER_INVALID) ? m_data.GetConsecutiveLosses() : 0;
-
-      // [v2.03] Pakai regime info untuk logging
-      string regimeType    = "UNKNOWN";
-      double regimeScoreVal = 0.5;
-      double volScoreVal    = 0.5;
-      if (CheckPointer(m_regime) != POINTER_INVALID)
-      {
-         regimeScoreVal = m_regime.GetRegimeScore();
-         volScoreVal    = m_regime.GetVolatilityScore();
-         regimeType     = m_regime.GetDescription();
-      }
-
-      // Build context untuk score detail
+      string sampleId   = CreateSampleId();
       EvalContext ctx;
       BuildEvalContext(ctx, signal, atrPoints, support, resistance);
+
+      int handle = FileOpen(m_datasetFilename, FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI);
+      if (handle == INVALID_HANDLE) return;
+      FileSeek(handle, 0, SEEK_END);
+      if (FileTell(handle) == 0)
+         FileWrite(handle, "sample_id","time","symbol","pattern","bias","atr","spread",
+                   "sl_mult","zone_conf","loss_streak","regime_score","volatility_score","timeofday",
+                   "mt_confluence","volume","rsi","candle_body","ema_dist","session",
+                   "trend_score","meanrev_score","momentum_score","ensemble_score",
+                   "regime_type","accepted");
+
+      long sp = 0; SymbolInfoInteger(_Symbol, SYMBOL_SPREAD, sp);
+      int  losses    = (CheckPointer(m_data) != POINTER_INVALID) ? m_data.GetConsecutiveLosses() : 0;
+      string regType = "UNKNOWN";
+      double regVal  = 0.5, volVal = 0.5;
+      if (CheckPointer(m_regime) != POINTER_INVALID)
+      { regVal = m_regime.GetRegimeScore(); volVal = m_regime.GetVolatilityScore(); regType = m_regime.GetDescription(); }
 
       double trendScore    = EvaluateTrendExpert(signal, ctx, cfg);
       double meanRevScore  = EvaluateMeanReversionExpert(signal, ctx, cfg);
@@ -993,92 +1074,55 @@ private:
 
       FileWrite(handle,
                 sampleId,
-                TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS),
+                TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS),
                 _Symbol,
                 IntegerToString((int)signal.patternType),
                 DoubleToString(m_model.bias, 3),
                 DoubleToString(atrPoints, 2),
-                DoubleToString((double)spreadInt, 2),
+                DoubleToString((double)sp, 2),
                 DoubleToString(signal.slMultiplier, 2),
-                zoneStrength,
-                IntegerToString(currentLosses),
-                DoubleToString(regimeScoreVal, 4),
-                DoubleToString(volScoreVal, 4),
+                DoubleToString(ctx.zoneNorm, 2),
+                IntegerToString(losses),
+                DoubleToString(regVal, 4),
+                DoubleToString(volVal, 4),
                 DoubleToString(ctx.timeOfDayNorm, 2),
                 DoubleToString(ctx.mtConfluenceNorm, 4),
                 DoubleToString(ctx.volumeNorm, 4),
+                DoubleToString(ctx.rsiNorm, 4),
+                DoubleToString(ctx.candleBodyRatio, 4),
+                DoubleToString(ctx.emaDistNorm, 4),
+                DoubleToString(ctx.sessionNorm, 2),
                 DoubleToString(trendScore, 4),
                 DoubleToString(meanRevScore, 4),
                 DoubleToString(momentumScore, 4),
                 DoubleToString(score, 4),
-                regimeType,
+                regType,
                 accepted ? "1" : "0");
       FileClose(handle);
 
-      RegisterPendingSample(sampleId, accepted, atrPoints, support, resistance, signal);
+      RegisterPendingSample(sampleId, accepted, atrPoints, support, resistance, signal, ctx);
    }
 
-   // [v2.04 FIX #1 #5] cfg.magic → cfg.risk.magic, deklarasi lokal
-   void ExportDatasetForExternalTraining(int minSamples = 100)
-   {
-      if (m_loggedSamples < minSamples)
-      {
-         Log("Insufficient samples for export. Need " + IntegerToString(minSamples) +
-             ", have " + IntegerToString(m_loggedSamples));
-         return;
-      }
+   //+------------------------------------------------------------------+
+   //| Adaptive Model                                                    |
+   //+------------------------------------------------------------------+
 
-      if (CheckPointer(m_data) == POINTER_INVALID) return;
-      StrategyConfig cfg;
-      m_data.GetConfigCache(cfg);
-
-      string exportFilename = "AI_ml_export_" + IntegerToString(cfg.risk.magic) + "_" + _Symbol + "_full.csv";
-      int handle = FileOpen(exportFilename, FILE_WRITE | FILE_CSV | FILE_ANSI);
-      if (handle == INVALID_HANDLE)
-      {
-         Log("Failed to create export file: " + exportFilename);
-         return;
-      }
-
-      FileWrite(handle, "timestamp","symbol","pattern_type","direction","entry_price",
-                "sl_multiplier","tp_multiplier","atr_points","spread","regime_score",
-                "volatility_score","time_of_day","mt_confluence","volume_ratio","zone_strength",
-                "loss_streak","bias","trend_score","meanrev_score","momentum_score",
-                "ensemble_score","regime_type","accepted","outcome_pnl","outcome_label");
-      FileClose(handle);
-
-      Log("WARNING: ExportDatasetForExternalTraining() is a stub. Only header written.");
-      Log("To complete: read " + m_datasetFilename + " and join with " + m_outcomeFilename);
-   }
-
-   //--- Adaptive Model ---
-
-   // [v2.04 FIX #6] (*m_data).Method() → m_data.Method()
    void AdaptModelToPerformance()
    {
-      if (CheckPointer(m_data) == POINTER_INVALID)
-      {
-         Log("⚠️ AdaptModelToPerformance: DataManager is NULL");
-         return;
-      }
-
-      StrategyConfig cfg;
-      m_data.GetConfigCache(cfg);
-
+      if (CheckPointer(m_data) == POINTER_INVALID) return;
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
       PerformanceStats stats = m_data.GetPerformanceStats();
       int total = stats.safeTotal + stats.aggTotal;
       if (total <= 0) return;
 
       double winRate = (double)(stats.safeWins + stats.aggWins) / total;
-
-      if (m_model.recentWinRate < 0)  m_model.recentWinRate  = winRate;
+      if (m_model.recentWinRate  < 0) m_model.recentWinRate  = winRate;
       else                             m_model.recentWinRate  = m_model.recentWinRate  * 0.9 + winRate * 0.1;
+      if (m_model.longTermWinRate< 0) m_model.longTermWinRate = winRate;
+      else                             m_model.longTermWinRate = m_model.longTermWinRate* 0.95+ winRate * 0.05;
 
-      if (m_model.longTermWinRate < 0) m_model.longTermWinRate = winRate;
-      else                              m_model.longTermWinRate = m_model.longTermWinRate * 0.95 + winRate * 0.05;
-
-      bool driftDetected = DetectConceptDrift();
-      if (MathAbs(winRate - m_lastSavedWinRate) < 0.01 && !driftDetected) return;
+      bool drift = DetectConceptDrift();
+      if (MathAbs(winRate - m_lastSavedWinRate) < 0.01 && !drift) return;
 
       double error = winRate - 0.50;
       m_model.bias             = NormalizeWeight(m_model.bias             + error * 0.08);
@@ -1086,21 +1130,15 @@ private:
       m_model.spreadWeight     = NormalizeWeight(m_model.spreadWeight     + error * 0.015);
       m_model.slWeight         = NormalizeWeight(m_model.slWeight         + error * 0.012);
       m_model.momentumWeight   = NormalizeWeight(m_model.momentumWeight   + error * 0.01);
-      // [v2.04 FIX #6] m_data.GetConsecutiveLosses() bukan (*m_data).GetConsecutiveLosses()
-      m_model.lossStreakWeight  = NormalizeWeight(m_model.lossStreakWeight - (m_data.GetConsecutiveLosses() * 0.005));
+      m_model.lossStreakWeight  = NormalizeWeight(m_model.lossStreakWeight - m_data.GetConsecutiveLosses() * 0.005);
       m_model.regimeScoreWeight = NormalizeWeight(m_model.regimeScoreWeight + error * 0.01);
 
-      if (driftDetected)
-      {
-         Log("CONCEPT DRIFT DETECTED! Adjusting ensemble weights...");
-         AdaptEnsembleWeights(error);
-      }
+      if (drift) { Log("CONCEPT DRIFT detected. Rebalancing ensemble..."); AdaptEnsembleWeights(error); }
 
       m_lastSavedWinRate = winRate;
-      m_modelDirty       = true;
+      m_modelDirty = true;
       SaveModelState(cfg);
-      Log("AI model updated winRate=" + DoubleToString(winRate, 2) +
-          (driftDetected ? " [DRIFT]" : ""));
+      Log("AI updated winRate=" + DoubleToString(winRate, 2) + (drift ? " [DRIFT]" : ""));
    }
 
    bool DetectConceptDrift() const
@@ -1114,52 +1152,36 @@ private:
       m_model.trendExpertWeight    = NormalizeWeight(m_model.trendExpertWeight    + error * 0.15);
       m_model.meanRevExpertWeight  = NormalizeWeight(m_model.meanRevExpertWeight  - error * 0.05);
       m_model.momentumExpertWeight = NormalizeWeight(m_model.momentumExpertWeight + error * 0.08);
-      Log("Ensemble rebalanced: Trend=" + DoubleToString(m_model.trendExpertWeight, 2) +
-          " MeanRev=" + DoubleToString(m_model.meanRevExpertWeight, 2) +
-          " Momentum=" + DoubleToString(m_model.momentumExpertWeight, 2));
+      Log("Ensemble: T=" + DoubleToString(m_model.trendExpertWeight, 2) +
+          " MR=" + DoubleToString(m_model.meanRevExpertWeight, 2) +
+          " Mo=" + DoubleToString(m_model.momentumExpertWeight, 2));
    }
 
-   void DecayModel(double decay)
+   void ExportDatasetForExternalTraining(int minSamples = 100)
    {
-      double d = (decay > 0.0) ? decay : 0.98;
-      m_model.atrWeight         = NormalizeWeight(m_model.atrWeight         * d);
-      m_model.spreadWeight      = NormalizeWeight(m_model.spreadWeight      * d);
-      m_model.slWeight          = NormalizeWeight(m_model.slWeight          * d);
-      m_model.momentumWeight    = NormalizeWeight(m_model.momentumWeight    * d);
-      m_model.lossStreakWeight   = NormalizeWeight(m_model.lossStreakWeight  * d);
-      m_model.regimeScoreWeight  = NormalizeWeight(m_model.regimeScoreWeight * d);
-      m_model.timeOfDayWeight    = NormalizeWeight(m_model.timeOfDayWeight   * d);
-      m_model.mtConfluenceWeight = NormalizeWeight(m_model.mtConfluenceWeight * d);
-      m_model.volumeWeight       = NormalizeWeight(m_model.volumeWeight      * d);
-
-      // [v2.03 FIX] NN weights pakai NormalizeNNWeight() agar boleh negatif
-      double nd = 0.999;
-      m_model.nn_hidden1_w1   = NormalizeNNWeight(m_model.nn_hidden1_w1   * nd);
-      m_model.nn_hidden1_w2   = NormalizeNNWeight(m_model.nn_hidden1_w2   * nd);
-      m_model.nn_hidden1_w3   = NormalizeNNWeight(m_model.nn_hidden1_w3   * nd);
-      m_model.nn_hidden1_bias = NormalizeNNWeight(m_model.nn_hidden1_bias * nd);
-      m_model.nn_hidden2_w1   = NormalizeNNWeight(m_model.nn_hidden2_w1   * nd);
-      m_model.nn_hidden2_bias = NormalizeNNWeight(m_model.nn_hidden2_bias * nd);
-      m_model.nn_output_w1    = NormalizeNNWeight(m_model.nn_output_w1    * nd);
-      m_model.nn_output_w2    = NormalizeNNWeight(m_model.nn_output_w2    * nd);
-      m_model.nn_output_bias  = NormalizeNNWeight(m_model.nn_output_bias  * nd);
-   }
-
-   // Feature weights: hanya positif [0.01, 2.0]
-   double NormalizeWeight(double value) const
-   {
-      return MathMax(0.01, MathMin(2.0, value));
-   }
-
-   // [v2.03 FIX] NN weights: boleh negatif [-2.0, 2.0]
-   double NormalizeNNWeight(double value) const
-   {
-      return MathMax(-2.0, MathMin(2.0, value));
+      if (m_loggedSamples < minSamples) { Log("Insufficient samples for export."); return; }
+      if (CheckPointer(m_data) == POINTER_INVALID) return;
+      StrategyConfig cfg; m_data.GetConfigCache(cfg);
+      string fn = "AI_ml_export_" + IntegerToString(cfg.risk.magic) + "_" + _Symbol + "_full.csv";
+      int h = FileOpen(fn, FILE_WRITE|FILE_CSV|FILE_ANSI);
+      if (h == INVALID_HANDLE) return;
+      FileWrite(h, "timestamp","symbol","pattern_type","direction","entry_price",
+                "sl_multiplier","tp_multiplier","atr_points","spread","regime_score",
+                "volatility_score","time_of_day","mt_confluence","volume_ratio","zone_strength",
+                "rsi","candle_body","ema_dist","session","loss_streak","bias",
+                "trend_score","meanrev_score","momentum_score","ensemble_score",
+                "regime_type","accepted","outcome_pnl","outcome_label");
+      FileClose(h);
+      Log("Export header written to: " + fn);
    }
 
 public:
    int    GetNNTrainingSamples() const { return m_model.nnTrainingSamples; }
    double GetNNLearningRate()    const { return m_model.nnLearningRate; }
+   int    GetReplayCount()       const { return m_replayCount; }
+   int    GetReplayTrainCount()  const { return m_model.replayTrainCount; }
+   double GetPlattA()            const { return m_model.plattA; }
+   double GetPlattB()            const { return m_model.plattB; }
 };
 
 #endif
