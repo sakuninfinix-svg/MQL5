@@ -572,7 +572,8 @@ private:
    double NormalizeVolatilityFeatureFallback() const
    {
       MqlRates bars[20];
-      if(CopyRates(_Symbol, _Period, 0, 20, bars) < 20) return 0.5;
+      // FIX: Use shift=1 to avoid current forming bar - use last 20 CLOSED bars
+      if(CopyRates(_Symbol, _Period, 1, 20, bars) < 20) return 0.5;
       double avg = 0;
       for(int i = 0; i < 20; i++) avg += bars[i].close;
       avg /= 20;
