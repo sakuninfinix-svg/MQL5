@@ -3,18 +3,6 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Order Execution & Trade Management Module             |
 //+------------------------------------------------------------------+
-//| V2.02 FIXES:                                                     |
-//| - EX-PERF-1 [HIGH]: ScavengePendingGVs O(n²) eliminated.       |
-//|   Replaced GlobalVariablesDeleteAll inside scan loop with a     |
-//|   two-pass deferred-delete approach.                            |
-//| - EX-PERF-2 [MEDIUM]: GlobalVariablesTotal() now called once.   |
-//| - EX-PERF-3 [MEDIUM]: Scavenge runs at most once per new bar.   |
-//| - EX-PERF-4 [LOW]: 1 Hz dashboard render throttle added.        |
-//|                                                                  |
-//| V2.01 FIXES (previous):                                         |
-//| - EX-BUG-FIX-1 [HIGH]: GV keys include ACCOUNT_LOGIN prefix.   |
-//| - EX-BUG-FIX-2 [HIGH]: Safe per-key deletion loop.             |
-//+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
