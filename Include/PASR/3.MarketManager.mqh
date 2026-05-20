@@ -14,6 +14,10 @@
 #define __MARKET_MANAGER_MQH__
 
 #include "IManager.mqh"
+// Forward declarations to reduce coupling
+class DataManager;
+class MarketRegimeFilter;
+
 #include "10.DataManager.mqh"
 #include "12.MarketRegime.mqh"
 
@@ -48,6 +52,64 @@ struct SpreadTrend
    SpreadTrend() : head(0), count(0), sma(0.0), slope(0.0), lastUpdate(0)
    {
       ArrayInitialize(spreads, 0.0);
+   }
+   
+   void AddSample(double spread)
+   {
+      // Shift buffer efficiently
+      if(ArraySize(spreads) >= maxSamples)
+      {
+         ArrayCopy(spreads, spreads, 0, 1, WHOLE_ARRAY - 1);
+         spreads[maxSamples - 1] = spread;
+      }
+      else
+      {
+         int size = ArraySize(spreads);
+         ArrayResize(spreads, size + 1);
+         spreads[size] = spread;
+      }
+      lastUpdate = TimeCurrent();
+   }
+   
+   void CalculateSMA()
+   {
+      if(ArraySize(spreads) == 0)
+      {
+         sma = 0.0;
+         return;
+      }
+      
+      double sum = 0.0;
+      for(int i = 0; i < ArraySize(spreads); i++)
+         sum += spreads[i];
+      sma = sum / ArraySize(spreads);
+   }
+   
+   void CalculateSlope()
+   {
+      int n = MathMin(10, ArraySize(spreads));
+      if(n < 5)
+      {
+         slope = 0.0;
+         return;
+      }
+      
+      double xSum = 0.0, ySum = 0.0, xySum = 0.0, xxSum = 0.0;
+      for(int i = 0; i < n; i++)
+      {
+         double x = (double)i;
+         double y = spreads[i];
+         xSum += x;
+         ySum += y;
+         xySum += x * y;
+         xxSum += x * x;
+      }
+      
+      double denominator = n * xxSum - xSum * xSum;
+      if(denominator != 0)
+         slope = (n * xySum - xSum * ySum) / denominator;
+      else
+         slope = 0.0;
    }
 };
 
@@ -127,7 +189,15 @@ public:
                      m_newsImpactExpiry(0),
                      m_spreadWarningActive(false),
                      m_regimeFilter(NULL),
-                     m_lastRegimeCheck(0)
+                     m_lastRegimeCheck(0),
+                     m_consecutiveLosses(0),
+                     m_lastEntryBarTime(0),
+                     m_lastLossBarTime(0),
+                     m_nextNewsTime(0),
+                     m_lastBarTime(0),
+                     m_dayAnchor(0),
+                     m_lastNewsCheck(0),
+                     m_lastWebFetch(0)
    {
       m_baseCurr   = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE);
       m_profitCurr = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
@@ -421,6 +491,9 @@ bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, doubl
 //+------------------------------------------------------------------+
 bool MarketManager::PassesGateWithContext(const MqlTick &tick, double &currentSpread, double currentATR)
 {
+   if(currentATR <= 0)
+      return false;
+      
    StrategyConfig cfg; m_data.GetConfigCache(cfg);
 
    // Detect overlaps once — shared by IsTradingSession and session close warning
@@ -429,7 +502,8 @@ bool MarketManager::PassesGateWithContext(const MqlTick &tick, double &currentSp
    // 1. Session check
    if(!IsTradingSession())
    {
-      m_data.DebugLog(m_debugMode, "Trading session is closed.");
+      if(m_debugMode)
+         PrintFormat("[%s] Gate blocked: Trading session closed", m_name);
       return false;
    }
 
@@ -442,9 +516,8 @@ bool MarketManager::PassesGateWithContext(const MqlTick &tick, double &currentSp
    double dynamicSpreadThreshold = MathMax(cfg.max_spread, m_avgSpread * 2.5);
    if(currentSpread > dynamicSpreadThreshold)
    {
-      m_data.DebugLog(m_debugMode, StringFormat(
-         "Spread too high: %.1f pts (Dynamic Threshold: %.1f, Static: %.1f). Avg Spread: %.2f",
-         currentSpread, dynamicSpreadThreshold, cfg.max_spread, m_avgSpread));
+      if(m_debugMode)
+         PrintFormat("[%s] Gate blocked: Market regime incompatible", m_name);
       return false;
    }
 
@@ -462,8 +535,9 @@ bool MarketManager::PassesGateWithContext(const MqlTick &tick, double &currentSp
       if(m_debugMode)
       {
          string reason = (normalizedATR < normalizedMin) ? "Too Low" : "Too High";
-         PrintFormat("[%s] ATR Gate Blocked: Current %.1f (Norm: %.1f), Min: %.1f, Max: %.1f - %s",
-                     m_name, currentATR, normalizedATR, normalizedMin, normalizedMax, reason);
+         PrintFormat("[%s] ATR blocked: %.1f (Norm: %.1f), Range: %.1f-%.1f - %s",
+                     m_name, normalizedATR * m_timeframeFactor, normalizedATR, 
+                     normalizedMin, normalizedMax, reason);
       }
       return false;
    }
