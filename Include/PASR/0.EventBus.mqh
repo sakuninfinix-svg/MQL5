@@ -1,15 +1,7 @@
 //+------------------------------------------------------------------+
-//|                                                 0.EventBus.mqh   |
-//|                         BACKWARD-COMPAT SHIM - DO NOT MODIFY     |
-//|                                                                   |
-//| This file is preserved for backward compatibility only.          |
-//| All content has been migrated to: Core/EventBus.mqh              |
-//|                                                                   |
-//| Canonical path: Include/PASR/Core/EventBus.mqh                  |
-//| New code should use: #include "Core/EventBus.mqh"               |
+//| 0.EventBus.mqh  — DELETED                                        |
+//| Canonical: #include <PASR/Core/EventBus.mqh>                    |
+//| This file is intentionally empty. If you see a compile error     |
+//| here, update your #include path to the canonical location above. |
 //+------------------------------------------------------------------+
-
-#ifndef __EVENT_BUS_MQH__
-#define __EVENT_BUS_MQH__
-#include "Core/EventBus.mqh"
-#endif
+#error "0.EventBus.mqh has been removed. Use: #include <PASR/Core/EventBus.mqh>"
