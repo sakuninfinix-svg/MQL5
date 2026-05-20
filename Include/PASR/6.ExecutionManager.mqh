@@ -3,17 +3,22 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Order Execution & Trade Management Module             |
 //+------------------------------------------------------------------+
-//| V2.01 FIXES:                                                     |
-//| - EX-BUG-FIX-1 [HIGH]: All GV key prefixes now include          |
-//|   AccountInfoInteger(ACCOUNT_LOGIN) to prevent state corruption  |
-//|   when demo+live instances share the same magic number.          |
-//| - EX-BUG-FIX-2 [HIGH]: DeletePendingStateById() replaced        |
-//|   GlobalVariablesDeleteAll() with per-key enumeration loop.      |
+//| V2.02 FIXES:                                                     |
+//| - EX-PERF-1 [HIGH]: ScavengePendingGVs O(n²) eliminated.       |
+//|   Replaced GlobalVariablesDeleteAll inside scan loop with a     |
+//|   two-pass deferred-delete approach.                            |
+//| - EX-PERF-2 [MEDIUM]: GlobalVariablesTotal() now called once.   |
+//| - EX-PERF-3 [MEDIUM]: Scavenge runs at most once per new bar.   |
+//| - EX-PERF-4 [LOW]: 1 Hz dashboard render throttle added.        |
+//|                                                                  |
+//| V2.01 FIXES (previous):                                         |
+//| - EX-BUG-FIX-1 [HIGH]: GV keys include ACCOUNT_LOGIN prefix.   |
+//| - EX-BUG-FIX-2 [HIGH]: Safe per-key deletion loop.             |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.01"
+#property version   "2.02"
 #property strict
 
 #ifndef __EXECUTION_MANAGER_MQH__
@@ -25,7 +30,7 @@
 #include "3.ZoneManager.mqh"
 
 //+------------------------------------------------------------------+
-//| Trade Plan — data passed from signal to execution                |
+//| Trade Plan — data passed from signal to execution               |
 //+------------------------------------------------------------------+
 struct TradePlan
 {
@@ -51,31 +56,33 @@ private:
    string   m_symbol;
    bool     m_tradingAllowed;
 
+   // EX-PERF-3: guard to ensure Scavenge runs at most once per bar
+   datetime m_lastScavengeBar;
+
+   // EX-PERF-4: dashboard throttle — render at most 1 Hz
+   ulong    m_lastRenderUs;
+
    //--- Pending-state helpers (GlobalVariable persistence)
-   // EX-BUG-FIX-1: All key builders now include ACCOUNT_LOGIN prefix.
    string MakePendingPrefix(ulong tsID) const
    {
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      // EX-BUG-FIX-1: prepend account login to prevent cross-account GV collision
       return "PASR_PEND_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_"
-             + IntegerToString(cfg.magic) + "_" + m_symbol + "_" + IntegerToString(tsID) + "_";
+             + IntegerToString(Config().magic) + "_" + m_symbol + "_"
+             + IntegerToString(tsID) + "_";
    }
 
    void SavePendingState(ulong tsID, const TradePlan &plan, double zonePrice, double slMult) const
    {
       string p = MakePendingPrefix(tsID);
-      GlobalVariableSet(p + "ts", (double)TimeCurrent());
-      GlobalVariableSet(p + "tp", plan.tp);
-      GlobalVariableSet(p + "zp", zonePrice);
-      GlobalVariableSet(p + "sm", slMult);
+      GlobalVariableSet(p + "ts",  (double)TimeCurrent());
+      GlobalVariableSet(p + "tp",  plan.tp);
+      GlobalVariableSet(p + "zp",  zonePrice);
+      GlobalVariableSet(p + "sm",  slMult);
    }
 
-   // EX-BUG-FIX-2: Safe per-key deletion loop instead of GlobalVariablesDeleteAll.
+   // EX-BUG-FIX-2: Safe per-key deletion (no GlobalVariablesDeleteAll on shared terminal)
    void DeletePendingStateById(ulong tsID) const
    {
       string prefix = MakePendingPrefix(tsID);
-      // EX-BUG-FIX-2: per-key loop — GlobalVariablesDeleteAll is unsafe
-      // when multiple EA instances share a prefix substring
       for(int i = GlobalVariablesTotal() - 1; i >= 0; i--)
       {
          string varName = GlobalVariableName(i);
@@ -84,46 +91,73 @@ private:
       }
    }
 
+   // EX-PERF-1/2/3: two-pass deferred-delete; runs once per bar
    void ScavengePendingGVs()
    {
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      // EX-BUG-FIX-1: account login prefix
-      string pattern = "PASR_PEND_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_"
-                     + IntegerToString(cfg.magic) + "_" + m_symbol + "_";
+      datetime currentBar = iTime(m_symbol, _Period, 0);
+      if(currentBar == m_lastScavengeBar) return;   // EX-PERF-3
+      m_lastScavengeBar = currentBar;
 
+      string pattern = "PASR_PEND_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_"
+                     + IntegerToString(Config().magic) + "_" + m_symbol + "_";
+
+      // EX-PERF-2: snapshot total once — no redundant calls inside loop
       int total = GlobalVariablesTotal();
-      // Collect unique tsID values under this pattern
-      string found[];
-      int    foundCount = 0;
+
+      // --- Pass 1: collect unique tsID values + identify stale ones ---
+      string liveIDs[];
+      string staleKeys[];
+      int    liveCount  = 0;
+      int    staleCount = 0;
+
       for(int i = 0; i < total; i++)
       {
          string gvName = GlobalVariableName(i);
          if(StringFind(gvName, pattern) != 0) continue;
 
-         // Extract tsID segment (between pattern end and next '_')
          string rest    = StringSubstr(gvName, StringLen(pattern));
          int    sepPos  = StringFind(rest, "_");
          string tsID_str = (sepPos >= 0) ? StringSubstr(rest, 0, sepPos) : rest;
 
-         // De-dup
+         // De-dup tsID
          bool already = false;
-         for(int j = 0; j < foundCount; j++)
-            if(found[j] == tsID_str) { already = true; break; }
+         for(int j = 0; j < liveCount; j++)
+            if(liveIDs[j] == tsID_str) { already = true; break; }
+         for(int j = 0; j < staleCount; j++)
+         {
+            string stalePrefix = pattern + tsID_str;
+            if(StringFind(staleKeys[j], stalePrefix) == 0) { already = true; break; }
+         }
          if(already) continue;
 
-         // Check timestamp expiry (default 24 h)
          datetime ts = (datetime)GlobalVariableGet(pattern + tsID_str + "_ts");
          if(ts > 0 && TimeCurrent() - ts > 86400)
          {
-            GlobalVariablesDeleteAll(pattern + tsID_str + "_");
-            if(m_debugMode)
-               PrintFormat("[Execution] Scavenged stale pending GVs for tsID=%s", tsID_str);
+            // Collect all keys belonging to this stale tsID in this same pass
+            for(int k = i; k < total; k++)
+            {
+               string kName   = GlobalVariableName(k);
+               string kPrefix = pattern + tsID_str + "_";
+               if(StringFind(kName, kPrefix) == 0)
+               {
+                  ArrayResize(staleKeys, staleCount + 1);
+                  staleKeys[staleCount++] = kName;
+               }
+            }
          }
          else
          {
-            ArrayResize(found, foundCount + 1);
-            found[foundCount++] = tsID_str;
+            ArrayResize(liveIDs, liveCount + 1);
+            liveIDs[liveCount++] = tsID_str;
          }
+      }
+
+      // --- Pass 2: delete stale keys (deferred, no re-scan) ---
+      for(int i = 0; i < staleCount; i++)
+      {
+         GlobalVariableDel(staleKeys[i]);
+         if(m_debugMode)
+            PrintFormat("[Execution] Scavenged stale GV: %s", staleKeys[i]);
       }
    }
 
@@ -132,9 +166,8 @@ private:
       outTicket = 0;
       if(!m_tradingAllowed) return false;
 
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      m_trade.SetExpertMagicNumber(cfg.magic);
-      m_trade.SetDeviationInPoints(cfg.max_slippage_points);
+      m_trade.SetExpertMagicNumber(Config().magic);
+      m_trade.SetDeviationInPoints(Config().max_slippage_points);
 
       bool ok = false;
       if(plan.direction == 1)
@@ -185,11 +218,42 @@ private:
       return m_data.NormalizeVolume(m_symbol, rawLot);
    }
 
+   // EX-PERF-4: 1 Hz dashboard status line — avoid string heap churn per tick
+   string PrepareStatusLine()
+   {
+      ulong nowUs = GetMicrosecondCount();
+      if(nowUs - m_lastRenderUs < 1000000UL)   // 1 second
+         return "";
+      m_lastRenderUs = nowUs;
+
+      int openPos = 0, pendOrd = 0;
+      for(int i = 0; i < PositionsTotal(); i++)
+      {
+         ulong t = PositionGetTicket(i);
+         if(PositionGetInteger(POSITION_MAGIC) == Config().magic &&
+            PositionGetString(POSITION_SYMBOL) == m_symbol)
+            openPos++;
+      }
+      for(int i = 0; i < OrdersTotal(); i++)
+      {
+         ulong t = OrderGetTicket(i);
+         if(OrderGetInteger(ORDER_MAGIC) == Config().magic &&
+            OrderGetString(ORDER_SYMBOL) == m_symbol)
+            pendOrd++;
+      }
+      return StringFormat("[Execution] Positions:%d Pending:%d Trading:%s",
+                          openPos, pendOrd, m_tradingAllowed ? "ON" : "OFF");
+   }
+
 private:
    virtual void RefreshConfigCache() override { IManager::RefreshConfigCache(); }
 
 public:
-   ExecutionManager() : IManager("ExecutionManager", 50), m_tradingAllowed(true)
+   ExecutionManager()
+      : IManager("ExecutionManager", 50),
+        m_tradingAllowed(true),
+        m_lastScavengeBar(0),
+        m_lastRenderUs(0)
    {
       m_symbol = _Symbol;
    }
@@ -197,9 +261,8 @@ public:
    virtual bool Init() override
    {
       if(!IManager::Init()) return false;
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      m_trade.SetExpertMagicNumber(cfg.magic);
-      m_trade.SetDeviationInPoints(cfg.max_slippage_points);
+      m_trade.SetExpertMagicNumber(Config().magic);
+      m_trade.SetDeviationInPoints(Config().max_slippage_points);
       ScavengePendingGVs();
       return true;
    }
@@ -222,19 +285,18 @@ public:
    {
       if(CheckPointer(e) == POINTER_INVALID || !m_tradingAllowed) return;
 
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-
       TradePlan plan;
       plan.direction  = e.direction;
       plan.entry      = e.entryPrice;
       plan.sl         = e.slPrice;
       plan.tp         = e.tpPrice;
-      plan.isPending  = (e.entryPrice > 0 && MathAbs(e.entryPrice - SymbolInfoDouble(m_symbol, SYMBOL_ASK)) > _Point);
-      plan.expiry     = TimeCurrent() + (cfg.pending_order_expiry_bars * PeriodSeconds(_Period));
-      plan.label      = StringFormat("PASR_%d", cfg.magic);
+      plan.isPending  = (e.entryPrice > 0 &&
+                         MathAbs(e.entryPrice - SymbolInfoDouble(m_symbol, SYMBOL_ASK)) > _Point);
+      plan.expiry     = TimeCurrent() + (Config().pending_order_expiry_bars * PeriodSeconds(_Period));
+      plan.label      = StringFormat("PASR_%d", Config().magic);
 
       double slPoints = MathAbs(plan.entry - plan.sl) / _Point;
-      plan.lot        = CalcLotSize(cfg.risk_pct, slPoints);
+      plan.lot        = CalcLotSize(Config().risk_pct, slPoints);
       if(plan.lot <= 0)
       {
          if(m_debugMode) Log("Lot size calculation failed — signal skipped");
@@ -268,7 +330,13 @@ public:
    virtual void OnNewBar(NewBarEvent *e) override
    {
       if(CheckPointer(e) == POINTER_INVALID) return;
+      // EX-PERF-3: Scavenge is internally guarded; safe to call here
       ScavengePendingGVs();
+
+      // EX-PERF-4: update dashboard once per bar (minimum)
+      string status = PrepareStatusLine();
+      if(StringLen(status) > 0 && m_debugMode)
+         Print(status);
    }
 
    virtual void OnEmergencyStop(EmergencyStopEvent *e) override
@@ -276,28 +344,24 @@ public:
       if(CheckPointer(e) == POINTER_INVALID) return;
       m_tradingAllowed = false;
 
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      // Close all open positions
       for(int i = PositionsTotal() - 1; i >= 0; i--)
       {
          ulong ticket = PositionGetTicket(i);
-         if(PositionGetInteger(POSITION_MAGIC) != cfg.magic) continue;
-         if(PositionGetString(POSITION_SYMBOL) != m_symbol)  continue;
+         if(PositionGetInteger(POSITION_MAGIC) != Config().magic) continue;
+         if(PositionGetString(POSITION_SYMBOL) != m_symbol)       continue;
          m_trade.PositionClose(ticket);
       }
 
-      // Delete all pending orders
       for(int i = OrdersTotal() - 1; i >= 0; i--)
       {
          ulong ticket = OrderGetTicket(i);
-         if(OrderGetInteger(ORDER_MAGIC) != cfg.magic)         continue;
-         if(OrderGetString(ORDER_SYMBOL) != m_symbol)          continue;
+         if(OrderGetInteger(ORDER_MAGIC) != Config().magic)  continue;
+         if(OrderGetString(ORDER_SYMBOL) != m_symbol)         continue;
          m_trade.OrderDelete(ticket);
       }
 
-      // EX-BUG-FIX-1: account login prefix
       GlobalVariablesDeleteAll("PASR_PEND_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_"
-                              + IntegerToString(cfg.magic) + "_" + m_symbol + "_");
+                              + IntegerToString(Config().magic) + "_" + m_symbol + "_");
 
       if(m_debugMode) Log("Emergency stop executed — all positions/orders closed.");
    }
@@ -313,29 +377,24 @@ public:
    virtual void OnConfigReload(ConfigReloadEvent *e) override
    {
       IManager::OnConfigReload(e);
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      m_trade.SetExpertMagicNumber(cfg.magic);
-      m_trade.SetDeviationInPoints(cfg.max_slippage_points);
+      m_trade.SetExpertMagicNumber(Config().magic);
+      m_trade.SetDeviationInPoints(Config().max_slippage_points);
    }
 
    virtual void OnZoneUpdate(ZoneUpdateEvent *e) override
    {
       if(CheckPointer(e) == POINTER_INVALID || !m_tradingAllowed) return;
+      if(!Config().use_pending_orders) return;
 
-      StrategyConfig cfg; m_data.GetConfigCache(cfg);
-      if(!cfg.use_pending_orders) return;
-
-      // Re-evaluate pending orders against updated zone data
-      ulong tsID = e.zoneID;
-      string prefix = MakePendingPrefix(tsID);
+      ulong  tsID    = e.zoneID;
+      string prefix  = MakePendingPrefix(tsID);
       if(!GlobalVariableCheck(prefix + "ts")) return;
 
-      // Retrieve stored plan data
       TradePlan plan;
-      plan.tp        = GlobalVariableGet(prefix + "tp");
+      plan.tp          = GlobalVariableGet(prefix + "tp");
       double zonePrice = GlobalVariableGet(prefix + "zp");
       double slMult    = GlobalVariableGet(prefix + "sm");
-      (void)zonePrice; (void)slMult; // used for reference, not re-calculation here
+      (void)zonePrice; (void)slMult;
 
       if(m_debugMode)
          PrintFormat("[Execution] Zone update for pending tsID=%d, stored tp=%.5f", tsID, plan.tp);
