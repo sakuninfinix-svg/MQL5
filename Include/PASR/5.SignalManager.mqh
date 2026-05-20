@@ -3,14 +3,29 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Signal Generation & Decision Logic Module             |
 //+------------------------------------------------------------------+
-//| PURPOSE: Generates trading signals based on S/R confluence,      |
-//|          market regime, pattern recognition, and risk assessment.|
-//|          Implements signal filtering and quality scoring.        |
+//| V2.01 FIXES:                                                     |
+//| - SM-BUG-1 [CRITICAL]: Init() used non-existent                 |
+//|   GetDataManager().GetManager() — compile error.                 |
+//|   Replaced with SetManagers() dependency injection setter.       |
+//| - SM-BUG-2 [CRITICAL]: UpdateStats() signalsLastHour counter     |
+//|   always reset to 1 — lastSignalTime was overwritten BEFORE      |
+//|   the hourly check. Snapshot prevTime before overwrite.          |
+//| - SM-BUG-3 [HIGH]: Constructor pre-allocated 100 stale slots.   |
+//|   ArrayResize(0) now; AddToHistory() grows on demand.            |
+//| - SM-BUG-4 [HIGH]: IsRateLimited() per-bar guard used            |
+//|   TimeCurrent()==barTime (true only 1s). Fixed to use            |
+//|   iTime(m_symbol,_Period,0)==m_currentBarTime.                   |
+//| - SM-BUG-5 [HIGH]: isValid never set true in Generate*Signal()  |
+//|   → every emitted event had valid=false. Fixed post-scoring.     |
+//| - SM-BUG-6 [MEDIUM]: static lastCheck in OnPriceUpdate() shared  |
+//|   across instances. Replaced with member m_lastPriceCheckTime.   |
+//| - SM-BUG-7 [MEDIUM]: slMultiplier/tpMultiplier hardcoded 1.5/2.0.|
+//|   Now reads Config().sl_atr_mult / Config().tp_atr_mult.         |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.00"
+#property version   "2.01"
 #property strict
 
 #ifndef __SIGNAL_MANAGER_MQH__
@@ -26,10 +41,10 @@
 //+------------------------------------------------------------------+
 enum ENUM_SIGNAL_QUALITY
 {
-   SIGNAL_QUALITY_LOW,      // Score < 40 - Avoid trading
-   SIGNAL_QUALITY_MODERATE, // Score 40-60 - Trade with reduced size
-   SIGNAL_QUALITY_HIGH,     // Score 60-80 - Normal trading
-   SIGNAL_QUALITY_EXCELLENT // Score > 80 - High conviction trade
+   SIGNAL_QUALITY_LOW,       // Score < 40 - Avoid trading
+   SIGNAL_QUALITY_MODERATE,  // Score 40-60 - Trade with reduced size
+   SIGNAL_QUALITY_HIGH,      // Score 60-80 - Normal trading
+   SIGNAL_QUALITY_EXCELLENT  // Score > 80 - High conviction trade
 };
 
 //+------------------------------------------------------------------+
@@ -38,14 +53,14 @@ enum ENUM_SIGNAL_QUALITY
 enum ENUM_SIGNAL_REASON
 {
    SIGNAL_REASON_NONE,
-   SIGNAL_REASON_SR_BOUNCE,       // Bounce from S/R level
-   SIGNAL_REASON_SR_BREAKOUT,     // Breakout through S/R
-   SIGNAL_REASON_PATTERN_COMPLETE,// Chart pattern completed
-   SIGNAL_REASON_REGIME_CHANGE,   // Market regime shift
-   SIGNAL_REASON_CONFLUENCE,      // Multiple factors aligned
-   SIGNAL_REASON_REVERSAL,        // Reversal pattern detected
-   SIGNAL_REASON_CONTINUATION,    // Trend continuation
-   SIGNAL_REASON_AI_GENERATED     // AI model generated signal
+   SIGNAL_REASON_SR_BOUNCE,         // Bounce from S/R level
+   SIGNAL_REASON_SR_BREAKOUT,       // Breakout through S/R
+   SIGNAL_REASON_PATTERN_COMPLETE,  // Chart pattern completed
+   SIGNAL_REASON_REGIME_CHANGE,     // Market regime shift
+   SIGNAL_REASON_CONFLUENCE,        // Multiple factors aligned
+   SIGNAL_REASON_REVERSAL,          // Reversal pattern detected
+   SIGNAL_REASON_CONTINUATION,      // Trend continuation
+   SIGNAL_REASON_AI_GENERATED       // AI model generated signal
 };
 
 //+------------------------------------------------------------------+
@@ -70,22 +85,22 @@ struct SignalData
    double             entryPrice;
    double             slPrice;
    double             tpPrice;
-   double             zonePrice;         // S/R level that triggered signal
-   double             slMultiplier;      // ATR multiplier for SL
-   double             tpMultiplier;      // ATR multiplier for TP
+   double             zonePrice;       ///< S/R level that triggered signal
+   double             slMultiplier;    ///< ATR multiplier for SL
+   double             tpMultiplier;    ///< ATR multiplier for TP
    ENUM_SIGNAL_QUALITY quality;
-   ENUM_SIGNAL_REASON reason;
-   ENUM_ENTRY_TYPE    entryType;
-   int                qualityScore;      // 0-100 composite score
-   string             comment;
-   
+   ENUM_SIGNAL_REASON  reason;
+   ENUM_ENTRY_TYPE     entryType;
+   int                 qualityScore;   ///< 0-100 composite score
+   string              comment;
+
    // Additional context
    double             atrValue;
    double             supportLevel;
    double             resistanceLevel;
    ENUM_MARKET_REGIME regime;
    int                timeframe;
-   
+
    SignalData() : isValid(false), timestamp(0), direction(ORDER_TYPE_BUY),
                   entryPrice(0), slPrice(0), tpPrice(0), zonePrice(0),
                   slMultiplier(1.5), tpMultiplier(2.0),
@@ -93,48 +108,48 @@ struct SignalData
                   entryType(ENTRY_TYPE_MARKET), qualityScore(0),
                   atrValue(0), supportLevel(0), resistanceLevel(0),
                   regime(MARKET_REGIME_UNKNOWN), timeframe(0) {}
-   
+
    void Reset()
    {
       ZeroMemory(this);
       slMultiplier = 1.5;
       tpMultiplier = 2.0;
    }
-   
+
    double RiskRewardRatio() const
    {
       if(slPrice <= 0 || tpPrice <= 0) return 0.0;
-      double risk = MathAbs(entryPrice - slPrice);
-      double reward = MathAbs(tpPrice - entryPrice);
+      double risk   = MathAbs(entryPrice - slPrice);
+      double reward = MathAbs(tpPrice   - entryPrice);
       return (risk > 0) ? reward / risk : 0.0;
    }
-   
+
    string GetQualityString() const
    {
       switch(quality)
       {
-         case SIGNAL_QUALITY_LOW:      return "LOW";
-         case SIGNAL_QUALITY_MODERATE: return "MODERATE";
-         case SIGNAL_QUALITY_HIGH:     return "HIGH";
-         case SIGNAL_QUALITY_EXCELLENT:return "EXCELLENT";
-         default: return "UNKNOWN";
+         case SIGNAL_QUALITY_LOW:       return "LOW";
+         case SIGNAL_QUALITY_MODERATE:  return "MODERATE";
+         case SIGNAL_QUALITY_HIGH:      return "HIGH";
+         case SIGNAL_QUALITY_EXCELLENT: return "EXCELLENT";
+         default:                       return "UNKNOWN";
       }
    }
-   
+
    string GetReasonString() const
    {
       switch(reason)
       {
-         case SIGNAL_REASON_NONE:          return "None";
-         case SIGNAL_REASON_SR_BOUNCE:     return "S/R Bounce";
-         case SIGNAL_REASON_SR_BREAKOUT:   return "S/R Breakout";
+         case SIGNAL_REASON_NONE:             return "None";
+         case SIGNAL_REASON_SR_BOUNCE:        return "S/R Bounce";
+         case SIGNAL_REASON_SR_BREAKOUT:      return "S/R Breakout";
          case SIGNAL_REASON_PATTERN_COMPLETE: return "Pattern Complete";
-         case SIGNAL_REASON_REGIME_CHANGE: return "Regime Change";
-         case SIGNAL_REASON_CONFLUENCE:    return "Confluence";
-         case SIGNAL_REASON_REVERSAL:      return "Reversal";
-         case SIGNAL_REASON_CONTINUATION:  return "Continuation";
-         case SIGNAL_REASON_AI_GENERATED:  return "AI Generated";
-         default: return "Unknown";
+         case SIGNAL_REASON_REGIME_CHANGE:    return "Regime Change";
+         case SIGNAL_REASON_CONFLUENCE:       return "Confluence";
+         case SIGNAL_REASON_REVERSAL:         return "Reversal";
+         case SIGNAL_REASON_CONTINUATION:     return "Continuation";
+         case SIGNAL_REASON_AI_GENERATED:     return "AI Generated";
+         default:                             return "Unknown";
       }
    }
 };
@@ -144,14 +159,14 @@ struct SignalData
 //+------------------------------------------------------------------+
 struct SignalFilter
 {
-   int    minQualityScore;       // Minimum score to generate signal
-   bool   allowCounterTrend;     // Allow trades against regime bias
-   double minRRRatio;            // Minimum risk/reward ratio
-   int    maxSignalsPerBar;      // Limit signals per bar
-   int    maxSignalsPerHour;     // Limit signals per hour
-   bool   requireConfluence;     // Require multiple confirming factors
-   double minConfluenceScore;    // Minimum confluence score
-   
+   int    minQualityScore;      ///< Minimum score to generate signal
+   bool   allowCounterTrend;    ///< Allow trades against regime bias
+   double minRRRatio;           ///< Minimum risk/reward ratio
+   int    maxSignalsPerBar;     ///< Limit signals per bar
+   int    maxSignalsPerHour;    ///< Limit signals per hour
+   bool   requireConfluence;    ///< Require multiple confirming factors
+   double minConfluenceScore;   ///< Minimum confluence score
+
    SignalFilter() : minQualityScore(50), allowCounterTrend(false),
                     minRRRatio(1.5), maxSignalsPerBar(1),
                     maxSignalsPerHour(3), requireConfluence(true),
@@ -163,19 +178,21 @@ struct SignalFilter
 //+------------------------------------------------------------------+
 struct SignalStats
 {
-   int    totalSignals;
-   int    buySignals;
-   int    sellSignals;
-   int    winningSignals;
-   int    losingSignals;
-   int    neutralSignals;
-   double avgQualityScore;
-   int    signalsLastHour;
+   int      totalSignals;
+   int      buySignals;
+   int      sellSignals;
+   int      winningSignals;
+   int      losingSignals;
+   int      neutralSignals;
+   double   avgQualityScore;
+   int      signalsLastHour;
    datetime lastSignalTime;
-   
+   datetime hourWindowStart; ///< Start of the current 1-hour count window
+
    SignalStats() : totalSignals(0), buySignals(0), sellSignals(0),
                    winningSignals(0), losingSignals(0), neutralSignals(0),
-                   avgQualityScore(0), signalsLastHour(0), lastSignalTime(0) {}
+                   avgQualityScore(0), signalsLastHour(0),
+                   lastSignalTime(0), hourWindowStart(0) {}
 };
 
 //+------------------------------------------------------------------+
@@ -185,76 +202,76 @@ class SignalManager : public IManager
 {
 private:
    SignalData   m_currentSignal;
-   SignalData   m_signalHistory[];
+   SignalData   m_signalHistory[];   ///< SM-BUG-3: starts empty, grows on demand
    SignalFilter m_filter;
    SignalStats  m_stats;
-   
+
    int          m_maxHistory;
    int          m_signalsThisBar;
    datetime     m_currentBarTime;
-   
-   // Dependencies (injected or looked up)
+
+   // SM-BUG-1 FIX: injected via SetManagers(), no longer resolved inside Init()
    SRManager    *m_srManager;
    MarketRegime *m_marketRegime;
-   
-   // Throttle to prevent signal spam
+
    datetime     m_lastSignalTime;
    int          m_minSignalIntervalSec;
-   
+
+   // SM-BUG-6 FIX: member variable instead of static local
+   datetime     m_lastPriceCheckTime;
+
 private:
+   virtual void RefreshConfigCache() override { IManager::RefreshConfigCache(); }
+
    //--- Calculate signal quality score (0-100)
    int CalculateQualityScore(const SignalData &signal) const
    {
       int score = 0;
-      
+
       // Confluence scoring (0-30 points)
       if(signal.supportLevel > 0 && signal.resistanceLevel > 0)
       {
-         double range = signal.resistanceLevel - signal.supportLevel;
+         double range      = signal.resistanceLevel - signal.supportLevel;
          double distToZone = MathAbs(signal.entryPrice - signal.zonePrice);
-         
-         if(range > 0 && distToZone < range * 0.1)
-            score += 30; // Price near key zone
-         else if(distToZone < range * 0.2)
-            score += 20;
-         else if(distToZone < range * 0.3)
-            score += 10;
+
+         if(range > 0 && distToZone < range * 0.1)       score += 30;
+         else if(distToZone < range * 0.2)                score += 20;
+         else if(distToZone < range * 0.3)                score += 10;
       }
-      
+
       // Regime alignment (0-25 points)
-      if(signal.regime == MARKET_REGIME_TRENDING_UP && signal.direction == ORDER_TYPE_BUY)
+      if(signal.regime == MARKET_REGIME_TRENDING_UP   && signal.direction == ORDER_TYPE_BUY)
          score += 25;
       else if(signal.regime == MARKET_REGIME_TRENDING_DOWN && signal.direction == ORDER_TYPE_SELL)
          score += 25;
       else if(signal.regime == MARKET_REGIME_RANGING)
-         score += 15; // Neutral regime, partial points
+         score += 15;
       else if(m_filter.allowCounterTrend)
-         score += 10; // Counter-trend allowed but penalized
-      
+         score += 10;
+
       // Risk/Reward scoring (0-25 points)
       double rr = signal.RiskRewardRatio();
       if(rr >= 3.0)      score += 25;
       else if(rr >= 2.0) score += 20;
       else if(rr >= 1.5) score += 15;
       else if(rr >= 1.0) score += 10;
-      
+
       // Reason-based scoring (0-20 points)
       switch(signal.reason)
       {
-         case SIGNAL_REASON_CONFLUENCE:     score += 20; break;
-         case SIGNAL_REASON_SR_BOUNCE:      score += 15; break;
-         case SIGNAL_REASON_PATTERN_COMPLETE: score += 15; break;
-         case SIGNAL_REASON_SR_BREAKOUT:    score += 12; break;
-         case SIGNAL_REASON_REGIME_CHANGE:  score += 10; break;
-         case SIGNAL_REASON_CONTINUATION:   score += 10; break;
-         case SIGNAL_REASON_REVERSAL:       score += 8; break;
-         default: score += 5;
+         case SIGNAL_REASON_CONFLUENCE:        score += 20; break;
+         case SIGNAL_REASON_SR_BOUNCE:         score += 15; break;
+         case SIGNAL_REASON_PATTERN_COMPLETE:  score += 15; break;
+         case SIGNAL_REASON_SR_BREAKOUT:       score += 12; break;
+         case SIGNAL_REASON_REGIME_CHANGE:     score += 10; break;
+         case SIGNAL_REASON_CONTINUATION:      score += 10; break;
+         case SIGNAL_REASON_REVERSAL:          score +=  8; break;
+         default:                              score +=  5; break;
       }
-      
+
       return MathMin(100, score);
    }
-   
-   //--- Determine signal quality enum from score
+
    ENUM_SIGNAL_QUALITY ScoreToQuality(int score) const
    {
       if(score >= 80) return SIGNAL_QUALITY_EXCELLENT;
@@ -262,274 +279,262 @@ private:
       if(score >= 40) return SIGNAL_QUALITY_MODERATE;
       return SIGNAL_QUALITY_LOW;
    }
-   
-   //--- Check if signal passes filters
+
    bool PassesFilters(const SignalData &signal) const
    {
-      // Quality threshold
-      if(signal.qualityScore < m_filter.minQualityScore)
-         return false;
-      
-      // Risk/Reward threshold
-      if(signal.RiskRewardRatio() < m_filter.minRRRatio)
-         return false;
-      
-      // Confluence requirement
+      if(signal.qualityScore < m_filter.minQualityScore)   return false;
+      if(signal.RiskRewardRatio() < m_filter.minRRRatio)   return false;
+
       if(m_filter.requireConfluence)
-      {
-         if(signal.supportLevel <= 0 || signal.resistanceLevel <= 0)
-            return false;
-      }
-      
-      // Counter-trend filter
+         if(signal.supportLevel <= 0 || signal.resistanceLevel <= 0) return false;
+
       if(!m_filter.allowCounterTrend)
       {
-         if(signal.regime == MARKET_REGIME_TRENDING_UP && signal.direction == ORDER_TYPE_SELL)
-            return false;
-         if(signal.regime == MARKET_REGIME_TRENDING_DOWN && signal.direction == ORDER_TYPE_BUY)
-            return false;
+         if(signal.regime == MARKET_REGIME_TRENDING_UP   && signal.direction == ORDER_TYPE_SELL) return false;
+         if(signal.regime == MARKET_REGIME_TRENDING_DOWN && signal.direction == ORDER_TYPE_BUY)  return false;
       }
-      
+
       return true;
    }
-   
-   //--- Rate limiting
+
+   // SM-BUG-4 FIX: use iTime() for per-bar comparison (not TimeCurrent())
    bool IsRateLimited() const
    {
-      datetime now = TimeCurrent();
-      
+      datetime now    = TimeCurrent();
+      datetime barNow = iTime(m_symbol, _Period, 0);
+
       // Per-bar limit
-      if(now == m_currentBarTime && m_signalsThisBar >= m_filter.maxSignalsPerBar)
+      if(barNow == m_currentBarTime && m_signalsThisBar >= m_filter.maxSignalsPerBar)
          return true;
-      
-      // Per-hour limit
+
+      // Per-hour limit — use rolling window
       if(m_stats.signalsLastHour >= m_filter.maxSignalsPerHour)
       {
-         datetime hourAgo = now - 3600;
-         if(m_stats.lastSignalTime > hourAgo)
+         if(now - m_stats.hourWindowStart < 3600)
             return true;
       }
-      
+
       // Minimum interval
       if(now - m_lastSignalTime < m_minSignalIntervalSec)
          return true;
-      
+
       return false;
    }
-   
-   //--- Generate BUY signal
-   SignalData GenerateBuySignal(double entryPrice, double zonePrice, 
+
+   // SM-BUG-5 FIX: set isValid=true after scoring; SM-BUG-7 FIX: use Config() for multipliers
+   SignalData GenerateBuySignal(double entryPrice, double zonePrice,
                                 ENUM_SIGNAL_REASON reason, string comment = "")
    {
       SignalData signal;
       signal.Reset();
-      
-      signal.timestamp = TimeCurrent();
-      signal.direction = ORDER_TYPE_BUY;
+
+      signal.timestamp  = TimeCurrent();
+      signal.direction  = ORDER_TYPE_BUY;
       signal.entryPrice = entryPrice;
-      signal.zonePrice = zonePrice;
-      signal.reason = reason;
-      signal.comment = comment;
-      signal.timeframe = _Period;
-      
-      // Get current market context
-      signal.atrValue = GetCurrentATR();
-      signal.regime = GetMarketRegime();
-      signal.supportLevel = zonePrice;
+      signal.zonePrice  = zonePrice;
+      signal.reason     = reason;
+      signal.comment    = comment;
+      signal.timeframe  = _Period;
+
+      // SM-BUG-7 FIX: read multipliers from Config(), fallback to struct defaults
+      signal.slMultiplier = (Config().sl_atr_mult > 0) ? Config().sl_atr_mult : 1.5;
+      signal.tpMultiplier = (Config().tp_atr_mult > 0) ? Config().tp_atr_mult : 2.0;
+
+      signal.atrValue        = GetCurrentATR();
+      signal.regime          = GetMarketRegime();
+      signal.supportLevel    = zonePrice;
       signal.resistanceLevel = GetNearestResistance(entryPrice);
-      
-      // Calculate SL/TP
-      double atr = signal.atrValue;
-      if(atr <= 0) atr = _Point * 100;
-      
+
+      double atr = (signal.atrValue > 0) ? signal.atrValue : _Point * 100;
+
       signal.slPrice = entryPrice - (atr * signal.slMultiplier);
       signal.tpPrice = entryPrice + (atr * signal.tpMultiplier);
-      
-      // Adjust for regime
+
       if(signal.regime == MARKET_REGIME_TRENDING_UP)
       {
-         signal.tpMultiplier = 2.5; // Let winners run in uptrend
-         signal.tpPrice = entryPrice + (atr * signal.tpMultiplier);
+         signal.tpMultiplier = signal.tpMultiplier * 1.25;
+         signal.tpPrice      = entryPrice + (atr * signal.tpMultiplier);
       }
-      
-      // Calculate quality
+
       signal.qualityScore = CalculateQualityScore(signal);
-      signal.quality = ScoreToQuality(signal.qualityScore);
-      
+      signal.quality      = ScoreToQuality(signal.qualityScore);
+      signal.isValid      = true;   // SM-BUG-5 FIX
+
       return signal;
    }
-   
-   //--- Generate SELL signal
+
    SignalData GenerateSellSignal(double entryPrice, double zonePrice,
                                  ENUM_SIGNAL_REASON reason, string comment = "")
    {
       SignalData signal;
       signal.Reset();
-      
-      signal.timestamp = TimeCurrent();
-      signal.direction = ORDER_TYPE_SELL;
+
+      signal.timestamp  = TimeCurrent();
+      signal.direction  = ORDER_TYPE_SELL;
       signal.entryPrice = entryPrice;
-      signal.zonePrice = zonePrice;
-      signal.reason = reason;
-      signal.comment = comment;
-      signal.timeframe = _Period;
-      
-      // Get current market context
-      signal.atrValue = GetCurrentATR();
-      signal.regime = GetMarketRegime();
+      signal.zonePrice  = zonePrice;
+      signal.reason     = reason;
+      signal.comment    = comment;
+      signal.timeframe  = _Period;
+
+      // SM-BUG-7 FIX
+      signal.slMultiplier = (Config().sl_atr_mult > 0) ? Config().sl_atr_mult : 1.5;
+      signal.tpMultiplier = (Config().tp_atr_mult > 0) ? Config().tp_atr_mult : 2.0;
+
+      signal.atrValue        = GetCurrentATR();
+      signal.regime          = GetMarketRegime();
       signal.resistanceLevel = zonePrice;
-      signal.supportLevel = GetNearestSupport(entryPrice);
-      
-      // Calculate SL/TP
-      double atr = signal.atrValue;
-      if(atr <= 0) atr = _Point * 100;
-      
+      signal.supportLevel    = GetNearestSupport(entryPrice);
+
+      double atr = (signal.atrValue > 0) ? signal.atrValue : _Point * 100;
+
       signal.slPrice = entryPrice + (atr * signal.slMultiplier);
       signal.tpPrice = entryPrice - (atr * signal.tpMultiplier);
-      
-      // Adjust for regime
+
       if(signal.regime == MARKET_REGIME_TRENDING_DOWN)
       {
-         signal.tpMultiplier = 2.5;
-         signal.tpPrice = entryPrice - (atr * signal.tpMultiplier);
+         signal.tpMultiplier = signal.tpMultiplier * 1.25;
+         signal.tpPrice      = entryPrice - (atr * signal.tpMultiplier);
       }
-      
-      // Calculate quality
+
       signal.qualityScore = CalculateQualityScore(signal);
-      signal.quality = ScoreToQuality(signal.qualityScore);
-      
+      signal.quality      = ScoreToQuality(signal.qualityScore);
+      signal.isValid      = true;   // SM-BUG-5 FIX
+
       return signal;
    }
-   
+
    double GetCurrentATR() const
    {
-      if(CheckPointer(m_data) != POINTER_INVALID)
-         return m_data.GetATR();
-      return _Point * 100;
+      return (CheckPointer(m_data) != POINTER_INVALID) ? m_data.GetATR() : _Point * 100;
    }
-   
+
    ENUM_MARKET_REGIME GetMarketRegime() const
    {
-      if(CheckPointer(m_marketRegime) != POINTER_INVALID)
-         return m_marketRegime.GetCurrentRegime();
-      return MARKET_REGIME_UNKNOWN;
+      return (CheckPointer(m_marketRegime) != POINTER_INVALID)
+         ? m_marketRegime.GetCurrentRegime()
+         : MARKET_REGIME_UNKNOWN;
    }
-   
+
    double GetNearestSupport(double price) const
    {
       if(CheckPointer(m_srManager) != POINTER_INVALID)
       {
          SRLevel *level = m_srManager.GetNearestSupport(price);
-         if(CheckPointer(level) != POINTER_INVALID)
-            return level.price;
+         if(CheckPointer(level) != POINTER_INVALID) return level.price;
       }
       return 0;
    }
-   
+
    double GetNearestResistance(double price) const
    {
       if(CheckPointer(m_srManager) != POINTER_INVALID)
       {
          SRLevel *level = m_srManager.GetNearestResistance(price);
-         if(CheckPointer(level) != POINTER_INVALID)
-            return level.price;
+         if(CheckPointer(level) != POINTER_INVALID) return level.price;
       }
       return 0;
    }
-   
+
+   // SM-BUG-2 FIX: snapshot lastSignalTime BEFORE overwriting so hourly check is correct
    void UpdateStats(const SignalData &signal)
    {
       m_stats.totalSignals++;
-      
-      if(signal.direction == ORDER_TYPE_BUY)
-         m_stats.buySignals++;
+
+      if(signal.direction == ORDER_TYPE_BUY) m_stats.buySignals++;
+      else                                    m_stats.sellSignals++;
+
+      m_stats.avgQualityScore =
+         (m_stats.avgQualityScore * (m_stats.totalSignals - 1) + signal.qualityScore)
+         / m_stats.totalSignals;
+
+      // Hourly window management (SM-BUG-2 FIX)
+      datetime now = TimeCurrent();
+      if(now - m_stats.hourWindowStart >= 3600)
+      {
+         m_stats.signalsLastHour = 1;         // reset window
+         m_stats.hourWindowStart = now;
+      }
       else
-         m_stats.sellSignals++;
-      
-      m_stats.avgQualityScore = (m_stats.avgQualityScore * (m_stats.totalSignals - 1) + 
-                                 signal.qualityScore) / m_stats.totalSignals;
-      
-      m_stats.lastSignalTime = signal.timestamp;
-      
-      // Update hourly counter
-      if(TimeCurrent() - m_stats.lastSignalTime < 3600)
          m_stats.signalsLastHour++;
-      else
-         m_stats.signalsLastHour = 1;
+
+      m_stats.lastSignalTime = signal.timestamp;   // update AFTER hourly check
    }
-   
+
+   // SM-BUG-3 FIX: array starts at 0, grows here only
    void AddToHistory(const SignalData &signal)
    {
       int idx = ArraySize(m_signalHistory);
-      ArrayResize(m_signalHistory, idx + 1);
-      m_signalHistory[idx] = signal;
-      
-      // Trim history if needed
-      if(ArraySize(m_signalHistory) > m_maxHistory)
+      if(idx >= m_maxHistory)
       {
          ArrayCopy(m_signalHistory, m_signalHistory, 0, 1, WHOLE_ARRAY);
-         ArrayResize(m_signalHistory, m_maxHistory);
+         ArrayResize(m_signalHistory, m_maxHistory - 1);
+         idx = m_maxHistory - 1;
       }
+      ArrayResize(m_signalHistory, idx + 1);
+      m_signalHistory[idx] = signal;
    }
-   
+
 public:
+   // SM-BUG-3 FIX: no pre-allocation; SM-BUG-6 FIX: m_lastPriceCheckTime member init
    SignalManager() : m_maxHistory(100), m_signalsThisBar(0),
                      m_currentBarTime(0), m_srManager(NULL),
                      m_marketRegime(NULL), m_lastSignalTime(0),
-                     m_minSignalIntervalSec(5)
+                     m_minSignalIntervalSec(5), m_lastPriceCheckTime(0)
    {
-      ArrayResize(m_signalHistory, m_maxHistory);
+      ArrayResize(m_signalHistory, 0);   // SM-BUG-3 FIX: start empty
    }
-   
+
    virtual ~SignalManager()
    {
       ArrayFree(m_signalHistory);
    }
-   
+
+   // SM-BUG-1 FIX: removed GetDataManager().GetManager() — inject via SetManagers() instead
    virtual bool Init() override
    {
       if(!IManager::Init()) return false;
-      
-      // Try to get references to dependent managers
-      // In production, these would be injected via dependency injection
-      m_srManager = (SRManager*)GetDataManager().GetManager("SRManager");
-      m_marketRegime = (MarketRegime*)GetDataManager().GetManager("MarketRegime");
-      
-      Log("✅ SignalManager initialized");
+      // m_srManager and m_marketRegime must be set via SetManagers()
+      // before Init() or after, but will be checked at usage via CheckPointer
+      Log("SignalManager initialized (v2.01)");
       return true;
    }
-   
+
+   /// Dependency injection — call from PASR.mqh after all managers are created
+   void SetManagers(SRManager *sr, MarketRegime *regime)
+   {
+      m_srManager   = sr;
+      m_marketRegime = regime;
+   }
+
    virtual void DeclareEvents() override
    {
       AddEvent(EVENT_ID_SIGNAL_GENERATED);
       AddEvent(EVENT_ID_ZONE_UPDATE);
       AddEvent(EVENT_ID_NEW_BAR);
+      AddEvent(EVENT_ID_PRICE_UPDATE);
    }
-   
-   //--- Main signal generation method
+
    bool TryGenerateSignal(ENUM_ORDER_TYPE direction, double entryPrice,
                           ENUM_SIGNAL_REASON reason, string comment = "")
    {
-      // Check rate limits
       if(IsRateLimited())
       {
-         if(m_debugMode)
-            Log("⏸️ Signal rate limited, skipping");
+         if(m_debugMode) Log("Signal rate limited, skipping");
          return false;
       }
-      
-      // Check if new bar
-      datetime barTime = iTime(m_symbol, _Period, 0);
-      if(barTime != m_currentBarTime)
+
+      // Sync bar tracker
+      datetime barNow = iTime(m_symbol, _Period, 0);
+      if(barNow != m_currentBarTime)
       {
-         m_currentBarTime = barTime;
+         m_currentBarTime = barNow;
          m_signalsThisBar = 0;
       }
-      
+
       SignalData signal;
-      double zonePrice = 0;
-      
-      // Get zone price based on direction
+      double     zonePrice = 0;
+
       if(direction == ORDER_TYPE_BUY)
       {
          zonePrice = GetNearestSupport(entryPrice);
@@ -542,152 +547,115 @@ public:
          if(zonePrice <= 0) zonePrice = entryPrice;
          signal = GenerateSellSignal(entryPrice, zonePrice, reason, comment);
       }
-      
-      // Apply filters
+
       if(!PassesFilters(signal))
       {
          if(m_debugMode)
-            Log("🚫 Signal filtered out - Score: " + IntegerToString(signal.qualityScore));
+            Log("Signal filtered — Score: " + IntegerToString(signal.qualityScore));
          return false;
       }
-      
-      // Emit signal event
-      m_currentSignal = signal;
+
+      m_currentSignal  = signal;
       m_signalsThisBar++;
       m_lastSignalTime = TimeCurrent();
-      
+
       UpdateStats(signal);
       AddToHistory(signal);
-      
       EmitSignalGenerated(signal);
-      
-      Log("📊 Signal Generated: " + signal.GetQualityString() + 
-          " | " + signal.GetReasonString() +
-          " | Score: " + IntegerToString(signal.qualityScore) +
-          " | RR: " + DoubleToString(signal.RiskRewardRatio(), 2));
-      
+
+      if(m_debugMode)
+         PrintFormat("[Signal] %s | %s | Score:%d | RR:%.2f",
+                     signal.GetQualityString(), signal.GetReasonString(),
+                     signal.qualityScore, signal.RiskRewardRatio());
       return true;
    }
-   
-   //--- Check for S/R bounce signals
+
    void CheckSRBounceSignals(double currentPrice)
    {
       if(CheckPointer(m_srManager) == POINTER_INVALID) return;
-      
+
       SRLevel *nearestSup = m_srManager.GetNearestSupport(currentPrice);
       SRLevel *nearestRes = m_srManager.GetNearestResistance(currentPrice);
-      
-      // Check support bounce
+      double   atr        = GetCurrentATR();
+
       if(CheckPointer(nearestSup) != POINTER_INVALID)
       {
          double distToSup = currentPrice - nearestSup.price;
-         double atr = GetCurrentATR();
-         
          if(distToSup < atr * 0.5 && nearestSup.confluenceScore >= 60)
-         {
-            // Price near strong support - potential BUY
-            TryGenerateSignal(ORDER_TYPE_BUY, currentPrice, 
-                             SIGNAL_REASON_SR_BOUNCE, "Support bounce setup");
-         }
+            TryGenerateSignal(ORDER_TYPE_BUY, currentPrice,
+                              SIGNAL_REASON_SR_BOUNCE, "Support bounce setup");
       }
-      
-      // Check resistance bounce
+
       if(CheckPointer(nearestRes) != POINTER_INVALID)
       {
          double distToRes = nearestRes.price - currentPrice;
-         double atr = GetCurrentATR();
-         
          if(distToRes < atr * 0.5 && nearestRes.confluenceScore >= 60)
-         {
-            // Price near strong resistance - potential SELL
             TryGenerateSignal(ORDER_TYPE_SELL, currentPrice,
-                             SIGNAL_REASON_SR_BOUNCE, "Resistance bounce setup");
-         }
+                              SIGNAL_REASON_SR_BOUNCE, "Resistance bounce setup");
       }
    }
-   
-   //--- Emit signal event to EventBus
+
    void EmitSignalGenerated(const SignalData &signal)
    {
       SignalDecision decision;
-      decision.valid = signal.isValid;
-      decision.orderType = signal.direction;
+      decision.valid       = signal.isValid;   // SM-BUG-5 FIX: now always true for valid signals
+      decision.orderType   = signal.direction;
       decision.signalPrice = signal.entryPrice;
-      decision.zonePrice = signal.zonePrice;
+      decision.zonePrice   = signal.zonePrice;
       decision.patternType = PATTERN_NONE;
-      decision.bias = (signal.direction == ORDER_TYPE_BUY) ? 1 : -1;
+      decision.bias        = (signal.direction == ORDER_TYPE_BUY) ? 1 : -1;
       decision.signalShift = 0;
       decision.slMultiplier = signal.slMultiplier;
-      decision.reason = signal.GetReasonString();
-      
+      decision.reason      = signal.GetReasonString();
+
       SignalGeneratedEvent *event = new SignalGeneratedEvent(
          decision,
          signal.atrValue,
          signal.supportLevel,
          signal.resistanceLevel
       );
-      
+
       if(CheckPointer(event) != POINTER_INVALID)
          DispatchEvent(event);
    }
-   
-   //--- Event handlers
+
    virtual void OnNewBar(NewBarEvent *e) override
    {
       if(CheckPointer(e) == POINTER_INVALID) return;
-      
-      // Reset per-bar counters
       m_currentBarTime = e.barOpenTime;
       m_signalsThisBar = 0;
-      
-      // Check for signals on new bar
-      double currentPrice = e.close;
-      CheckSRBounceSignals(currentPrice);
+      CheckSRBounceSignals(e.close);
    }
-   
+
+   // SM-BUG-6 FIX: m_lastPriceCheckTime is now a member, not a static local
    virtual void OnPriceUpdate(PriceUpdateEvent *e) override
    {
       if(CheckPointer(e) == POINTER_INVALID) return;
-      
-      // Only check on significant price moves (throttle)
-      static datetime lastCheck = 0;
       datetime now = TimeCurrent();
-      
-      if(now - lastCheck < 1) return; // Check every second max
-      lastCheck = now;
-      
+      if(now - m_lastPriceCheckTime < 1) return;
+      m_lastPriceCheckTime = now;
       CheckSRBounceSignals(e.tick.bid);
    }
-   
+
    virtual void OnZoneUpdate(ZoneUpdateEvent *e) override
    {
       if(CheckPointer(e) == POINTER_INVALID) return;
-      
-      // Zone updated - may trigger signal re-evaluation
       if(m_debugMode)
-         Log("📍 Zone update received - Sup: " + DoubleToString(e.support, _Digits) +
-             " Res: " + DoubleToString(e.resistance, _Digits));
+         PrintFormat("[Signal] Zone update — Sup:%.5f Res:%.5f",
+                     e.support, e.resistance);
    }
-   
-   //--- Configuration
-   void SetFilter(const SignalFilter &filter) { m_filter = filter; }
-   const SignalFilter& GetFilter() const { return m_filter; }
-   
-   void SetMinSignalInterval(int seconds) 
-   { 
-      m_minSignalIntervalSec = MathMax(1, seconds); 
-   }
-   
-   //--- Accessors
-   const SignalData& GetCurrentSignal() const { return m_currentSignal; }
-   const SignalStats& GetStats() const { return m_stats; }
-   
-   int GetSignalCount() const { return m_stats.totalSignals; }
-   
+
+   void              SetFilter(const SignalFilter &filter) { m_filter = filter; }
+   const SignalFilter& GetFilter()         const { return m_filter; }
+   void              SetMinSignalInterval(int s) { m_minSignalIntervalSec = MathMax(1, s); }
+
+   const SignalData&  GetCurrentSignal()   const { return m_currentSignal; }
+   const SignalStats& GetStats()           const { return m_stats; }
+   int                GetSignalCount()     const { return m_stats.totalSignals; }
+
    SignalData* GetSignalHistory(int index)
    {
-      if(index < 0 || index >= ArraySize(m_signalHistory))
-         return NULL;
+      if(index < 0 || index >= ArraySize(m_signalHistory)) return NULL;
       return &m_signalHistory[index];
    }
 };
