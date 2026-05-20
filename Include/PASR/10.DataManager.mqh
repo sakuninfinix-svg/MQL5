@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
-#property link "agsicentre.wordpress.com"
-#property version "2.00"
+#property link      "agsicentre.wordpress.com"
+#property version   "2.01"
 #property strict
 
 #ifndef __DATA_MANAGER_MQH__
@@ -247,9 +247,9 @@ interface IDataProvider
    bool CanOpenTrade(double additionalRiskAmount);
    double CalculateLotSize(string symbol, double riskPct, double slDistancePoints, double qualityMultiplier = 1.0);
    double NormalizeVolume(string symbol, double vol) const;
-   void GetConfigCache(StrategyConfig &cfg) const;  // Changed: pass by reference
-   ENUM_CACHE_STATE GetCacheState() const;  // New: Cache status accessor
-   string GetCacheError() const;             // New: Error details
+   void GetConfigCache(StrategyConfig &cfg) const;
+   ENUM_CACHE_STATE GetCacheState() const;  // Cache status accessor
+   string GetCacheError() const;            // Error details
 };
 
 //+------------------------------------------------------------------+
@@ -258,8 +258,8 @@ interface IDataProvider
 class DataManager : public IManager
 {
 private:
-   // Fix Multiple Inheritance: Gunakan Proxy class untuk mengimplementasikan IDataProvider.
-   // MQL5 tidak mendukung inheritance dari dua class sekaligus.
+   // FIX DM-BUG-3: CDataProviderProxy now fully implements IDataProvider interface,
+   // including GetCacheState() and GetCacheError() which were missing before.
    class CDataProviderProxy : public IDataProvider
    {
    private:
@@ -277,6 +277,9 @@ private:
       }
       virtual double NormalizeVolume(string symbol, double vol) const override { return m_mgr.NormalizeVolume(symbol, vol); }
       virtual void GetConfigCache(StrategyConfig &cfg) const override { m_mgr.GetConfigCache(cfg); }
+      // FIX DM-BUG-3: Previously missing — proxy now correctly forwards cache state
+      virtual ENUM_CACHE_STATE GetCacheState() const override { return m_mgr.GetCacheState(); }
+      virtual string GetCacheError() const override { return m_mgr.GetCacheError(); }
    };
 
    CDataProviderProxy *m_proxy;
@@ -318,6 +321,9 @@ private:
    datetime m_lastLossTime;
 
 public:
+   // FIX DM-BUG-1: Removed m_perfTracker.Initialize() from constructor body.
+   // At constructor time, m_symbol is still "" (set later by IManager::Init via SetSymbol).
+   // m_perfTracker is now initialized correctly inside Init() where m_symbol is available.
    DataManager() : IManager("DataManager", 10),
                    m_atrHandle(INVALID_HANDLE), m_fractalHandle(INVALID_HANDLE),
                    m_cfgInitialized(false),
@@ -339,9 +345,8 @@ public:
       ZeroMemory(m_scanCache);
       m_lastHistoryCount = -1;
       m_proxy = new CDataProviderProxy(GetPointer(this));
-      
-      // Initialize performance tracker
-      m_perfTracker.Initialize(CFG.magic, m_symbol);
+      // NOTE: m_perfTracker.Initialize() intentionally NOT called here.
+      // It is called in Init() after m_symbol is set by the framework.
    }
 
    ~DataManager()
@@ -379,7 +384,8 @@ public:
       m_data = this;
       InitConfigCache();  // Initialize config cache
       
-      // Initialize performance tracker with current config
+      // FIX DM-BUG-1: Initialize performance tracker here, after m_symbol is set
+      // and config cache is loaded — both values are guaranteed valid at this point.
       m_perfTracker.Initialize(m_cfgCache.magic, m_symbol);
       
       return ResetIndicators();
@@ -643,7 +649,10 @@ public:
 
    void RefreshDailyProfit()
    {
-      string gvName = "PASR_PROFIT_" + m_symbol + "_" + (string)m_cfgCache.magic;
+      // FIX DM-BUG-2: Prefix GV key with account login to prevent state corruption
+      // between live and demo accounts running the same magic number on the same terminal.
+      string gvName = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + 
+                      "_PASR_PROFIT_" + m_symbol + "_" + (string)m_cfgCache.magic;
       datetime times[];
       if (CopyTime(m_symbol, PERIOD_D1, 0, 1, times) <= 0)
          return;
