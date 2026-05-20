@@ -1,15 +1,15 @@
 //+------------------------------------------------------------------+
-//| Core/IManager.mqh — Canonical location (migrated from root)     |
-//| PASR Core: IManager base class                                   |
+//| AI/AIManager.mqh — Canonical location (from 7.)                 |
+//| PASR Layer 5: Neural network inference & training orchestration  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
 #property version   "1.00"
 #property strict
 
-#ifndef __CORE_IMANAGER_MQH__
-#define __CORE_IMANAGER_MQH__
+#ifndef __AI_AI_MANAGER_MQH__
+#define __AI_AI_MANAGER_MQH__
 
-#include "../IManager.mqh"
+#include "../7.AIManager.mqh"
 
-#endif // __CORE_IMANAGER_MQH__
+#endif // __AI_AI_MANAGER_MQH__

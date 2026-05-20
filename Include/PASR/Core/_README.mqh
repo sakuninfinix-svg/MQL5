@@ -1,32 +1,25 @@
 //+------------------------------------------------------------------+
-//| PASR LAYER 1 — CORE / FOUNDATION                                |
+//| PASR LAYER 0 — CORE                                             |
 //|                                                                  |
 //| PURPOSE:                                                         |
-//|   The lowest layer of the PASR framework. Defines the           |
-//|   fundamental building blocks that every other layer depends on. |
+//|   Foundation layer. No dependencies on any other PASR layer.    |
+//|   All other layers depend on Core, never the reverse.            |
 //|                                                                  |
 //| CONTENTS:                                                        |
-//|   IManager.mqh      — Abstract base class for all managers      |
-//|   EventBus.mqh      — Event bus engine & priority queue         |
-//|   Events.mqh        — All event struct/enum definitions         |
-//|   Config/Types.mqh  — StrategyConfig + all sub-structs          |
-//|   Config/Manager.mqh — Config validation, reload, distribution  |
+//|   EventBus.mqh     — CEventBus priority queue dispatcher        |
+//|   Events.mqh       — All IEvent subclass definitions             |
+//|   ConfigTypes.mqh  — StrategyConfig + all sub-structs            |
+//|   IManager.mqh     — Abstract base class for all managers        |
+//|   Globals.mqh      — Global singleton declarations               |
 //|                                                                  |
-//| DEPENDENCY RULES (STRICT):                                       |
-//|   ✅ MAY include   : other files within Core/ only              |
-//|   ❌ MUST NOT include: Infra/, Analysis/, Signal/, Trade/, UI/  |
+//| DEPENDENCY RULES:                                                |
+//|   ✅ MAY include   : <stdlib>, <Trade/Trade.mqh>                 |
+//|   ❌ MUST NOT include: any other PASR layer                      |
 //|                                                                  |
-//| RATIONALE:                                                       |
-//|   Core has zero knowledge of business logic. If a Core file     |
-//|   needs to reference a type from another layer, that is a       |
-//|   design smell — use forward declarations or interfaces instead. |
+//| MIGRATION STATUS:                                                |
+//|   Forwarding shims created for all 5 files.                      |
+//|   Legacy root files (0.EventBus, 1.Events, etc.) now deprecated. |
+//|   Remove legacy files in v3.0 after all consumers migrated.      |
 //+------------------------------------------------------------------+
 //
-// This file is a layer documentation stub.
-// It is never included by production code.
-// Migration status:
-//   [ ] IManager.mqh      — pending (source: ../IManager.mqh)
-//   [ ] EventBus.mqh      — pending (source: ../0.EventBus.mqh)
-//   [ ] Events.mqh        — pending (source: ../1.Events.mqh)
-//   [ ] Config/Types.mqh  — pending (source: ../2.Config.Types.mqh)
-//   [ ] Config/Manager.mqh — pending (source: ../2.Config.Manager.mqh)
+// This file is a layer documentation stub — never included.

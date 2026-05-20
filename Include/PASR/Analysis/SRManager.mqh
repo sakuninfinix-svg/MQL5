@@ -1,15 +1,15 @@
 //+------------------------------------------------------------------+
-//| Core/IManager.mqh — Canonical location (migrated from root)     |
-//| PASR Core: IManager base class                                   |
+//| Analysis/SRManager.mqh — Canonical location (from 4.)           |
+//| PASR Layer 3: Support/Resistance level detection & management    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
 #property version   "1.00"
 #property strict
 
-#ifndef __CORE_IMANAGER_MQH__
-#define __CORE_IMANAGER_MQH__
+#ifndef __ANALYSIS_SR_MANAGER_MQH__
+#define __ANALYSIS_SR_MANAGER_MQH__
 
-#include "../IManager.mqh"
+#include "../4.SRManager.mqh"
 
-#endif // __CORE_IMANAGER_MQH__
+#endif // __ANALYSIS_SR_MANAGER_MQH__

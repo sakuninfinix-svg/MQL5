@@ -1,28 +1,18 @@
 //+------------------------------------------------------------------+
-//| PASR LAYER 6 — USER INTERFACE / PRESENTATION                    |
+//| PASR LAYER 7 — UI                                               |
 //|                                                                  |
 //| PURPOSE:                                                         |
-//|   Chart dashboard rendering: equity curve, open positions,     |
-//|   signal status, regime indicator, AI confidence score.        |
+//|   Presentation layer. Chart objects, dashboard panels,           |
+//|   on-screen diagnostics. Zero trading logic.                     |
 //|                                                                  |
 //| CONTENTS:                                                        |
-//|   DashboardManager.mqh — Comment-based dashboard, throttled    |
-//|                           to 1 Hz via m_lastRenderUs guard.    |
+//|   DashboardManager.mqh — On-chart status panel                  |
 //|                                                                  |
-//| DEPENDENCY RULES (STRICT):                                       |
-//|   ✅ MAY include   : Core/, Infra/ (read-only)                  |
-//|   ✅ MAY read      : Analysis/, Signal/, Trade/ via pointers    |
-//|   ❌ MUST NOT write to: any other layer's state                 |
-//|   ❌ MUST NOT include: Trade/ or Signal/ headers directly       |
-//|      (use extern pointers + forward declarations instead)       |
-//|                                                                  |
-//| PERFORMANCE RULE:                                               |
-//|   Dashboard MUST be throttled. String building is expensive.   |
-//|   Maximum render frequency: 1 Hz (1000ms between renders).     |
-//|   Use m_dirtyFlag to skip render when no data has changed.     |
-//|   NEVER concatenate strings inside OnTick() directly.          |
+//| DEPENDENCY RULES:                                                |
+//|   ✅ MAY include   : Core/ (read-only: config + events)          |
+//|   ❌ MUST NOT include: Infra/, Analysis/, Signal/, Trade/, AI/   |
+//|   ℹ️ Dashboard reads state via events only — no direct manager   |
+//|      pointer access. Decoupled by design.                        |
 //+------------------------------------------------------------------+
 //
-// Migration status:
-//   [✅] DashboardManager.mqh — DONE (source: ../11.DashboardManager.mqh)
-//        Already refactored with 1Hz throttle + dirty flag.
+// This file is a layer documentation stub — never included.

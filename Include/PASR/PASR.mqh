@@ -1,135 +1,65 @@
 //+------------------------------------------------------------------+
-//|                                                       PASR.mqh   |
-//|                                       Copyright 2026, Agsicentre |
-//|              MASTER INCLUDE — PASR EA Framework v2.00            |
-//|                                                                   |
-//| USAGE: #include <PASR/PASR.mqh>  (satu baris, semua tersedia)   |
-//|                                                                   |
-//| LAYER ARCHITECTURE (dependency order — jangan diubah urutannya): |
-//|                                                                   |
-//|  L0  Tools/Optimizations   ← macros, CStringPool, cache align   |
-//|  L1  Core/Config/Types     ← plain structs (zero deps)          |
-//|  L2  Core/EventBus         ← Event, IEventHandler, EventBus     |
-//|  L3  Core/Events           ← concrete event classes             |
-//|  L4  Core/IManager         ← base class semua manager           |
-//|  L5  Globals               ← global singletons & helpers        |
-//|  L6  Data/DataManager      ← indicator cache, symbol data       |
-//|  L7  Core/Config/Manager   ← config loading & validation        |
-//|  L8  Data/MarketRegime     ← regime detection                   |
-//|  L9  Data/ZoneManager      ← S/D zones                         |
-//|  L10 Data/MarketManager    ← market conditions                  |
-//|  L11 Data/SRManager        ← support/resistance                 |
-//|  L12 Analysis/PatternMgr   ← pattern recognition               |
-//|  L13 Signal/SignalManager  ← signal generation                  |
-//|  L14 AI/AIManager          ← ML orchestration (optional)        |
-//|  L15 Trade/ExecutionMgr    ← order execution                    |
-//|  L16 Trade/RecoveryMgr     ← error recovery                     |
-//|  L17 UI/DashboardManager   ← dashboard (depends on all above)  |
-//|                                                                   |
-//| MIGRATION STATUS:                                               |
-//|  [x] L0   Tools/Optimizations.mqh                              |
-//|  [x] L1   Core/Config/Types.mqh                                |
-//|  [x] L2   Core/EventBus.mqh                                    |
-//|  [x] L3   Core/Events.mqh                                      |
-//|  [x] L4   Core/IManager.mqh                                    |
-//|  [x] L5   Globals.mqh                                          |
-//|  [x] L6   Data/DataManager.mqh                                 |
-//|  [x] L7   Core/Config/Manager.mqh                              |
-//|  [x] L8   Data/MarketRegime.mqh                                |
-//|  [x] L9   Data/ZoneManager.mqh                                 |
-//|  [x] L10  Data/MarketManager.mqh                               |
-//|  [x] L11  Data/SRManager.mqh                                   |
-//|  [x] L12  Analysis/PatternManager.mqh                          |
-//|  [x] L13  Signal/SignalManager.mqh                             |
-//|  [x] L14  AI/AIManager.mqh (if exists)                         |
-//|  [x] L15  Trade/ExecutionManager.mqh                           |
-//|  [x] L16  Trade/RecoveryManager.mqh                            |
-//|  [x] L17  UI/DashboardManager.mqh                              |
-//|                                                                   |
-//| NOTE: Semua file lama (0.EventBus.mqh, 10.DataManager.mqh, dst) |
-//| masih ada sebagai backward-compat shims. EA lama tetap compile. |
+//|                                                     PASR.mqh     |
+//|                             Copyright 2026, Agsicentre           |
+//|                       agsicentre.wordpress.com                   |
+//|                                                                  |
+//| PASR MASTER INCLUDE — single entry point for EA files            |
+//|                                                                  |
+//| Usage in Expert Advisor:                                         |
+//|   #include <PASR/PASR.mqh>                                       |
+//|                                                                  |
+//| Include order guarantees correct dependency resolution.          |
+//| Do NOT include individual PASR files directly in EA code;        |
+//| always use this master include.                                  |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.00"
+#property version   "2.05"
 #property strict
 
 #ifndef __PASR_MQH__
 #define __PASR_MQH__
 
-// =================================================================
-// L0: Performance macros & string pool
-// =================================================================
-#include "Tools/Optimizations.mqh"
+// ── Layer 0: Core ─────────────────────────────────────────────────
+// Zero external PASR dependencies. Must be first.
+#include "Core/EventBus.mqh"      // CEventBus, IEvent
+#include "Core/Events.mqh"        // All event type definitions
+#include "Core/ConfigTypes.mqh"   // StrategyConfig + sub-structs
+#include "Core/IManager.mqh"      // IManager base class
+#include "Core/Globals.mqh"       // Global singleton declarations
 
-// =================================================================
-// L1: Config types — plain structs, zero dependencies
-// =================================================================
-#include "Core/Config/Types.mqh"
+// ── Layer 2: Infra ────────────────────────────────────────────────
+// Broker API wrappers. Depends on Core only.
+#include "Infra/ConfigManager.mqh" // Config load, validate, hot-reload
+#include "Infra/DataManager.mqh"   // ATR, rates, volume, spread
 
-// =================================================================
-// L2: Event bus — Event base, IEventHandler, EventBus singleton
-// =================================================================
-#include "Core/EventBus.mqh"
+// ── Layer 3: Analysis ─────────────────────────────────────────────
+// Market analysis. Depends on Core + Infra.
+#include "Analysis/MarketManager.mqh"  // Session, spread, trading hours
+#include "Analysis/ZoneManager.mqh"    // Supply/demand zones
+#include "Analysis/SRManager.mqh"      // S/R levels
+#include "Analysis/MarketRegime.mqh"   // Trend/range/chop classification
 
-// =================================================================
-// L3: Concrete event classes
-// =================================================================
-#include "Core/Events.mqh"
+// ── Layer 3b: Pattern ─────────────────────────────────────────────
+// Candlestick pattern analysis. Depends on Core + Infra.
+#include "Pattern/PatternManager.mqh"  // Fakeout detection, pattern eval
 
-// =================================================================
-// L4: IManager base class
-// =================================================================
-#include "Core/IManager.mqh"
+// ── Layer 5a: AI ──────────────────────────────────────────────────
+// Neural network inference. Depends on Core + Infra + Analysis.
+#include "AI/AIManager.mqh"            // NN inference + training dispatch
 
-// =================================================================
-// L5: Global utilities & singleton registry
-// =================================================================
-#include "Globals.mqh"
+// ── Layer 4: Signal ───────────────────────────────────────────────
+// Signal generation. Depends on Core + Infra + Analysis + AI.
+#include "Signal/SignalManager.mqh"    // Entry/exit signal generation
 
-// =================================================================
-// L6: Data layer — indicator cache & symbol data
-// =================================================================
-#include "Data/DataManager.mqh"
+// ── Layer 6: Trade ────────────────────────────────────────────────
+// Order execution + recovery. Depends on Core + Infra + Signal.
+#include "Trade/ExecutionManager.mqh" // Order placement, sizing, retry
+#include "Trade/RecoveryManager.mqh"  // Position recovery, trailing, partial
 
-// =================================================================
-// L7: Config manager — loads & validates StrategyConfig
-// =================================================================
-#include "Core/Config/Manager.mqh"
-
-// =================================================================
-// L8-L11: Market data sub-managers
-// =================================================================
-#include "Data/MarketRegime.mqh"
-#include "Data/ZoneManager.mqh"
-#include "Data/MarketManager.mqh"
-#include "Data/SRManager.mqh"
-
-// =================================================================
-// L12: Analysis layer
-// =================================================================
-#include "Analysis/PatternManager.mqh"
-
-// =================================================================
-// L13: Signal generation
-// =================================================================
-#include "Signal/SignalManager.mqh"
-
-// =================================================================
-// L14: AI/ML orchestration (optional — comment out to disable)
-// =================================================================
-#include "AI/AIManager.mqh"
-
-// =================================================================
-// L15-L16: Execution layer
-// =================================================================
-#include "Trade/ExecutionManager.mqh"
-#include "Trade/RecoveryManager.mqh"
-
-// =================================================================
-// L17: UI — depends on all layers above
-// =================================================================
-#include "UI/DashboardManager.mqh"
+// ── Layer 7: UI ───────────────────────────────────────────────────
+// Presentation only. Depends on Core events (read-only).
+#include "UI/DashboardManager.mqh"     // On-chart status panel
 
 #endif // __PASR_MQH__
