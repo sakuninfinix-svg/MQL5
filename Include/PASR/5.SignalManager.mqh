@@ -2,33 +2,44 @@
 //|                                                SignalManager.mqh |
 //|                                       Copyright 2026, Agsicentre |
 //|     Advanced Signal Scoring & Context-Aware Filtering Module     |
-//|                    Version 2.01 - Audit Patch 2026-05-20        |
+//|                    Version 2.02 - Audit Patch 2026-05-20        |
 //+------------------------------------------------------------------+
-//| v2.01 FIXES:                                                     |
-//| - CRITICAL #8:  iATR() returns handle not value. Fixed: use     |
-//|   cached ATR handle + CopyBuffer for avgATR calculation.        |
-//| - CRITICAL #9:  GetPriceVsMA() always wrote to m_maH1_Buffer.   |
-//|   Fixed: pass dedicated buffer per TF to avoid H4 overwriting   |
-//|   H1 data when called sequentially.                             |
-//| - CRITICAL #10: CalculateRegimeScore() duplicated regime logic  |
-//|   via linear regression instead of using g_regimeFilter.        |
-//|   Fixed: reads g_regimeFilter.GetResult() as single source.     |
-//| - HIGH #11:    Evaluate() had no bar-time cache guard. Multiple  |
-//|   callers per bar triggered full recalculation each time.       |
-//|   Fixed: cache result keyed on last closed bar time.            |
-//| - HIGH #12:    DetectRecoverySignal used FetchCandleBatch(0,...) |
-//|   = forming bar. Fixed: shift 1 for confirmed bar.              |
-//| - HIGH #13:    ProcessSignalOnNewBar hardcoded signalPrice=supp  |
-//|   and patternType=ENGULFING. Fixed: use values from Evaluate(). |
-//| - MEDIUM #14:  m_avgSpread not declared in this class -> compile |
-//|   error. Fixed: compute inline from recent spread samples.      |
+//| v2.01 FIXES (previous):                                          |
+//| - CRITICAL #8:  iATR() returns handle not value.                 |
+//| - CRITICAL #9:  GetPriceVsMA() always wrote to m_maH1_Buffer.    |
+//| - CRITICAL #10: CalculateRegimeScore() duplicated regime logic.  |
+//| - HIGH #11:    Evaluate() had no bar-time cache guard.           |
+//| - HIGH #12:    DetectRecoverySignal used FetchCandleBatch(0,...). |
+//| - HIGH #13:    ProcessSignalOnNewBar hardcoded signalPrice/type.  |
+//| - MEDIUM #14:  m_avgSpread not declared in this class.           |
 //| - MEDIUM #15:  IsSignalStable incremented per tick not per bar.  |
-//|   Fixed: anchor stability counter to bar time.                  |
+//+------------------------------------------------------------------+
+//| v2.02 FIXES (this patch):                                        |
+//| - SM-BUG-1 [CRITICAL]: CalculateDynamicThreshold spread average  |
+//|   is a fake loop (same value x20). Fixed: rolling ring buffer.   |
+//| - SM-BUG-2 [CRITICAL]: CalculatePatternScore passes hardcoded    |
+//|   75.0 for rawScore — ignores actual pScore from PatternManager. |
+//|   Fixed: pass decision.rawScore through SignalDecision struct.   |
+//| - SM-BUG-3 [HIGH]: PassOpportunityFilter R:R check uses 1.0      |
+//|   multiplier (profitDist < riskDist*1.0) — identical to break-   |
+//|   even, never actually enforces minimum R:R from config.         |
+//|   Fixed: use cfg.min_rr_ratio.                                   |
+//| - SM-BUG-4 [HIGH]: IsZoneReuseBlocked is declared but NEVER      |
+//|   called inside DetectSignalCore. Zone reuse filter is dead code. |
+//|   Fixed: call before PassZoneTouchFilter.                        |
+//| - SM-BUG-5 [MEDIUM]: m_handleATR_ForAvg created inside           |
+//|   Evaluate() body (lazy init without guard for failed handle).   |
+//|   If iATR fails once, it retries every bar. Fixed: moved to      |
+//|   InitializeMTFHandles() with proper fail flag.                  |
+//| - SM-BUG-6 [MEDIUM]: IsSignalStable resets count when type       |
+//|   changes to SIGNAL_NONE mid-bar but doesn't clear cache.        |
+//|   Stale m_lastValidSignal returned via GetLastSignalResult().    |
+//|   Fixed: invalidate m_lastValidSignal on type reset.             |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.01"
+#property version   "2.02"
 #property strict
 
 #ifndef __SIGNAL_MANAGER_MQH__
@@ -113,6 +124,25 @@ struct SignalResult
 };
 
 //+------------------------------------------------------------------+
+//| STRUCT: Signal Decision (extended with rawScore for scoring)     |
+//+------------------------------------------------------------------+
+// [SM-BUG-2] Added rawScore field so CalculatePatternScore receives
+// actual PatternManager score instead of hardcoded 75.0
+struct SignalDecision
+{
+   bool             valid;
+   ENUM_ORDER_TYPE  orderType;
+   double           signalPrice;
+   double           zonePrice;
+   ENUM_PATTERN_TYPE patternType;
+   double           rawScore;      // [SM-BUG-2] actual pScore from PatternManager
+   int              signalShift;
+   double           slMultiplier;
+   int              bias;
+   string           reason;
+};
+
+//+------------------------------------------------------------------+
 //| CLASS: SignalManager                                             |
 //+------------------------------------------------------------------+
 class SignalManager : public IManager
@@ -150,7 +180,6 @@ private:
    int              m_signalStabilityCount;
    int              m_requiredStabilityTicks;
    SignalResult     m_lastValidSignal;
-   // [v2.01 FIX #15] anchor stability to bar time, not tick count
    datetime         m_lastStabilityBarTime;
 
    // --- Dynamic threshold ---
@@ -158,17 +187,23 @@ private:
    double   m_baseThreshold;
    datetime m_lastThresholdUpdate;
 
+   // [SM-BUG-1] Rolling ring buffer for real spread average (size 20)
+   double   m_spreadRing[20];
+   int      m_spreadRingIdx;
+   bool     m_spreadRingFull;
+
    // --- MTF handles ---
    int    m_handleMA_H1;
    int    m_handleMA_H4;
-   double m_maH1_Buffer[]; // [v2.01 FIX #9] dedicated buffer for H1
-   double m_maH4_Buffer[]; // [v2.01 FIX #9] dedicated buffer for H4
+   double m_maH1_Buffer[];
+   double m_maH4_Buffer[];
    bool   m_mtfHandlesInitialized;
 
-   // [v2.01 FIX #8] cached ATR handle for avgATR calculation
+   // [SM-BUG-5] ATR handle initialised once in InitializeMTFHandles
    int    m_handleATR_ForAvg;
+   bool   m_atrHandleFailed;   // guard: stop retrying if iATR() fails
 
-   // [v2.01 FIX #11] Evaluate() result cache
+   // Evaluate() result cache
    SignalResult m_cachedEvalResult;
    datetime     m_lastEvalBarTime;
 
@@ -182,6 +217,24 @@ private:
    {
       ArraySetAsSeries(outRates, true);
       return (CopyRates(m_symbol, m_period, shiftStart, count, outRates) > 0);
+   }
+
+   // [SM-BUG-1] Update rolling spread ring buffer — call once per threshold update
+   void UpdateSpreadRing()
+   {
+      double sp = (double)SymbolInfoInteger(m_symbol, SYMBOL_SPREAD) * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      m_spreadRing[m_spreadRingIdx] = sp;
+      m_spreadRingIdx = (m_spreadRingIdx + 1) % 20;
+      if(m_spreadRingIdx == 0) m_spreadRingFull = true;
+   }
+
+   double GetAvgSpread()
+   {
+      int  n   = m_spreadRingFull ? 20 : m_spreadRingIdx;
+      if(n == 0) return 0.0;
+      double s = 0;
+      for(int i = 0; i < n; i++) s += m_spreadRing[i];
+      return s / (double)n;
    }
 
    bool IsZoneReuseBlocked(bool isBuy, double zonePrice, double atrPoints)
@@ -282,7 +335,7 @@ private:
    }
 
    // ----------------------------------------------------------------
-   // MTF MA Handles
+   // MTF MA Handles + ATR handle (SM-BUG-5: init ATR here, not in Evaluate)
    // ----------------------------------------------------------------
    bool InitializeMTFHandles()
    {
@@ -297,6 +350,15 @@ private:
       }
       ArraySetAsSeries(m_maH1_Buffer, true);
       ArraySetAsSeries(m_maH4_Buffer, true);
+
+      // [SM-BUG-5] Init ATR handle once here; set fail flag to skip retry
+      if(!m_atrHandleFailed && m_handleATR_ForAvg == INVALID_HANDLE)
+      {
+         m_handleATR_ForAvg = iATR(m_symbol, m_period, 14);
+         if(m_handleATR_ForAvg == INVALID_HANDLE)
+            m_atrHandleFailed = true;
+      }
+
       m_mtfHandlesInitialized = true;
       return true;
    }
@@ -305,12 +367,11 @@ private:
    {
       if(m_handleMA_H1 != INVALID_HANDLE) { IndicatorRelease(m_handleMA_H1); m_handleMA_H1 = INVALID_HANDLE; }
       if(m_handleMA_H4 != INVALID_HANDLE) { IndicatorRelease(m_handleMA_H4); m_handleMA_H4 = INVALID_HANDLE; }
+      if(m_handleATR_ForAvg != INVALID_HANDLE) { IndicatorRelease(m_handleATR_ForAvg); m_handleATR_ForAvg = INVALID_HANDLE; }
       m_mtfHandlesInitialized = false;
+      m_atrHandleFailed       = false;
    }
 
-   // [v2.01 FIX #9] Each TF gets its OWN buffer parameter
-   // Old: always wrote to m_maH1_Buffer regardless of TF
-   // New: caller passes the correct buffer by reference
    int GetPriceVsMA(int handle, double &maValue, double &buffer[])
    {
       if(handle == INVALID_HANDLE) return 0;
@@ -329,7 +390,6 @@ private:
    {
       if(!InitializeMTFHandles()) return 0.5;
       double maH1 = 0, maH4 = 0;
-      // [v2.01 FIX #9] pass dedicated buffers
       int h1Pos = GetPriceVsMA(m_handleMA_H1, maH1, m_maH1_Buffer);
       int h4Pos = GetPriceVsMA(m_handleMA_H4, maH4, m_maH4_Buffer);
       int align = 0;
@@ -350,9 +410,11 @@ private:
       return 0.0;
    }
 
-   double CalculatePatternScore(ENUM_PATTERN_TYPE patternType, double patternRawScore)
+   // [SM-BUG-2] rawScore parameter now receives actual pScore from PatternManager
+   // Old: hardcoded 75.0 → every pattern scored identically regardless of quality
+   double CalculatePatternScore(ENUM_PATTERN_TYPE patternType, double rawScore)
    {
-      double norm = MathMin(1.0, MathMax(0.0, patternRawScore / 100.0));
+      double norm = MathMin(1.0, MathMax(0.0, rawScore / 100.0));
       double bonus = 0.0;
       switch(patternType)
       {
@@ -365,30 +427,20 @@ private:
       return MathMin(1.0, norm + bonus);
    }
 
-   // [v2.01 FIX #10] CalculateRegimeScore: use g_regimeFilter as single truth
-   // Old: duplicated linear-regression regime detection → inconsistent with lot sizing
-   // New: reads RegimeResult from g_regimeFilter; fallback to neutral if unavailable
    double CalculateRegimeScore(ENUM_SIGNAL_TYPE signalType)
    {
       if(CheckPointer(g_regimeFilter) != POINTER_INVALID)
       {
          const RegimeResult& r = g_regimeFilter.GetResult();
-         // During transition or choppy: penalise regardless of direction
          if(r.isTransition)            return 0.15;
          if(r.regime == REGIME_CHOPPY_HIGH_VOL) return 0.20;
-
-         double base = r.regimeScore;  // Already 0.0-1.0 from MarketRegimeFilter
-
-         // Directional penalty: if regime trend contradicts signal, reduce score
+         double base = r.regimeScore;
          if(signalType == SIGNAL_BUY  && r.regime == REGIME_TRENDING_STRONG && r.trendStrength < 0)
             return base * 0.5;
          if(signalType == SIGNAL_SELL && r.regime == REGIME_TRENDING_STRONG && r.trendStrength > 0)
             return base * 0.5;
-
          return base;
       }
-
-      // Fallback: g_regimeFilter not available — neutral
       return 0.5;
    }
 
@@ -504,6 +556,7 @@ private:
       return false;
    }
 
+   // [SM-BUG-3] Use cfg.min_rr_ratio instead of hardcoded 1.0
    bool PassOpportunityFilter(int dir, int shift, double atrPoints,
                               double support, double resistance,
                               double patternExtreme, string &reason,
@@ -521,9 +574,14 @@ private:
       double projSL     = (dir == 1) ? baseSL - slBuffer : baseSL + slBuffer;
       double riskDist   = MathMax(MathAbs(entryPrice - projSL), point);
       double minTPDist  = cfg.min_tp_distance_atr * atrPoints * point;
-      if(profitDist < minTPDist)              { reason = "TP distance < Min ATR"; return false; }
-      if(profitDist < riskDist * 1.0)
-      { reason = StringFormat("Poor R:R (Risk:%.1fpt TP:%.1fpt)", riskDist/point, profitDist/point); return false; }
+      if(profitDist < minTPDist)
+      { reason = "TP distance < Min ATR"; return false; }
+      // [SM-BUG-3] was: profitDist < riskDist * 1.0 (always break-even, never real R:R check)
+      double minRR = (cfg.min_rr_ratio > 0) ? cfg.min_rr_ratio : 1.5;
+      if(profitDist < riskDist * minRR)
+      { reason = StringFormat("Poor R:R %.1f (need %.1f) Risk:%.1fpt TP:%.1fpt",
+                              profitDist/riskDist, minRR, riskDist/point, profitDist/point);
+        return false; }
       return true;
    }
 
@@ -563,6 +621,11 @@ private:
          if((dir == 1 && isSupBroken) || (dir == -1 && isResBroken))
          { reason = "Zone broken"; continue; }
 
+         // [SM-BUG-4] IsZoneReuseBlocked was declared but never called — dead filter
+         // Fixed: check before zone touch filter
+         if(IsZoneReuseBlocked(dir == 1, zonePrice, atrPoints))
+         { reason = "Zone reuse blocked (same bar)"; continue; }
+
          int zoneStrength = (dir == 1) ? m_marketData.supStrength : m_marketData.resStrength;
          if(!PassZoneTouchFilter(shift, dir, zonePrice, atrPoints, currentBufMult, fr, rates, zoneStrength))
          { reason = fr; continue; }
@@ -589,15 +652,16 @@ private:
          if(IsSignalCooldownActiveWithCustomBars(signalPrice, atrPoints, effCooldown))
          { reason = "Signal cooldown active"; continue; }
 
-         decision.valid       = true;
-         decision.orderType   = ot;
-         decision.signalPrice = signalPrice;  // actual pattern price
-         decision.patternType = pType;        // actual pattern type
-         decision.zonePrice   = zonePrice;
-         decision.signalShift = shift;
-         decision.slMultiplier= pSLMult;
-         decision.bias        = bias;
-         decision.reason      = pReason + (fr != "" ? " | " + fr : "");
+         decision.valid        = true;
+         decision.orderType    = ot;
+         decision.signalPrice  = signalPrice;
+         decision.patternType  = pType;
+         decision.rawScore     = pScore;   // [SM-BUG-2] store actual score
+         decision.zonePrice    = zonePrice;
+         decision.signalShift  = shift;
+         decision.slMultiplier = pSLMult;
+         decision.bias         = bias;
+         decision.reason       = pReason + (fr != "" ? " | " + fr : "");
 
          RegisterZoneUse(dir == 1, zonePrice);
          return true;
@@ -606,7 +670,6 @@ private:
       return false;
    }
 
-   // [v2.01 FIX #12] Changed FetchCandleBatch(0,...) -> (1,...) for confirmed bar
    bool DetectRecoverySignal(SignalDecision &decision,
                              ulong originalTicket,
                              double slHitPrice,
@@ -623,7 +686,6 @@ private:
       if(!cfg.recovery_use) return false;
 
       MqlRates rates[];
-      // [v2.01 FIX #12] shift 1 = last CLOSED bar, prevents repainting
       if(!FetchCandleBatch(1, 6, rates))
       { decision.reason = "Failed to fetch candle data for recovery"; return false; }
 
@@ -641,13 +703,14 @@ private:
       double tol = atrPoints * cfg.recovery_zone_tolerance_atr * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       if(MathAbs(signalPrice - slHitPrice) > tol) return false;
 
-      decision.valid       = true;
-      decision.orderType   = (targetDir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-      decision.signalPrice = signalPrice;
-      decision.patternType = pType;
-      decision.slMultiplier= pSLMult;
-      decision.bias        = targetDir;
-      decision.reason      = "RECOVERY SIGNAL: " + pReason;
+      decision.valid        = true;
+      decision.orderType    = (targetDir == 1) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+      decision.signalPrice  = signalPrice;
+      decision.patternType  = pType;
+      decision.rawScore     = pScore;
+      decision.slMultiplier = pSLMult;
+      decision.bias         = targetDir;
+      decision.reason       = "RECOVERY SIGNAL: " + pReason;
       return true;
    }
 
@@ -663,12 +726,17 @@ public:
       m_dynamicThreshold  = 0.65;
       m_baseThreshold     = 0.65;
       m_lastThresholdUpdate    = 0;
-      m_lastStabilityBarTime   = 0;    // [v2.01 FIX #15]
+      m_lastStabilityBarTime   = 0;
       m_mtfHandlesInitialized  = false;
       m_handleMA_H1       = INVALID_HANDLE;
       m_handleMA_H4       = INVALID_HANDLE;
-      m_handleATR_ForAvg  = INVALID_HANDLE;  // [v2.01 FIX #8]
-      m_lastEvalBarTime   = 0;               // [v2.01 FIX #11]
+      m_handleATR_ForAvg  = INVALID_HANDLE;
+      m_atrHandleFailed   = false;           // [SM-BUG-5]
+      m_lastEvalBarTime   = 0;
+      // [SM-BUG-1] init spread ring buffer
+      ArrayInitialize(m_spreadRing, 0.0);
+      m_spreadRingIdx  = 0;
+      m_spreadRingFull = false;
       ArraySetAsSeries(m_maH1_Buffer, true);
       ArraySetAsSeries(m_maH4_Buffer, true);
    }
@@ -678,9 +746,6 @@ public:
       ArrayFree(m_failedZones);
       ArrayFree(m_signalCooldowns);
       ReleaseMTFHandles();
-      // [v2.01 FIX #8] release ATR handle
-      if(m_handleATR_ForAvg != INVALID_HANDLE)
-      { IndicatorRelease(m_handleATR_ForAvg); m_handleATR_ForAvg = INVALID_HANDLE; }
       IManager::Deinit();
    }
 
@@ -759,8 +824,8 @@ public:
    void NotifyPatternFailure(double zonePrice) { RegisterFailure(zonePrice); }
 
    // ----------------------------------------------------------------
-   // Dynamic Threshold (Feature #2)
-   // [v2.01 FIX #14] m_avgSpread replaced with inline rolling average
+   // Dynamic Threshold
+   // [SM-BUG-1] Use real rolling spread average via ring buffer
    // ----------------------------------------------------------------
    double CalculateDynamicThreshold()
    {
@@ -769,17 +834,11 @@ public:
          return m_dynamicThreshold;
       m_lastThresholdUpdate = now;
 
-      double threshold = m_baseThreshold;
+      UpdateSpreadRing();  // [SM-BUG-1] push real current spread into ring
+      double threshold     = m_baseThreshold;
+      double currentSpread = (double)SymbolInfoInteger(m_symbol, SYMBOL_SPREAD) * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      double avgSpread     = GetAvgSpread();  // [SM-BUG-1] real rolling average
 
-      // [v2.01 FIX #14] Compute spread inline; m_avgSpread not a member of this class
-      double currentSpread = SymbolInfoInteger(m_symbol, SYMBOL_SPREAD) * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
-      double spreadArr[20];
-      double spreadSum = 0;
-      // Approximate average spread from 20 recent readings
-      for(int s = 0; s < 20; s++) spreadSum += currentSpread; // simplified; replace with rolling if IManager exposes it
-      double avgSpread = spreadSum / 20.0;
-
-      // Regime-based adjustment: use g_regimeFilter if available
       if(CheckPointer(g_regimeFilter) != POINTER_INVALID)
       {
          const RegimeResult& r = g_regimeFilter.GetResult();
@@ -800,7 +859,7 @@ public:
       return m_dynamicThreshold;
    }
 
-   // [v2.01 FIX #15] IsSignalStable: anchor to bar time, not tick count
+   // [SM-BUG-6] On type reset to SIGNAL_NONE, invalidate m_lastValidSignal
    bool IsSignalStable(ENUM_SIGNAL_TYPE currentType)
    {
       if(currentType != m_lastSignalType)
@@ -808,6 +867,9 @@ public:
          m_signalStabilityCount = 1;
          m_lastSignalType       = currentType;
          m_lastStabilityBarTime = iTime(m_symbol, m_period, 1);
+         // [SM-BUG-6] Invalidate stale cached signal when direction flips
+         if(currentType == SIGNAL_NONE)
+            ZeroMemory(m_lastValidSignal);
          return false;
       }
       if(currentType != SIGNAL_NONE)
@@ -852,13 +914,10 @@ public:
    }
 
    // ----------------------------------------------------------------
-   // [v2.01 FIX #11] Evaluate() — bar-level cache to prevent re-compute
-   // [v2.01 FIX #8]  avgATR from valid CopyBuffer, not iATR() return value
-   // [v2.01 FIX #13] detectedSignalPrice/Pattern stored in result
+   // Evaluate() — bar-level cache + real pattern score
    // ----------------------------------------------------------------
    SignalResult Evaluate()
    {
-      // [v2.01 FIX #11] Return cached result if same bar
       datetime barTime = iTime(m_symbol, m_period, 1);
       if(barTime == m_lastEvalBarTime && m_lastEvalBarTime != 0)
          return m_cachedEvalResult;
@@ -893,19 +952,17 @@ public:
       }
 
       result.type = (decision.orderType == ORDER_TYPE_BUY) ? SIGNAL_BUY : SIGNAL_SELL;
-      // [v2.01 FIX #13] Store actual detected values
       result.detectedPattern    = decision.patternType;
       result.detectedSignalPrice= decision.signalPrice;
 
-      result.patternScore    = CalculatePatternScore(decision.patternType, 75.0);
+      // [SM-BUG-2] pass decision.rawScore — actual score from PatternManager
+      result.patternScore    = CalculatePatternScore(decision.patternType, decision.rawScore);
       result.regimeScore     = CalculateRegimeScore(result.type);
 
-      // [v2.01 FIX #8] avgATR via CopyBuffer with cached handle
+      // avgATR via cached handle (SM-BUG-5: handle already initialised in InitializeMTFHandles)
       double currentATR = atrPoints * SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       double avgATR     = currentATR;
-      if(m_handleATR_ForAvg == INVALID_HANDLE)
-         m_handleATR_ForAvg = iATR(m_symbol, m_period, 14);
-      if(m_handleATR_ForAvg != INVALID_HANDLE)
+      if(!m_atrHandleFailed && m_handleATR_ForAvg != INVALID_HANDLE)
       {
          double atrBuf[50];
          if(CopyBuffer(m_handleATR_ForAvg, 0, 1, 50, atrBuf) == 50)
@@ -918,13 +975,13 @@ public:
       result.newsScore       = CalculateNewsScore();
       result.mtfScore        = CalculateMTFScore(result.type);
 
-      result.score = result.patternScore   * 0.40
-                   + result.regimeScore    * 0.20
-                   + result.volatilityScore* 0.15
-                   + result.newsScore      * 0.15
-                   + result.mtfScore       * 0.10;
+      result.score = result.patternScore    * 0.40
+                   + result.regimeScore     * 0.20
+                   + result.volatilityScore * 0.15
+                   + result.newsScore       * 0.15
+                   + result.mtfScore        * 0.10;
 
-      if(result.score >= 0.85)     result.confidence = CONFIDENCE_VERY_HIGH;
+      if(result.score >= 0.85)      result.confidence = CONFIDENCE_VERY_HIGH;
       else if(result.score >= 0.70) result.confidence = CONFIDENCE_HIGH;
       else if(result.score >= 0.50) result.confidence = CONFIDENCE_MEDIUM;
       else                          result.confidence = CONFIDENCE_LOW;
@@ -945,9 +1002,9 @@ public:
          regime = g_regimeFilter.GetResult().regime;
       else
       {
-         if(result.regimeScore >= 0.75)       regime = REGIME_TRENDING_STRONG;
-         else if(result.regimeScore >= 0.5)   regime = REGIME_RANGING_SIDEWAYS;
-         else                                  regime = REGIME_CHOPPY_HIGH_VOL;
+         if(result.regimeScore >= 0.75)     regime = REGIME_TRENDING_STRONG;
+         else if(result.regimeScore >= 0.5) regime = REGIME_RANGING_SIDEWAYS;
+         else                               regime = REGIME_CHOPPY_HIGH_VOL;
       }
 
       int mtfAlign = (result.mtfScore >= 0.75) ? 2 : (result.mtfScore >= 0.5) ? 0 : -1;
@@ -968,7 +1025,6 @@ public:
    const SignalResult& GetLastSignalResult() const { return m_lastValidSignal; }
 
 private:
-   // [v2.01 FIX #13] Use actual signalPrice/patternType from Evaluate() result
    void ProcessSignalOnNewBar(NewBarEvent *e)
    {
       double atrPoints = m_marketData.atrPoints;
@@ -981,12 +1037,10 @@ private:
       ZeroMemory(decision);
       decision.valid       = true;
       decision.orderType   = (result.type == SIGNAL_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-      // [v2.01 FIX #13] use actual detected price, not hardcoded support
       decision.signalPrice = (result.detectedSignalPrice > 0)
                              ? result.detectedSignalPrice
                              : ((result.type == SIGNAL_BUY) ? m_marketData.support : m_marketData.resistance);
       decision.zonePrice   = (result.type == SIGNAL_BUY) ? m_marketData.support : m_marketData.resistance;
-      // [v2.01 FIX #13] use actual detected pattern, not hardcoded ENGULFING
       decision.patternType = (result.detectedPattern != PATTERN_NONE) ? result.detectedPattern : PATTERN_ENGULFING;
       decision.reason      = result.reasoning;
       decision.bias        = (result.type == SIGNAL_BUY) ? 1 : -1;
