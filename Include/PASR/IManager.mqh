@@ -15,7 +15,8 @@
 
 #include "0.EventBus.mqh"
 #include "1.Events.mqh"
-#include "2.Config.mqh"
+#include "2.Config.Types.mqh"
+#include "2.Config.Manager.mqh"
 
 class DataManager;
 
