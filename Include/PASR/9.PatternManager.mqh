@@ -1,33 +1,30 @@
 //+------------------------------------------------------------------+
-//|  9.PatternManager.mqh  — BACKWARD-COMPATIBILITY SHIM             |
+//|                                              9.PatternManager.mqh |
+//|                                       Copyright 2026, Agsicentre |
+//|  @deprecated  BACKWARD-COMPATIBILITY SHIM — DO NOT INCLUDE       |
+//|               THIS FILE IN NEW CODE.                              |
 //|                                                                   |
-//|  This file is kept so that any existing EA that includes          |
-//|  "9.PatternManager.mqh" continues to compile without change.     |
+//|  This file is kept ONLY so that old EA files that were compiled   |
+//|  before the Pattern/ subfolder migration continue to build        |
+//|  without modification.                                            |
 //|                                                                   |
-//|  All logic has been moved to Pattern/ subfolder (v3.0 refactor): |
-//|    Pattern/PatternTypes.mqh      — types & structs               |
-//|    Pattern/CandleUtils.mqh       — candle math                   |
-//|    Pattern/ScoreEngine.mqh       — scoring engine                |
-//|    Pattern/Evaluators.mqh        — 10 pattern evaluators         |
-//|    Pattern/FakeoutDetector.mqh   — fakeout detection             |
-//|    Pattern/PatternManager.mqh    — orchestrator                  |
+//|  STATUS : DEPRECATED since v2.04 / PASR.mqh v1.10               |
+//|  REPLACE WITH : #include "Pattern/PatternManager.mqh"            |
+//|  SAFE TO DELETE : YES — after all callers are migrated            |
 //|                                                                   |
-//|  MIGRATION: replace this include with:                           |
-//|    #include "Pattern/PatternManager.mqh"                         |
+//|  CURRENT KNOWN CALLERS (as of migration commit):                  |
+//|    - PASR.mqh              → MIGRATED (now uses Pattern/)         |
+//|    - PASR_MODULAR.mq5      → MIGRATED (uses PASR.mqh)             |
+//|    - 8.RecoveryManager.mqh → MIGRATED (now uses Pattern/)         |
+//|    - DOCUMENTATION.md      → doc-only ref, no compile impact      |
+//|    - Audit .md files       → doc-only ref, no compile impact      |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026, Agsicentre"
-#property link      "agsicentre.wordpress.com"
-#property version   "3.00"
-#property strict
 
-#ifndef __PATTERN_MANAGER_MQH__
-#define __PATTERN_MANAGER_MQH__
+#ifndef __9_PATTERN_MANAGER_SHIM_MQH__
+#define __9_PATTERN_MANAGER_SHIM_MQH__
 
-// Re-export everything from the new modular structure
+// Forward to the real modular implementation.
+// All PatternManager:: call sites remain valid — no changes needed in callers.
 #include "Pattern/PatternManager.mqh"
 
-// All public symbols (PatternResult, PatternWeights, FakeoutResult,
-// ENUM_PATTERN_GRADE, PatternManager, FakeoutDetector) are now available
-// via the transitive includes above. No code duplication.
-
-#endif // __PATTERN_MANAGER_MQH__
+#endif // __9_PATTERN_MANAGER_SHIM_MQH__

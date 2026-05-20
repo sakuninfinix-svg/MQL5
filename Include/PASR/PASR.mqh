@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                        PASR.mqh  |
 //|                                       Copyright 2026, Agsicentre |
-//|            PASR EA — Master Include File v1.00                  |
+//|            PASR EA — Master Include File v1.10                  |
 //+------------------------------------------------------------------+
 //| PURPOSE                                                          |
 //| Replaces the numeric-prefix file-ordering convention.            |
@@ -22,15 +22,20 @@
 //|   Layer 0: Core infrastructure (no deps)                         |
 //|   Layer 1: Base classes                                          |
 //|   Layer 2: Data & Market                                         |
-//|   Layer 3: Analysis                                              |
+//|   Layer 3: Analysis  ← PatternManager now lives in Pattern/      |
 //|   Layer 4: Signal & AI                                           |
 //|   Layer 5: Execution & Recovery                                  |
 //|   Layer 6: UI (lowest priority)                                  |
+//|                                                                  |
+//| CHANGELOG                                                        |
+//|   v1.10 - Layer 3 now references Pattern/PatternManager.mqh      |
+//|           (modular subfolder). 9.PatternManager.mqh is a shim.   |
+//|   v1.00 - Initial master include file                            |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 
 #ifndef __PASR_MQH__
@@ -53,7 +58,10 @@
 
 // ── Layer 3: Analysis ─────────────────────────────────────────────
 #include "4.SRManager.mqh"
-#include "9.PatternManager.mqh"
+// NOTE: PatternManager is now fully modular under Pattern/ subfolder.
+// 9.PatternManager.mqh is kept only as a deprecated backward-compat shim.
+// New code should include Pattern/PatternManager.mqh directly if needed.
+#include "Pattern/PatternManager.mqh"
 
 // ── Layer 4: Signal & AI ──────────────────────────────────────────
 #include "5.SignalManager.mqh"

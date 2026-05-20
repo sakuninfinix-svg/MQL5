@@ -3,6 +3,11 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Position Recovery & Fakeout Management Module         |
 //+------------------------------------------------------------------+
+//| V2.04 CHANGES:                                                   |
+//| - Updated #include from "9.PatternManager.mqh" to               |
+//|   "Pattern/PatternManager.mqh" (modular subfolder migration).    |
+//|   No functional change — PatternManager:: call sites unchanged.  |
+//|                                                                  |
 //| V2.03 FIXES:                                                     |
 //| - RM-BUG-FIX-3 [CRITICAL]: Replaced undefined CFG macro with    |
 //|   Config() accessor (IManager v2.11 m_cfg cached field).        |
@@ -17,7 +22,7 @@
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.03"
+#property version   "2.04"
 #property strict
 
 #ifndef __RECOVERY_MANAGER_MQH__
@@ -26,7 +31,7 @@
 #include <Trade/Trade.mqh>
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
-#include "9.PatternManager.mqh"
+#include "Pattern/PatternManager.mqh"
 #include "12.MarketRegime.mqh"
 
 //+------------------------------------------------------------------+

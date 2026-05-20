@@ -3,29 +3,22 @@
 //|                                       Copyright 2026, Agsicentre |
 //|         Enhanced & Refactored for Performance & Efficiency       |
 //+------------------------------------------------------------------+
+//| CHANGELOG                                                        |
+//|   v1.30 - Replaced 14 individual #include lines with single      |
+//|           #include <PASR/PASR.mqh> master include.               |
+//|           Dependency order is now enforced in PASR.mqh, not here. |
+//|           PatternManager now sourced from Pattern/ subfolder.     |
+//|   v1.20 - Performance & efficiency refactor                      |
+//+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "1.20"
+#property version   "1.30"
 #property strict
 #property description "Modular Price Action & SR Trading System"
 #property description "Optimized for efficiency, reduced latency, and better resource management"
 
-//--- Include Dependencies (Ordered by initialization priority)
-#include <PASR/0.EventBus.mqh>
-#include <PASR/2.Config.Types.mqh>
-#include <PASR/2.Config.Manager.mqh>
-#include <PASR/1.Events.mqh>
-#include <PASR/IManager.mqh>
-#include <PASR/3.MarketManager.mqh>
-#include <PASR/4.SRManager.mqh>
-#include <PASR/5.SignalManager.mqh>
-#include <PASR/6.ExecutionManager.mqh>
-#include <PASR/8.RecoveryManager.mqh>
-#include <PASR/9.PatternManager.mqh>
-#include <PASR/10.DataManager.mqh>
-#include <PASR/7.AIManager.mqh>
-#include <PASR/11.DashboardManager.mqh>
-#include <PASR/12.MarketRegime.mqh>
+//--- Single master include — dependency order enforced in PASR.mqh
+#include <PASR/PASR.mqh>
 
 //--- Global Pointers Declaration
 EventRecorder      *g_recorder = NULL;  // Defined here, declared extern in EventBus.mqh
