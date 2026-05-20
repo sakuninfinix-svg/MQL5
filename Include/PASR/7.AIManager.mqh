@@ -148,6 +148,35 @@ private:
    int m_replayHead;
    int m_replayCount;
 
+   //+------------------------------------------------------------------+
+   //| Bar Data Cache for Performance Optimization
+   //| Caches OHLCV data to avoid repeated CopyRates calls per tick
+   //+------------------------------------------------------------------+
+   struct CachedBarData
+   {
+      datetime timestamp;        // Timestamp of the last cached bar
+      MqlRates bars14[];         // Last 14 bars (for momentum, RSI)
+      MqlRates bars15[];         // Last 15 bars (for RSI calculation)
+      MqlRates bars20[];         // Last 20 bars (for EMA, volatility)
+      MqlRates bar1[];           // Last 1 closed bar (for candle body)
+      bool     initialized;
+      
+      void Initialize()
+      {
+         ArrayResize(bars14, 14);
+         ArrayResize(bars15, 15);
+         ArrayResize(bars20, 20);
+         ArrayResize(bar1, 1);
+         ArrayInitialize(bars14, 0.0);
+         ArrayInitialize(bars15, 0.0);
+         ArrayInitialize(bars20, 0.0);
+         ArrayInitialize(bar1, 0.0);
+         initialized = true;
+      }
+   } m_barCache;
+   
+   datetime m_lastCacheUpdate;    // Track last cache update time
+
    struct AISignalSample
    {
       string         sampleId;
@@ -199,6 +228,9 @@ public:
                  m_replayCount(0),
                  m_activeExpert(EXPERT_NONE)
    {
+      // Initialize bar cache
+      m_barCache.Initialize();
+      
       m_model.bias               = 0.55;
       m_model.atrWeight          = 0.18;
       m_model.spreadWeight       = 0.14;
@@ -432,13 +464,16 @@ public:
       // Ensure bar cache is fresh before feature extraction
       CacheCurrentBars();
 
+      // Ensure bar cache is updated before feature extraction
+      CacheCurrentBars();
+      
       EvalContext ctx;
       BuildEvalContext(ctx, e.signal, e.atrPoints, e.support, e.resistance);
 
       double score = EvaluateSignal(e.signal, e.atrPoints, e.support, e.resistance, ctx, cfg);
 
       double aiSlAdjustment  = 1.0 + (Logistic(score) * m_model.volNoiseWeight);
-      double dynamicThreshold = GetDynamicThreshold(cfg);
+      double dynamicThreshold = GetAdaptiveThreshold(cfg);
       bool   accepted         = score >= dynamicThreshold;
 
       Log("AI score=" + DoubleToString(score, 2) +
@@ -562,6 +597,75 @@ private:
       
       // Cap maximum threshold to prevent completely blocking trades
       return MathMin(adaptiveThreshold, baseThreshold * 2.5);
+   }
+
+   //+------------------------------------------------------------------+
+   //| Adaptive Threshold: Base + Regime Uncertainty Factor
+   //+------------------------------------------------------------------+
+   double GetAdaptiveThreshold(const StrategyConfig &cfg) const
+   {
+      double baseThreshold = cfg.ai.minConfidence;
+      
+      if(CheckPointer(m_regime) == POINTER_INVALID)
+         return baseThreshold;
+      
+      const RegimeResult &r = m_regime.GetResult();
+      
+      // Calculate regime uncertainty
+      double regimeUncertainty = 0.0;
+      switch(r.regime)
+      {
+         case REGIME_TRANSITION:       regimeUncertainty = 1.0; break;
+         case REGIME_CHOPPY_HIGH_VOL:  regimeUncertainty = 0.8; break;
+         case REGIME_RANGING_SIDEWAYS: regimeUncertainty = 0.5; break;
+         case REGIME_TRENDING_WEAK:    regimeUncertainty = 0.3; break;
+         case REGIME_TRENDING_STRONG:  regimeUncertainty = 0.1; break;
+         default:                      regimeUncertainty = 0.6; break;
+      }
+      
+      // Adjust for MTF confirmation (more certainty if MTF confirmed)
+      if(!r.mtfConfirmed)
+         regimeUncertainty *= 1.3;
+      
+      // Formula: BaseThreshold + (RegimeUncertainty * Factor)
+      double adaptiveThreshold = baseThreshold + (regimeUncertainty * 0.15);
+      
+      // Clamp to reasonable range
+      return MathMax(baseThreshold, MathMin(0.9, adaptiveThreshold));
+   }
+
+   //+------------------------------------------------------------------+
+   //| Multi-Model Switching: Select Active Expert Based on Regime
+   //+------------------------------------------------------------------+
+   ExpertType GetActiveExpert() const
+   {
+      if(CheckPointer(m_regime) == POINTER_INVALID)
+         return EXPERT_NONE;
+      
+      ENUM_MARKET_REGIME regime = m_regime.GetMarketRegime();
+      double confidence = m_regime.GetResult().regimeScore;
+      
+      // Low confidence or transition → skip trading
+      if(regime == REGIME_TRANSITION || confidence < 0.3)
+         return EXPERT_NONE;
+      
+      // Select expert based on regime type
+      switch(regime)
+      {
+         case REGIME_TRENDING_STRONG:
+         case REGIME_TRENDING_WEAK:
+            return EXPERT_TREND;
+            
+         case REGIME_RANGING_SIDEWAYS:
+            return EXPERT_MEAN_REVERSION;
+            
+         case REGIME_CHOPPY_HIGH_VOL:
+            // In high vol choppy, use momentum for breakouts only
+            return EXPERT_MOMENTUM;
+            
+         default:
+            return EXPERT_NONE;
+      }
    }
 
    double EvaluateSignal(const SignalDecision &signal, const double atrPoints,
@@ -698,8 +802,49 @@ private:
       return MathMax(0.0, MathMin(2.0, ratio));
    }
 
+   //+------------------------------------------------------------------+
+   //| Bar Data Caching: Cache current bars once per tick/event
+   //+------------------------------------------------------------------+
+   void CacheCurrentBars()
+   {
+      datetime currentBarTime = iTime(_Symbol, _Period, 1);  // Last closed bar time
+      
+      // Only update cache if bar has changed
+      if(currentBarTime == m_lastCacheUpdate && m_barCache.initialized)
+         return;
+      
+      m_lastCacheUpdate = currentBarTime;
+      
+      // Cache 14 bars for momentum/RSI
+      if(CopyRates(_Symbol, _Period, 1, 14, m_barCache.bars14) < 14)
+         ArrayInitialize(m_barCache.bars14, 0.0);
+      
+      // Cache 15 bars for RSI calculation
+      if(CopyRates(_Symbol, _Period, 1, 15, m_barCache.bars15) < 15)
+         ArrayInitialize(m_barCache.bars15, 0.0);
+      
+      // Cache 20 bars for EMA/volatility
+      if(CopyRates(_Symbol, _Period, 1, 20, m_barCache.bars20) < 20)
+         ArrayInitialize(m_barCache.bars20, 0.0);
+      
+      // Cache 1 bar for candle body ratio
+      if(CopyRates(_Symbol, _Period, 1, 1, m_barCache.bar1) < 1)
+         ArrayInitialize(m_barCache.bar1, 0.0);
+   }
+
    double NormalizeMomentumFeature() const
    {
+      // Use cached data if available
+      if(m_barCache.initialized && ArraySize(m_barCache.bars14) >= 14)
+      {
+         double momentum = m_barCache.bars14[0].close - m_barCache.bars14[13].close;
+         double maxMove  = 0;
+         for(int i = 1; i < 14; i++) maxMove = MathMax(maxMove, MathAbs(m_barCache.bars14[i].close - m_barCache.bars14[0].close));
+         if(maxMove == 0) return 0.5;
+         return 0.5 + (momentum / maxMove) * 0.5;
+      }
+      
+      // Fallback to direct CopyRates if cache not ready
       MqlRates bars[14];
       // OPTIMIZATION: Try cache first, fallback to CopyRates
       if(GetCachedBars((ENUM_TIMEFRAMES)Period(), bars, 14, 1))
@@ -727,6 +872,22 @@ private:
 
    double NormalizeRSIFeature() const
    {
+      // Use cached data if available
+      if(m_barCache.initialized && ArraySize(m_barCache.bars15) >= 15)
+      {
+         double gains = 0, losses = 0;
+         for(int i = 0; i < 14; i++)
+         {
+            double diff = m_barCache.bars15[i].close - m_barCache.bars15[i+1].close;
+            if(diff > 0) gains  += diff;
+            else         losses -= diff;
+         }
+         double rs  = (losses == 0) ? 100.0 : gains / losses;
+         double rsi = 100.0 - (100.0 / (1.0 + rs));
+         return rsi / 100.0;
+      }
+      
+      // Fallback to direct CopyRates if cache not ready
       MqlRates bars[15];
       // OPTIMIZATION: Try cache first, fallback to CopyRates
       if(GetCachedBars((ENUM_TIMEFRAMES)Period(), bars, 15, 1))
@@ -747,6 +908,15 @@ private:
 
    double NormalizeCandleBodyRatio() const
    {
+      // Use cached data if available
+      if(m_barCache.initialized && ArraySize(m_barCache.bar1) >= 1)
+      {
+         double body  = MathAbs(m_barCache.bar1[0].close - m_barCache.bar1[0].open);
+         double range = m_barCache.bar1[0].high - m_barCache.bar1[0].low;
+         return (range == 0) ? 0.5 : MathMin(1.0, body / range);
+      }
+      
+      // Fallback to direct CopyRates if cache not ready
       MqlRates bar[1];
       // OPTIMIZATION: Use cached bar data
       if(GetCachedBars((ENUM_TIMEFRAMES)Period(), bar, 1, 1))
@@ -760,6 +930,20 @@ private:
 
    double NormalizeEMADistanceFeature() const
    {
+      // Use cached data if available
+      if(m_barCache.initialized && ArraySize(m_barCache.bars20) >= 20)
+      {
+         double ema = m_barCache.bars20[19].close;
+         double k   = 2.0 / 21.0;
+         for(int i = 18; i >= 0; i--) ema = m_barCache.bars20[i].close * k + ema * (1.0 - k);
+         double dist   = MathAbs(m_barCache.bars20[0].close - ema);
+         double atrEst = 0;
+         for(int i = 0; i < 20; i++) atrEst += m_barCache.bars20[i].high - m_barCache.bars20[i].low;
+         atrEst /= 20.0;
+         return (atrEst == 0) ? 0.5 : MathMin(1.0, dist / (atrEst * 2.0));
+      }
+      
+      // Fallback to direct CopyRates if cache not ready
       MqlRates bars[20];
       // OPTIMIZATION: Try cache first, fallback to CopyRates
       if(GetCachedBars((ENUM_TIMEFRAMES)Period(), bars, 20, 1))
@@ -787,6 +971,19 @@ private:
 
    double NormalizeVolatilityFeatureFallback() const
    {
+      // Use cached data if available
+      if(m_barCache.initialized && ArraySize(m_barCache.bars20) >= 20)
+      {
+         double avg = 0;
+         for(int i = 0; i < 20; i++) avg += m_barCache.bars20[i].close;
+         avg /= 20;
+         double sumSq = 0;
+         for(int i = 0; i < 20; i++) { double d = m_barCache.bars20[i].close - avg; sumSq += d * d; }
+         double vol = MathSqrt(sumSq / 20);
+         return MathMin(1.0, vol / (SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100));
+      }
+      
+      // Fallback to direct CopyRates if cache not ready
       MqlRates bars[20];
       // OPTIMIZATION: Try cache first, fallback to CopyRates
       if(GetCachedBars((ENUM_TIMEFRAMES)Period(), bars, 20, 1))
@@ -1247,6 +1444,101 @@ private:
              " | ATR_Norm=" + DoubleToString(atrNorm, 2) +
              " | Adv_Norm=" + DoubleToString(adverseNorm, 2));
       }
+   }
+
+   //+------------------------------------------------------------------+
+   //| Time-Based Labeling: Check price N bars ahead for win/loss
+   //| Replaces slow close-based labeling with forward-looking prediction
+   //+------------------------------------------------------------------+
+   void ApplyTimeBasedLabel(ulong ticket, datetime entryTime, double entryPrice, ENUM_ORDER_TYPE orderType)
+   {
+      int idx = FindPendingSampleIndexByTicket(ticket);
+      if(idx < 0 || m_pendingSamples[idx].labeled) return;
+      
+      // Get strategy config for threshold
+      StrategyConfig cfg;
+      m_data.GetConfigCache(cfg);
+      int lookforwardBars = cfg.ai.lookforwardBars > 0 ? cfg.ai.lookforwardBars : 5;
+      double profitThreshold = cfg.ai.profitThreshold > 0 ? cfg.ai.profitThreshold : 1.5; // In ATR multiples
+      
+      // Fetch bars N bars ahead from entry
+      MqlRates futureBars[];
+      ArrayResize(futureBars, lookforwardBars + 1);
+      
+      // Find the bar index at entry time
+      datetime entryBarTime = iTime(_Symbol, _Period, TimeToBar(_Symbol, _Period, entryTime));
+      int startBar = iBarShift(_Symbol, _Period, entryBarTime);
+      if(startBar < 0) startBar = 0;
+      
+      // Copy rates from entry bar to lookforward bars ahead
+      if(CopyRates(_Symbol, _Period, startBar, lookforwardBars + 1, futureBars) < lookforwardBars + 1)
+      {
+         Log("⚠️ ApplyTimeBasedLabel: Failed to copy future bars");
+         return;
+      }
+      
+      // Calculate max favorable excursion over lookforward period
+      double maxProfit = 0.0;
+      double maxAdverse = 0.0;
+      
+      for(int i = 1; i <= lookforwardBars; i++)  // Skip index 0 (entry bar)
+      {
+         double priceAtBar = (orderType == ORDER_TYPE_BUY) ? futureBars[i].close : futureBars[i].close;
+         double profitPoints = (orderType == ORDER_TYPE_BUY) 
+                               ? (priceAtBar - entryPrice) / SymbolInfoDouble(_Symbol, SYMBOL_POINT)
+                               : (entryPrice - priceAtBar) / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+         
+         if(profitPoints > maxProfit) maxProfit = profitPoints;
+         if(profitPoints < 0 && MathAbs(profitPoints) > maxAdverse) maxAdverse = MathAbs(profitPoints);
+      }
+      
+      // Determine label based on whether profit threshold was hit before adverse
+      double atrPoints = m_pendingSamples[idx].atrPoints;
+      double thresholdPoints = profitThreshold * atrPoints;
+      
+      bool isWin = (maxProfit >= thresholdPoints && maxProfit > maxAdverse);
+      double label = isWin ? 1.0 : 0.0;
+      
+      m_pendingSamples[idx].labeled = true;
+      
+      AppendCsvRow(m_outcomeFilename,
+                   "sample_id","ticket","label_type","lookforward_bars","profit_threshold","max_profit","max_adverse","label",
+                   m_pendingSamples[idx].sampleId,
+                   IntegerToString((int)ticket),
+                   "TIME_BASED",
+                   IntegerToString(lookforwardBars),
+                   DoubleToString(profitThreshold, 2),
+                   DoubleToString(maxProfit, 2),
+                   DoubleToString(maxAdverse, 2),
+                   DoubleToString(label, 2));
+      
+      PushReplayBuffer(m_pendingSamples[idx].features, label);
+      
+      m_labeledSinceLastBatch++;
+      if(m_labeledSinceLastBatch >= MINIBATCH_SIZE)
+      {
+         TrainMiniBatch();
+         m_modelDirty = true;
+         SaveModelState(cfg);
+      }
+      
+      Log("TimeLabel: " + (isWin ? "WIN" : "LOSS") +
+          " | MaxProf=" + DoubleToString(maxProfit, 1) +
+          " | MaxAdv=" + DoubleToString(maxAdverse, 1) +
+          " | Bars=" + IntegerToString(lookforwardBars));
+   }
+   
+   // Helper: Convert datetime to bar index
+   int TimeToBar(const string symbol, ENUM_TIMEFRAMES tf, datetime dt) const
+   {
+      datetime barTime = iTime(symbol, tf, 0);
+      int shift = 0;
+      while(barTime > dt && shift < 1000)
+      {
+         shift++;
+         barTime = iTime(symbol, tf, shift);
+      }
+      return (barTime == dt) ? shift : -1;
    }
 
    void AppendCsvRow(const string filename,
