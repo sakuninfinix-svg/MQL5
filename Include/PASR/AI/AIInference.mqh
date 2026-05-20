@@ -3,8 +3,18 @@
 //|          Pure forward-pass inference + expert scoring module     |
 //|                                       Copyright 2026, Agsicentre |
 //+------------------------------------------------------------------+
+//| V3.01 FIXES:                                                     |
+//| - AI-INF-FIX-1 [CRITICAL]: Double Logistic bug in Evaluate().   |
+//|   expertScore (raw weighted sum) was passed directly into hybrid |
+//|   blend alongside already-calibrated nnScore [0,1], then the    |
+//|   whole hybrid was Logistic'd again. Fixed by normalizing        |
+//|   expertScore to expertProb = Logistic(expertScore) first, then |
+//|   blending two [0,1] values — no final Logistic needed.         |
+//| - AI-INF-FIX-2 [MEDIUM]: SelectExpert now returns EXPERT_NONE   |
+//|   when volume is critically low (spread proxy guard).            |
+//+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
-#property version   "3.00"
+#property version   "3.01"
 #property strict
 
 #ifndef __AI_INFERENCE_MQH__
@@ -29,9 +39,16 @@ public:
    void SetRegime(MarketRegimeFilter *r) { m_regime = r; }
 
    //--- Select the active expert based on current regime
+   //    AI-INF-FIX-2: guard against abnormally wide spread (illiquid market)
    ExpertType SelectExpert() const
    {
       if(CheckPointer(m_regime) == POINTER_INVALID) return EXPERT_NONE;
+
+      // Guard: skip trading when spread is critically wide (>30 points)
+      long spread = 0;
+      SymbolInfoInteger(_Symbol, SYMBOL_SPREAD, spread);
+      if(spread > 30) return EXPERT_NONE;
+
       ENUM_MARKET_REGIME regime     = m_regime.GetMarketRegime();
       double             confidence = m_regime.GetResult().regimeScore;
       if(regime == REGIME_TRANSITION || confidence < 0.3) return EXPERT_NONE;
@@ -105,10 +122,10 @@ public:
    {
       if(!m.initialized) return 0.5;
       double feat[NN_INPUTS];
-      feat[0]=ctx.atrNorm;       feat[1]=ctx.regimeScore;
+      feat[0]=ctx.atrNorm;          feat[1]=ctx.regimeScore;
       feat[2]=ctx.mtConfluenceNorm; feat[3]=ctx.rsiNorm;
       feat[4]=ctx.candleBodyRatio;  feat[5]=ctx.emaDistNorm;
-      feat[6]=ctx.sessionNorm;    feat[7]=ctx.momentumNorm;
+      feat[6]=ctx.sessionNorm;      feat[7]=ctx.momentumNorm;
 
       double h1[NN_H1];
       for(int j=0;j<NN_H1;j++)
@@ -134,6 +151,9 @@ public:
    { return (m.plattSamples < 30) ? Logistic(nnRaw) : Logistic(m.plattA*nnRaw + m.plattB); }
 
    //--- Full signal evaluation — returns final [0,1] score
+   //    AI-INF-FIX-1: expertScore normalised to expertProb via Logistic() BEFORE
+   //    blending with nnScore. Both inputs to hybrid are now [0,1].
+   //    Final Logistic() removed — blending two probabilities needs no sigmoid squash.
    double Evaluate(const AIModelState &mdl, const EvalContext &ctx,
                    const SignalDecision &signal, double patternBonus) const
    {
@@ -143,17 +163,21 @@ public:
       double expertScore = 0.0;
       switch(expert)
       {
-         case EXPERT_TREND:          expertScore = ScoreTrend(mdl, ctx, signal, patternBonus);        break;
+         case EXPERT_TREND:          expertScore = ScoreTrend(mdl, ctx, signal, patternBonus);         break;
          case EXPERT_MEAN_REVERSION: expertScore = ScoreMeanReversion(mdl, ctx, signal, patternBonus); break;
-         case EXPERT_MOMENTUM:       expertScore = ScoreMomentum(mdl, ctx);                           break;
+         case EXPERT_MOMENTUM:       expertScore = ScoreMomentum(mdl, ctx);                            break;
          default:                    return 0.0;
       }
 
+      // Normalize raw expert weighted sum to probability space [0,1]
+      double expertProb = Logistic(expertScore);  // AI-INF-FIX-1
+
       double nnRaw    = ForwardPass(mdl, ctx);
-      double nnScore  = PlattCalibrate(mdl, nnRaw);
+      double nnScore  = PlattCalibrate(mdl, nnRaw);             // already [0,1]
       double nnWeight = MathMin(0.30, 0.005 * mdl.nnTrainingSamples);
-      double hybrid   = (1.0 - nnWeight) * expertScore + nnWeight * nnScore;
-      return Logistic(hybrid);
+
+      // Both sides are [0,1] — linear blend, no outer Logistic needed
+      return (1.0 - nnWeight) * expertProb + nnWeight * nnScore; // AI-INF-FIX-1
    }
 };
 

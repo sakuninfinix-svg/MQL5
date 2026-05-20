@@ -3,8 +3,18 @@
 //|          Pure stateless feature normalisation for AI subsystem   |
 //|                                       Copyright 2026, Agsicentre |
 //+------------------------------------------------------------------+
+//| V3.01 FIXES:                                                     |
+//| - AI-FB-FIX-1 [HIGH]: NormalizeVolume() was clamping to 2.0     |
+//|   instead of 1.0, causing volume feature to have 2x weight       |
+//|   compared to all other normalised features in the NN input.     |
+//|   Fixed: MathMin(1.0, ...) on both cache and fallback paths.    |
+//| - AI-FB-FIX-2 [MEDIUM]: NormalizeMomentum() maxMove anchor was  |
+//|   bars14[0] (newest bar) — under-estimated true range since      |
+//|   bars14[0] was excluded from the loop. Fixed: anchor is now     |
+//|   bars14[13] (oldest bar), loop runs full i=0..13.              |
+//+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
-#property version   "3.00"
+#property version   "3.01"
 #property strict
 
 #ifndef __AI_FEATURE_BUILDER_MQH__
@@ -136,28 +146,32 @@ public:
       return 0.3;
    }
 
+   // AI-FB-FIX-1: Both cache and fallback paths now clamp to [0,1] not [0,2].
    double NormalizeVolume() const
    {
       if(m_cache.current.valid && m_cache.higher.valid)
       {
          long avgVol = (m_cache.current.volume + m_cache.higher.volume) / 2;
          if(avgVol == 0) return 0.5;
-         return MathMax(0.0, MathMin(2.0, (double)m_cache.current.volume / avgVol));
+         return MathMax(0.0, MathMin(1.0, (double)m_cache.current.volume / avgVol)); // fixed: 1.0
       }
       long vol[20];
       if(CopyTickVolume(_Symbol, _Period, 1, 20, vol) < 20) return 0.5;
       long sum = 0; for(int i=0;i<20;i++) sum+=vol[i];
       long avg = sum / 20;
-      return (avg == 0) ? 0.5 : MathMax(0.0, MathMin(2.0, (double)vol[0]/avg));
+      return (avg == 0) ? 0.5 : MathMax(0.0, MathMin(1.0, (double)vol[0]/avg)); // fixed: 1.0
    }
 
+   // AI-FB-FIX-2: maxMove now uses bars14[13] (oldest bar) as anchor,
+   // loop runs i=0..13 so all bars including bars14[0] contribute to range.
    double NormalizeMomentum() const
    {
       if(m_cache.initialized && ArraySize(m_cache.bars14) >= 14)
       {
          double momentum = m_cache.bars14[0].close - m_cache.bars14[13].close;
+         double ref      = m_cache.bars14[13].close; // anchor = oldest bar
          double maxMove  = 0;
-         for(int i=1;i<14;i++) maxMove = MathMax(maxMove, MathAbs(m_cache.bars14[i].close - m_cache.bars14[0].close));
+         for(int i=0;i<14;i++) maxMove = MathMax(maxMove, MathAbs(m_cache.bars14[i].close - ref));
          return (maxMove == 0) ? 0.5 : 0.5 + (momentum / maxMove) * 0.5;
       }
       return 0.5;
