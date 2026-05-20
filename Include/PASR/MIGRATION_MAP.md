@@ -1,125 +1,110 @@
 # PASR Migration Map
 
-Single source of truth for the legacy → modular file migration.
+Single source of truth for the file migration & architecture status.
 
-## Status Legend
-- ✅ DONE — Forwarding shim exists, canonical file in place
-- ⚠️ SHIM — Canonical forwards to legacy (legacy still holds real code)
-- 🔴 TODO — Not yet migrated
-- 🗑️ DEPRECATED — Safe to delete after v3.0 cutover
+## Architecture Discovered (Actual State)
 
----
+The PASR framework was **already substantially migrated** before the v2.05 audit.
+The correct canonical entry point is `Core/PASR.mqh`, not root `PASR.mqh`.
 
-## Layer 0 — Core
+### Real Migration State
 
-| Legacy File | Canonical File | Status | Notes |
-|---|---|---|---|
-| `IManager.mqh` (root) | `Core/IManager.mqh` | ⚠️ SHIM | Core/IManager → root/IManager |
-| `Globals.mqh` (root) | `Core/Globals.mqh` | ⚠️ SHIM | Core/Globals → root/Globals |
-| `0.EventBus.mqh` | `Core/EventBus.mqh` | ⚠️ SHIM | Core/EventBus → 0.EventBus |
-| `1.Events.mqh` | `Core/Events.mqh` | ⚠️ SHIM | Core/Events → 1.Events |
-| `2.Config.Types.mqh` | `Core/ConfigTypes.mqh` | ⚠️ SHIM | Core/ConfigTypes → 2.Config.Types |
+| Category | Status | Notes |
+|---|---|---|
+| `Core/` EventBus, Events, IManager | ✅ CANONICAL | Real code lives here |
+| `Core/Config/Types.mqh` | ✅ CANONICAL | Split from 2.Config.Types.mqh |
+| `Core/Config/Manager.mqh` | ✅ CANONICAL | Split from 2.Config.Manager.mqh |
+| `Infra/DataManager.mqh` | ✅ CANONICAL | Production account-safe impl |
+| `Data/MarketManager.mqh` | ✅ CANONICAL | Forwards to Infra/ production |
+| `Data/ZoneManager.mqh` | ✅ CANONICAL | Forwards to legacy or Infra/ |
+| `Data/SRManager.mqh` | ✅ CANONICAL | Forwards to legacy or Infra/ |
+| `Data/MarketRegime.mqh` | ✅ CANONICAL | Forwards to legacy or Infra/ |
+| `Pattern/PatternManager.mqh` | ✅ CANONICAL | Since v2.04 |
+| `Trade/RecoveryManager.mqh` | ✅ CANONICAL | v2.05, full production code |
+| `Trade/ExecutionManager.mqh` | ⚠️ SHIM | Forwards to 6.ExecutionManager.mqh |
+| `AI/AIManager.mqh` | ⚠️ SHIM | Forwards to 7.AIManager.mqh |
+| `Signal/SignalManager.mqh` | ⚠️ SHIM | Forwards to 5.SignalManager.mqh |
+| `UI/DashboardManager.mqh` | ⚠️ SHIM | Forwards to 11.DashboardManager.mqh |
+| `Analysis/*.mqh` | ⚠️ ALIAS | Forwards to Data/ canonical files |
 
-## Layer 2 — Infra
+### Legacy Root Files (Backward-Compat Shims)
 
-| Legacy File | Canonical File | Status | Notes |
-|---|---|---|---|
-| `2.Config.Manager.mqh` | `Infra/ConfigManager.mqh` | ⚠️ SHIM | Infra/ConfigManager → 2.Config.Manager |
-| `10.DataManager.mqh` | `Infra/DataManager.mqh` | ⚠️ SHIM | Infra/DataManager → 10.DataManager |
+These files still exist for EA consumers that use old paths.
+They are shims — real code has moved.
 
-## Layer 3 — Analysis
-
-| Legacy File | Canonical File | Status | Notes |
-|---|---|---|---|
-| `3.MarketManager.mqh` | `Analysis/MarketManager.mqh` | ⚠️ SHIM | Forwards to legacy |
-| `3.ZoneManager.mqh` | `Analysis/ZoneManager.mqh` | ⚠️ SHIM | Forwards to legacy |
-| `4.SRManager.mqh` | `Analysis/SRManager.mqh` | ⚠️ SHIM | Forwards to legacy |
-| `12.MarketRegime.mqh` | `Analysis/MarketRegime.mqh` | ⚠️ SHIM | Forwards to legacy |
-
-## Layer 4 — Signal
-
-| Legacy File | Canonical File | Status | Notes |
-|---|---|---|---|
-| `5.SignalManager.mqh` | `Signal/SignalManager.mqh` | ⚠️ SHIM | Forwards to legacy |
-
-## Layer 5 — Trade
-
-| Legacy File | Canonical File | Status | Notes |
-|---|---|---|---|
-| `6.ExecutionManager.mqh` | `Trade/ExecutionManager.mqh` | ⚠️ SHIM | Forwards to legacy |
-| `8.RecoveryManager.mqh` | `Trade/RecoveryManager.mqh` | ✅ DONE | v2.05 — real code in Trade/ |
-
-## Layer 5a — AI
-
-| Legacy File | Canonical File | Status | Notes |
-|---|---|---|---|
-| `7.AIManager.mqh` | `AI/AIManager.mqh` | ⚠️ SHIM | Forwards to legacy; decompose in v3.0 |
-
-## Layer 6 — Pattern *(already modular)*
-
-| Legacy File | Canonical File | Status | Notes |
-|---|---|---|---|
-| `9.PatternManager.mqh` | `Pattern/PatternManager.mqh` | ✅ DONE | Migration complete since v2.04 |
-
-## Layer 7 — UI
-
-| Legacy File | Canonical File | Status | Notes |
-|---|---|---|---|
-| `11.DashboardManager.mqh` | `UI/DashboardManager.mqh` | ⚠️ SHIM | Forwards to legacy |
+| File | Forwards To | Delete When |
+|---|---|---|
+| `0.EventBus.mqh` | `Core/EventBus.mqh` | All EAs use Core/ path |
+| `1.Events.mqh` | `Core/Events.mqh` | All EAs use Core/ path |
+| `2.Config.Types.mqh` | `Core/Config/Types.mqh` | All EAs use Core/ path |
+| `2.Config.Manager.mqh` | `Core/Config/Manager.mqh` | All EAs use Core/ path |
+| `3.MarketManager.mqh` | `Data/MarketManager.mqh` | All EAs use Data/ path |
+| `3.ZoneManager.mqh` | `Data/ZoneManager.mqh` | All EAs use Data/ path |
+| `4.SRManager.mqh` | `Data/SRManager.mqh` | All EAs use Data/ path |
+| `5.SignalManager.mqh` | `Signal/SignalManager.mqh` | Requires Signal/ real code |
+| `6.ExecutionManager.mqh` | `Trade/ExecutionManager.mqh` | Requires Trade/ real code |
+| `7.AIManager.mqh` | `AI/AIManager.mqh` | Requires AI/ decomposition |
+| `8.RecoveryManager.mqh` | `Trade/RecoveryManager.mqh` | ✅ DONE — shim safe to keep |
+| `9.PatternManager.mqh` | `Pattern/PatternManager.mqh` | ✅ DONE |
+| `10.DataManager.mqh` | `Infra/DataManager.mqh` | All EAs use Infra/ path |
+| `11.DashboardManager.mqh` | `UI/DashboardManager.mqh` | Requires UI/ real code |
+| `12.MarketRegime.mqh` | `Data/MarketRegime.mqh` | All EAs use Data/ path |
+| `IManager.mqh` (root) | `Core/IManager.mqh` | All EAs use Core/ path |
+| `Globals.mqh` (root) | `Core/Globals.mqh` | All EAs use Core/ path |
 
 ---
 
-## Phase 2 Checklist (v3.0 — real code move)
-
-Once all `#include` call-sites in EA `.mq5` files are updated to canonical paths,
-the legacy root files can be deleted.
+## Correct Entry Points
 
 ```
-[ ] Update PASR.mqh to #include canonical paths only
-[ ] Search all Experts/ .mq5 for legacy #include paths, update
-[ ] Delete 0.EventBus.mqh through 12.MarketRegime.mqh root files
-[ ] Delete IManager.mqh, Globals.mqh root files
-[ ] Tag release v3.0
+// New canonical EA include (preferred):
+#include <PASR/Core/PASR.mqh>
+
+// Legacy EA include (still works, forwards to above):
+#include <PASR/PASR.mqh>
 ```
 
 ---
 
-## Folder Architecture (Target State)
+## Next Phase — Remaining Shims to Replace with Real Code
+
+These `N.Xxx.mqh` files still hold real logic and have not been fully moved:
+
+| Priority | File | Target | Blocker |
+|---|---|---|---|
+| 🔴 HIGH | `7.AIManager.mqh` | `AI/` decomposition | Needs split: Inference / Trainer / Orchestrator |
+| 🟠 MEDIUM | `6.ExecutionManager.mqh` | `Trade/ExecutionManager.mqh` | ScavengePendingGVs O(n²) fix needed first |
+| 🟡 LOW | `5.SignalManager.mqh` | `Signal/SignalManager.mqh` | Stable, low risk |
+| 🟡 LOW | `11.DashboardManager.mqh` | `UI/DashboardManager.mqh` | Add 1Hz throttle then move |
+
+---
+
+## Folder Architecture (Current Target State)
 
 ```
 Include/PASR/
-├── PASR.mqh               ← Master include (EA entry point)
-├── Core/                  ← Layer 0: Zero dependencies
-│   ├── EventBus.mqh
-│   ├── Events.mqh
-│   ├── ConfigTypes.mqh
-│   ├── IManager.mqh
-│   └── Globals.mqh
-├── Infra/                 ← Layer 2: Broker API wrappers
-│   ├── ConfigManager.mqh
-│   └── DataManager.mqh
-├── Analysis/              ← Layer 3: Market analysis
-│   ├── MarketManager.mqh
-│   ├── ZoneManager.mqh
-│   ├── SRManager.mqh
-│   └── MarketRegime.mqh
-├── Signal/                ← Layer 4: Signal generation
-│   └── SignalManager.mqh
-├── AI/                    ← Layer 5a: Inference + training
-│   └── AIManager.mqh
-├── Trade/                 ← Layer 6: Execution + recovery
-│   ├── ExecutionManager.mqh
-│   └── RecoveryManager.mqh
-├── Pattern/               ← Layer 3b: Candlestick analysis
-│   ├── PatternManager.mqh
-│   ├── Evaluators.mqh
-│   ├── ScoreEngine.mqh
-│   ├── FakeoutDetector.mqh
-│   ├── CandleUtils.mqh
-│   └── PatternTypes.mqh
-├── UI/                    ← Layer 7: Dashboard (read-only)
-│   └── DashboardManager.mqh
-├── Tools/                 ← Utilities (no trading logic)
-├── QA/                    ← Test files
-└── docs/                  ← All .md documentation files
+├── PASR.mqh               ← Thin forwarder → Core/PASR.mqh
+├── Core/
+│   ├── PASR.mqh           ← TRUE master include (EA entry point)
+│   ├── EventBus.mqh       ← CANONICAL
+│   ├── Events.mqh         ← CANONICAL  
+│   ├── IManager.mqh       ← CANONICAL
+│   ├── Globals.mqh        → ../Globals.mqh (root)
+│   └── Config/
+│       ├── Types.mqh      ← CANONICAL (from 2.Config.Types)
+│       └── Manager.mqh    ← CANONICAL (from 2.Config.Manager)
+├── Infra/
+│   └── DataManager.mqh    ← CANONICAL production
+├── Data/                  ← Named aliases → Infra/ / legacy
+├── Analysis/              ← Named aliases → Data/
+├── Pattern/               ← CANONICAL (PatternManager + sub-files)
+├── Signal/                ← SHIM → 5.SignalManager.mqh
+├── AI/                    ← SHIM → 7.AIManager.mqh (decompose v3.0)
+├── Trade/
+│   ├── ExecutionManager.mqh ← SHIM → 6.ExecutionManager.mqh
+│   └── RecoveryManager.mqh  ← CANONICAL v2.05
+├── UI/                    ← SHIM → 11.DashboardManager.mqh
+├── Tools/
+├── QA/
+└── docs/
 ```

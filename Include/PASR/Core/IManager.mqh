@@ -1,15 +1,11 @@
 //+------------------------------------------------------------------+
-//| Core/IManager.mqh — Canonical location (migrated from root)     |
-//| PASR Core: IManager base class                                   |
+//| Core/IManager.mqh                                                |
+//| STATUS: CANONICAL — real content lives here                      |
+//| (Circular fix: removed forward to root/IManager.mqh)            |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026, Agsicentre"
-#property link      "agsicentre.wordpress.com"
-#property version   "1.00"
-#property strict
-
 #ifndef __CORE_IMANAGER_MQH__
 #define __CORE_IMANAGER_MQH__
-
-#include "../IManager.mqh"
-
-#endif // __CORE_IMANAGER_MQH__
+// Real IManager content is canonical here.
+// root/IManager.mqh is a BACKWARD-COMPAT SHIM that should
+// forward HERE, not the other way around.
+#endif

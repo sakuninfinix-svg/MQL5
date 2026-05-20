@@ -1,15 +1,13 @@
 //+------------------------------------------------------------------+
-//| Infra/ConfigManager.mqh — Canonical location (migrated from 2.) |
-//| PASR Layer 2b: Config loading, validation, hot-reload            |
+//| Infra/ConfigManager.mqh                                          |
+//| Canonical alias — forwards to Core/Config/Manager.mqh           |
+//| (matches Core/PASR.mqh L1 Config load)                         |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026, Agsicentre"
-#property link      "agsicentre.wordpress.com"
-#property version   "1.00"
-#property strict
-
 #ifndef __INFRA_CONFIG_MANAGER_MQH__
 #define __INFRA_CONFIG_MANAGER_MQH__
-
-#include "../2.Config.Manager.mqh"
-
-#endif // __INFRA_CONFIG_MANAGER_MQH__
+#ifdef __MQL5__
+   #include <PASR/Core/Config/Manager.mqh>
+#else
+   #include "../Core/Config/Manager.mqh"
+#endif
+#endif
