@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
-//|                                        Data/MarketManager.mqh    |
-//|                                       Copyright 2026, Agsicentre |
-//|  Canonical location. Migrated from 3.MarketManager.mqh           |
+//|                                      Data/MarketManager.mqh      |
+//|  Canonical name — forwards to 3.MarketManager.mqh (root)         |
+//|  Migration status: PENDING → Analysis/MarketManager.mqh          |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __DATA_MARKET_MANAGER_MQH__
 #define __DATA_MARKET_MANAGER_MQH__
-#include "../../3.MarketManager.mqh"
+#include "../3.MarketManager.mqh"
 #endif

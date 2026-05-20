@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
-//|                                    Core/Config/Types.mqh         |
-//|                                       Copyright 2026, Agsicentre |
-//|  Canonical location. Shim -> 2.Config.Types.mqh                  |
+//|                                      Core/Config/Types.mqh       |
+//|  Canonical location — migrated from 2.Config.Types.mqh           |
+//|  Contains: StrategyConfig + all sub-structs                       |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_CONFIG_TYPES_MQH__

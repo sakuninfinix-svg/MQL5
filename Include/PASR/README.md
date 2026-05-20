@@ -1,460 +1,219 @@
-# PASR Framework — Professional Automated SR Trading System
+# PASR Framework
 
-[![Version](https://img.shields.io/badge/version-2.00-blue.svg)]()
-[![MQL5](https://img.shields.io/badge/platform-MQL5-green.svg)]()
-[![License](https://img.shields.io/badge/license-Proprietary-red.svg)]()
-
-> **Single source of truth** untuk arsitektur PASR.  
-> File ini menggabungkan semua konsep dari `_README.mqh` per-layer  
-> menjadi satu dokumen yang komprehensif dan tidak redundan.
+> **Price Action Support/Resistance** — Production-grade Expert Advisor framework for MetaTrader 5.
+> Version: 3.x (Modular Architecture) · Copyright 2026, Agsicentre
 
 ---
 
-## 🎯 Overview
+## Quick Start
 
-**PASR (Professional Automated SR)** adalah framework trading algoritmik berbasis MQL5 yang mengimplementasikan strategi **Supply & Demand** dengan arsitektur event-driven modern, 7-layer separation of concerns, dan AI/ML terintegrasi.
+```mql5
+// In your EA .mq5 file — ONE line replaces all old numeric includes
+#include <PASR/Core/PASR.mqh>
+```
 
-### Key Features
-
-| Feature | Status | Keterangan |
-|---------|--------|------------|
-| Event-Driven Architecture | ✅ Done | EventBus pattern, loose coupling |
-| 7-Layer Architecture | ✅ Done | Strict dependency rules per layer |
-| SOLID Principles | ✅ Done | Maintainable & extensible |
-| AI/ML Integration | ✅ Done | Decomposed dari God Object, deferred training |
-| Config Caching | ✅ Done | m_cfg member, refresh per-bar bukan per-fungsi |
-| Indicator Caching | ✅ Done | Lazy evaluation, no redundant iCall |
-| Recovery Management | 🔄 Fixing | Bug scope `cfg` sedang diperbaiki |
-| Account-Safe GV Keys | ✅ Done | `GVKey()` helper di Globals.mqh |
-| Multi-Timeframe Analysis | 🔄 Planned | Phase 2 |
+This single include guarantees the correct load order across all 8 layers automatically.
 
 ---
 
-## 📁 Project Structure
+## Folder Structure (Current — v3.x Modular)
 
 ```
 Include/PASR/
 │
-├── PASR.mqh                            # ★ Master include — satu baris untuk semua
-├── Globals.mqh                         # GVKey(), PASRLog, CPerfTimer, validators
-│
-├── Core/                               # ─── LAYER 1: Foundation (zero deps) ───
-│   ├── _README.mqh                     # Layer spec & dependency rules
-│   ├── IManager.mqh                    # Abstract base class semua manager
-│   ├── EventBus.mqh                    # Priority event queue & dispatcher
-│   ├── Events.mqh                      # Semua event struct/enum definitions
+├── Core/                        ← L1: Foundation (zero business logic)
+│   ├── PASR.mqh                 ← ★ MASTER INCLUDE — start here
+│   ├── IManager.mqh             → stub → ../IManager.mqh
+│   ├── EventBus.mqh             → stub → ../0.EventBus.mqh
+│   ├── Events.mqh               → stub → ../1.Events.mqh
 │   └── Config/
-│       ├── _README.mqh                 # Config sublayer spec
-│       ├── Types.mqh                   # StrategyConfig + semua sub-struct
-│       └── Manager.mqh                 # Config validation, reload, distribution
+│       ├── Types.mqh            → stub → ../2.Config.Types.mqh
+│       └── Manager.mqh          → stub → ../2.Config.Manager.mqh
 │
-├── Infra/                              # ─── LAYER 2: Infrastructure / Plumbing ───
-│   ├── _README.mqh                     # Layer spec & dependency rules
-│   ├── DataManager.mqh                 # ATR/fractal cache, lot sizing, daily PnL
-│   ├── MarketManager.mqh               # Session hours, spread, news filter
-│   └── ZoneManager.mqh                 # Supply/demand zone detection & storage
+├── Infra/                       ← L2: Infrastructure (PRODUCTION files)
+│   ├── DataManager.mqh          ★ Production — bug-fixed, account-safe GVs
+│   └── DataManager.shim.mqh    (backward-compat shim, remove in v4.0)
 │
-├── Analysis/                           # ─── LAYER 3: Analysis / Domain ───
-│   ├── _README.mqh                     # Layer spec & dependency rules
-│   ├── SRManager.mqh                   # S/R level detection & scoring
-│   ├── MarketRegime.mqh                # ADX/ATR regime + volatility filter
-│   └── Pattern/
-│       ├── _README.mqh                 # Pattern sublayer spec
-│       ├── PatternManager.mqh          # Orchestrator, delegates ke evaluators
-│       ├── Evaluators.mqh              # Per-pattern evaluation logic
-│       └── ScoreEngine.mqh             # Pattern scoring & confluence weighting
+├── Data/                        ← L3: Data access aliases → Infra/ or root
+│   ├── DataManager.mqh          → Infra/DataManager.mqh (production)
+│   ├── MarketManager.mqh        → 3.MarketManager.mqh (pending migration)
+│   ├── ZoneManager.mqh          → 3.ZoneManager.mqh   (pending migration)
+│   ├── SRManager.mqh            → 4.SRManager.mqh      (pending migration)
+│   └── MarketRegime.mqh         → 12.MarketRegime.mqh  (pending migration)
 │
-├── Signal/                             # ─── LAYER 4: Signal / Intelligence ───
-│   ├── _README.mqh                     # Layer spec & dependency rules
-│   ├── SignalManager.mqh               # Aggregates pattern+regime+AI → SignalResult
-│   └── AI/                             # AI sublayer (decomposed dari 7.AIManager.mqh)
-│       ├── _README.mqh                 # AI sublayer spec & latency budget
-│       ├── AIOrchestrator.mqh          # Thin coordinator, SATU-SATUNYA yg di-include
-│       ├── AIInference.mqh             # Pure forward-pass, zero alloc, per-tick
-│       ├── AITrainer.mqh               # Backprop deferred via EventBus (NewBar only)
-│       ├── AIFeatureBuilder.mqh        # Feature extraction dari DataManager
-│       └── AITypes.mqh                 # Shared AI types (NN weights, config)
+├── Analysis/                    ← L3+: (subfolders — pending population)
+├── Signal/                      ← L4: (sublayer AI/ pending)
+├── AI/                          ← L4 sub: AIManager decomposition (pending)
 │
-├── Trade/                              # ─── LAYER 5: Trade / Execution ───
-│   ├── _README.mqh                     # Layer spec, security rule, recovery rule
-│   ├── ExecutionManager.mqh            # CTrade wrapper, SL/TP, partial, breakeven
-│   └── RecoveryManager.mqh             # Drawdown detection, GV-persisted state
+├── Trade/                       ← L6: Trade execution layer
+│   ├── TradePlan.mqh            ★ Production — SRP-extracted from ExecMgr
+│   ├── ExecutionManager.mqh     ★ Production — all PASR-BUG-00x fixes applied
+│   ├── RecoveryManager.mqh      → stub → 8.RecoveryManager.mqh
+│   │                              ⚠ PASR-BUG-003 pending in legacy source
+│   ├── ExecutionManager.shim.mqh (backward-compat, remove in v4.0)
+│   └── _README.mqh              (layer documentation)
 │
-├── UI/                                 # ─── LAYER 6: Presentation ───
-│   ├── _README.mqh                     # Layer spec & dependency rules
-│   └── DashboardManager.mqh            # Chart overlay: equity, positions, regime
+├── UI/                          ← L7: Dashboard (pending migration)
+├── Pattern/                     ← Analysis sub (pending)
+├── QA/                          ← L8: Audit/Test tools (pending)
+├── Tools/                       ← Utilities (pending)
 │
-├── QA/                                 # ─── LAYER 7: Dev Tools (NOT production) ───
-│   ├── _README.mqh                     # QA layer spec & PASR_QA_BUILD guard
-│   ├── Audit.mqh                       # Runtime audit log
-│   ├── Test.mqh                        # Unit test runner
-│   └── Optimizations.mqh              # Performance macros & helpers
+├── docs/                        ← Internal documentation
+├── PASR.mqh                     ← Root forward → Core/PASR.mqh
+├── Globals.mqh                  ← Consolidated extern declarations
 │
-├── docs/                               # Dokumentasi extended (bukan kode)
-│   ├── QUICKSTART.md                   # Getting started dalam 5 menit
-│   ├── DOCUMENTATION.md               # Architecture deep dive & API reference
-│   ├── IMPROVEMENT_ROADMAP.md          # 90-day enhancement plan
-│   └── PERFORMANCE_OPTIMIZATION.md    # Advanced optimization techniques
+│── ── LEGACY ROOT FILES (still authoritative — migration in progress) ──────
+├── 0.EventBus.mqh               ★ Active source
+├── 1.Events.mqh                 ★ Active source
+├── 2.Config.Types.mqh           ★ Active source (53 KB — split planned v4.0)
+├── 2.Config.Manager.mqh         ★ Active source
+├── 3.MarketManager.mqh          ★ Active source
+├── 3.ZoneManager.mqh            ★ Active source
+├── 4.SRManager.mqh              ★ Active source
+├── 5.SignalManager.mqh          ★ Active source
+├── 6.ExecutionManager.mqh       ⚠ Legacy — superseded by Trade/ExecutionManager.mqh
+├── 7.AIManager.mqh              ⚠ God object — decomposition pending (AI/ folder)
+├── 8.RecoveryManager.mqh        ⚠ Active but has PASR-BUG-003 (cfg scope)
+├── 9.PatternManager.mqh         ★ Active source
+├── 10.DataManager.mqh           ⚠ Legacy — superseded by Infra/DataManager.mqh
+├── 11.DashboardManager.mqh      ★ Active source (pending → UI/)
+├── 12.MarketRegime.mqh          ★ Active source
 │
-└── [legacy shims — backward compat]   # File lama tetap ada, compile normal
-    ├── 0.EventBus.mqh                  # → Core/EventBus.mqh
-    ├── 1.Events.mqh                    # → Core/Events.mqh
-    ├── 2.Config.Types.mqh              # → Core/Config/Types.mqh
-    ├── 2.Config.Manager.mqh            # → Core/Config/Manager.mqh
-    ├── 3.MarketManager.mqh             # → Infra/MarketManager.mqh
-    ├── 3.ZoneManager.mqh               # → Infra/ZoneManager.mqh
-    ├── 4.SRManager.mqh                 # → Analysis/SRManager.mqh
-    ├── 5.SignalManager.mqh             # → Signal/SignalManager.mqh
-    ├── 6.ExecutionManager.mqh          # → Trade/ExecutionManager.mqh
-    ├── 7.AIManager.mqh                 # → Signal/AI/AIOrchestrator.mqh
-    ├── 8.RecoveryManager.mqh           # → Trade/RecoveryManager.mqh
-    ├── 9.PatternManager.mqh            # → Analysis/Pattern/PatternManager.mqh
-    ├── 10.DataManager.mqh              # → Infra/DataManager.mqh
-    ├── 11.DashboardManager.mqh         # → UI/DashboardManager.mqh
-    └── 12.MarketRegime.mqh             # → Analysis/MarketRegime.mqh
+├── IManager.mqh                 ★ Active source (abstract base)
+└── PASR.Audit/Test/Opt.mqh     ★ QA tools (PASR_QA_BUILD only)
 ```
 
 ---
 
-## 🏗️ Layer Architecture
+## Layer Architecture
 
-### Dependency Flow (satu arah — tidak boleh terbalik)
+| Layer | Folder | Responsibility | Dependency Rule |
+|-------|--------|---------------|-----------------|
+| L1 | `Core/` | IManager, EventBus, Events, Config | May only include other `Core/` files |
+| L2 | `Infra/` | DataManager (GV state, cache, PnL) | May include `Core/` only |
+| L3 | `Data/` | Market data access aliases | Forwards to `Infra/` or root sources |
+| L3+ | `Analysis/` | SRManager, ZoneManager, MarketRegime | May include `Core/`, `Infra/`, `Data/` |
+| L4 | `Signal/` + `AI/` | SignalManager, AIManager | May include L1–L3 only |
+| L5 | `Pattern/` | CandlePatternManager | May include L1–L3 only |
+| L6 | `Trade/` | TradePlan, ExecutionManager, RecoveryManager | May include L1–L5 |
+| L7 | `UI/` | DashboardManager | May include all lower layers |
+| L8 | `QA/` | Audit, Test, Optimizer | Dev builds only (`#ifdef PASR_QA_BUILD`) |
 
-```
-┌─────────────────────────────────────────────────────┐
-│  QA (Layer 7)     — dev only, #ifdef PASR_QA_BUILD  │
-│  Boleh include semua layer. TIDAK boleh di-include  │
-│  oleh production .mqh atau .mq5 manapun.            │
-└────────────────────┬────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────┐
-│  UI (Layer 6)     — DashboardManager                │
-│  MAY include : Core, Infra, Analysis, Signal, Trade │
-│  MUST NOT    : ─                                    │
-└────────────────────┬────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────┐
-│  Trade (Layer 5)  — Execution, Recovery             │
-│  MAY include : Core, Infra                          │
-│  MAY read    : Analysis types (via parameters)      │
-│  MUST NOT    : Signal/, UI/                         │
-└────────────────────┬────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────┐
-│  Signal (Layer 4) — SignalManager + AI sublayer     │
-│  MAY include : Core, Infra, Analysis                │
-│  MUST NOT    : Trade/, UI/                          │
-│                                                     │
-│  Signal/AI/       — sublayer dari Signal            │
-│    AIInference  → per-tick, zero alloc, O(layers)  │
-│    AITrainer    → deferred via EventBus (NewBar)    │
-│    AIOrchestrator → satu-satunya yg di-include      │
-│                     oleh SignalManager              │
-└────────────────────┬────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────┐
-│  Analysis (Layer 3) — SR, Regime, Pattern           │
-│  MAY include : Core, Infra                          │
-│  MUST NOT    : Signal/, Trade/, UI/                 │
-│                                                     │
-│  CATATAN:                                           │
-│  - Pattern/ files tidak boleh include SRManager     │
-│    atau MarketRegime (data dikirim via parameter)   │
-│  - MarketRegime tidak boleh include DataManager     │
-│    langsung (gunakan IDataProvider interface)       │
-└────────────────────┬────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────┐
-│  Infra (Layer 2)  — DataManager, Market, Zone       │
-│  MAY include : Core only                            │
-│  MUST NOT    : Analysis/, Signal/, Trade/, UI/      │
-│                                                     │
-│  CATATAN:                                           │
-│  - DataManager TIDAK boleh include Config/Manager   │
-│    Config diinjeksi via InitConfigCache(cfg&)       │
-│  - MarketRegimeFilter diakses via extern pointer    │
-│    g_regimeFilter dari Globals.mqh                 │
-└────────────────────┬────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────┐
-│  Core (Layer 1)   — IManager, EventBus, Config      │
-│  MAY include : Core/ only                           │
-│  MUST NOT    : semua layer lain                     │
-│                                                     │
-│  RATIONALE: Core tidak boleh tahu business logic.   │
-│  Jika Core file butuh type dari layer lain →        │
-│  gunakan forward declaration atau interface.        │
-└─────────────────────────────────────────────────────┘
-```
-
-### Layer Summary
-
-| Layer | Folder | Isi | Boleh include |
-|-------|--------|-----|-----------------|
-| L1 | `Core/` | IManager, EventBus, Events, Config | Core/ saja |
-| L2 | `Infra/` | DataManager, MarketManager, ZoneManager | Core/ |
-| L3 | `Analysis/` | SRManager, MarketRegime, Pattern/ | Core/, Infra/ |
-| L4 | `Signal/` | SignalManager, AI/ | Core/, Infra/, Analysis/ |
-| L5 | `Trade/` | ExecutionManager, RecoveryManager | Core/, Infra/ |
-| L6 | `UI/` | DashboardManager | Semua L1-L5 |
-| L7 | `QA/` | Audit, Test, Optimizations | Semua layer |
+**Golden Rule:** Higher layers NEVER include lower layers. Violations = circular dependency.
 
 ---
 
-## 🚀 Quick Start
+## Migration Status
 
-### Production EA
+| File | New Canonical Path | Status | Notes |
+|------|--------------------|--------|-------|
+| `IManager.mqh` | `Core/IManager.mqh` | 🔄 Stub ready | Source still at root |
+| `0.EventBus.mqh` | `Core/EventBus.mqh` | 🔄 Stub ready | Source still at root |
+| `1.Events.mqh` | `Core/Events.mqh` | 🔄 Stub ready | Source still at root |
+| `2.Config.Types.mqh` | `Core/Config/Types.mqh` | 🔄 Stub ready | 53 KB — split in v4.0 |
+| `2.Config.Manager.mqh` | `Core/Config/Manager.mqh` | 🔄 Stub ready | |
+| `10.DataManager.mqh` | `Infra/DataManager.mqh` | ✅ **DONE** | All bugs fixed |
+| `6.ExecutionManager.mqh` | `Trade/ExecutionManager.mqh` | ✅ **DONE** | All bugs fixed |
+| `Trade/TradePlan.mqh` | *(new file — extracted)* | ✅ **DONE** | SRP extract |
+| `8.RecoveryManager.mqh` | `Trade/RecoveryManager.mqh` | 🔄 Stub ready | ⚠ BUG-003 pending |
+| `3.MarketManager.mqh` | `Analysis/MarketManager.mqh` | ⏳ Pending | |
+| `3.ZoneManager.mqh` | `Analysis/ZoneManager.mqh` | ⏳ Pending | |
+| `4.SRManager.mqh` | `Analysis/SRManager.mqh` | ⏳ Pending | |
+| `12.MarketRegime.mqh` | `Analysis/MarketRegime.mqh` | ⏳ Pending | extern sprawl issue |
+| `7.AIManager.mqh` | `AI/AIOrchestrator.mqh` + `AI/AIInference.mqh` + `AI/AITrainer.mqh` | ⏳ Pending | God object decomp |
+| `5.SignalManager.mqh` | `Signal/SignalManager.mqh` | ⏳ Pending | |
+| `9.PatternManager.mqh` | `Pattern/PatternManager.mqh` | ⏳ Pending | |
+| `11.DashboardManager.mqh` | `UI/DashboardManager.mqh` | ⏳ Pending | |
+
+---
+
+## Bug Fix Register
+
+| ID | Severity | File | Description | Status |
+|----|----------|------|-------------|--------|
+| PASR-BUG-001 | 🔴 Critical | `Infra/DataManager.mqh` | GV keys missing `ACCOUNT_LOGIN` prefix → multi-instance state corruption | ✅ Fixed |
+| PASR-BUG-002 | 🔴 Critical | `Trade/ExecutionManager.mqh` | `ScavengePendingGVs()` O(n²) on every bar → CPU spike | ✅ Fixed |
+| PASR-BUG-003 | 🔴 Critical | `8.RecoveryManager.mqh` | `cfg` undeclared in `ClearEngineGVs()` → runtime NULL crash | ⏳ Pending |
+| PASR-BUG-004 | 🟠 High | `Trade/ExecutionManager.mqh` | Dashboard string rebuilt on every tick → heap churn | ✅ Fixed |
+| PASR-BUG-005 | 🟠 High | `Infra/DataManager.mqh` | Daily PnL formula missing floating component | ✅ Fixed |
+| PASR-BUG-006 | 🟠 High | Multiple | `extern` declarations duplicated across 3+ files → linker collision | ✅ Fixed via `Globals.mqh` |
+
+---
+
+## Include Path Reference
 
 ```mql5
-// Satu baris — semua layer tersedia dengan load order yang benar
-#include <PASR/PASR.mqh>
-```
+// ── Recommended (always use these canonical paths) ──────────────────────
+#include <PASR/Core/PASR.mqh>              // Everything, correct load order
+#include <PASR/Infra/DataManager.mqh>      // Data layer only
+#include <PASR/Trade/ExecutionManager.mqh> // Trade layer only
+#include <PASR/Trade/TradePlan.mqh>        // Trade plan struct
 
-### Include layer tertentu saja
+// ── Config sub-includes ───────────────────────────────────────────────────
+#include <PASR/Core/Config/Types.mqh>      // StrategyConfig struct
+#include <PASR/Core/Config/Manager.mqh>    // CConfigManager
 
-```mql5
-// Hanya event system:
-#include <PASR/Core/EventBus.mqh>
-
-// Hanya infrastructure:
-#include <PASR/Infra/DataManager.mqh>
-
-// Hanya signal layer:
-#include <PASR/Signal/SignalManager.mqh>
-```
-
-### Development / QA Build
-
-```mql5
-// Aktifkan QA tools — HANYA untuk dev/test build, tidak untuk production!
-#define PASR_QA_BUILD
-#include <PASR/PASR.mqh>
-#include <PASR/QA/Test.mqh>
-#include <PASR/QA/Audit.mqh>
-```
-
-### Debug Logging
-
-```mql5
-// Aktifkan verbose logging
-#define PASR_DEBUG
-#include <PASR/PASR.mqh>
+// ── Legacy paths (still work via shims — deprecated, remove in v4.0) ─────
+#include <PASR/10.DataManager.mqh>         // ⚠ Use Infra/DataManager.mqh instead
+#include <PASR/6.ExecutionManager.mqh>     // ⚠ Use Trade/ExecutionManager.mqh instead
 ```
 
 ---
 
-## 🔑 Globals.mqh — Safety Helpers
+## Development Guidelines
 
-### Account-Safe GlobalVariable Keys
+### Adding a New Manager
 
-**WAJIB digunakan** untuk semua GlobalVariable. Mencegah state corruption antara
-instance live + demo yang berjalan bersamaan dengan magic number yang sama.
+1. Create in the correct layer folder (e.g., `Analysis/MyManager.mqh`)
+2. Inherit from `IManager` (via `Core/IManager.mqh`)
+3. Subscribe to events via `EventBus` — never call other managers directly
+4. Add a canonical stub in the appropriate alias folder if needed
+5. Register the include in `Core/PASR.mqh` at the correct layer position
+6. Add GV keys with `AccountInfoInteger(ACCOUNT_LOGIN)` prefix
 
-```mql5
-#include <PASR/Globals.mqh>
-
-// Format key: "<login>_<symbol>_<magic>_<purpose>"
-// Contoh: "123456789_EURUSD_12345_TRADE_STATE"
-
-// Set:
-GVSet("TRADE_STATE", 1.0);
-
-// Get (dengan default jika belum ada):
-double state = GVGet("TRADE_STATE", 0.0);
-
-// Delete:
-GVDelete("TRADE_STATE");
-
-// Check exists:
-if (GVExists("TRADE_STATE")) { ... }
-```
-
-### Performance Profiling
+### GlobalVariable Key Convention
 
 ```mql5
-#include <PASR/Globals.mqh>
+// CORRECT — account-safe, magic-number-scoped
+string key = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
+           + "_PASR_"
+           + IntegerToString(MagicNumber)
+           + "_KeyName";
 
-void OnTick() {
-    CPerfTimer timer;
-    timer.Start();
-
-    // ... logic ...
-
-    ulong us = timer.Elapsed();
-    if (us > 100) timer.Log("OnTick"); // alert jika > 100µs
-}
+// WRONG — causes live/demo cross-contamination
+string key = "PASR_" + IntegerToString(MagicNumber) + "_KeyName";
 ```
 
----
+### QA Build
 
-## ⚡ Performance Budget
-
-| Handler | Target | Strategi |
-|---------|--------|----------|
-| `OnTick()` total | < 100µs | Early return, zero alloc, no string ops |
-| `OnNewBar()` total | < 2ms | Deferred compute via EventBus |
-| EventBus dispatch | < 50µs | Array-based queue, no map lookup |
-| `AIInference` per-tick | < 0.5ms | O(layers), no dynamic alloc |
-| `AITrainer` per-NewBar | < 50ms | Deferred, tidak pernah di OnTick() |
-| Dashboard render | 1 Hz max | Throttle dengan `GetMicrosecondCount()` |
-| Config cache refresh | Per-bar | `m_cfg` member, bukan per-fungsi copy |
-
----
-
-## 🛠️ Development Tools (QA Layer)
-
-> ⚠️ **Tidak boleh masuk production build.** Gunakan `#define PASR_QA_BUILD`.
-
-### Code Quality Audit
+Enable the full audit/test suite by defining `PASR_QA_BUILD` before the include:
 
 ```mql5
 #define PASR_QA_BUILD
-#include <PASR/QA/Audit.mqh>
-
-PASRAuditor auditor;
-auditor.RunFullAudit();
-```
-
-### Unit Testing
-
-```mql5
-#define PASR_QA_BUILD
-#include <PASR/QA/Test.mqh>
-
-TestRunner runner;
-runner.RegisterTest(myTest);
-TestSuiteReport report = runner.RunAll();
-report.LogReport();
+#include <PASR/Core/PASR.mqh>
 ```
 
 ---
 
-## 🐛 Known Issues (v1.x bugs — must fix)
+## Documentation
 
-> Bugs ini didokumentasikan di `Trade/_README.mqh` dan `Analysis/_README.mqh`.
-
-| ID | File | Bug | Severity | Fix |
-|----|------|-----|----------|-----|
-| PASR-BUG-001 | `8.RecoveryManager.mqh` | `cfg` digunakan tanpa deklarasi di scope `ClearEngineGVs()` | 🔴 Critical | Tambah `StrategyConfig cfg; CheckPointer(m_data); m_data.GetConfigCache(cfg);` |
-| PASR-BUG-002 | `6.ExecutionManager.mqh` | `ScavengePendingGVs()` O(total_GVs × positions) setiap bar | 🔴 Critical | Cache GV keys di `string m_gvKeys[]`, update hanya saat trade open/close |
-| PASR-BUG-003 | `6.ExecutionManager.mqh` | GV keys tanpa `AccountLogin` prefix | 🟠 High | Ganti semua dengan `GVKey()` dari Globals.mqh |
-| PASR-BUG-004 | `7.AIManager.mqh` | Backprop jalan synchronous di tick thread | 🟠 High | Pindah ke deferred EventBus event (AITrainer sudah siap di Signal/AI/) |
-| PASR-BUG-005 | `11.DashboardManager.mqh` | String rebuild setiap `OnPriceUpdate` | 🟡 Medium | Throttle 1 Hz dengan `GetMicrosecondCount()` guard |
-| PASR-BUG-006 | Multiple files | `StrategyConfig cfg` copy per-fungsi | 🟡 Medium | Pakai `m_cfg` member, refresh per-bar via `ConfigReloadEvent` |
-
----
-
-## 📊 Migration Status
-
-Track progress migrasi dari file numbered ke canonical path.
-
-| Source (lama) | Target (baru) | Status |
-|---------------|---------------|--------|
-| `0.EventBus.mqh` | `Core/EventBus.mqh` | ✅ Shim done |
-| `1.Events.mqh` | `Core/Events.mqh` | ✅ Shim done |
-| `2.Config.Types.mqh` | `Core/Config/Types.mqh` | ✅ Shim done |
-| `2.Config.Manager.mqh` | `Core/Config/Manager.mqh` | ✅ Shim done |
-| `3.MarketManager.mqh` | `Infra/MarketManager.mqh` | ⏳ Pending full migration |
-| `3.ZoneManager.mqh` | `Infra/ZoneManager.mqh` | ⏳ Pending full migration |
-| `4.SRManager.mqh` | `Analysis/SRManager.mqh` | ⏳ Pending full migration |
-| `5.SignalManager.mqh` | `Signal/SignalManager.mqh` | ✅ Shim done |
-| `6.ExecutionManager.mqh` | `Trade/ExecutionManager.mqh` | ✅ Shim done + PASR-BUG-002/003 to fix |
-| `7.AIManager.mqh` | `Signal/AI/AIOrchestrator.mqh` | ✅ Decomposed (Orchestrator+Inference+Trainer) |
-| `8.RecoveryManager.mqh` | `Trade/RecoveryManager.mqh` | ✅ Shim done + PASR-BUG-001 to fix |
-| `9.PatternManager.mqh` | `Analysis/Pattern/PatternManager.mqh` | ✅ Shim done |
-| `10.DataManager.mqh` | `Infra/DataManager.mqh` | ⏳ Pending full migration |
-| `11.DashboardManager.mqh` | `UI/DashboardManager.mqh` | ✅ Shim done + PASR-BUG-005 to fix |
-| `12.MarketRegime.mqh` | `Analysis/MarketRegime.mqh` | ⏳ Pending full migration |
-| `PASR.Audit.mqh` | `QA/Audit.mqh` | ⏳ Pending full migration |
-| `PASR.Test.mqh` | `QA/Test.mqh` | ⏳ Pending full migration |
-| `PASR.Optimizations.mqh` | `QA/Optimizations.mqh` | ⏳ Pending full migration |
+| File | Contents |
+|------|----------|
+| `README.md` | This file — architecture overview |
+| `QUICKSTART.md` | Step-by-step EA integration guide |
+| `DOCUMENTATION.md` | Full API reference |
+| `IMPROVEMENT_ROADMAP.md` | Prioritized refactor backlog |
+| `PERFORMANCE_OPTIMIZATION.md` | Performance analysis & benchmarks |
+| `OPTIMIZATION_PHASE2.md` | Phase 2 optimization plan |
+| `OPTIMIZATION_REPORT.md` | Optimization audit results |
+| `docs/` | Internal architecture notes |
 
 ---
 
-## 📈 Roadmap
+## Version History
 
-### Phase 1 — Foundation (Days 1-30) 🔄 In Progress
-
-- [x] Audit tool created (`QA/Audit.mqh`)
-- [x] Test framework created (`QA/Test.mqh`)
-- [x] Folder structure defined per `_README.mqh` layer specs
-- [x] Shims created untuk semua canonical paths
-- [x] `PASR.mqh` master include dengan enforced load order
-- [x] `Globals.mqh` dengan `GVKey()` account-safe helper
-- [x] AI decomposed: `AIOrchestrator` + `AIInference` + `AITrainer`
-- [ ] Fix PASR-BUG-001 (`RecoveryManager` cfg scope)
-- [ ] Fix PASR-BUG-002 (`ScavengePendingGVs` O(n×m))
-- [ ] Fix PASR-BUG-003 (GV keys → `GVKey()`)
-- [ ] Fix PASR-BUG-004 (backprop deferred)
-- [ ] 60% test coverage di `QA/Test.mqh`
-
-### Phase 2 — Performance (Days 31-60)
-
-- [ ] Event dispatch ≤ 50µs verified dengan `CPerfTimer`
-- [ ] Full migration semua pending file ke canonical paths
-- [ ] Enum `ENUM_EVENT_ID` menggantikan `#define EVENT_ID_*`
-- [ ] Memory per symbol ≤ 2KB (audit dengan `QA/Audit.mqh`)
-- [ ] Lazy indicator updates
-- [ ] Tick batching
-
-### Phase 3 — Scalability (Days 61-90)
-
-- [ ] Multi-symbol support
-- [ ] Config hot-reload tanpa restart EA
-- [ ] ONNX model support via `AIInference.mqh`
-- [ ] Test coverage ≥ 80%
-- [ ] Performance regression test suite
-
----
-
-## 📝 Developer Notes
-
-### Rules yang TIDAK boleh dilanggar
-
-1. **Dependency rules** — setiap layer hanya boleh include layer di bawahnya (lihat tabel Layer Summary)
-2. **GV keys** — SELALU gunakan `GVKey()` dari `Globals.mqh`, TIDAK PERNAH hardcode string GV
-3. **AI Trainer** — TIDAK PERNAH dipanggil langsung dari `OnTick()`, hanya via deferred EventBus event
-4. **QA layer** — TIDAK PERNAH masuk production build, wajib dibungkus `#ifdef PASR_QA_BUILD`
-5. **Config copy** — TIDAK PERNAH `StrategyConfig cfg; m_data.GetConfigCache(cfg)` di dalam fungsi — selalu pakai `m_cfg` member
-6. **Legacy shims** — TIDAK perlu diubah, biarkan tetap ada untuk backward compat EA lama
-
-### Untuk EA baru
-
-```mql5
-#include <PASR/PASR.mqh>          // ← satu baris ini saja
-```
-
-### Untuk EA lama (tidak perlu diubah)
-
-```mql5
-#include <PASR/10.DataManager.mqh>  // ← masih berfungsi via shim
-```
-
-### Kalau butuh hanya satu sublayer
-
-```mql5
-#include <PASR/Signal/AI/AIOrchestrator.mqh>   // AI saja
-#include <PASR/Analysis/Pattern/PatternManager.mqh>  // Pattern saja
-#include <PASR/QA/Audit.mqh>  // Audit saja (dev build)
-```
-
----
-
-## 📚 Extended Documentation
-
-| Dokumen | Isi |
-|---------|-----|
-| [docs/QUICKSTART.md](docs/QUICKSTART.md) | Getting started dalam 5 menit |
-| [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) | Architecture deep dive & API reference |
-| [docs/IMPROVEMENT_ROADMAP.md](docs/IMPROVEMENT_ROADMAP.md) | 90-day enhancement plan |
-| [docs/PERFORMANCE_OPTIMIZATION.md](docs/PERFORMANCE_OPTIMIZATION.md) | Profiling & optimization patterns |
-
----
-
-## 📄 License
-
-Proprietary — Copyright 2026 Agsicentre
-
----
-
-**Built with ❤️ for Algorithmic Trading**
+| Version | Changes |
+|---------|---------|
+| v3.x | Modular subfolder architecture; `Core/PASR.mqh` master include; production `Infra/DataManager.mqh`; `Trade/ExecutionManager.mqh` + `TradePlan.mqh`; `Globals.mqh` extern consolidation; all PASR-BUG-00x fixes except BUG-003 |
+| v2.x | 12-file flat numeric prefix system (0.EventBus … 12.MarketRegime) |
+| v1.x | Initial monolithic EA structure |

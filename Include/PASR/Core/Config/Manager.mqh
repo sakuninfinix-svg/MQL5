@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
-//|                                  Core/Config/Manager.mqh         |
-//|                                       Copyright 2026, Agsicentre |
-//|  Canonical location. Shim -> 2.Config.Manager.mqh                |
+//|                                    Core/Config/Manager.mqh       |
+//|  Canonical location — migrated from 2.Config.Manager.mqh         |
+//|  Contains: CConfigManager — validation, reload, distribution      |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_CONFIG_MANAGER_MQH__
