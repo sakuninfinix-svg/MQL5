@@ -1187,17 +1187,20 @@ private:
       double maxProfit = 0.0;
       double maxAdverse = 0.0;
       
+      // Use signalPrice as entry price reference
+      double entryPrice = sample.signal.signalPrice;
+      
       for(int i = 0; i < lookforwardBars; i++)
       {
-         double highDiff = futureBars[i].high - sample.signal.entryPrice;
-         double lowDiff = sample.signal.entryPrice - futureBars[i].low;
+         double highDiff = futureBars[i].high - entryPrice;
+         double lowDiff = entryPrice - futureBars[i].low;
          
-         if(sample.signal.type == ORDER_TYPE_BUY)
+         if(sample.signal.orderType == ORDER_TYPE_BUY)
          {
             maxProfit = MathMax(maxProfit, highDiff);
             maxAdverse = MathMax(maxAdverse, lowDiff);
          }
-         else if(sample.signal.type == ORDER_TYPE_SELL)
+         else if(sample.signal.orderType == ORDER_TYPE_SELL)
          {
             maxProfit = MathMax(maxProfit, lowDiff);
             maxAdverse = MathMax(maxAdverse, highDiff);
