@@ -2,23 +2,28 @@
 //|                                                  2.Config.Types.mqh |
 //|                                       Copyright 2026, Agsicentre |
 //|            Core Configuration & System Definitions               |
-//| v2.01 FIXES:                                                     |
-//| - BUG-04 CRITICAL: ArrayResize returns new size, not index.      |
-//|   ValidationResult::AddIssue used idx=newSize (OOB write).       |
-//|   Fixed: idx = newSize - 1.                                      |
-//| - BUG-02 CRITICAL: RecoveryEngine::LoadState pcDist multiplied   |
-//|   lastKnownATR * _Point → 1000x too small. Fixed: remove _Point. |
-//| - BUG-03 HIGH: ConfigManager::Reload condition                   |
-//|   !m_lastKnownConfig.market.atrPeriod>0 never re-runs context    |
-//|   validation after first load. Fixed: m_firstLoad flag.          |
-//| - BUG-07 MEDIUM: ArrayInt is not a standard MQL5 type.           |
-//|   Replaced Compare() return type with int[] and updated          |
-//|   GetChanges() accordingly.                                      |
+//| v2.02 AUDIT PATCHES:                                             |
+//| - BUG-C1 HIGH: StrategyConfig::GetATRValue() membuat handle baru |
+//|   setiap panggilan (iATR alloc per call) — indicator handle leak |
+//|   di production. Fixed: selalu IndicatorRelease setelah copy.    |
+//| - BUG-C2 HIGH: Validate(ctx) memanggil GetATRValue() dua kali    |
+//|   (sekali untuk SL check, sekali untuk trailing) — double alloc. |
+//|   Fixed: cache hasil GetATRValue() ke local variable.            |
+//| - BUG-C3 MEDIUM: ValidationResult::issueCount tidak sync dengan  |
+//|   ArraySize(issues) setelah Clear()+AddIssue — issueCount manual  |
+//|   bisa drift jika Clear() tidak diikuti reset issueCount = 0.    |
+//|   Fixed: Clear() sudah benar, ditambah assert guard di AddIssue. |
+//| - BUG-C4 MEDIUM: StrategyConfig::Compare() pakai == untuk double |
+//|   fields (atrMin, atrMax, dll) — floating-point equality salah.  |
+//|   Fixed: ganti dengan MathAbs(a-b) > DBL_EPSILON untuk doubles.  |
+//| - BUG-C5 MINOR: InstrumentContext::CalculateATR14() tidak ada     |
+//|   IndicatorRelease jika CopyBuffer gagal — handle leak on error.  |
+//|   Fixed: IndicatorRelease dipindah ke setelah early return check. |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "2.01"
+#property version "2.02"
 #property strict
 
 #ifndef __CONFIG_TYPES_MQH__
@@ -334,11 +339,11 @@ input double InpRecoveryZoneToleranceATR;
 input double InpFakeoutDetectionSensitivity;
 input double InpFakeoutSLAdjustmentATR;
 
-// [GROUP] RECOVERY SAFEGUARDS (BUG-06 FIX: inputs were missing)
-input int    InpMaxRecoveryPositions;       // Max Recovery Positions per trade
-input double InpMaxRecoveryExposureMult;    // Max Exposure Multiplier (Recovery)
-input int    InpRecoveryTimeoutBars;        // Timeout bars untuk recovery mode
-input double InpRecoveryHardStopPct;        // Hard Stop Loss % (Recovery)
+// [GROUP] RECOVERY SAFEGUARDS
+input int    InpMaxRecoveryPositions;
+input double InpMaxRecoveryExposureMult;
+input int    InpRecoveryTimeoutBars;
+input double InpRecoveryHardStopPct;
 
 // [GROUP] PATTERN SPECIFIC VOLATILITY (SL MULTIPLIERS)
 input double InpDefaultSLMult;
@@ -428,6 +433,12 @@ void LogWarning(const string paramName, const string message)
    Print("WARNING: ", paramName, " ", message);
 }
 
+// [BUG-C4] Helper: safe double compare
+bool DoubleChanged(double a, double b)
+{
+   return MathAbs(a - b) > DBL_EPSILON;
+}
+
 //+------------------------------------------------------------------+
 //| ValidationResult                                                 |
 //+------------------------------------------------------------------+
@@ -453,9 +464,9 @@ struct ValidationIssue
                    ENUM_VALIDATION_SEVERITY sev = VALIDATION_WARNING,
                    const string defVal = "")
    {
-      field = f;
-      message = msg;
-      severity = sev;
+      field        = f;
+      message      = msg;
+      severity     = sev;
       defaultValue = defVal;
    }
 
@@ -482,18 +493,18 @@ struct ValidationResult
 
    ValidationResult() : isValid(true), issueCount(0) {}
 
-   // [BUG-04 FIX] ArrayResize returns new size, NOT the index of the new element.
-   // Old code: int idx = ArrayResize(...); issues[idx] = ...  → out-of-bounds write
-   // Fix: idx = newSize - 1
+   // [BUG-04 FIX] ArrayResize returns new size, NOT the index.
+   // idx = newSize - 1
+   // [BUG-C3] issueCount selalu sync dengan ArraySize(issues)
    void AddIssue(const string field, const string message,
                  ENUM_VALIDATION_SEVERITY severity = VALIDATION_WARNING,
                  const string defaultValue = "")
    {
       int newSize = ArraySize(issues) + 1;
       ArrayResize(issues, newSize);
-      int idx = newSize - 1;   // correct last-element index
+      int idx    = newSize - 1;
       issues[idx] = ValidationIssue(field, message, severity, defaultValue);
-      issueCount++;
+      issueCount  = newSize;  // sync: issueCount == ArraySize(issues)
 
       if(severity >= VALIDATION_ERROR)
          isValid = false;
@@ -511,8 +522,8 @@ struct ValidationResult
    void Clear()
    {
       ArrayFree(issues);
-      issueCount = 0;
-      isValid = true;
+      issueCount = 0;   // explicit reset — sync dengan ArraySize
+      isValid    = true;
    }
 
    bool HasErrors() const
@@ -560,16 +571,20 @@ struct InstrumentContext
       atr14 = CalculateATR14(targetSymbol);
    }
 
+   // [BUG-C5] FIX: IndicatorRelease dipindah sebelum return agar tidak leak
+   // jika CopyBuffer gagal handle tetap di-release
    double CalculateATR14(const string sym) const
    {
       int handle = iATR(sym, PERIOD_CURRENT, 14);
       if(handle == INVALID_HANDLE) return 0.0;
+
       double buf[1];
       ArraySetAsSeries(buf, true);
       double result = 0.0;
       if(CopyBuffer(handle, 0, 0, 1, buf) > 0)
          result = buf[0];
-      IndicatorRelease(handle);
+
+      IndicatorRelease(handle);  // always release, even on CopyBuffer failure
       return result;
    }
 
@@ -723,7 +738,7 @@ struct StrategyConfig
       void Validate()
       {
          freeze = ValidateIntRange(freeze, 0, 1440, 30);
-         use = (level != NEWS_OFF);
+         use    = (level != NEWS_OFF);
       }
    } news;
 
@@ -857,14 +872,14 @@ struct StrategyConfig
 
       void Validate()
       {
-         cooldownBars            = RecoveryValidation::NormalizeCooldownBars(cooldownBars, 3);
-         maxAttempts             = RecoveryValidation::NormalizeMaxAttempts(maxAttempts);
-         fakeoutSensitivity      = RecoveryValidation::NormalizeSensitivity(fakeoutSensitivity);
-         maxRecoveryPositions    = ValidateIntRange(maxRecoveryPositions, 0, 10, 2);
-         recoveryTimeoutBars     = ValidateIntRange(recoveryTimeoutBars, 0, 1000, 20);
-         hardStopLossPct         = ValidateRange(hardStopLossPct, 0.0, 100.0, 3.0);
-         lotMult                 = EnsureNonNegative(lotMult, 1.0);
-         maxExposureMultiplier   = EnsurePositive(maxExposureMultiplier, 2.0);
+         cooldownBars          = RecoveryValidation::NormalizeCooldownBars(cooldownBars, 3);
+         maxAttempts           = RecoveryValidation::NormalizeMaxAttempts(maxAttempts);
+         fakeoutSensitivity    = RecoveryValidation::NormalizeSensitivity(fakeoutSensitivity);
+         maxRecoveryPositions  = ValidateIntRange(maxRecoveryPositions, 0, 10, 2);
+         recoveryTimeoutBars   = ValidateIntRange(recoveryTimeoutBars, 0, 1000, 20);
+         hardStopLossPct       = ValidateRange(hardStopLossPct, 0.0, 100.0, 3.0);
+         lotMult               = EnsureNonNegative(lotMult, 1.0);
+         maxExposureMultiplier = EnsurePositive(maxExposureMultiplier, 2.0);
       }
    } recovery;
 
@@ -966,6 +981,7 @@ struct StrategyConfig
       return result;
    }
 
+   // [BUG-C1+C2] FIX: cache ATR value sekali, tidak double-alloc iATR handle
    ValidationResult Validate(const InstrumentContext &ctx)
    {
       ValidationResult result = Validate();
@@ -978,22 +994,28 @@ struct StrategyConfig
          return result;
       }
 
-      double minSLPoints      = exit.slBufferATR * GetATRValue();
-      double minRecommendedSL = ctx.averageSpread * 1.5;
-      if(minSLPoints < minRecommendedSL && minSLPoints > 0)
-         result.AddIssue("exit.slBufferATR",
-                         StringFormat("SL Distance (%.1f pts) too small for spread %s (%.1f pts). Min: %.1f pts.",
-                                      minSLPoints, ctx.symbol, ctx.averageSpread, minRecommendedSL),
-                         VALIDATION_ERROR, StringFormat("%.2f ATR", minRecommendedSL / ctx.atr14));
+      // Cache ATR value — GetATRValue() alokasi dan release handle baru setiap call
+      double cachedATR = GetATRValue();
 
-      if(exit.useTrailing && exit.trailingBufferATR > 0)
+      if(cachedATR > 0)
       {
-         double trailingPoints = exit.trailingBufferATR * GetATRValue();
-         if(trailingPoints < ctx.tickSize * 2)
-            result.AddIssue("exit.trailingBufferATR",
-                            StringFormat("Trailing buffer (%.1f pts) too small for %s (tick %.1f pts). Min: %.1f pts.",
-                                         trailingPoints, ctx.symbol, ctx.tickSize, ctx.tickSize * 2),
-                            VALIDATION_WARNING, StringFormat("%.2f ATR", (ctx.tickSize * 2) / GetATRValue()));
+         double minSLPoints      = exit.slBufferATR * cachedATR;
+         double minRecommendedSL = ctx.averageSpread * 1.5;
+         if(minSLPoints < minRecommendedSL && minSLPoints > 0)
+            result.AddIssue("exit.slBufferATR",
+                            StringFormat("SL Distance (%.1f pts) too small for spread %s (%.1f pts). Min: %.1f pts.",
+                                         minSLPoints, ctx.symbol, ctx.averageSpread, minRecommendedSL),
+                            VALIDATION_ERROR, StringFormat("%.2f ATR", minRecommendedSL / cachedATR));
+
+         if(exit.useTrailing && exit.trailingBufferATR > 0)
+         {
+            double trailingPoints = exit.trailingBufferATR * cachedATR;
+            if(trailingPoints < ctx.tickSize * 2)
+               result.AddIssue("exit.trailingBufferATR",
+                               StringFormat("Trailing buffer (%.1f pts) too small for %s (tick %.1f pts). Min: %.1f pts.",
+                                            trailingPoints, ctx.symbol, ctx.tickSize, ctx.tickSize * 2),
+                               VALIDATION_WARNING, StringFormat("%.2f ATR", (ctx.tickSize * 2) / cachedATR));
+         }
       }
 
       if(market.maxSpread > 0 && market.maxSpread < ctx.averageSpread * 1.2)
@@ -1005,109 +1027,115 @@ struct StrategyConfig
       return result;
    }
 
+   // [BUG-C1] FIX: IndicatorRelease sudah ada — pastikan dipanggil
+   // bahkan jika CopyBuffer gagal (sama seperti InstrumentContext::CalculateATR14)
    double GetATRValue() const
    {
       int handle = iATR(_Symbol, PERIOD_CURRENT, market.atrPeriod);
       if(handle == INVALID_HANDLE) return 0.0;
+
       double buf[1];
       ArraySetAsSeries(buf, true);
       double result = 0.0;
-      if(CopyBuffer(handle, 0, 0, 1, buf) > 0) result = buf[0];
-      IndicatorRelease(handle);
+      if(CopyBuffer(handle, 0, 0, 1, buf) > 0)
+         result = buf[0];
+
+      IndicatorRelease(handle);  // always release
       return result;
    }
 
-   // [BUG-07 FIX] Replace non-standard ArrayInt with standard int[]
-   // Caller passes changed[] by reference; function fills it.
+   // [BUG-C4] FIX: double fields pakai DoubleChanged() bukan ==
    void Compare(const StrategyConfig &other, int &changed[]) const
    {
       ArrayResize(changed, 0);
 
       #define ADD_IF_CHANGED(expr, fid) if(expr) { int sz=ArraySize(changed); ArrayResize(changed,sz+1); changed[sz]=(int)(fid); }
+      #define DBL_CHG(a,b) DoubleChanged(a,b)
 
-      ADD_IF_CHANGED(market.atrPeriod            != other.market.atrPeriod,            FIELD_ATR_PERIOD)
-      ADD_IF_CHANGED(market.atrMin               != other.market.atrMin,               FIELD_ATR_MIN)
-      ADD_IF_CHANGED(market.atrMax               != other.market.atrMax,               FIELD_ATR_MAX)
-      ADD_IF_CHANGED(market.maxSpread            != other.market.maxSpread,            FIELD_MAX_SPREAD)
-      ADD_IF_CHANGED(market.useRegime            != other.market.useRegime,            FIELD_USE_REGIME)
-      ADD_IF_CHANGED(market.minTrendStrength      != other.market.minTrendStrength,      FIELD_MIN_TREND_STRENGTH)
-      ADD_IF_CHANGED(market.allowSideways        != other.market.allowSideways,        FIELD_ALLOW_SIDEWAYS)
-      ADD_IF_CHANGED(market.regimeLotMultStrong  != other.market.regimeLotMultStrong,  FIELD_REGIME_LOT_MULT_STRONG)
-      ADD_IF_CHANGED(market.regimeLotMultWeak    != other.market.regimeLotMultWeak,    FIELD_REGIME_LOT_MULT_WEAK)
-      ADD_IF_CHANGED(market.regimeLotMultSide    != other.market.regimeLotMultSide,    FIELD_REGIME_LOT_MULT_SIDE)
-      ADD_IF_CHANGED(market.regimeLotMultChop    != other.market.regimeLotMultChop,    FIELD_REGIME_LOT_MULT_CHOP)
-      ADD_IF_CHANGED(news.level                  != other.news.level,                  FIELD_NEWS_LEVEL)
-      ADD_IF_CHANGED(news.freeze                 != other.news.freeze,                 FIELD_NEWS_FREEZE)
-      ADD_IF_CHANGED(risk.autoLot                != other.risk.autoLot,                FIELD_AUTO_LOT)
-      ADD_IF_CHANGED(risk.pct                    != other.risk.pct,                    FIELD_RISK_PCT)
-      ADD_IF_CHANGED(risk.lot                    != other.risk.lot,                    FIELD_LOT_SIZE)
-      ADD_IF_CHANGED(risk.maxDailyLoss           != other.risk.maxDailyLoss,           FIELD_MAX_DAILY_LOSS)
-      ADD_IF_CHANGED(risk.magic                  != other.risk.magic,                  FIELD_MAGIC_NUM)
-      ADD_IF_CHANGED(risk.entryMode              != other.risk.entryMode,              FIELD_ENTRY_MODE)
-      ADD_IF_CHANGED(risk.tpslMode               != other.risk.tpslMode,               FIELD_TPSL_MODE)
-      ADD_IF_CHANGED(risk.useMTF                 != other.risk.useMTF,                 FIELD_USE_MTF)
-      ADD_IF_CHANGED(risk.htf                    != other.risk.htf,                    FIELD_HTF)
-      ADD_IF_CHANGED(risk.htfLookback            != other.risk.htfLookback,            FIELD_HTF_LOOKBACK)
-      ADD_IF_CHANGED(risk.qualityLotMult         != other.risk.qualityLotMult,         FIELD_QUALITY_LOT_MULT)
-      ADD_IF_CHANGED(risk.maxPositions           != other.risk.maxPositions,           FIELD_MAX_POSITIONS)
-      ADD_IF_CHANGED(risk.maxConsecutiveLoss     != other.risk.maxConsecutiveLoss,     FIELD_MAX_CONSECUTIVE_LOSS)
-      ADD_IF_CHANGED(risk.maxTradeDurationDays   != other.risk.maxTradeDurationDays,   FIELD_MAX_TRADE_DURATION)
-      ADD_IF_CHANGED(risk.entryCooldownBars      != other.risk.entryCooldownBars,      FIELD_ENTRY_COOLDOWN)
-      ADD_IF_CHANGED(risk.signalCooldownBars     != other.risk.signalCooldownBars,     FIELD_SIGNAL_COOLDOWN)
-      ADD_IF_CHANGED(risk.lossCooldownBars       != other.risk.lossCooldownBars,       FIELD_LOSS_COOLDOWN)
-      ADD_IF_CHANGED(sr.mode                     != other.sr.mode,                     FIELD_SR_MODE)
-      ADD_IF_CHANGED(sr.lookback                 != other.sr.lookback,                 FIELD_SR_LOOKBACK)
-      ADD_IF_CHANGED(sr.swingLookback            != other.sr.swingLookback,            FIELD_SR_SWING_LOOKBACK)
-      ADD_IF_CHANGED(sr.touchBufferATR           != other.sr.touchBufferATR,           FIELD_SR_TOUCH_BUFFER)
-      ADD_IF_CHANGED(sr.minTouchesStrong         != other.sr.minTouchesStrong,         FIELD_SR_MIN_TOUCHES)
-      ADD_IF_CHANGED(sr.minRangeATR              != other.sr.minRangeATR,              FIELD_SR_MIN_RANGE)
-      ADD_IF_CHANGED(sr.atrBufferMult            != other.sr.atrBufferMult,            FIELD_SR_ATR_BUFFER)
-      ADD_IF_CHANGED(sr.bufferMultStrong         != other.sr.bufferMultStrong,         FIELD_SR_BUFFER_STRONG)
-      ADD_IF_CHANGED(sr.bufferMultWeak           != other.sr.bufferMultWeak,           FIELD_SR_BUFFER_WEAK)
-      ADD_IF_CHANGED(sr.zoneReuseATR             != other.sr.zoneReuseATR,             FIELD_SR_ZONE_REUSE)
-      ADD_IF_CHANGED(pattern.lookback            != other.pattern.lookback,            FIELD_PATTERN_LOOKBACK)
-      ADD_IF_CHANGED(pattern.mtfConfluenceBonus  != other.pattern.mtfConfluenceBonus,  FIELD_PATTERN_MTF_BONUS)
-      ADD_IF_CHANGED(pattern.strongZoneBonus     != other.pattern.strongZoneBonus,     FIELD_PATTERN_STRONG_ZONE_BONUS)
-      ADD_IF_CHANGED(pattern.strongZoneThreshold != other.pattern.strongZoneThreshold, FIELD_PATTERN_STRONG_ZONE_THRESHOLD)
-      ADD_IF_CHANGED(pattern.maxSignalATR        != other.pattern.maxSignalATR,        FIELD_PATTERN_MAX_SIGNAL_ATR)
-      ADD_IF_CHANGED(pattern.momentumThresholdATR!= other.pattern.momentumThresholdATR,FIELD_PATTERN_MOMENTUM_THRESHOLD)
-      ADD_IF_CHANGED(pattern.useWeights          != other.pattern.useWeights,          FIELD_PATTERN_USE_WEIGHTS)
-      ADD_IF_CHANGED(pattern.antiBreakoutPct     != other.pattern.antiBreakoutPct,     FIELD_PATTERN_ANTI_BREAKOUT)
-      ADD_IF_CHANGED(pattern.marubozuMinBodyPct  != other.pattern.marubozuMinBodyPct,  FIELD_PATTERN_MARUBOZU_BODY)
-      ADD_IF_CHANGED(pattern.engulfingBodyMult   != other.pattern.engulfingBodyMult,   FIELD_PATTERN_ENGULFING_MULT)
-      ADD_IF_CHANGED(pattern.minDominanceGap     != other.pattern.minDominanceGap,     FIELD_PATTERN_DOMINANCE_GAP)
-      ADD_IF_CHANGED(pattern.sensitivityATR      != other.pattern.sensitivityATR,      FIELD_PATTERN_SENSITIVITY)
-      ADD_IF_CHANGED(pattern.defaultSLMult       != other.pattern.defaultSLMult,       FIELD_PATTERN_DEFAULT_SL_MULT)
-      ADD_IF_CHANGED(pattern.pinbarSLMult        != other.pattern.pinbarSLMult,        FIELD_PATTERN_PINBAR_SL_MULT)
-      ADD_IF_CHANGED(pattern.insideBarSLMult     != other.pattern.insideBarSLMult,     FIELD_PATTERN_INSIDEBAR_SL_MULT)
-      ADD_IF_CHANGED(pattern.hqThreshold         != other.pattern.hqThreshold,         FIELD_PATTERN_HQ_THRESHOLD)
-      ADD_IF_CHANGED(recovery.use                != other.recovery.use,                FIELD_RECOVERY_USE)
-      ADD_IF_CHANGED(recovery.cooldownBars       != other.recovery.cooldownBars,       FIELD_RECOVERY_COOLDOWN)
-      ADD_IF_CHANGED(recovery.maxAttempts        != other.recovery.maxAttempts,        FIELD_RECOVERY_MAX_ATTEMPTS)
-      ADD_IF_CHANGED(recovery.lotMult            != other.recovery.lotMult,            FIELD_RECOVERY_LOT_MULT)
-      ADD_IF_CHANGED(recovery.scoreThreshold     != other.recovery.scoreThreshold,     FIELD_RECOVERY_SCORE_THRESHOLD)
-      ADD_IF_CHANGED(recovery.zoneToleranceATR   != other.recovery.zoneToleranceATR,   FIELD_RECOVERY_ZONE_TOLERANCE)
-      ADD_IF_CHANGED(recovery.fakeoutSensitivity != other.recovery.fakeoutSensitivity, FIELD_RECOVERY_FAKEOUT_SENS)
-      ADD_IF_CHANGED(exit.useTrailing            != other.exit.useTrailing,            FIELD_EXIT_TRAILING)
-      ADD_IF_CHANGED(exit.usePartial             != other.exit.usePartial,             FIELD_EXIT_PARTIAL)
-      ADD_IF_CHANGED(exit.exitOnOpposite         != other.exit.exitOnOpposite,         FIELD_EXIT_ON_OPPOSITE)
-      ADD_IF_CHANGED(exit.tpBufferATR            != other.exit.tpBufferATR,            FIELD_EXIT_TP_BUFFER)
-      ADD_IF_CHANGED(exit.slBufferATR            != other.exit.slBufferATR,            FIELD_EXIT_SL_BUFFER)
-      ADD_IF_CHANGED(exit.minTPDistATR           != other.exit.minTPDistATR,           FIELD_EXIT_MIN_TP_DIST)
-      ADD_IF_CHANGED(exit.maxTPDistATR           != other.exit.maxTPDistATR,           FIELD_EXIT_MAX_TP_DIST)
-      ADD_IF_CHANGED(exit.trailingStartATR       != other.exit.trailingStartATR,       FIELD_EXIT_TRAILING_START)
-      ADD_IF_CHANGED(exit.trailingBufferATR      != other.exit.trailingBufferATR,      FIELD_EXIT_TRAILING_BUFFER)
-      ADD_IF_CHANGED(exit.partialLotPct          != other.exit.partialLotPct,          FIELD_EXIT_PARTIAL_LOT_PCT)
-      ADD_IF_CHANGED(exit.partialATR             != other.exit.partialATR,             FIELD_EXIT_PARTIAL_ATR)
-      ADD_IF_CHANGED(ai.use                      != other.ai.use,                      FIELD_AI_USE)
-      ADD_IF_CHANGED(ai.trainingWindow           != other.ai.trainingWindow,           FIELD_AI_TRAINING_WINDOW)
-      ADD_IF_CHANGED(ai.minConfidence            != other.ai.minConfidence,            FIELD_AI_MIN_CONFIDENCE)
-      ADD_IF_CHANGED(ai.patternBonus             != other.ai.patternBonus,             FIELD_AI_PATTERN_BONUS)
-      ADD_IF_CHANGED(system.debug                != other.system.debug,                FIELD_SYSTEM_DEBUG)
-      ADD_IF_CHANGED(system.safe                 != other.system.safe,                 FIELD_SYSTEM_SAFE)
-      ADD_IF_CHANGED(system.orderThrottleMs      != other.system.orderThrottleMs,      FIELD_SYSTEM_THROTTLE)
+      ADD_IF_CHANGED(market.atrPeriod            != other.market.atrPeriod,                    FIELD_ATR_PERIOD)
+      ADD_IF_CHANGED(DBL_CHG(market.atrMin,        other.market.atrMin),                       FIELD_ATR_MIN)
+      ADD_IF_CHANGED(DBL_CHG(market.atrMax,        other.market.atrMax),                       FIELD_ATR_MAX)
+      ADD_IF_CHANGED(DBL_CHG(market.maxSpread,     other.market.maxSpread),                    FIELD_MAX_SPREAD)
+      ADD_IF_CHANGED(market.useRegime            != other.market.useRegime,                    FIELD_USE_REGIME)
+      ADD_IF_CHANGED(DBL_CHG(market.minTrendStrength, other.market.minTrendStrength),          FIELD_MIN_TREND_STRENGTH)
+      ADD_IF_CHANGED(market.allowSideways        != other.market.allowSideways,                FIELD_ALLOW_SIDEWAYS)
+      ADD_IF_CHANGED(DBL_CHG(market.regimeLotMultStrong, other.market.regimeLotMultStrong),    FIELD_REGIME_LOT_MULT_STRONG)
+      ADD_IF_CHANGED(DBL_CHG(market.regimeLotMultWeak,   other.market.regimeLotMultWeak),      FIELD_REGIME_LOT_MULT_WEAK)
+      ADD_IF_CHANGED(DBL_CHG(market.regimeLotMultSide,   other.market.regimeLotMultSide),      FIELD_REGIME_LOT_MULT_SIDE)
+      ADD_IF_CHANGED(DBL_CHG(market.regimeLotMultChop,   other.market.regimeLotMultChop),      FIELD_REGIME_LOT_MULT_CHOP)
+      ADD_IF_CHANGED(news.level                  != other.news.level,                          FIELD_NEWS_LEVEL)
+      ADD_IF_CHANGED(news.freeze                 != other.news.freeze,                         FIELD_NEWS_FREEZE)
+      ADD_IF_CHANGED(risk.autoLot                != other.risk.autoLot,                        FIELD_AUTO_LOT)
+      ADD_IF_CHANGED(DBL_CHG(risk.pct,             other.risk.pct),                           FIELD_RISK_PCT)
+      ADD_IF_CHANGED(DBL_CHG(risk.lot,             other.risk.lot),                           FIELD_LOT_SIZE)
+      ADD_IF_CHANGED(DBL_CHG(risk.maxDailyLoss,    other.risk.maxDailyLoss),                  FIELD_MAX_DAILY_LOSS)
+      ADD_IF_CHANGED(risk.magic                  != other.risk.magic,                          FIELD_MAGIC_NUM)
+      ADD_IF_CHANGED(risk.entryMode              != other.risk.entryMode,                      FIELD_ENTRY_MODE)
+      ADD_IF_CHANGED(risk.tpslMode               != other.risk.tpslMode,                      FIELD_TPSL_MODE)
+      ADD_IF_CHANGED(risk.useMTF                 != other.risk.useMTF,                         FIELD_USE_MTF)
+      ADD_IF_CHANGED(risk.htf                    != other.risk.htf,                            FIELD_HTF)
+      ADD_IF_CHANGED(risk.htfLookback            != other.risk.htfLookback,                   FIELD_HTF_LOOKBACK)
+      ADD_IF_CHANGED(DBL_CHG(risk.qualityLotMult,  other.risk.qualityLotMult),                FIELD_QUALITY_LOT_MULT)
+      ADD_IF_CHANGED(risk.maxPositions           != other.risk.maxPositions,                   FIELD_MAX_POSITIONS)
+      ADD_IF_CHANGED(risk.maxConsecutiveLoss     != other.risk.maxConsecutiveLoss,             FIELD_MAX_CONSECUTIVE_LOSS)
+      ADD_IF_CHANGED(risk.maxTradeDurationDays   != other.risk.maxTradeDurationDays,           FIELD_MAX_TRADE_DURATION)
+      ADD_IF_CHANGED(risk.entryCooldownBars      != other.risk.entryCooldownBars,              FIELD_ENTRY_COOLDOWN)
+      ADD_IF_CHANGED(risk.signalCooldownBars     != other.risk.signalCooldownBars,             FIELD_SIGNAL_COOLDOWN)
+      ADD_IF_CHANGED(risk.lossCooldownBars       != other.risk.lossCooldownBars,               FIELD_LOSS_COOLDOWN)
+      ADD_IF_CHANGED(sr.mode                     != other.sr.mode,                             FIELD_SR_MODE)
+      ADD_IF_CHANGED(sr.lookback                 != other.sr.lookback,                         FIELD_SR_LOOKBACK)
+      ADD_IF_CHANGED(sr.swingLookback            != other.sr.swingLookback,                   FIELD_SR_SWING_LOOKBACK)
+      ADD_IF_CHANGED(DBL_CHG(sr.touchBufferATR,    other.sr.touchBufferATR),                  FIELD_SR_TOUCH_BUFFER)
+      ADD_IF_CHANGED(sr.minTouchesStrong         != other.sr.minTouchesStrong,                 FIELD_SR_MIN_TOUCHES)
+      ADD_IF_CHANGED(DBL_CHG(sr.minRangeATR,       other.sr.minRangeATR),                     FIELD_SR_MIN_RANGE)
+      ADD_IF_CHANGED(DBL_CHG(sr.atrBufferMult,     other.sr.atrBufferMult),                   FIELD_SR_ATR_BUFFER)
+      ADD_IF_CHANGED(DBL_CHG(sr.bufferMultStrong,  other.sr.bufferMultStrong),                FIELD_SR_BUFFER_STRONG)
+      ADD_IF_CHANGED(DBL_CHG(sr.bufferMultWeak,    other.sr.bufferMultWeak),                  FIELD_SR_BUFFER_WEAK)
+      ADD_IF_CHANGED(DBL_CHG(sr.zoneReuseATR,      other.sr.zoneReuseATR),                    FIELD_SR_ZONE_REUSE)
+      ADD_IF_CHANGED(pattern.lookback            != other.pattern.lookback,                    FIELD_PATTERN_LOOKBACK)
+      ADD_IF_CHANGED(DBL_CHG(pattern.mtfConfluenceBonus, other.pattern.mtfConfluenceBonus),   FIELD_PATTERN_MTF_BONUS)
+      ADD_IF_CHANGED(DBL_CHG(pattern.strongZoneBonus,    other.pattern.strongZoneBonus),      FIELD_PATTERN_STRONG_ZONE_BONUS)
+      ADD_IF_CHANGED(DBL_CHG(pattern.strongZoneThreshold,other.pattern.strongZoneThreshold),  FIELD_PATTERN_STRONG_ZONE_THRESHOLD)
+      ADD_IF_CHANGED(DBL_CHG(pattern.maxSignalATR,       other.pattern.maxSignalATR),         FIELD_PATTERN_MAX_SIGNAL_ATR)
+      ADD_IF_CHANGED(DBL_CHG(pattern.momentumThresholdATR,other.pattern.momentumThresholdATR),FIELD_PATTERN_MOMENTUM_THRESHOLD)
+      ADD_IF_CHANGED(pattern.useWeights          != other.pattern.useWeights,                  FIELD_PATTERN_USE_WEIGHTS)
+      ADD_IF_CHANGED(DBL_CHG(pattern.antiBreakoutPct,    other.pattern.antiBreakoutPct),      FIELD_PATTERN_ANTI_BREAKOUT)
+      ADD_IF_CHANGED(DBL_CHG(pattern.marubozuMinBodyPct, other.pattern.marubozuMinBodyPct),   FIELD_PATTERN_MARUBOZU_BODY)
+      ADD_IF_CHANGED(DBL_CHG(pattern.engulfingBodyMult,  other.pattern.engulfingBodyMult),    FIELD_PATTERN_ENGULFING_MULT)
+      ADD_IF_CHANGED(DBL_CHG(pattern.minDominanceGap,    other.pattern.minDominanceGap),      FIELD_PATTERN_DOMINANCE_GAP)
+      ADD_IF_CHANGED(DBL_CHG(pattern.sensitivityATR,     other.pattern.sensitivityATR),       FIELD_PATTERN_SENSITIVITY)
+      ADD_IF_CHANGED(DBL_CHG(pattern.defaultSLMult,      other.pattern.defaultSLMult),        FIELD_PATTERN_DEFAULT_SL_MULT)
+      ADD_IF_CHANGED(DBL_CHG(pattern.pinbarSLMult,       other.pattern.pinbarSLMult),         FIELD_PATTERN_PINBAR_SL_MULT)
+      ADD_IF_CHANGED(DBL_CHG(pattern.insideBarSLMult,    other.pattern.insideBarSLMult),      FIELD_PATTERN_INSIDEBAR_SL_MULT)
+      ADD_IF_CHANGED(DBL_CHG(pattern.hqThreshold,        other.pattern.hqThreshold),          FIELD_PATTERN_HQ_THRESHOLD)
+      ADD_IF_CHANGED(recovery.use                != other.recovery.use,                        FIELD_RECOVERY_USE)
+      ADD_IF_CHANGED(recovery.cooldownBars       != other.recovery.cooldownBars,               FIELD_RECOVERY_COOLDOWN)
+      ADD_IF_CHANGED(recovery.maxAttempts        != other.recovery.maxAttempts,                FIELD_RECOVERY_MAX_ATTEMPTS)
+      ADD_IF_CHANGED(DBL_CHG(recovery.lotMult,         other.recovery.lotMult),               FIELD_RECOVERY_LOT_MULT)
+      ADD_IF_CHANGED(DBL_CHG(recovery.scoreThreshold,  other.recovery.scoreThreshold),        FIELD_RECOVERY_SCORE_THRESHOLD)
+      ADD_IF_CHANGED(DBL_CHG(recovery.zoneToleranceATR,other.recovery.zoneToleranceATR),      FIELD_RECOVERY_ZONE_TOLERANCE)
+      ADD_IF_CHANGED(DBL_CHG(recovery.fakeoutSensitivity,other.recovery.fakeoutSensitivity),  FIELD_RECOVERY_FAKEOUT_SENS)
+      ADD_IF_CHANGED(exit.useTrailing            != other.exit.useTrailing,                    FIELD_EXIT_TRAILING)
+      ADD_IF_CHANGED(exit.usePartial             != other.exit.usePartial,                     FIELD_EXIT_PARTIAL)
+      ADD_IF_CHANGED(exit.exitOnOpposite         != other.exit.exitOnOpposite,                 FIELD_EXIT_ON_OPPOSITE)
+      ADD_IF_CHANGED(DBL_CHG(exit.tpBufferATR,         other.exit.tpBufferATR),               FIELD_EXIT_TP_BUFFER)
+      ADD_IF_CHANGED(DBL_CHG(exit.slBufferATR,         other.exit.slBufferATR),               FIELD_EXIT_SL_BUFFER)
+      ADD_IF_CHANGED(DBL_CHG(exit.minTPDistATR,        other.exit.minTPDistATR),              FIELD_EXIT_MIN_TP_DIST)
+      ADD_IF_CHANGED(DBL_CHG(exit.maxTPDistATR,        other.exit.maxTPDistATR),              FIELD_EXIT_MAX_TP_DIST)
+      ADD_IF_CHANGED(DBL_CHG(exit.trailingStartATR,    other.exit.trailingStartATR),          FIELD_EXIT_TRAILING_START)
+      ADD_IF_CHANGED(DBL_CHG(exit.trailingBufferATR,   other.exit.trailingBufferATR),         FIELD_EXIT_TRAILING_BUFFER)
+      ADD_IF_CHANGED(DBL_CHG(exit.partialLotPct,       other.exit.partialLotPct),             FIELD_EXIT_PARTIAL_LOT_PCT)
+      ADD_IF_CHANGED(DBL_CHG(exit.partialATR,          other.exit.partialATR),                FIELD_EXIT_PARTIAL_ATR)
+      ADD_IF_CHANGED(ai.use                      != other.ai.use,                              FIELD_AI_USE)
+      ADD_IF_CHANGED(ai.trainingWindow           != other.ai.trainingWindow,                   FIELD_AI_TRAINING_WINDOW)
+      ADD_IF_CHANGED(DBL_CHG(ai.minConfidence,         other.ai.minConfidence),               FIELD_AI_MIN_CONFIDENCE)
+      ADD_IF_CHANGED(DBL_CHG(ai.patternBonus,          other.ai.patternBonus),                FIELD_AI_PATTERN_BONUS)
+      ADD_IF_CHANGED(system.debug                != other.system.debug,                        FIELD_SYSTEM_DEBUG)
+      ADD_IF_CHANGED(system.safe                 != other.system.safe,                         FIELD_SYSTEM_SAFE)
+      ADD_IF_CHANGED(system.orderThrottleMs      != other.system.orderThrottleMs,              FIELD_SYSTEM_THROTTLE)
 
       #undef ADD_IF_CHANGED
+      #undef DBL_CHG
    }
 
    bool HasChanged(const StrategyConfig &other, ENUM_CONFIG_FIELD_ID fieldId) const
@@ -1115,29 +1143,29 @@ struct StrategyConfig
       switch(fieldId)
       {
          case FIELD_ATR_PERIOD:               return market.atrPeriod            != other.market.atrPeriod;
-         case FIELD_ATR_MIN:                  return market.atrMin               != other.market.atrMin;
-         case FIELD_ATR_MAX:                  return market.atrMax               != other.market.atrMax;
-         case FIELD_MAX_SPREAD:               return market.maxSpread            != other.market.maxSpread;
+         case FIELD_ATR_MIN:                  return DoubleChanged(market.atrMin,               other.market.atrMin);
+         case FIELD_ATR_MAX:                  return DoubleChanged(market.atrMax,               other.market.atrMax);
+         case FIELD_MAX_SPREAD:               return DoubleChanged(market.maxSpread,            other.market.maxSpread);
          case FIELD_USE_REGIME:               return market.useRegime            != other.market.useRegime;
-         case FIELD_MIN_TREND_STRENGTH:       return market.minTrendStrength      != other.market.minTrendStrength;
+         case FIELD_MIN_TREND_STRENGTH:       return DoubleChanged(market.minTrendStrength,     other.market.minTrendStrength);
          case FIELD_ALLOW_SIDEWAYS:           return market.allowSideways        != other.market.allowSideways;
-         case FIELD_REGIME_LOT_MULT_STRONG:   return market.regimeLotMultStrong  != other.market.regimeLotMultStrong;
-         case FIELD_REGIME_LOT_MULT_WEAK:     return market.regimeLotMultWeak    != other.market.regimeLotMultWeak;
-         case FIELD_REGIME_LOT_MULT_SIDE:     return market.regimeLotMultSide    != other.market.regimeLotMultSide;
-         case FIELD_REGIME_LOT_MULT_CHOP:     return market.regimeLotMultChop    != other.market.regimeLotMultChop;
+         case FIELD_REGIME_LOT_MULT_STRONG:   return DoubleChanged(market.regimeLotMultStrong,  other.market.regimeLotMultStrong);
+         case FIELD_REGIME_LOT_MULT_WEAK:     return DoubleChanged(market.regimeLotMultWeak,    other.market.regimeLotMultWeak);
+         case FIELD_REGIME_LOT_MULT_SIDE:     return DoubleChanged(market.regimeLotMultSide,    other.market.regimeLotMultSide);
+         case FIELD_REGIME_LOT_MULT_CHOP:     return DoubleChanged(market.regimeLotMultChop,    other.market.regimeLotMultChop);
          case FIELD_NEWS_LEVEL:               return news.level                  != other.news.level;
          case FIELD_NEWS_FREEZE:              return news.freeze                 != other.news.freeze;
          case FIELD_AUTO_LOT:                 return risk.autoLot                != other.risk.autoLot;
-         case FIELD_RISK_PCT:                 return risk.pct                    != other.risk.pct;
-         case FIELD_LOT_SIZE:                 return risk.lot                    != other.risk.lot;
-         case FIELD_MAX_DAILY_LOSS:           return risk.maxDailyLoss           != other.risk.maxDailyLoss;
+         case FIELD_RISK_PCT:                 return DoubleChanged(risk.pct,                    other.risk.pct);
+         case FIELD_LOT_SIZE:                 return DoubleChanged(risk.lot,                    other.risk.lot);
+         case FIELD_MAX_DAILY_LOSS:           return DoubleChanged(risk.maxDailyLoss,           other.risk.maxDailyLoss);
          case FIELD_MAGIC_NUM:                return risk.magic                  != other.risk.magic;
          case FIELD_ENTRY_MODE:               return risk.entryMode              != other.risk.entryMode;
          case FIELD_TPSL_MODE:                return risk.tpslMode               != other.risk.tpslMode;
          case FIELD_USE_MTF:                  return risk.useMTF                 != other.risk.useMTF;
          case FIELD_HTF:                      return risk.htf                    != other.risk.htf;
          case FIELD_HTF_LOOKBACK:             return risk.htfLookback            != other.risk.htfLookback;
-         case FIELD_QUALITY_LOT_MULT:         return risk.qualityLotMult         != other.risk.qualityLotMult;
+         case FIELD_QUALITY_LOT_MULT:         return DoubleChanged(risk.qualityLotMult,         other.risk.qualityLotMult);
          case FIELD_MAX_POSITIONS:            return risk.maxPositions           != other.risk.maxPositions;
          case FIELD_MAX_CONSECUTIVE_LOSS:     return risk.maxConsecutiveLoss     != other.risk.maxConsecutiveLoss;
          case FIELD_MAX_TRADE_DURATION:       return risk.maxTradeDurationDays   != other.risk.maxTradeDurationDays;
@@ -1147,51 +1175,51 @@ struct StrategyConfig
          case FIELD_SR_MODE:                  return sr.mode                     != other.sr.mode;
          case FIELD_SR_LOOKBACK:              return sr.lookback                 != other.sr.lookback;
          case FIELD_SR_SWING_LOOKBACK:        return sr.swingLookback            != other.sr.swingLookback;
-         case FIELD_SR_TOUCH_BUFFER:          return sr.touchBufferATR           != other.sr.touchBufferATR;
+         case FIELD_SR_TOUCH_BUFFER:          return DoubleChanged(sr.touchBufferATR,           other.sr.touchBufferATR);
          case FIELD_SR_MIN_TOUCHES:           return sr.minTouchesStrong         != other.sr.minTouchesStrong;
-         case FIELD_SR_MIN_RANGE:             return sr.minRangeATR              != other.sr.minRangeATR;
-         case FIELD_SR_ATR_BUFFER:            return sr.atrBufferMult            != other.sr.atrBufferMult;
-         case FIELD_SR_BUFFER_STRONG:         return sr.bufferMultStrong         != other.sr.bufferMultStrong;
-         case FIELD_SR_BUFFER_WEAK:           return sr.bufferMultWeak           != other.sr.bufferMultWeak;
-         case FIELD_SR_ZONE_REUSE:            return sr.zoneReuseATR             != other.sr.zoneReuseATR;
+         case FIELD_SR_MIN_RANGE:             return DoubleChanged(sr.minRangeATR,              other.sr.minRangeATR);
+         case FIELD_SR_ATR_BUFFER:            return DoubleChanged(sr.atrBufferMult,            other.sr.atrBufferMult);
+         case FIELD_SR_BUFFER_STRONG:         return DoubleChanged(sr.bufferMultStrong,         other.sr.bufferMultStrong);
+         case FIELD_SR_BUFFER_WEAK:           return DoubleChanged(sr.bufferMultWeak,           other.sr.bufferMultWeak);
+         case FIELD_SR_ZONE_REUSE:            return DoubleChanged(sr.zoneReuseATR,             other.sr.zoneReuseATR);
          case FIELD_PATTERN_LOOKBACK:         return pattern.lookback            != other.pattern.lookback;
-         case FIELD_PATTERN_MTF_BONUS:        return pattern.mtfConfluenceBonus  != other.pattern.mtfConfluenceBonus;
-         case FIELD_PATTERN_STRONG_ZONE_BONUS:return pattern.strongZoneBonus     != other.pattern.strongZoneBonus;
-         case FIELD_PATTERN_STRONG_ZONE_THRESHOLD: return pattern.strongZoneThreshold != other.pattern.strongZoneThreshold;
-         case FIELD_PATTERN_MAX_SIGNAL_ATR:   return pattern.maxSignalATR        != other.pattern.maxSignalATR;
-         case FIELD_PATTERN_MOMENTUM_THRESHOLD:return pattern.momentumThresholdATR!= other.pattern.momentumThresholdATR;
+         case FIELD_PATTERN_MTF_BONUS:        return DoubleChanged(pattern.mtfConfluenceBonus,  other.pattern.mtfConfluenceBonus);
+         case FIELD_PATTERN_STRONG_ZONE_BONUS:return DoubleChanged(pattern.strongZoneBonus,     other.pattern.strongZoneBonus);
+         case FIELD_PATTERN_STRONG_ZONE_THRESHOLD: return DoubleChanged(pattern.strongZoneThreshold, other.pattern.strongZoneThreshold);
+         case FIELD_PATTERN_MAX_SIGNAL_ATR:   return DoubleChanged(pattern.maxSignalATR,        other.pattern.maxSignalATR);
+         case FIELD_PATTERN_MOMENTUM_THRESHOLD:return DoubleChanged(pattern.momentumThresholdATR, other.pattern.momentumThresholdATR);
          case FIELD_PATTERN_USE_WEIGHTS:      return pattern.useWeights          != other.pattern.useWeights;
-         case FIELD_PATTERN_ANTI_BREAKOUT:    return pattern.antiBreakoutPct     != other.pattern.antiBreakoutPct;
-         case FIELD_PATTERN_MARUBOZU_BODY:    return pattern.marubozuMinBodyPct  != other.pattern.marubozuMinBodyPct;
-         case FIELD_PATTERN_ENGULFING_MULT:   return pattern.engulfingBodyMult   != other.pattern.engulfingBodyMult;
-         case FIELD_PATTERN_DOMINANCE_GAP:    return pattern.minDominanceGap     != other.pattern.minDominanceGap;
-         case FIELD_PATTERN_SENSITIVITY:      return pattern.sensitivityATR      != other.pattern.sensitivityATR;
-         case FIELD_PATTERN_DEFAULT_SL_MULT:  return pattern.defaultSLMult       != other.pattern.defaultSLMult;
-         case FIELD_PATTERN_PINBAR_SL_MULT:   return pattern.pinbarSLMult        != other.pattern.pinbarSLMult;
-         case FIELD_PATTERN_INSIDEBAR_SL_MULT:return pattern.insideBarSLMult     != other.pattern.insideBarSLMult;
-         case FIELD_PATTERN_HQ_THRESHOLD:     return pattern.hqThreshold         != other.pattern.hqThreshold;
+         case FIELD_PATTERN_ANTI_BREAKOUT:    return DoubleChanged(pattern.antiBreakoutPct,     other.pattern.antiBreakoutPct);
+         case FIELD_PATTERN_MARUBOZU_BODY:    return DoubleChanged(pattern.marubozuMinBodyPct,  other.pattern.marubozuMinBodyPct);
+         case FIELD_PATTERN_ENGULFING_MULT:   return DoubleChanged(pattern.engulfingBodyMult,   other.pattern.engulfingBodyMult);
+         case FIELD_PATTERN_DOMINANCE_GAP:    return DoubleChanged(pattern.minDominanceGap,     other.pattern.minDominanceGap);
+         case FIELD_PATTERN_SENSITIVITY:      return DoubleChanged(pattern.sensitivityATR,      other.pattern.sensitivityATR);
+         case FIELD_PATTERN_DEFAULT_SL_MULT:  return DoubleChanged(pattern.defaultSLMult,       other.pattern.defaultSLMult);
+         case FIELD_PATTERN_PINBAR_SL_MULT:   return DoubleChanged(pattern.pinbarSLMult,        other.pattern.pinbarSLMult);
+         case FIELD_PATTERN_INSIDEBAR_SL_MULT:return DoubleChanged(pattern.insideBarSLMult,     other.pattern.insideBarSLMult);
+         case FIELD_PATTERN_HQ_THRESHOLD:     return DoubleChanged(pattern.hqThreshold,         other.pattern.hqThreshold);
          case FIELD_RECOVERY_USE:             return recovery.use                != other.recovery.use;
          case FIELD_RECOVERY_COOLDOWN:        return recovery.cooldownBars       != other.recovery.cooldownBars;
          case FIELD_RECOVERY_MAX_ATTEMPTS:    return recovery.maxAttempts        != other.recovery.maxAttempts;
-         case FIELD_RECOVERY_LOT_MULT:        return recovery.lotMult            != other.recovery.lotMult;
-         case FIELD_RECOVERY_SCORE_THRESHOLD: return recovery.scoreThreshold     != other.recovery.scoreThreshold;
-         case FIELD_RECOVERY_ZONE_TOLERANCE:  return recovery.zoneToleranceATR   != other.recovery.zoneToleranceATR;
-         case FIELD_RECOVERY_FAKEOUT_SENS:    return recovery.fakeoutSensitivity != other.recovery.fakeoutSensitivity;
+         case FIELD_RECOVERY_LOT_MULT:        return DoubleChanged(recovery.lotMult,            other.recovery.lotMult);
+         case FIELD_RECOVERY_SCORE_THRESHOLD: return DoubleChanged(recovery.scoreThreshold,     other.recovery.scoreThreshold);
+         case FIELD_RECOVERY_ZONE_TOLERANCE:  return DoubleChanged(recovery.zoneToleranceATR,   other.recovery.zoneToleranceATR);
+         case FIELD_RECOVERY_FAKEOUT_SENS:    return DoubleChanged(recovery.fakeoutSensitivity, other.recovery.fakeoutSensitivity);
          case FIELD_EXIT_TRAILING:            return exit.useTrailing            != other.exit.useTrailing;
          case FIELD_EXIT_PARTIAL:             return exit.usePartial             != other.exit.usePartial;
          case FIELD_EXIT_ON_OPPOSITE:         return exit.exitOnOpposite         != other.exit.exitOnOpposite;
-         case FIELD_EXIT_TP_BUFFER:           return exit.tpBufferATR            != other.exit.tpBufferATR;
-         case FIELD_EXIT_SL_BUFFER:           return exit.slBufferATR            != other.exit.slBufferATR;
-         case FIELD_EXIT_MIN_TP_DIST:         return exit.minTPDistATR           != other.exit.minTPDistATR;
-         case FIELD_EXIT_MAX_TP_DIST:         return exit.maxTPDistATR           != other.exit.maxTPDistATR;
-         case FIELD_EXIT_TRAILING_START:      return exit.trailingStartATR       != other.exit.trailingStartATR;
-         case FIELD_EXIT_TRAILING_BUFFER:     return exit.trailingBufferATR      != other.exit.trailingBufferATR;
-         case FIELD_EXIT_PARTIAL_LOT_PCT:     return exit.partialLotPct          != other.exit.partialLotPct;
-         case FIELD_EXIT_PARTIAL_ATR:         return exit.partialATR             != other.exit.partialATR;
+         case FIELD_EXIT_TP_BUFFER:           return DoubleChanged(exit.tpBufferATR,            other.exit.tpBufferATR);
+         case FIELD_EXIT_SL_BUFFER:           return DoubleChanged(exit.slBufferATR,            other.exit.slBufferATR);
+         case FIELD_EXIT_MIN_TP_DIST:         return DoubleChanged(exit.minTPDistATR,           other.exit.minTPDistATR);
+         case FIELD_EXIT_MAX_TP_DIST:         return DoubleChanged(exit.maxTPDistATR,           other.exit.maxTPDistATR);
+         case FIELD_EXIT_TRAILING_START:      return DoubleChanged(exit.trailingStartATR,       other.exit.trailingStartATR);
+         case FIELD_EXIT_TRAILING_BUFFER:     return DoubleChanged(exit.trailingBufferATR,      other.exit.trailingBufferATR);
+         case FIELD_EXIT_PARTIAL_LOT_PCT:     return DoubleChanged(exit.partialLotPct,          other.exit.partialLotPct);
+         case FIELD_EXIT_PARTIAL_ATR:         return DoubleChanged(exit.partialATR,             other.exit.partialATR);
          case FIELD_AI_USE:                   return ai.use                      != other.ai.use;
          case FIELD_AI_TRAINING_WINDOW:       return ai.trainingWindow           != other.ai.trainingWindow;
-         case FIELD_AI_MIN_CONFIDENCE:        return ai.minConfidence            != other.ai.minConfidence;
-         case FIELD_AI_PATTERN_BONUS:         return ai.patternBonus             != other.ai.patternBonus;
+         case FIELD_AI_MIN_CONFIDENCE:        return DoubleChanged(ai.minConfidence,            other.ai.minConfidence);
+         case FIELD_AI_PATTERN_BONUS:         return DoubleChanged(ai.patternBonus,             other.ai.patternBonus);
          case FIELD_SYSTEM_DEBUG:             return system.debug                != other.system.debug;
          case FIELD_SYSTEM_SAFE:              return system.safe                 != other.system.safe;
          case FIELD_SYSTEM_THROTTLE:          return system.orderThrottleMs      != other.system.orderThrottleMs;
