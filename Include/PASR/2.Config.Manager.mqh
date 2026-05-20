@@ -2,6 +2,19 @@
 //|                                                2.Config.Manager.mqh |
 //|                                       Copyright 2026, Agsicentre |
 //|            Core Configuration Manager & Recovery Engine          |
+//| v2.02 FIXES:                                                     |
+//| - CM-BUG-1 CRITICAL: GetChanges() race — split into GetChanges() |
+//|   (query only) + CommitChanges() (explicit commit).              |
+//| - CM-BUG-2 CRITICAL: LoadState() partialTP with lastKnownATR==0  |
+//|   caused instant partial close. Added fallback + disable guard.  |
+//| - CM-BUG-3 HIGH: ClearGVs() GlobalVariablesDeleteAll(prefix)     |
+//|   could wipe all EA GVs. Replaced with per-key GlobalVariableDel.|
+//| - CM-BUG-4 HIGH: Reload() did not check Refresh() success.       |
+//|   Added IsValid() guard after Refresh.                           |
+//| - CM-BUG-5 MEDIUM: LoadNewsParams() ignored InpUseNews master    |
+//|   switch. Fixed: AND InpUseNews && level != NEWS_OFF.            |
+//| - CM-BUG-6 MEDIUM: Added RecoveryEngine::IsStateValid() guard.   |
+//| - CM-MINOR-1: PrintConfigSummary() guards IsInitialized().       |
 //| v2.01 FIXES:                                                     |
 //| - BUG-04 CRITICAL: ArrayResize returns new size, not index.      |
 //|   ValidationResult::AddIssue used idx=newSize (OOB write).       |
@@ -17,8 +30,8 @@
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
-#property link "agsicentre.wordpress.com"
-#property version "2.01"
+#property link      "agsicentre.wordpress.com"
+#property version   "2.02"
 #property strict
 
 #ifndef __CONFIG_MANAGER_MQH__
@@ -52,12 +65,21 @@ public:
 
    void CopyTo(StrategyConfig &dest) const { dest = m_config; }
 
-   // [BUG-07 FIX] GetChanges now uses int[] instead of ArrayInt
+   // [CM-BUG-1 FIX] Split into query (GetChanges) + explicit commit (CommitChanges).
+   // Old pattern: m_lastKnownConfig updated inside GetChanges() caused race condition
+   // when multiple EventBus handlers called GetChanges() in same tick — second caller
+   // always got empty changed[] because first call already committed the state.
    void GetChanges(int &changed[])
    {
       m_config.Compare(m_lastKnownConfig, changed);
-      if(ArraySize(changed) > 0)
-         m_lastKnownConfig = m_config;
+      // NOTE: do NOT update m_lastKnownConfig here.
+      // Caller must explicitly call CommitChanges() after processing all changed fields.
+   }
+
+   // Must be called by the orchestrator AFTER all handlers have processed GetChanges().
+   void CommitChanges()
+   {
+      m_lastKnownConfig = m_config;
    }
 
    bool HasFieldChanged(ENUM_CONFIG_FIELD_ID fieldId) const
@@ -85,6 +107,18 @@ public:
       {
          m_instrumentCtx.Refresh();
          m_lastSymbol = _Symbol;
+
+         // [CM-BUG-4 FIX] Guard Refresh() failure.
+         // Old code: Refresh() result not checked — Validate(ctx) would run with stale/zero ATR.
+         if(!m_instrumentCtx.IsValid())
+         {
+            ValidationResult errResult;
+            errResult.AddIssue(VALIDATION_ERROR,
+               "InstrumentContext.Refresh() failed for " + _Symbol +
+               ". Config validation skipped. Check broker connection.");
+            return errResult;
+         }
+
          PrintFormat("[ConfigManager] Symbol → %s. ATR14=%.5f Spread=%.1f TickSz=%.5f",
                      _Symbol, m_instrumentCtx.atr14,
                      m_instrumentCtx.averageSpread, m_instrumentCtx.tickSize);
@@ -95,9 +129,6 @@ public:
       ValidationResult result;
 
       // [BUG-03 FIX] Use explicit m_firstLoad flag instead of atrPeriod==0 heuristic.
-      // Old code: !m_lastKnownConfig.market.atrPeriod > 0
-      //   - After first load atrPeriod is always > 0, so context-validation never ran again.
-      // Fix: dedicated bool flag, reset only here.
       bool runContextValidation = symbolChanged || m_firstLoad;
 
       if(runContextValidation)
@@ -156,7 +187,10 @@ public:
       m_config.news.level  = InpNewsLevel;
       m_config.news.freeze = ValidateIntRange(InpNewsFreezeMinutes, 0, 1440, 30);
       m_config.news.url    = InpNewsWebURL;
-      m_config.news.use    = (InpNewsLevel != NEWS_OFF); // explicit, don't rely on Validate()
+      // [CM-BUG-5 FIX] Old code derived news.use from InpNewsLevel alone, silently
+      // ignoring InpUseNews master switch. User setting InpUseNews=false had no effect
+      // if InpNewsLevel != NEWS_OFF. Fix: AND both conditions.
+      m_config.news.use    = InpUseNews && (InpNewsLevel != NEWS_OFF);
    }
 
    void LoadRiskParams()
@@ -305,8 +339,10 @@ ValidationResult SetCommonDefaults()
    return ConfigManager::GetInstance()->Reload();
 }
 
+// [CM-MINOR-1 FIX] Guard IsInitialized() to prevent misleading log before first Reload().
 void PrintConfigSummary()
 {
+   if(!ConfigManager::GetInstance()->IsInitialized()) return;
    const StrategyConfig &cfg = GetConfig();
    if(!cfg.system.debug) return;
    Print("=== PASR CONFIG ACTIVE ===");
@@ -321,6 +357,7 @@ void PrintConfigSummary()
       Print("  Fakeout Sensitivity: ", DoubleToString(cfg.recovery.fakeoutSensitivity, 2));
    Print("Use MTF          : ", (cfg.risk.useMTF ? "true" : "false"));
    Print("Use Trailing     : ", (cfg.exit.useTrailing ? "true" : "false"));
+   Print("News Filter      : ", (cfg.news.use ? EnumToString(cfg.news.level) : "OFF"));
 }
 
 //+------------------------------------------------------------------+
@@ -355,6 +392,18 @@ public:
    double originalLot;
    int recoveryAttempts;
    datetime recoveryCooldownExpiry;
+
+   // [CM-BUG-6] Validate loaded state for critical field sanity.
+   // Call after LoadState(). If false, caller must Reset() and abort recovery.
+   bool IsStateValid() const
+   {
+      if(!active || mainTicket <= 0)        return false;
+      if(entryPrice <= 0.0)                 return false;
+      if(direction != 1 && direction != -1) return false;
+      if(lastKnownATR < 0.0)               return false;
+      if(lot <= 0.0)                        return false;
+      return true;
+   }
 
    void SaveState() const
    {
@@ -415,21 +464,41 @@ public:
          recoveryCooldownExpiry = (datetime)GlobalVariableGet(p + "rc");
 
          // [BUG-02 FIX] lastKnownATR is already in price units (e.g. 0.00120 for EURUSD).
-         // Old: lastKnownATR * CFG.exit.partialATR * _Point  ← multiplied _Point twice!
-         // Fix: remove _Point multiplication.
+         // [CM-BUG-2 FIX] Guard lastKnownATR == 0 — partialTP == entryPrice causes
+         // immediate partial close on entry bar. Fallback to live ATR from InstrumentContext.
          double pcDist = lastKnownATR * CFG.exit.partialATR;
-         partialTP = NormalizeDouble(
-            entryPrice + ((direction == 1 ? 1.0 : -1.0) * pcDist), _Digits);
+         if(lastKnownATR <= 0.0 || pcDist <= 0.0)
+         {
+            double atrFallback = ConfigManager::GetInstance()->GetInstrumentContext().atr14;
+            pcDist = (atrFallback > 0.0) ? atrFallback * CFG.exit.partialATR : 0.0;
+            LOG_EVENT(EVENT_LOG_LEVEL_WARNING,
+               "RecoveryEngine: lastKnownATR=0 on LoadState for ticket " +
+               IntegerToString(ticket) + ". Using live ATR fallback: " +
+               DoubleToString(atrFallback, _Digits));
+         }
+
+         if(pcDist > 0.0)
+            partialTP = NormalizeDouble(
+               entryPrice + ((direction == 1 ? 1.0 : -1.0) * pcDist), _Digits);
+         else
+            partialTP = 0.0; // partial TP disabled — safer than wrong price
 
          active = true;
       }
    }
 
+   // [CM-BUG-3 FIX] Old: GlobalVariablesDeleteAll(prefix) — deletes ALL GVs matching
+   // wildcard, not just this engine's keys. Could wipe other EA global state.
+   // Fix: explicit per-key GlobalVariableDel() for all known keys.
    void ClearGVs()
    {
       if(mainTicket <= 0) return;
       string p = "PASR_" + IntegerToString(CFG.risk.magic) + "_" + IntegerToString(mainTicket) + "_";
-      GlobalVariablesDeleteAll(p);
+      string keys[] = {"v2","st","ep","it","bs","zp","dr","at","pk","tm",
+                       "pc","an","lo","sm","ak","sh","sht","oe","os","ot",
+                       "ol","ra","rc"};
+      for(int i = 0; i < ArraySize(keys); i++)
+         GlobalVariableDel(p + keys[i]);
    }
 
    void Reset()
