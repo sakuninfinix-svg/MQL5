@@ -32,7 +32,8 @@
 #ifndef __EVENT_BUS_MQH__
 #define __EVENT_BUS_MQH__
 
-#include "PASR.Optimizations.mqh"  // Include semua optimizations
+// REFACTORED: Moved to folder structure
+#include "../Optimizations/PASR.Optimizations.mqh"  // Include semua optimizations
 
 #define MAX_HANDLERS_PER_EVENT  16
 #define MAX_EVENT_TYPES         32
