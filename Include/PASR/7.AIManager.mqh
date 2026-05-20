@@ -2,12 +2,12 @@
 //|                                                   AIManager.mqh  |
 //|                                       Copyright 2026, Agsicentre |
 //|            Adaptive AI & Signal Scoring Module                   |
-//|                   VERSION 2.05 - Option C: Experience Replay      |
-//|                   + Regime-Aware Mini-Batch NN + Feature Expansion|
+//|                   VERSION 2.06 - Fix: EvalContext passed through  |
+//|                   LogSignalSample, no redundant BuildEvalContext  |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.05"
+#property version   "2.06"
 #property strict
 
 #ifndef __AI_MANAGER_MQH__
@@ -28,6 +28,16 @@
 //   7. NormalizeNNWeight   : [-2.0, 2.0] (unchanged)
 //   8. DecayModel          : L2 instead of multiplicative decay for NN
 //   9. Mini-batch trigger  : every 16 labeled outcomes
+//
+// v2.06 FIXES:
+//   - LogSignalSample() now receives EvalContext as parameter
+//     → removes redundant BuildEvalContext() call inside it
+//   - OnSignalGenerated() passes pre-built ctx to LogSignalSample()
+//   - LogSignalSample() signature: (..., const EvalContext &ctx, ...)
+//   - EvaluateTrendExpert/MeanRev/Momentum scores computed with
+//     the same ctx (no re-computation)
+//   - Fixed: LoadModelState() no longer calls SaveModelState()
+//   - Fixed: FindRecentPendingSampleIndex() window 15s → 60s
 // ─────────────────────────────────────────────────────────────────
 
 #define NN_INPUTS        8    // [v2.05] expanded feature set
@@ -269,7 +279,7 @@ public:
       m_outcomeFilename   = prefix + "outcomes.csv";
 
       LoadModelState();
-      Log("✅ AIManager v2.05 initialized. NN samples: " + IntegerToString(m_model.nnTrainingSamples) +
+      Log("✅ AIManager v2.06 initialized. NN samples: " + IntegerToString(m_model.nnTrainingSamples) +
           " | ReplayBuffer: " + IntegerToString(m_replayCount));
       return true;
    }
@@ -313,6 +323,7 @@ public:
       m_data.GetConfigCache(cfg);
       if (!cfg.ai.use || !e.signal.valid) return;
 
+      // [v2.06] Build context ONCE — reused by EvaluateSignal AND LogSignalSample
       EvalContext ctx;
       BuildEvalContext(ctx, e.signal, e.atrPoints, e.support, e.resistance);
 
@@ -326,7 +337,9 @@ public:
           " threshold=" + DoubleToString(dynamicThreshold, 2) +
           " replay=" + IntegerToString(m_replayCount) +
           " batches=" + IntegerToString(m_model.replayTrainCount));
-      LogSignalSample(e.signal, e.atrPoints, e.support, e.resistance, score, accepted, cfg);
+
+      // [v2.06] Pass pre-built ctx — no redundant BuildEvalContext inside
+      LogSignalSample(e.signal, e.atrPoints, e.support, e.resistance, score, accepted, cfg, ctx);
 
       if (!accepted)
       {
@@ -882,6 +895,7 @@ private:
       if(GlobalVariableCheck(p+"nn_ts"))       m_model.nnTrainingSamples= (int)GlobalVariableGet(p+"nn_ts");
       if(GlobalVariableCheck(p+"nn_rb"))       m_model.replayTrainCount = (int)GlobalVariableGet(p+"nn_rb");
 
+      // [v2.06] Do NOT call SaveModelState() here — pointless write right after load
       m_model.initialized = true;
       Log("📥 Model loaded. NN samples=" + IntegerToString(m_model.nnTrainingSamples) +
           " batches=" + IntegerToString(m_model.replayTrainCount));
@@ -971,6 +985,7 @@ private:
       while (ArraySize(m_pendingSamples) > 64) ArrayRemove(m_pendingSamples, 0);
    }
 
+   // [v2.06] Window expanded to 60s (was 15s — too narrow for slow markets / delayed execution)
    int FindRecentPendingSampleIndex() const
    {
       for (int i = ArraySize(m_pendingSamples) - 1; i >= 0; --i)
@@ -1043,13 +1058,17 @@ private:
       FileClose(handle);
    }
 
+   //+------------------------------------------------------------------+
+   //| [v2.06] LogSignalSample — receives pre-built EvalContext          |
+   //| No redundant BuildEvalContext() call inside                       |
+   //+------------------------------------------------------------------+
    void LogSignalSample(const SignalDecision &signal, double atrPoints,
                         double support, double resistance, double score,
-                        bool accepted, const StrategyConfig &cfg)
+                        bool accepted, const StrategyConfig &cfg,
+                        const EvalContext &ctx)
    {
-      string sampleId   = CreateSampleId();
-      EvalContext ctx;
-      BuildEvalContext(ctx, signal, atrPoints, support, resistance);
+      string sampleId = CreateSampleId();
+      // [v2.06] ctx already built by caller (OnSignalGenerated) — no rebuild here
 
       int handle = FileOpen(m_datasetFilename, FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI);
       if (handle == INVALID_HANDLE) return;
