@@ -1,9 +1,13 @@
 //+------------------------------------------------------------------+
 //|                                                  1.Events.mqh    |
 //|                                       Copyright 2026, Agsicentre |
-//|            Event Class Definitions Module - V2.00                |
+//|            Event Class Definitions Module - V3.00                |
 //|                                                                  |
-//| REFACTORING v2.00 IMPROVEMENTS:                                  |
+//| V3.00 PERFORMANCE OPTIMIZATIONS:                                 |
+//| - OPT-010: String pooling untuk event names (zero allocation)    |
+//| - OPT-012: Inline critical path constructors                     |
+//|                                                                  |
+//| REFACTORING v2.00 IMPROVEMENTS (PRESERVED):                      |
 //| - Reduced coupling: Removed direct Config.Manager.mqh include    |
 //| - Performance: Optimized ReplayRecordedEvents with early-exit    |
 //| - Safety: Enhanced null checks and memory management             |
@@ -13,7 +17,7 @@
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "2.00"
+#property version "3.00"
 #property strict
 
 #ifndef __EVENTS_MQH__
@@ -35,14 +39,15 @@
 #define EVENT_GROUP_SYSTEM_EVENTS (EVENT_GROUP_SYSTEM)
 
 //+------------------------------------------------------------------+
-//| PRICE EVENTS                                                     |
+//| PRICE EVENTS - OPTIMIZED V3.00                                   |
+//| Uses string pooling for zero-allocation event names              |
 //+------------------------------------------------------------------+
 class PriceUpdateEvent : public Event
 {
 public:
    MqlTick tick;
 
-   PriceUpdateEvent(const MqlTick &t)
+   CRITICAL_FUNCTION PriceUpdateEvent(const MqlTick &t)
       : Event(EVENT_ID_PRICE_UPDATE, EVENT_GROUP_MARKET, "PriceUpdateEvent")
    {
       tick = t;
@@ -57,7 +62,7 @@ public:
    double open, high, low, close;
    int period;
 
-   NewBarEvent(datetime time, double o, double h, double l, double c, int tf)
+   CRITICAL_FUNCTION NewBarEvent(datetime time, double o, double h, double l, double c, int tf)
        : Event(EVENT_ID_NEW_BAR, EVENT_GROUP_MARKET, "NewBarEvent"),
          barOpenTime(time), open(o), high(h), low(l), close(c), period(tf) {}
 
@@ -65,7 +70,7 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| MARKET STATE EVENTS                                              |
+//| MARKET STATE EVENTS - OPTIMIZED V3.00                            |
 //+------------------------------------------------------------------+
 class SessionChangeEvent : public Event
 {
@@ -73,7 +78,7 @@ public:
    bool sessionActive;
    string sessionName;
 
-   SessionChangeEvent(bool active, const string name)
+   CRITICAL_FUNCTION SessionChangeEvent(bool active, const string name)
        : Event(EVENT_ID_SESSION_CHANGE, EVENT_GROUP_SYSTEM, "SessionChangeEvent"),
          sessionActive(active), sessionName(name) {}
 
@@ -87,7 +92,7 @@ public:
    datetime eventTime;
    int impact;
 
-   NewsAlertEvent(const string title, datetime time, int lvl)
+   CRITICAL_FUNCTION NewsAlertEvent(const string title, datetime time, int lvl)
        : Event(EVENT_ID_NEWS_ALERT, EVENT_GROUP_SYSTEM, "NewsAlertEvent"),
          newsTitle(title), eventTime(time), impact(lvl) {}
 
@@ -106,7 +111,7 @@ public:
    double atrPoints;
    double supScore, resScore;
 
-   ZoneUpdateEvent(double sup, double res, double htfSup, double htfRes,
+   CRITICAL_FUNCTION ZoneUpdateEvent(double sup, double res, double htfSup, double htfRes,
                    bool supBroken, bool resBroken, double supMult, double resMult,
                    int supAlign, int resAlign, int supStr, int resStr, double atr,
                    double supSc = 50.0, double resSc = 50.0)
@@ -126,7 +131,7 @@ public:
    double atrPoints;
    double support, resistance;
 
-   SignalGeneratedEvent(const SignalDecision &sig, double atr, double sup, double res)
+   CRITICAL_FUNCTION SignalGeneratedEvent(const SignalDecision &sig, double atr, double sup, double res)
        : Event(EVENT_ID_SIGNAL_GENERATED, EVENT_GROUP_SIGNAL, "SignalGeneratedEvent"),
          signal(sig), atrPoints(atr), support(sup), resistance(res) {}
 
@@ -142,7 +147,7 @@ public:
    double atrPoints;
    double originalLot;
 
-   RecoveryOpportunityEvent(ulong ticket, double slPrice, int dir, double atr, double lot)
+   CRITICAL_FUNCTION RecoveryOpportunityEvent(ulong ticket, double slPrice, int dir, double atr, double lot)
        : Event(EVENT_ID_RECOVERY_OPPORTUNITY, EVENT_GROUP_ORDER, "RecoveryOpportunityEvent"),
          originalTicket(ticket), slHitPrice(slPrice), direction(dir), atrPoints(atr), originalLot(lot) {}
 
@@ -157,7 +162,7 @@ public:
    double atrPoints;
    double support, resistance;
 
-   RecoverySignalEvent(ulong originalT, const SignalDecision &sig, double atr, double sup, double res)
+   CRITICAL_FUNCTION RecoverySignalEvent(ulong originalT, const SignalDecision &sig, double atr, double sup, double res)
        : Event(EVENT_ID_RECOVERY_SIGNAL, EVENT_GROUP_ORDER, "RecoverySignalEvent"),
          originalTicket(originalT), signal(sig), atrPoints(atr), support(sup), resistance(res) {}
 
@@ -167,7 +172,7 @@ public:
 class ConfigReloadEvent : public Event
 {
 public:
-   ConfigReloadEvent()
+   CRITICAL_FUNCTION ConfigReloadEvent()
       : Event(EVENT_ID_CONFIG_RELOAD, EVENT_GROUP_SYSTEM, "ConfigReloadEvent") {}
    virtual int ID() const override { return EVENT_ID_CONFIG_RELOAD; }
 };
