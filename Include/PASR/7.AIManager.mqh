@@ -525,9 +525,43 @@ private:
 
    double GetDynamicThreshold(const StrategyConfig &cfg) const
    {
-      if(CheckPointer(m_regime) != POINTER_INVALID)
-         return m_regime.GetDynamicThreshold(cfg.ai.minConfidence);
-      return cfg.ai.minConfidence;
+      // Use adaptive thresholding based on regime uncertainty
+      return GetAdaptiveThreshold(cfg.ai.minConfidence);
+   }
+
+   //+------------------------------------------------------------------+
+   //| Adaptive Thresholding: BaseThreshold + (RegimeUncertainty * Factor)
+   //| Higher uncertainty = higher entry threshold required
+   //+------------------------------------------------------------------+
+   double GetAdaptiveThreshold(double baseThreshold) const
+   {
+      if(CheckPointer(m_regime) == POINTER_INVALID)
+         return baseThreshold;
+      
+      const RegimeResult &r = m_regime.GetResult();
+      
+      // Calculate regime uncertainty (1 - confidence)
+      double regimeUncertainty = 1.0 - r.regimeScore;
+      
+      // Add volatility uncertainty factor
+      double volUncertainty = 1.0 - r.volatilityScore;
+      
+      // Combined uncertainty weighted average
+      double totalUncertainty = 0.6 * regimeUncertainty + 0.4 * volUncertainty;
+      
+      // Uncertainty factor: higher uncertainty = higher threshold multiplier
+      // Range: 1.0 (certain) to 2.0 (highly uncertain)
+      double uncertaintyFactor = 1.0 + totalUncertainty;
+      
+      // Base threshold adjusted by uncertainty
+      double adaptiveThreshold = baseThreshold * uncertaintyFactor;
+      
+      // Additional penalty during transition phases
+      if(r.isTransition)
+         adaptiveThreshold *= 1.5;  // 50% higher threshold during transitions
+      
+      // Cap maximum threshold to prevent completely blocking trades
+      return MathMin(adaptiveThreshold, baseThreshold * 2.5);
    }
 
    double EvaluateSignal(const SignalDecision &signal, const double atrPoints,
@@ -640,31 +674,43 @@ private:
 
    double NormalizeVolumeFeature() const
    {
+      // OPTIMIZATION: Use cached bar data for volume calculation
+      if(m_barCache.current.valid && m_barCache.higher.valid)
+      {
+         long currentVol = m_barCache.current.volume;
+         // Use simple average estimation from cache (simplified for performance)
+         long avgVol = (m_barCache.current.volume + m_barCache.higher.volume) / 2;
+         if(avgVol == 0) return 0.5;
+         double ratio = (double)currentVol / avgVol;
+         return MathMax(0.0, MathMin(2.0, ratio));
+      }
+      
+      // Fallback to CopyTickVolume
       long vol[20];
-      // FIX: CopyTickVolume returns count of copied ticks, not boolean
-      // Use shift=1 to avoid current forming bar, get last 20 completed ticks
       if(CopyTickVolume(_Symbol, _Period, 1, 20, vol) < 20) return 0.5;
       
       long sum = 0;
       for(int i = 0; i < 20; i++) sum += vol[i];
       long avg = sum / 20;
       
-      // Avoid division by zero and clamp result
       if(avg == 0) return 0.5;
       double ratio = (double)vol[0] / avg;
-      return MathMax(0.0, MathMin(2.0, ratio));  // Allow some headroom above 1.0
+      return MathMax(0.0, MathMin(2.0, ratio));
    }
 
    double NormalizeMomentumFeature() const
    {
       MqlRates bars[14];
-      // FIX: Use shift=1 to avoid current forming bar - use last 14 CLOSED bars
-      if(CopyRates(_Symbol, _Period, 1, 14, bars) < 14) return 0.5;
-      double momentum = bars[0].close - bars[13].close;
-      double maxMove  = 0;
-      for(int i = 1; i < 14; i++) maxMove = MathMax(maxMove, MathAbs(bars[i].close - bars[0].close));
-      if(maxMove == 0) return 0.5;
-      return 0.5 + (momentum / maxMove) * 0.5;
+      // OPTIMIZATION: Try cache first, fallback to CopyRates
+      if(GetCachedBars((ENUM_TIMEFRAMES)Period(), bars, 14, 1))
+      {
+         double momentum = bars[0].close - bars[13].close;
+         double maxMove  = 0;
+         for(int i = 1; i < 14; i++) maxMove = MathMax(maxMove, MathAbs(bars[i].close - bars[0].close));
+         if(maxMove == 0) return 0.5;
+         return 0.5 + (momentum / maxMove) * 0.5;
+      }
+      return 0.5;
    }
 
    double NormalizeNoiseFeature() const
@@ -682,43 +728,52 @@ private:
    double NormalizeRSIFeature() const
    {
       MqlRates bars[15];
-      // FIX: Use shift=1 to avoid current forming bar - use last 15 CLOSED bars for RSI calculation
-      if(CopyRates(_Symbol, _Period, 1, 15, bars) < 15) return 0.5;
-      double gains = 0, losses = 0;
-      for(int i = 0; i < 14; i++)
+      // OPTIMIZATION: Try cache first, fallback to CopyRates
+      if(GetCachedBars((ENUM_TIMEFRAMES)Period(), bars, 15, 1))
       {
-         double diff = bars[i].close - bars[i+1].close;
-         if(diff > 0) gains  += diff;
-         else         losses -= diff;
+         double gains = 0, losses = 0;
+         for(int i = 0; i < 14; i++)
+         {
+            double diff = bars[i].close - bars[i+1].close;
+            if(diff > 0) gains  += diff;
+            else         losses -= diff;
+         }
+         double rs  = (losses == 0) ? 100.0 : gains / losses;
+         double rsi = 100.0 - (100.0 / (1.0 + rs));
+         return rsi / 100.0;
       }
-      double rs  = (losses == 0) ? 100.0 : gains / losses;
-      double rsi = 100.0 - (100.0 / (1.0 + rs));
-      return rsi / 100.0;
+      return 0.5;
    }
 
    double NormalizeCandleBodyRatio() const
    {
       MqlRates bar[1];
-      // FIX: Use shift=1 to get last CLOSED bar, not current forming bar
-      if(CopyRates(_Symbol, _Period, 1, 1, bar) < 1) return 0.5;
-      double body  = MathAbs(bar[0].close - bar[0].open);
-      double range = bar[0].high - bar[0].low;
-      return (range == 0) ? 0.5 : MathMin(1.0, body / range);
+      // OPTIMIZATION: Use cached bar data
+      if(GetCachedBars((ENUM_TIMEFRAMES)Period(), bar, 1, 1))
+      {
+         double body  = MathAbs(bar[0].close - bar[0].open);
+         double range = bar[0].high - bar[0].low;
+         return (range == 0) ? 0.5 : MathMin(1.0, body / range);
+      }
+      return 0.5;
    }
 
    double NormalizeEMADistanceFeature() const
    {
       MqlRates bars[20];
-      // FIX: Use shift=1 to avoid current forming bar - use last 20 CLOSED bars
-      if(CopyRates(_Symbol, _Period, 1, 20, bars) < 20) return 0.5;
-      double ema = bars[19].close;
-      double k   = 2.0 / 21.0;
-      for(int i = 18; i >= 0; i--) ema = bars[i].close * k + ema * (1.0 - k);
-      double dist   = MathAbs(bars[0].close - ema);
-      double atrEst = 0;
-      for(int i = 0; i < 20; i++) atrEst += bars[i].high - bars[i].low;
-      atrEst /= 20.0;
-      return (atrEst == 0) ? 0.5 : MathMin(1.0, dist / (atrEst * 2.0));
+      // OPTIMIZATION: Try cache first, fallback to CopyRates
+      if(GetCachedBars((ENUM_TIMEFRAMES)Period(), bars, 20, 1))
+      {
+         double ema = bars[19].close;
+         double k   = 2.0 / 21.0;
+         for(int i = 18; i >= 0; i--) ema = bars[i].close * k + ema * (1.0 - k);
+         double dist   = MathAbs(bars[0].close - ema);
+         double atrEst = 0;
+         for(int i = 0; i < 20; i++) atrEst += bars[i].high - bars[i].low;
+         atrEst /= 20.0;
+         return (atrEst == 0) ? 0.5 : MathMin(1.0, dist / (atrEst * 2.0));
+      }
+      return 0.5;
    }
 
    double NormalizeSessionFeature() const
@@ -733,28 +788,35 @@ private:
    double NormalizeVolatilityFeatureFallback() const
    {
       MqlRates bars[20];
-      // FIX: Use shift=1 to avoid current forming bar - use last 20 CLOSED bars
-      if(CopyRates(_Symbol, _Period, 1, 20, bars) < 20) return 0.5;
-      double avg = 0;
-      for(int i = 0; i < 20; i++) avg += bars[i].close;
-      avg /= 20;
-      double sumSq = 0;
-      for(int i = 0; i < 20; i++) { double d = bars[i].close - avg; sumSq += d * d; }
-      double vol = MathSqrt(sumSq / 20);
-      return MathMin(1.0, vol / (SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100));
+      // OPTIMIZATION: Try cache first, fallback to CopyRates
+      if(GetCachedBars((ENUM_TIMEFRAMES)Period(), bars, 20, 1))
+      {
+         double avg = 0;
+         for(int i = 0; i < 20; i++) avg += bars[i].close;
+         avg /= 20;
+         double sumSq = 0;
+         for(int i = 0; i < 20; i++) { double d = bars[i].close - avg; sumSq += d * d; }
+         double vol = MathSqrt(sumSq / 20);
+         return MathMin(1.0, vol / (SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100));
+      }
+      return 0.5;
    }
 
    double NormalizeMultiTimeframeConfluenceFallback(const SignalDecision &signal) const
    {
       ENUM_TIMEFRAMES htf = GetHigherTimeframe((ENUM_TIMEFRAMES)Period());
       MqlRates bars[10];
-      if(CopyRates(_Symbol, htf, 0, 10, bars) < 10) return 0.5;
-      double hi = bars[0].high, lo = bars[0].low;
-      for(int i = 1; i < 10; i++) { hi = MathMax(hi, bars[i].high); lo = MathMin(lo, bars[i].low); }
-      double rangeSize = hi - lo;
-      if(rangeSize == 0) return 0.5;
-      double minDist = MathMin(MathAbs(bars[0].close - hi), MathAbs(bars[0].close - lo));
-      return MathMax(0.3, 1.0 - MathMin(1.0, minDist / (rangeSize * 0.3)));
+      // OPTIMIZATION: Use cached higher timeframe data when available
+      if(GetCachedBars(htf, bars, 10, 1))
+      {
+         double hi = bars[0].high, lo = bars[0].low;
+         for(int i = 1; i < 10; i++) { hi = MathMax(hi, bars[i].high); lo = MathMin(lo, bars[i].low); }
+         double rangeSize = hi - lo;
+         if(rangeSize == 0) return 0.5;
+         double minDist = MathMin(MathAbs(bars[0].close - hi), MathAbs(bars[0].close - lo));
+         return MathMax(0.3, 1.0 - MathMin(1.0, minDist / (rangeSize * 0.3)));
+      }
+      return 0.5;
    }
 
    // ─── Neural Network ────────────────────────────────────────────
@@ -1111,26 +1173,14 @@ private:
       datetime entryTime = sample.timestamp;
       int totalBars = Bars(_Symbol, _Period);
       
-      // Find position of entry bar
-      int entryIndex = -1;
-      MqlRates tempBar[1];
-      for(int i = 1; i < totalBars && i < 50; i++)
-      {
-         if(CopyRates(_Symbol, _Period, i, 1, tempBar) == 1)
-         {
-            if(tempBar[0].time <= entryTime && tempBar[0].time >= entryTime - PeriodSeconds(_Period))
-            {
-               entryIndex = i;
-               break;
-            }
-         }
-      }
+      // Find position of entry bar using iBarShift for efficiency
+      int entryIndex = iBarShift(_Symbol, _Period, entryTime);
       
       if(entryIndex < 0 || entryIndex + lookforwardBars >= totalBars)
          return;  // Not enough data
       
-      // Get future bars for labeling
-      if(CopyRates(_Symbol, _Period, entryIndex - lookforwardBars, lookforwardBars, futureBars) < lookforwardBars)
+      // Get future bars for labeling (use shift=entryIndex to get bars after entry)
+      if(CopyRates(_Symbol, _Period, entryIndex, lookforwardBars, futureBars) < lookforwardBars)
          return;
       
       // Calculate max profit potential over lookforward period
