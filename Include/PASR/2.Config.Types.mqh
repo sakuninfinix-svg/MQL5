@@ -126,25 +126,9 @@ enum ENUM_CONFIG_FIELD_ID
    FIELD_SYSTEM_THROTTLE
 };
 
-enum ENUM_EVENT_ID
-{
-   EVENT_ID_NONE = 0,
-   EVENT_ID_PRICE_UPDATE,
-   EVENT_ID_NEW_BAR,
-   EVENT_ID_HEARTBEAT,
-   EVENT_ID_CONFIG_RELOAD,
-   EVENT_ID_EMERGENCY_STOP,
-   EVENT_ID_ZONE_UPDATE,
-   EVENT_ID_SIGNAL_GENERATED,
-   EVENT_ID_ORDER_EXECUTION,
-   EVENT_ID_POSITION_UPDATE,
-   EVENT_ID_RECOVERY_OPPORTUNITY,
-   EVENT_ID_RECOVERY_SIGNAL,
-   EVENT_ID_MARKET_GATE,
-   EVENT_ID_PAUSE_TOGGLE,
-   EVENT_ID_SESSION_CHANGE,
-   EVENT_ID_NEWS_ALERT
-};
+// NOTE: ENUM_EVENT_ID has been moved to 0.EventBus.mqh (single source of truth)
+// This duplicate definition was removed to prevent linker conflicts.
+// Include 0.EventBus.mqh or 1.Events.mqh to use EVENT_ID_* constants.
 
 enum ENUM_ENTRY_MODE
 {

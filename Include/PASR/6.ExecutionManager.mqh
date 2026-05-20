@@ -27,7 +27,8 @@
 #include <Trade/Trade.mqh>
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
-#include "3.ZoneManager.mqh"
+// #include "3.ZoneManager.mqh"  // Removed - ZoneManager not needed for ExecutionManager
+// If zone functionality is required, inject via interface or use SRManager directly
 
 //+------------------------------------------------------------------+
 //| Trade Plan — data passed from signal to execution               |
