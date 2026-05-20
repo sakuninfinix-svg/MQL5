@@ -35,17 +35,17 @@ class MarketRegimeFilter;
 class DashboardManager;
 class DataManager;
 
-//--- EventBus recorder (defined once here; 0.EventBus.mqh uses extern)
-EventRecorder       *g_recorder      = NULL;
+//--- EventBus recorder (declared extern here, defined in EA entry point)
+extern EventRecorder       *g_recorder;
 
 //--- Market regime filter (owned by main EA file)
-MarketRegimeFilter  *g_regimeFilter  = NULL;
+extern MarketRegimeFilter  *g_regimeFilter;
 
 //--- Dashboard (owned by main EA file)
-DashboardManager    *g_dashboard     = NULL;
+extern DashboardManager    *g_dashboard;
 
 //--- Shared DataManager instance (owned by main EA file)
-DataManager         *g_dataManager   = NULL;
+extern DataManager         *g_dataManager;
 
 //+------------------------------------------------------------------+
 //| Convenience macro: safe delete + NULL reset                      |
