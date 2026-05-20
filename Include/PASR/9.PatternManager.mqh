@@ -3,7 +3,7 @@
 //|                                       Copyright 2026, Agsicentre |
 //|            Pattern Detection & Analysis Module (Static Utility)  |
 //|                                                                  |
-//| VERSION 2.01 - BUG FIXES                                         |
+//| VERSION 2.02 - BUG FIXES                                         |
 //| PM-BUG-1: EvaluateMorningStar: added missing `return;` after     |
 //|   `if (dir == 0)` — previously fell through into vote assignment  |
 //|   with dir=0, producing corrupt vote entries on every bar.        |
@@ -13,11 +13,16 @@
 //|   Old EvaluateRailroadTracks() never set vote.dir or score.       |
 //| ADDED: InsideBarEnhanced, DarkCloudPiercingEnhanced,             |
 //|   MarubozuEnhanced to complete the Enhanced family.              |
+//| PM-BUG-4: Evaluate() array-bound guard was off-by-one AND logic-  |
+//|   inverted. `shift+3 >= ArraySize` fired early return even when   |
+//|   data was sufficient (e.g. shift=1, size=4 → 4>=4 true).        |
+//|   Fixed to `shift < 2 || (shift+2) >= ArraySize` which matches   |
+//|   actual worst-case index rates[shift+2] used by 3-bar patterns.  |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.01"
+#property version   "2.02"
 #property strict
 
 #ifndef __PATTERN_MANAGER_MQH__
@@ -155,14 +160,22 @@ public:
       result.confluenceScore= 0.0;
       result.timestamp     = TimeCurrent();
 
-      if (shift < 1 || atrvalue <= 0)
+      if (atrvalue <= 0)
       {
-         result.reasoning = "Invalid shift/ATR parameters";
+         result.reasoning = "Invalid ATR parameter";
          return result;
       }
-      if (shift + 3 >= ArraySize(rates))
+
+      // PM-BUG-4 FIX: Previous guard `shift + 3 >= ArraySize(rates)` was
+      // off-by-one AND logic-inverted. The worst-case array access in any
+      // Enhanced evaluator is rates[shift+2] (3-bar patterns: MorningStar,
+      // ThreeInside, Fakey). So the correct minimum is: shift >= 2 AND
+      // (shift+2) < ArraySize. Also enforce shift >= 1 for 2-bar patterns.
+      if (shift < 2 || (shift + 2) >= ArraySize(rates))
       {
-         result.reasoning = "Insufficient bar history (need at least 4 bars)";
+         result.reasoning = StringFormat(
+            "Insufficient bar history (shift=%d, size=%d, need shift>=2 and shift+2<size)",
+            shift, ArraySize(rates));
          return result;
       }
 
@@ -170,16 +183,16 @@ public:
       for (int i = 0; i < 10; i++)
          ResetVoteEnhanced(votes[i], cfg);
 
-      EvaluatePinbarEnhanced(          rates, shift, atrvalue, votes[0], cfg, weights.pinbarWeight);
-      EvaluateEngulfingEnhanced(       rates, shift, atrvalue, votes[1], cfg, weights.engulfingWeight);
-      EvaluateBottomEnhanced(          rates, shift, atrvalue, votes[2], cfg, weights.tweezerWeight);
-      EvaluateFakeyEnhanced(           rates, shift, atrvalue, votes[3], cfg, weights.fakeyWeight);      // PM-BUG-2 FIX
-      EvaluateInsideBarEnhanced(       rates, shift, atrvalue, votes[4], cfg, weights.insideBarWeight);
-      EvaluateMorningStarEnhanced(     rates, shift, atrvalue, votes[5], cfg, weights.morningStarWeight);
-      EvaluateThreeInsideEnhanced(     rates, shift, atrvalue, votes[6], cfg, weights.threeInsideWeight);
-      EvaluateRailroadTracksEnhanced(  rates, shift, atrvalue, votes[7], cfg, weights.railroadWeight);   // PM-BUG-3 FIX
+      EvaluatePinbarEnhanced(           rates, shift, atrvalue, votes[0], cfg, weights.pinbarWeight);
+      EvaluateEngulfingEnhanced(        rates, shift, atrvalue, votes[1], cfg, weights.engulfingWeight);
+      EvaluateBottomEnhanced(           rates, shift, atrvalue, votes[2], cfg, weights.tweezerWeight);
+      EvaluateFakeyEnhanced(            rates, shift, atrvalue, votes[3], cfg, weights.fakeyWeight);
+      EvaluateInsideBarEnhanced(        rates, shift, atrvalue, votes[4], cfg, weights.insideBarWeight);
+      EvaluateMorningStarEnhanced(      rates, shift, atrvalue, votes[5], cfg, weights.morningStarWeight);
+      EvaluateThreeInsideEnhanced(      rates, shift, atrvalue, votes[6], cfg, weights.threeInsideWeight);
+      EvaluateRailroadTracksEnhanced(   rates, shift, atrvalue, votes[7], cfg, weights.railroadWeight);
       EvaluateDarkCloudPiercingEnhanced(rates, shift, atrvalue, votes[8], cfg, weights.darkCloudWeight);
-      EvaluateMarubozuEnhanced(        rates, shift, atrvalue, votes[9], cfg, weights.marubozuWeight);
+      EvaluateMarubozuEnhanced(         rates, shift, atrvalue, votes[9], cfg, weights.marubozuWeight);
 
       // --- Pass 2: compute confluence scores now that all votes exist ---
       for (int i = 0; i < 10; i++)
@@ -210,8 +223,8 @@ public:
          return result;
       }
 
-      result.dir    = (buyScore > sellScore) ? 1 : -1;
-      int bestIdx   = (result.dir == 1) ? bestBuyIdx : bestSellIdx;
+      result.dir  = (buyScore > sellScore) ? 1 : -1;
+      int bestIdx = (result.dir == 1) ? bestBuyIdx : bestSellIdx;
 
       if (bestIdx < 0)
       {
@@ -615,7 +628,7 @@ private:
    static void EvaluateBottom(const MqlRates &r[], int s, double a, PatternVote &v, const StrategyConfig &c)
    { EvaluateBottomEnhanced(r, s, a, v, c, 0.75); }
 
-   //--- Fakey (PM-BUG-2 FIX: was missing, now properly implemented) ----
+   //--- Fakey -----------------------------------------------------------
    static void EvaluateFakeyEnhanced(const MqlRates &rates[], int shift,
                                      double atrvalue, PatternVote &vote,
                                      const StrategyConfig &cfg, double w)
@@ -626,7 +639,7 @@ private:
       double h1 = CandleHigh(rates, shift+1), l1 = CandleLow(rates, shift+1);
       double h2 = CandleHigh(rates, shift+2), l2 = CandleLow(rates, shift+2);
 
-      if (!(h1 < h2 && l1 > l2)) return; // shift+1 must be inside bar of shift+2
+      if (!(h1 < h2 && l1 > l2)) return;
 
       int dir = 0; double extreme = 0.0;
       if      (l0 < l1 && c0 > l1 && c0 > o0) { dir =  1; extreme = l0; }
@@ -658,7 +671,7 @@ private:
                                          const StrategyConfig &cfg, double w)
    {
       if (!IsInsideBar(rates, shift)) return;
-      double motherMid = (CandleHigh(rates,shift+1) + CandleLow(rates,shift+1)) / 2.0;
+      double motherMid  = (CandleHigh(rates,shift+1) + CandleLow(rates,shift+1)) / 2.0;
       double childClose = CandleClose(rates, shift);
       int dir = 0; double extreme = 0.0;
       if      (childClose > motherMid) { dir =  1; extreme = CandleLow(rates,shift); }
@@ -684,7 +697,7 @@ private:
    static void EvaluateInsideBar(const MqlRates &r[], int s, double a, PatternVote &v, const StrategyConfig &c)
    { EvaluateInsideBarEnhanced(r, s, a, v, c, 0.70); }
 
-   //--- Morning Star / Evening Star (PM-BUG-1 FIX: missing return added) ---
+   //--- Morning Star / Evening Star ------------------------------------
    static void EvaluateMorningStarEnhanced(const MqlRates &rates[], int shift,
                                            double atrvalue, PatternVote &vote,
                                            const StrategyConfig &cfg, double w)
@@ -717,7 +730,7 @@ private:
       if (eGap1 && eGap2 && eClose)
       { dir = -1; extreme = MathMax(CandleHigh(rates,shift+2), CandleHigh(rates,shift+1)); raw += cfg.bonus_gap_confirm; }
 
-      if (dir == 0) return;  // PM-BUG-1 FIX: was missing, execution fell through
+      if (dir == 0) return;  // PM-BUG-1 FIX
 
       if (NormalizeATRFactor(CandleRange(rates,shift), atrvalue) >= cfg.atr_range_threshold) raw += cfg.bonus_strong_atr;
       double closePos = (dir == 1)
@@ -745,19 +758,18 @@ private:
                                            const StrategyConfig &cfg, double w)
    {
       if (shift + 2 >= ArraySize(rates)) return;
-      double h0=CandleHigh(rates,shift), l0=CandleLow(rates,shift);
       double h2=CandleHigh(rates,shift+2),l2=CandleLow(rates,shift+2);
-      double c0=CandleClose(rates,shift),o0=CandleOpen(rates,shift);
+      double c0=CandleClose(rates,shift);
       double c1=CandleClose(rates,shift+1),o1=CandleOpen(rates,shift+1);
       double body0=CandleBody(rates,shift), body2=CandleBody(rates,shift+2);
       int dir = 0; double extreme = 0.0; double raw = cfg.base_score;
 
       bool upOk = IsBearish(rates,shift+2) && body0 > 0
-               && IsInsideBar(rates,shift+1) && c1 > o1 && CandleClose(rates,shift) > h2;
+               && IsInsideBar(rates,shift+1) && c1 > o1 && c0 > h2;
       if (upOk)  { dir =  1; extreme = MathMin(CandleLow(rates,shift+1), l2); raw += cfg.bonus_breakout_confirm; }
 
       bool dnOk = IsBullish(rates,shift+2) && body0 > 0
-               && IsInsideBar(rates,shift+1) && c1 < o1 && CandleClose(rates,shift) < l2;
+               && IsInsideBar(rates,shift+1) && c1 < o1 && c0 < l2;
       if (dnOk)  { dir = -1; extreme = MathMax(CandleHigh(rates,shift+1),CandleHigh(rates,shift+2)); raw += cfg.bonus_breakout_confirm; }
 
       if (dir == 0) return;
@@ -778,7 +790,7 @@ private:
    static void EvaluateThreeInside(const MqlRates &r[], int s, double a, PatternVote &v, const StrategyConfig &c)
    { EvaluateThreeInsideEnhanced(r, s, a, v, c, 0.85); }
 
-   //--- Railroad Tracks (PM-BUG-3 FIX: was missing, now properly implemented) ---
+   //--- Railroad Tracks -------------------------------------------------
    static void EvaluateRailroadTracksEnhanced(const MqlRates &rates[], int shift,
                                               double atrvalue, PatternVote &vote,
                                               const StrategyConfig &cfg, double w)
@@ -879,7 +891,7 @@ private:
    static void EvaluateMarubozu(const MqlRates &r[], int s, double a, PatternVote &v, const StrategyConfig &c)
    { EvaluateMarubozuEnhanced(r, s, a, v, c, 0.82); }
 
-   //--- Legacy helpers (kept for backward compat) ----------------------
+   //--- Legacy helpers -------------------------------------------------
    static int FindBestVote(PatternVote &votes[], int dir)
    {
       int best = -1; double best_s = 0.0;
