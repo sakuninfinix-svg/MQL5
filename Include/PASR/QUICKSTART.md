@@ -1,125 +1,80 @@
-# PASR Framework — Quick Start Guide
+# PASR EA Framework — Quick Start
 
-## 1. Installation
+> v2.13 | All 14 modules canonical or scaffolded
 
-Copy the entire `PASR/` folder into your MetaTrader 5 `Include/` directory:
+## Single Include
 
-```
-MQL5/
-└── Include/
-    └── PASR/          ← paste here
-        ├── Core/
-        ├── Infra/
-        ├── Trade/
-        └── ...
+```cpp
+// Only ONE line needed in your EA:
+#include <PASR/Core/PASR.mqh>
 ```
 
-## 2. Include in Your EA
+This loads all modules in the correct dependency order.
 
-```mql5
-// MyExpertAdvisor.mq5
-#property copyright "Your Name"
-#property version   "1.00"
-#property strict
+## Minimum EA Skeleton
 
-// ── Single line replaces all old numeric includes ──
+```cpp
 #include <PASR/Core/PASR.mqh>
 
-// Your input parameters
-input int    MagicNumber  = 12345;
-input double LotSize      = 0.01;
-// ... etc
-```
-
-## 3. Initialize the Framework
-
-```mql5
-CDataManager*       g_data     = NULL;
-CExecutionManager*  g_exec     = NULL;
+CPASREngine engine;
 
 int OnInit()
   {
-   g_data = new CDataManager(MagicNumber);
-   g_exec = new CExecutionManager(MagicNumber);
-
-   if(!CheckPointer(g_data) || !CheckPointer(g_exec))
-     {
-      Print("[PASR] CRITICAL: Manager allocation failed");
-      return INIT_FAILED;
-     }
-
-   // Load config from EA inputs
-   StrategyConfig cfg;
-   // ... populate cfg fields from input parameters ...
-   g_data.SetConfigCache(cfg);
-
-   return INIT_SUCCEEDED;
+   EventSetTimer(1);  // required for deferred AI training
+   return engine.Init() ? INIT_SUCCEEDED : INIT_FAILED;
   }
 
 void OnDeinit(const int reason)
   {
-   if(CheckPointer(g_data))  { delete g_data;  g_data  = NULL; }
-   if(CheckPointer(g_exec))  { delete g_exec;  g_exec  = NULL; }
+   EventKillTimer();
+   engine.Deinit();
   }
-```
 
-## 4. Wire Up Event Handlers
+void OnTick()   { engine.OnTick();  }
+void OnTimer()  { engine.OnTimer(); }
 
-```mql5
-void OnTick()
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest &req,
+                        const MqlTradeResult  &res)
   {
-   if(CheckPointer(g_exec))  g_exec.OnPriceUpdate();
-  }
-
-void OnTimer()
-  {
-   // Deferred AI training, config reload checks, etc.
+   engine.OnTradeTransaction(trans, req, res);
   }
 ```
 
-## 5. GlobalVariable Key Convention
+## Legacy Includes (still work)
 
-All GV keys **must** include `AccountInfoInteger(ACCOUNT_LOGIN)` as a prefix.  
-This is already handled automatically by `Infra/DataManager.mqh` and `Trade/ExecutionManager.mqh`.
+All numbered files (`0.EventBus.mqh`, `1.Events.mqh`, etc.) are thin forwarders.
+They still compile but should be migrated at your convenience.
 
-If you create custom GV keys in your EA:
+## Module Paths (v2.13)
 
-```mql5
-// CORRECT
-string myKey = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
-             + "_PASR_" + IntegerToString(MagicNumber) + "_MyKey";
+| Module | Canonical Path |
+|---|---|
+| EventBus | `Core/EventBus.mqh` |
+| Events | `Core/Events.mqh` |
+| IManager | `Core/IManager.mqh` |
+| Globals | `Core/Globals.mqh` |
+| Config Types | `Core/Config/Types.mqh` |
+| Config Manager | `Core/Config/Manager.mqh` |
+| DataManager | `Infra/DataManager.mqh` |
+| MarketManager | `Data/MarketManager.mqh` |
+| ZoneManager | `Data/ZoneManager.mqh` |
+| SRManager | `Data/SRManager.mqh` |
+| MarketRegime | `Data/MarketRegime.mqh` |
+| PatternManager | `Pattern/PatternManager.mqh` |
+| SignalManager | `Signal/SignalManager.mqh` |
+| ExecutionManager | `Trade/ExecutionManager.mqh` |
+| RecoveryManager | `Trade/RecoveryManager.mqh` |
+| AIManager | `AI/AIManager.mqh` |
+| DashboardManager | `UI/DashboardManager.mqh` |
 
-// WRONG — causes live/demo cross-contamination
-string myKey = "PASR_" + IntegerToString(MagicNumber) + "_MyKey";
-```
+## AI Training Note
 
-## 6. QA / Debug Build
+`CAITrainer::TrainStep()` runs on `OnTimer()` only — **never** on `OnTick()`.
+Always enable `EventSetTimer(1)` in `OnInit()` to activate training.
 
-```mql5
-// Enable full audit + test suite (development only)
-#define PASR_QA_BUILD
-#include <PASR/Core/PASR.mqh>
-```
+## See Also
 
-## 7. Legacy Migration
-
-If your existing EA uses old numeric includes:
-
-```mql5
-// OLD (still compiles via shims — deprecated)
-#include <PASR/0.EventBus.mqh>
-#include <PASR/1.Events.mqh>
-#include <PASR/10.DataManager.mqh>
-// ... 12 separate includes in exact numeric order ...
-
-// NEW — replace ALL of the above with:
-#include <PASR/Core/PASR.mqh>
-```
-
-Shims will be removed in **v4.0**. Migrate before then.
-
----
-
-Full API reference: see [`DOCUMENTATION.md`](./DOCUMENTATION.md)  
-Architecture overview: see [`README.md`](./README.md)  
-Refactor backlog: see [`IMPROVEMENT_ROADMAP.md`](./IMPROVEMENT_ROADMAP.md)
+- `README.md` — full architecture + event flow diagram
+- `MIGRATION_MAP.md` — migration status + remaining v3.0 work
+- `QA/` + `PASR.Test.mqh` — unit test runner

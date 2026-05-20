@@ -1,61 +1,49 @@
 # PASR Migration Map
 
-Single source of truth for the file migration & architecture status.
-Last updated: **v2.12** — 2026-05-20
+Single source of truth for the file migration & architecture status.  
+Last updated: **v2.13** — 2026-05-20
 
 ---
 
-## Migration Status Overview
+## Migration Status — ALL CANONICAL ✅
 
-| Category | Status | Version |
-|---|---|---|
-| `Core/` EventBus, Events, IManager | ✅ CANONICAL | v2.05 |
-| `Core/Config/Types.mqh` | ✅ CANONICAL | v2.05 |
-| `Core/Config/Manager.mqh` | ✅ CANONICAL | v2.05 |
-| `Infra/DataManager.mqh` | ✅ CANONICAL | v2.05 |
-| `Data/MarketManager.mqh` | ✅ CANONICAL | v2.05 |
-| `Data/ZoneManager.mqh` | ✅ CANONICAL | v2.05 |
-| `Data/SRManager.mqh` | ✅ CANONICAL | v2.05 |
-| `Data/MarketRegime.mqh` | ✅ CANONICAL | v2.05 |
-| `Pattern/PatternManager.mqh` | ✅ CANONICAL | v2.04 |
-| `Trade/RecoveryManager.mqh` | ✅ CANONICAL | v2.05 |
-| `Trade/ExecutionManager.mqh` | ✅ CANONICAL | **v2.12** |
-| `Signal/SignalManager.mqh` | ✅ CANONICAL | **v2.12** |
-| `UI/DashboardManager.mqh` | ✅ CANONICAL | **v2.12** |
-| `AI/AIManager.mqh` | 🔶 SCAFFOLD | **v2.12** — Inference safe, Trainer TODO |
+| Module | Canonical Path | Status | Since |
+|---|---|---|---|
+| EventBus | `Core/EventBus.mqh` | ✅ CANONICAL | **v2.13** |
+| Events | `Core/Events.mqh` | ✅ CANONICAL | **v2.13** |
+| IManager | `Core/IManager.mqh` | ✅ CANONICAL | **v2.13** |
+| Globals | `Core/Globals.mqh` | ✅ CANONICAL | **v2.13** |
+| Config Types | `Core/Config/Types.mqh` | ✅ CANONICAL | v2.05 |
+| Config Manager | `Core/Config/Manager.mqh` | ✅ CANONICAL | v2.05 |
+| DataManager | `Infra/DataManager.mqh` | ✅ CANONICAL | v2.05 |
+| MarketManager | `Data/MarketManager.mqh` | ✅ CANONICAL | v2.05 |
+| ZoneManager | `Data/ZoneManager.mqh` | ✅ CANONICAL | v2.05 |
+| SRManager | `Data/SRManager.mqh` | ✅ CANONICAL | v2.05 |
+| MarketRegime | `Data/MarketRegime.mqh` | ✅ CANONICAL | v2.05 |
+| PatternManager | `Pattern/PatternManager.mqh` | ✅ CANONICAL | v2.04 |
+| SignalManager | `Signal/SignalManager.mqh` | ✅ CANONICAL | v2.12 |
+| ExecutionManager | `Trade/ExecutionManager.mqh` | ✅ CANONICAL | v2.12 |
+| RecoveryManager | `Trade/RecoveryManager.mqh` | ✅ CANONICAL | v2.05 |
+| DashboardManager | `UI/DashboardManager.mqh` | ✅ CANONICAL | v2.12 |
+| AIManager | `AI/AIManager.mqh` | 🔶 SCAFFOLD | v2.12 |
 
----
-
-## AI Decomposition Status (v2.12)
-
-`AI/AIManager.mqh` has been scaffolded into three classes:
-
-| Class | Status | Notes |
-|---|---|---|
-| `CAIInference` | 🔶 SCAFFOLD | Forward pass stub; real weights TODO |
-| `CAITrainer` | 🔶 SCAFFOLD | Replay buffer real; backprop TODO |
-| `CAIOrchestrator` | 🔶 SCAFFOLD | Wires inference+trainer; feature build TODO |
-| `CAIManager` | ✅ ALIAS | `typedef CAIOrchestrator CAIManager` — no EA refactor needed |
-
-**Critical fix applied:** `CAIOrchestrator::OnPriceUpdate()` is intentionally empty.
-All inference runs on `OnNewBar()`. Training runs on `OnTimer()` only.
-Backprop is **never** called from the tick thread.
+**16/17 modules fully canonical. AI scaffold ready — needs weight loading + backprop.**
 
 ---
 
-## Legacy Root Shims (Backward-Compat)
+## Legacy Shims (root numbered files)
 
-These files exist for EAs that use old paths. They forward to canonical files.
+All numbered files are now **thin forwarders only** — no real code.
 
-| File | Forwards To | Status |
+| Shim File | Forwards To | Safe to Delete When |
 |---|---|---|
-| `0.EventBus.mqh` | `Core/EventBus.mqh` | ✅ Shim safe |
-| `1.Events.mqh` | `Core/Events.mqh` | ✅ Shim safe |
-| `2.Config.Types.mqh` | `Core/Config/Types.mqh` | ✅ Shim safe |
-| `2.Config.Manager.mqh` | `Core/Config/Manager.mqh` | ✅ Shim safe |
-| `3.MarketManager.mqh` | `Data/MarketManager.mqh` | ✅ Shim safe |
-| `3.ZoneManager.mqh` | `Data/ZoneManager.mqh` | ✅ Shim safe |
-| `4.SRManager.mqh` | `Data/SRManager.mqh` | ✅ Shim safe |
+| `0.EventBus.mqh` | `Core/EventBus.mqh` | All EAs use Core/ path |
+| `1.Events.mqh` | `Core/Events.mqh` | All EAs use Core/ path |
+| `2.Config.Types.mqh` | `Core/Config/Types.mqh` | All EAs use Core/ path |
+| `2.Config.Manager.mqh` | `Core/Config/Manager.mqh` | All EAs use Core/ path |
+| `3.MarketManager.mqh` | `Data/MarketManager.mqh` | All EAs use Data/ path |
+| `3.ZoneManager.mqh` | `Data/ZoneManager.mqh` | All EAs use Data/ path |
+| `4.SRManager.mqh` | `Data/SRManager.mqh` | All EAs use Data/ path |
 | `5.SignalManager.mqh` | `Signal/SignalManager.mqh` | ✅ Shim safe |
 | `6.ExecutionManager.mqh` | `Trade/ExecutionManager.mqh` | ✅ Shim safe |
 | `7.AIManager.mqh` | `AI/AIManager.mqh` | ✅ Shim safe |
@@ -69,24 +57,23 @@ These files exist for EAs that use old paths. They forward to canonical files.
 
 ---
 
-## Entry Points
+## Docs Cleanup (v2.13)
 
-```cpp
-// ✅ PREFERRED — new EAs:
-#include <PASR/Core/PASR.mqh>
-
-// ✅ LEGACY — existing EAs (still works, thin forward):
-#include <PASR/PASR.mqh>
-```
+Stale `.md` files removed from source root (moved/superseded by README.md):
+- ~~`OPTIMIZATION_REPORT.md`~~ — deleted
+- ~~`OPTIMIZATION_PHASE2.md`~~ — deleted  
+- ~~`PERFORMANCE_OPTIMIZATION.md`~~ — deleted
+- ~~`IMPROVEMENT_ROADMAP.md`~~ — deleted
+- ~~`DOCUMENTATION.md`~~ — deleted
 
 ---
 
-## Remaining Work (v3.0 targets)
+## Remaining Work — v3.0
 
 | Task | Priority | Effort |
 |---|---|---|
-| `CAIInference`: load real weights from `.bin` file | 🔴 HIGH | Medium |
-| `CAITrainer`: implement real SGD/Adam backprop | 🔴 HIGH | Large |
+| `CAIInference`: real weight loading from `.onnx` / `.bin` | 🔴 HIGH | Large |
+| `CAITrainer`: SGD/Adam backprop implementation | 🔴 HIGH | Large |
 | `CAIOrchestrator::BuildFeatures()`: wire to DataManager | 🟠 MEDIUM | Small |
-| Delete all `N.Xxx.mqh` root shims after EA migration | 🟡 LOW | Small |
 | `Core/Config/Types.mqh`: add `Validate()` method | 🟠 MEDIUM | Small |
+| Delete all `N.Xxx.mqh` shims after EA migration complete | 🟡 LOW | Trivial |
