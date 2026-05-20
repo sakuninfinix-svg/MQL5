@@ -50,11 +50,12 @@
 
 ## 📁 FILE STATUS
 
-### Core Modules (13 files)
+### Core Modules (14 files)
 ```
 ✅ 0.EventBus.mqh          - Event dispatcher (unchanged)
 ✅ 1.Events.mqh            - Event classes (unchanged)
-✅ 2.Config.mqh            - Configuration + ConfigSnapshot (v1.21)
+✅ 2.Config.Types.mqh      - Enums, structs, input params (v2.0 - SPLIT)
+✅ 2.Config.Manager.mqh    - ConfigManager + RecoveryEngine (v2.0 - SPLIT)
 ✅ 3.MarketManager.mqh     - Market analysis (unchanged)
 ✅ 4.SRManager.mqh         - Support/Resistance (unchanged)
 ✅ 5.SignalManager.mqh     - Signal generation (v1.20 - static calls)
@@ -131,8 +132,10 @@
 ### If Compilation Errors:
 ```mql5
 // Ensure include path is correct:
-#Include <PASR/2.Config.mqh>
+#Include <PASR/2.Config.Types.mqh>
+#Include <PASR/2.Config.Manager.mqh>
 // NOT: #Include "Include/PASR/2.Config.mqh"
+// The config module was split into Types and Manager in v2.0
 ```
 
 ### If Runtime Errors:
