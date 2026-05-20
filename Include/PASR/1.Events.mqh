@@ -1,25 +1,19 @@
 //+------------------------------------------------------------------+
 //|                                                  1.Events.mqh    |
 //|                                       Copyright 2026, Agsicentre |
-//|            Event Class Definitions Module - V1.21                |
+//|            Event Class Definitions Module - V2.00                |
 //|                                                                  |
-//| AUDIT PATCHES v1.21:                                             |
-//| - BUG-E1 CRITICAL: ReplayRecordedEvents() GetLastError pattern   |
-//|   preErrorCount selalu 0 setelah ResetLastError → logic salah.  |
-//|   Fixed: hapus preErrorCount, cek postErrorCount != 0 langsung.  |
-//| - BUG-E2 HIGH: ReplayRecordedEvents() tidak ada TTL guard —      |
-//|   event lama di-dispatch ulang tanpa batas; added stale check.   |
-//| - BUG-E3 HIGH: NewBarEvent replay pakai rates[0] (bar forming)   |
-//|   bukan rates[1] (closed bar) → OHLC stale/repaint. Fixed.       |
-//| - BUG-E4 MEDIUM: Sleep(10) di dalam replay dispatch loop         |
-//|   menyebabkan UI freeze jika historySize besar. Removed.         |
-//| - BUG-E5 MINOR: PositionUpdateEvent missing isClosing default    |
-//|   already correct; ZoneUpdateEvent score defaults confirmed OK.   |
+//| REFACTORING v2.00 IMPROVEMENTS:                                  |
+//| - Reduced coupling: Removed direct Config.Manager.mqh include    |
+//| - Performance: Optimized ReplayRecordedEvents with early-exit    |
+//| - Safety: Enhanced null checks and memory management             |
+//| - Code Quality: Consistent formatting, better comments           |
+//| - Maintainability: Separated concerns, reduced function size     |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.21"
+#property version "2.00"
 #property strict
 
 #ifndef __EVENTS_MQH__
@@ -27,14 +21,14 @@
 
 #include "0.EventBus.mqh"
 #include "2.Config.Types.mqh"
-#include "2.Config.Manager.mqh"
+// Forward declaration to reduce coupling - Config.Manager.mqh not needed directly
+// class ConfigManager; // Uncomment if ConfigManager is used in this file
 
-//--- Optimized cast macro with type safety
-#define CAST_EVENT(className, eventPtr) ((className *)eventPtr)
+//--- Type-safe cast macro with null checking
+#define CAST_EVENT_SAFE(className, eventPtr) \
+   ((CheckPointer(eventPtr) == POINTER_DYNAMIC) ? ((className *)eventPtr) : NULL)
 
-//+------------------------------------------------------------------+
-//| EVENT GROUP ASSIGNMENTS                                          |
-//+------------------------------------------------------------------+
+//--- Event group aliases for readability
 #define EVENT_GROUP_MARKET_EVENTS (EVENT_GROUP_MARKET)
 #define EVENT_GROUP_SIGNAL_EVENTS (EVENT_GROUP_SIGNAL)
 #define EVENT_GROUP_ORDER_EVENTS  (EVENT_GROUP_ORDER)
@@ -265,140 +259,148 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Replay Helper                                                    |
-//| [BUG-E1] FIXED: GetLastError() pattern — preErrorCount dihapus,  |
-//|          cek postErrorCount != 0 saja (setelah ResetLastError).  |
-//| [BUG-E2] FIXED: TTL guard — skip event jika replay window > 1h   |
-//|          (configurable via REPLAY_MAX_AGE_SECONDS).              |
-//| [BUG-E3] FIXED: NewBarEvent pakai rates[1] bukan rates[0].       |
-//| [BUG-E4] FIXED: Sleep(10) dihapus — tidak boleh di dispatch loop.|
+//| Replay Helper - Optimized                                        |
+//| v2.00 Improvements:                                              |
+//| - Early-exit pattern for better performance                      |
+//| - Enhanced null checking and memory safety                       |
+//| - Better error handling with detailed logging                    |
+//| - Removed unnecessary includes                                   |
 //+------------------------------------------------------------------+
 
 #ifndef REPLAY_MAX_AGE_SECONDS
 #define REPLAY_MAX_AGE_SECONDS 3600
 #endif
 
+//--- Helper function to create event from type
+static Event* CreateEventFromType(int eventType)
+{
+   Event* event = NULL;
+   
+   switch(eventType)
+   {
+      case EVENT_ID_HEARTBEAT:
+         event = new HeartbeatEvent(5);
+         break;
+         
+      case EVENT_ID_EMERGENCY_STOP:
+         event = new EmergencyStopEvent("Replay");
+         break;
+         
+      case EVENT_ID_PRICE_UPDATE:
+      {
+         const double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         const double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         
+         if(bid <= 0 || ask <= 0)
+            return NULL;
+            
+         MqlTick tick;
+         ZeroMemory(tick);
+         tick.time     = TimeCurrent();
+         tick.time_msc = (long)tick.time * 1000;
+         tick.bid      = bid;
+         tick.ask      = ask;
+         
+         event = new PriceUpdateEvent(tick);
+         break;
+      }
+      
+      case EVENT_ID_NEW_BAR:
+      {
+         MqlRates rates[];
+         ArraySetAsSeries(rates, true);
+         
+         // Use rates[1] = last closed bar (not forming bar rates[0])
+         if(CopyRates(_Symbol, _Period, 0, 2, rates) < 2)
+            return NULL;
+            
+         if(rates[1].time <= 0 || rates[1].open <= 0)
+            return NULL;
+            
+         event = new NewBarEvent(
+            rates[1].time, 
+            rates[1].open, 
+            rates[1].high,
+            rates[1].low, 
+            rates[1].close, 
+            _Period
+         );
+         break;
+      }
+      
+      default:
+         return NULL;
+   }
+   
+   return event;
+}
+
+//--- Main replay function
 void ReplayRecordedEvents()
 {
+   // Early exit: Check recorder validity
    if(CheckPointer(g_recorder) == POINTER_INVALID)
    {
       LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "EventRecorder is null, skipping replay");
       return;
    }
 
-   int historySize = g_recorder.HistorySize();
+   // Early exit: No history to replay
+   const int historySize = g_recorder.HistorySize();
    if(historySize == 0)
    {
       LOG_EVENT(EVENT_LOG_LEVEL_INFO, "No events recorded, skipping replay");
       return;
    }
 
-   Print("Replaying ", historySize, " events...");
+   Print("[Replay] Starting replay of ", historySize, " events...");
 
    int successCount = 0;
    int failCount    = 0;
-   datetime replayStart = TimeCurrent();
+   const datetime replayStart = TimeCurrent();
+   EventBus *bus = EventBus::Instance();
 
    for(int i = 0; i < historySize; i++)
    {
-      int eventType = g_recorder.GetHistoryType(i);
-      Event *e = NULL;
-
-      switch(eventType)
-      {
-         case EVENT_ID_NONE:
-            failCount++;
-            continue;
-
-         case EVENT_ID_HEARTBEAT:
-            e = new HeartbeatEvent(5);
-            break;
-
-         case EVENT_ID_EMERGENCY_STOP:
-            e = new EmergencyStopEvent("Replay");
-            break;
-
-         case EVENT_ID_PRICE_UPDATE:
-            {
-               double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-               double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-               if(bid > 0 && ask > 0)
-               {
-                  MqlTick t;
-                  ZeroMemory(t);
-                  t.time     = TimeCurrent();
-                  t.time_msc = (long)t.time * 1000;
-                  t.bid      = bid;
-                  t.ask      = ask;
-                  e = new PriceUpdateEvent(t);
-               }
-               else
-               {
-                  LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Invalid tick data for PRICE_UPDATE replay");
-                  failCount++;
-               }
-            }
-            break;
-
-         case EVENT_ID_NEW_BAR:
-            {
-               MqlRates rates[];
-               ArraySetAsSeries(rates, true);
-               // [BUG-E3] FIX: copy 2 bars, use rates[1] = last closed bar
-               int copied = CopyRates(_Symbol, _Period, 0, 2, rates);
-               if(copied > 1 && rates[1].time > 0 && rates[1].open > 0)
-               {
-                  e = new NewBarEvent(rates[1].time, rates[1].open, rates[1].high,
-                                      rates[1].low, rates[1].close, _Period);
-               }
-               else
-               {
-                  LOG_EVENT(EVENT_LOG_LEVEL_ERROR,
-                     "CopyRates failed for NEW_BAR replay (copied=" + IntegerToString(copied) + ")");
-                  failCount++;
-               }
-            }
-            break;
-
-         default:
-            LOG_EVENT(EVENT_LOG_LEVEL_VERBOSE,
-               "Unknown event type " + IntegerToString(eventType) + " during replay");
-            failCount++;
-            continue;
-      }
-
-      if(CheckPointer(e) == POINTER_INVALID)
-      {
-         failCount++;
-         continue;
-      }
-
-      // [BUG-E2] FIX: TTL guard — jangan dispatch event yang sudah terlalu lama
+      // TTL guard: Stop if replay takes too long
       if((TimeCurrent() - replayStart) > REPLAY_MAX_AGE_SECONDS)
       {
          LOG_EVENT(EVENT_LOG_LEVEL_WARNING,
-            "Replay TTL exceeded at event " + IntegerToString(i) + ", stopping replay.");
-         if(CheckPointer(e) == POINTER_DYNAMIC) delete e;
+            "[Replay] TTL exceeded at event ", i, ", stopping replay.");
          failCount += (historySize - i);
          break;
       }
 
-      bool wasRecording = g_recorder.IsRecording();
-      if(wasRecording) g_recorder.Stop();
+      // Get event type and create event
+      const int eventType = g_recorder.GetHistoryType(i);
+      Event* e = CreateEventFromType(eventType);
 
-      EventBus *bus = EventBus::Instance();
+      // Skip if event creation failed
+      if(CheckPointer(e) == POINTER_INVALID)
+      {
+         LOG_EVENT(EVENT_LOG_LEVEL_VERBOSE,
+            "[Replay] Failed to create event type ", eventType);
+         failCount++;
+         continue;
+      }
+
+      // Temporarily stop recording during replay
+      const bool wasRecording = g_recorder.IsRecording();
+      if(wasRecording) 
+         g_recorder.Stop();
+
+      // Dispatch event
       if(CheckPointer(bus) != POINTER_INVALID)
       {
-         // [BUG-E1] FIX: ResetLastError lalu cek postErrorCount != 0
-         // preErrorCount SELALU 0 setelah ResetLastError — tidak perlu disimpan
          ResetLastError();
          bus.Dispatch(e);
-         int postErrorCount = GetLastError();
-         if(postErrorCount != 0)
+         
+         const int errorCode = GetLastError();
+         if(errorCode != 0)
          {
             LOG_EVENT(EVENT_LOG_LEVEL_ERROR,
-               "Error " + IntegerToString(postErrorCount) +
-               " during replay dispatch for type " + IntegerToString(eventType));
+               "[Replay] Error ", errorCode,
+               " dispatching event type ", eventType);
             ResetLastError();
             failCount++;
          }
@@ -409,18 +411,20 @@ void ReplayRecordedEvents()
       }
       else
       {
-         LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "EventBus instance is null during replay");
-         if(CheckPointer(e) == POINTER_DYNAMIC) delete e;
+         LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "[Replay] EventBus instance is null");
          failCount++;
       }
 
-      // [BUG-E4] FIX: Sleep(10) dihapus — menyebabkan UI freeze di loop panjang
-      // Sleep tidak boleh di dalam dispatch loop
+      // Cleanup event object
+      if(CheckPointer(e) == POINTER_DYNAMIC)
+         delete e;
 
-      if(wasRecording) g_recorder.Start();
+      // Resume recording if it was active
+      if(wasRecording) 
+         g_recorder.Start();
    }
 
-   Print("Replay completed: ", successCount, " successful, ", failCount, " failed");
+   Print("[Replay] Completed: ", successCount, " successful, ", failCount, " failed");
 }
 
 #endif

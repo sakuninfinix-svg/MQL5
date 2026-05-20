@@ -1,13 +1,14 @@
-```markdown
+```
 # Compiled and build artifacts
 *.pyc
 __pycache__/
 *.o
 *.obj
+*.class
+*.exe
 *.dll
 *.so
 *.a
-*.exe
 *.out
 
 # Dependencies
@@ -17,25 +18,6 @@ venv/
 .env
 .env.local
 .env.*
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-*.swo
-
-# Editors
-.vscode/
-.idea/
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
 
 # Build directories
 dist/
@@ -53,10 +35,29 @@ __pycache__/
 .Python
 *.egg-info/
 .eggs/
-
-# MyPy cache
+.coverage
+coverage/
+htmlcov/
 .mypy_cache/
 .pytest_cache/
+.tox/
+.nox/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System files
+.DS_Store
+Thumbs.db
 
 # Compressed files
 *.zip
