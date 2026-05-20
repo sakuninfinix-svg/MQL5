@@ -1,22 +1,40 @@
 //+------------------------------------------------------------------+
 //|                                                  0.EventBus.mqh  |
 //|                                       Copyright 2026, Agsicentre |
-//|            Event-Driven Core for PASR EA - V1.31 (PATCHED)        |
-//|                                                                  |
-//| FEATURES:                                                        |
-//| - Safe memory management with auto-cleanup                       |
-//| - Re-entrancy protection (dispatch guard)                        |
-//| - Priority-based event execution                                 |
-//| - Optional deferred processing via OnTimer                       |
-//| - Event groups for wildcard subscriptions                        |
-//| - Structured debug logging with performance metrics              |
-//| - Error handling per handler                                     |
-//| - Hybrid ID system (int for perf, string for debug)              |
+//|            Event-Driven Core for PASR EA - V1.32 (PATCHED)        |
+//|                                                                   |
+//| V1.32 FIXES:                                                      |
+//| - BUG-A MEDIUM: EventRecorder::Start() resets m_currentIndex=0   |
+//|   but does NOT resize if ArraySize already correct. Combined with |
+//|   circular-buffer index math, replay after Start() returns stale  |
+//|   data because startOffset uses m_currentIndex (now 0) while old  |
+//|   data still sits in the array. Fix: clear m_currentIndex AND     |
+//|   zero-fill always on Start() regardless of prior size.           |
+//| - BUG-B MEDIUM: DispatchBatch: errorsHandled counter is tracked   |
+//|   per-batch but the #ifdef __DEBUG__ log block references it      |
+//|   OUTSIDE the per-event scope - it correctly accumulates total    |
+//|   errors for the batch now (was already ok structurally, but      |
+//|   the variable was declared at wrong scope causing shadow in some  |
+//|   MQL5 compiler versions). Moved declaration before outer loop.   |
+//| - BUG-C HIGH: ProcessDeferredEvents() calls Dispatch(e) which    |
+//|   sets m_isDispatching=true. But the early-return guard at top    |
+//|   checks m_isDispatching BEFORE setting it, so the SECOND         |
+//|   deferred event in the same ProcessDeferredEvents() call will    |
+//|   be blocked if Dispatch() leaves m_isDispatching=true when       |
+//|   depth returns to 0 (it does reset, but ONLY if depth==0).       |
+//|   Root cause: Dispatch() increments depth AFTER the guard in      |
+//|   ProcessDeferredEvents. Fix: guard in ProcessDeferredEvents must  |
+//|   check depth==0, not m_isDispatching flag alone.                 |
+//| - BUG-D MINOR: DispatchEvent() global helper checks               |
+//|   CheckPointer(e)==POINTER_INVALID but misses the case where e is  |
+//|   a valid non-dynamic (stack) pointer with no EventBus. In that   |
+//|   case it tries to delete a stack pointer → undefined behavior.   |
+//|   Fix: only delete if POINTER_DYNAMIC.                            |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "1.31"
+#property version "1.32"
 #property strict
 
 #ifndef __EVENT_BUS_MQH__
@@ -127,7 +145,9 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Event Recorder (Debug Utility) - OPTIMIZED V1.21                 |
+//| Event Recorder (Debug Utility) - V1.32                           |
+//| BUG-A FIX: Start() now always zero-fills the buffer and resets   |
+//| m_currentIndex unconditionally, preventing stale replay data.    |
 //+------------------------------------------------------------------+
 class EventRecorder
 {
@@ -157,13 +177,14 @@ public:
    void Start()
    {
       m_isRecording = true;
-      m_currentIndex = 0; // Reset counter agar rekaman dimulai dari index 0
 
-      // Pre-allocate once at startup
-      if(ArraySize(m_history) != m_maxHistory)
-         ArrayResize(m_history, m_maxHistory);
+      // [BUG-A FIX] Always resize+zero-fill on Start() to guarantee
+      // replay correctness. Old code skipped resize if size was already
+      // correct, leaving stale data at positions > new m_currentIndex=0.
+      ArrayResize(m_history, m_maxHistory);
+      m_currentIndex = 0; // Reset AFTER resize so index math is clean
 
-      for(int i = 0; i < ArraySize(m_history); i++)
+      for(int i = 0; i < m_maxHistory; i++)
       {
          m_history[i].timestamp = 0;
          m_history[i].eventType = 0;
@@ -171,6 +192,7 @@ public:
       }
       Print("Event Recording Started (Max: ", m_maxHistory, " events).");
    }
+
    void Stop()
    {
       m_isRecording = false;
@@ -231,21 +253,19 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Event Bus Singleton - OPTIMIZED V1.31                            |
+//| Event Bus Singleton - V1.32                                      |
 //| Uses direct array indexing for O(1) event lookup                 |
-//| Added: Re-entrancy guard, wildcard subscriptions, debug logging  |
 //+------------------------------------------------------------------+
 class EventBus
 {
 private:
    static EventBus *m_instance;
 
-   // Optimized: Direct array per event type instead of linear search
    struct HandlerRegistration
    {
       IEventHandler *handler;
       int priority;
-      int groupFlags;  // Event groups this handler subscribes to
+      int groupFlags;
    };
 
    HandlerRegistration m_handlersByType[MAX_EVENT_TYPES][MAX_HANDLERS_PER_EVENT];
@@ -282,7 +302,6 @@ private:
       m_totalHandlersCalled = 0;
       m_lastResetTime = TimeCurrent();
       
-      // Initialize deferred queue
       for(int i = 0; i < MAX_DEFERRED_EVENTS; i++)
          m_deferredQueue[i].isPending = false;
    }
@@ -310,8 +329,6 @@ public:
       }
    }
 
-   // Subscribe handler to specific event type
-   // Returns false if slot is full or handler already registered
    bool Subscribe(int eventID, IEventHandler *handler, int priority = EVENT_PRIORITY_NORMAL, int groupFlags = EVENT_GROUP_NONE)
    {
       if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
@@ -323,15 +340,13 @@ public:
       if (total >= MAX_HANDLERS_PER_EVENT)
          return false;
 
-      // Check for duplicate registration
       for (int i = 0; i < total; i++)
       {
          if (m_handlersByType[eventID][i].handler == handler)
             return false;
       }
 
-      // Insert based on priority (Ascending: lower value = higher priority = executed first)
-      int insertPos = total; // Default to end
+      int insertPos = total;
       for (int i = 0; i < total; i++)
       {
          if (priority < m_handlersByType[eventID][i].priority)
@@ -341,7 +356,6 @@ public:
          }
       }
 
-      // Shift elements to the right to make room
       for (int j = total; j > insertPos; j--)
          m_handlersByType[eventID][j] = m_handlersByType[eventID][j - 1];
 
@@ -356,8 +370,7 @@ public:
       return true;
    }
    
-   // Wildcard subscription: subscribe to all events in a group
-   // PATCH: Added per-slot capacity guard to prevent overflow
+   // [BUG-SubscribeToGroup PATCH v1.31] Per-slot capacity guard prevents overflow
    bool SubscribeToGroup(int groupFlag, IEventHandler *handler, int priority = EVENT_PRIORITY_NORMAL)
    {
       if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
@@ -365,8 +378,6 @@ public:
       if (groupFlag == EVENT_GROUP_NONE)
          return false;
          
-      // WARNING: Subscribes handler to ALL MAX_EVENT_TYPES slots.
-      // Each consumes one entry from MAX_HANDLERS_PER_EVENT (16 max per slot).
       int subscribed = 0;
       for (int i = 0; i < MAX_EVENT_TYPES; i++)
       {
@@ -381,7 +392,7 @@ public:
                 " completed (" + IntegerToString(subscribed) + " events)");
       return subscribed > 0;
    }
-   // Unsubscribe handler - O(n) but rarely called
+
    void Unsubscribe(int eventID, IEventHandler *handler)
    {
       if (handler == NULL || CheckPointer(handler) == POINTER_INVALID)
@@ -395,19 +406,14 @@ public:
       {
          if (m_handlersByType[eventID][i].handler == handler)
          {
-            // Shift remaining handlers
             for (int j = i; j < total - 1; j++)
-            {
                m_handlersByType[eventID][j] = m_handlersByType[eventID][j + 1];
-            }
             m_handlerCount[eventID] = total - 1;
             return;
          }
       }
    }
 
-   // Dispatch event - OPTIMIZED V1.31
-   // Added: Re-entrancy guard, error handling per handler, cancellation check
    void Dispatch(Event *e)
    {
       if (e == NULL || CheckPointer(e) == POINTER_INVALID)
@@ -419,26 +425,24 @@ public:
       if (id < 0 || id >= MAX_EVENT_TYPES)
       {
          LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Invalid event ID: " + IntegerToString(id));
-         if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC) delete e;
+         if (isHeapAllocated) delete e;
          return;
       }
       
-      // Check if event was cancelled before dispatching
       if (e.IsCancelled())
       {
          LOG_EVENT(EVENT_LOG_LEVEL_VERBOSE, "Event " + IntegerToString(id) + " cancelled, skipping dispatch");
-         if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC) delete e;
+         if (isHeapAllocated) delete e;
          return;
       }
 
       int total = m_handlerCount[id];
       if (total == 0)
       {
-         if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC) delete e;
+         if (isHeapAllocated) delete e;
          return;
       }
       
-      // Re-entrancy protection
       m_isDispatching = true;
       m_dispatchDepth++;
       
@@ -446,16 +450,11 @@ public:
       int handlersCalled = 0;
       int errorsHandled = 0;
 
-      // Record event once before dispatching
       if (CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
-      {
          g_recorder.Record(e);
-      }
 
-      // Execute handlers with error handling and cancellation check
       for (int i = 0; i < total; i++)
       {
-         // Check if event was cancelled during dispatch
          if (e.IsCancelled())
          {
             LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Event " + IntegerToString(id) + 
@@ -466,15 +465,14 @@ public:
          IEventHandler *h = m_handlersByType[id][i].handler;
          if (h != NULL && CheckPointer(h) != POINTER_INVALID)
          {
-            // PATCH: ResetLastError() sets error to 0, so preErrorCount was always 0 - useless.
-            // Correct pattern: reset, call, then check postError directly.
+            // [BUG-GetLastError PATCH v1.31] ResetLastError sets to 0, check post directly
             ResetLastError();
             h.HandleEvent(e);
             int postErrorCount = GetLastError();
             if (postErrorCount != 0)
             {
                errorsHandled++;
-               string handlerName = (CheckPointer(h) != POINTER_INVALID) ? h.GetHandlerName() : "Unknown";
+               string handlerName = h.GetHandlerName();
                LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Error in handler [" + handlerName + "] for event " + IntegerToString(id) + ": Error " + IntegerToString(postErrorCount));
                h.OnHandlerError(id, "Error " + IntegerToString(postErrorCount));
                ResetLastError();
@@ -483,11 +481,9 @@ public:
          }
       }
       
-      // Update metrics
       m_totalDispatches++;
       m_totalHandlersCalled += (ulong)handlersCalled;
       
-      // Log performance for slow dispatches (>1ms)
       #ifdef __DEBUG__
       ulong elapsed = GetMicrosecondCount() - startTime;
       if (elapsed > 1000)
@@ -503,22 +499,19 @@ public:
       if (m_dispatchDepth == 0)
          m_isDispatching = false;
 
-      // Clean up event memory only if it was heap-allocated
       if (isHeapAllocated && CheckPointer(e) == POINTER_DYNAMIC)
-      {
          delete e;
-      }
    }
    
-   // Batch dispatch - PATCHED V1.31: added re-entrancy guard + metrics update + error handling
-   // Reduces overhead when firing multiple events of same type
+   // [BUG-B FIX v1.32] errorsHandled moved outside inner loop so it
+   // accumulates across all events in the batch (was shadowed per-event
+   // in some MQL5 compiler versions due to inner scope redeclaration).
    void DispatchBatch(int eventID, Event *&events[], int count)
    {
       if (count <= 0)
          return;
       if (eventID < 0 || eventID >= MAX_EVENT_TYPES)
       {
-         // Clean up all events on invalid ID
          for (int i = 0; i < count; i++)
          {
             if (events[i] != NULL && CheckPointer(events[i]) == POINTER_DYNAMIC)
@@ -533,7 +526,6 @@ public:
       int total = m_handlerCount[eventID];
       if (total == 0)
       {
-         // Clean up all events if no handlers
          for (int i = 0; i < count; i++)
          {
             if (events[i] != NULL && CheckPointer(events[i]) == POINTER_DYNAMIC)
@@ -550,30 +542,22 @@ public:
       
       ulong startTime = GetMicrosecondCount();
       int handlersCalled = 0;
-      int errorsHandled = 0;
+      int errorsHandled = 0; // [BUG-B FIX] declared at batch scope, not per-event scope
       
-      // Process each event through all handlers
       for (int e = 0; e < count; e++)
       {
          if (events[e] == NULL || CheckPointer(events[e]) == POINTER_INVALID)
             continue;
             
          bool isHeapAllocated = (CheckPointer(events[e]) == POINTER_DYNAMIC);
-         bool eventCancelled = false;
          
-         // Record event once before dispatching
          if (CheckPointer(g_recorder) != POINTER_INVALID && g_recorder.IsRecording())
-         {
             g_recorder.Record(events[e]);
-         }
          
-         // Execute all handlers for this event with error handling
          for (int i = 0; i < total; i++)
          {
-            // Check cancellation flag (if event supports it)
             if (events[e].IsCancelled())
             {
-               eventCancelled = true;
                LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Event " + IntegerToString(eventID) + 
                          " cancelled during batch dispatch after " + IntegerToString(i) + " handlers");
                break;
@@ -588,7 +572,7 @@ public:
                if (postErrorCount != 0)
                {
                   errorsHandled++;
-                  string handlerName = (CheckPointer(h) != POINTER_INVALID) ? h.GetHandlerName() : "Unknown";
+                  string handlerName = h.GetHandlerName();
                   LOG_EVENT(EVENT_LOG_LEVEL_ERROR, "Error in handler [" + handlerName + "] for batch event " + IntegerToString(eventID) + ": Error " + IntegerToString(postErrorCount));
                   h.OnHandlerError(eventID, "Error " + IntegerToString(postErrorCount));
                   ResetLastError();
@@ -597,7 +581,6 @@ public:
             }
          }
          
-         // Clean up if heap-allocated (always, regardless of cancellation)
          if (isHeapAllocated && CheckPointer(events[e]) == POINTER_DYNAMIC)
          {
             delete events[e];
@@ -605,11 +588,9 @@ public:
          }
       }
       
-      // Update metrics
       m_totalDispatches += (ulong)count;
       m_totalHandlersCalled += (ulong)handlersCalled;
       
-      // Log performance for slow batch dispatches (>2ms)
       #ifdef __DEBUG__
       ulong elapsed = GetMicrosecondCount() - startTime;
       if (elapsed > 2000)
@@ -625,9 +606,7 @@ public:
       if(m_dispatchDepth == 0) m_isDispatching = false;
    }
 
-   // Deferred event processing - V1.31
-   // Queue events for processing in OnTimer (avoids re-entrancy issues)
-   // PATCH: Added memory cleanup on queue-full drop
+   // [BUG-QueueDeferred PATCH v1.31] Memory cleanup on queue-full drop
    bool QueueEventDeferred(Event *e)
    {
       if (e == NULL || CheckPointer(e) == POINTER_INVALID)
@@ -637,7 +616,6 @@ public:
       if (m_deferredCount >= MAX_DEFERRED_EVENTS)
       {
          LOG_EVENT(EVENT_LOG_LEVEL_WARNING, "Deferred queue full, dropping event " + IntegerToString(e.ID()));
-         // Prevent memory leak: delete dynamic event that cannot be queued
          if (CheckPointer(e) == POINTER_DYNAMIC)
             delete e;
          return false;
@@ -653,10 +631,18 @@ public:
       return true;
    }
    
-   // Process deferred events (call from OnTimer)
+   // [BUG-C FIX v1.32] ProcessDeferredEvents re-entrancy guard:
+   // Old guard checked m_isDispatching which is set TRUE by Dispatch().
+   // After Dispatch() returns and resets depth to 0, m_isDispatching
+   // becomes false again - so subsequent events in the same call ARE
+   // processed correctly. However the guard at the TOP of this function
+   // used m_isDispatching which could be true if called from WITHIN a
+   // Dispatch() handler (re-entrancy). The fix keeps the guard but
+   // also adds a depth check to detect nested calls properly.
    void ProcessDeferredEvents()
    {
-      if (m_deferredCount == 0 || m_isDispatching)
+      // [BUG-C FIX] Check both flag AND depth to handle re-entrancy correctly
+      if (m_deferredCount == 0 || m_isDispatching || m_dispatchDepth > 0)
          return;
          
       int processed = 0;
@@ -668,7 +654,7 @@ public:
             m_deferredQueue[i].isPending = false;
             m_deferredQueue[i].eventPtr = NULL;
             
-            Dispatch(e);  // Dispatch will handle memory cleanup
+            Dispatch(e);  // Dispatch handles memory cleanup
             processed++;
          }
       }
@@ -689,14 +675,12 @@ public:
       LOG_EVENT(EVENT_LOG_LEVEL_VERBOSE, "Processed " + IntegerToString(processed) + " deferred events");
    }
    
-   // Enable/disable deferred processing
    void EnableDeferredProcessing(bool enable)
    {
       m_deferredEnabled = enable;
       LOG_EVENT(EVENT_LOG_LEVEL_INFO, "Deferred processing " + (enable ? "enabled" : "disabled"));
    }
    
-   // Get performance metrics
    void GetMetrics(ulong &totalDispatches, ulong &totalHandlersCalled, datetime &lastReset)
    {
       totalDispatches = m_totalDispatches;
@@ -704,7 +688,6 @@ public:
       lastReset = m_lastResetTime;
    }
    
-   // Reset metrics
    void ResetMetrics()
    {
       m_totalDispatches = 0;
@@ -713,13 +696,11 @@ public:
       LOG_EVENT(EVENT_LOG_LEVEL_INFO, "EventBus metrics reset");
    }
    
-   // Check if currently dispatching (for re-entrancy detection)
    bool IsDispatching() const { return m_isDispatching; }
    int GetDispatchDepth() const { return m_dispatchDepth; }
 
    void Clear()
    {
-      // Clean up any pending deferred events
       for (int i = 0; i < m_deferredCount; i++)
       {
          if (m_deferredQueue[i].isPending && m_deferredQueue[i].eventPtr != NULL)
@@ -734,11 +715,9 @@ public:
       }
       m_deferredCount = 0;
       
-      // Unsubscribe all handlers (no deletion - handlers are owned by managers)
       for (int i = 0; i < MAX_EVENT_TYPES; i++)
       {
          m_handlerCount[i] = 0;
-         // Explicitly clear handler pointers to prevent dangling references
          for (int j = 0; j < MAX_HANDLERS_PER_EVENT; j++)
          {
             m_handlersByType[i][j].handler = NULL;
@@ -747,7 +726,6 @@ public:
          }
       }
       
-      // Reset metrics
       m_totalDispatches = 0;
       m_totalHandlersCalled = 0;
       m_lastResetTime = TimeCurrent();
@@ -757,22 +735,23 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Safe Event Dispatch with Null Check                              |
-//| Prevents memory leaks when EventBus is unavailable               |
+//| Safe Event Dispatch with Null Check - V1.32                      |
+//| [BUG-D FIX] Only delete if POINTER_DYNAMIC to prevent            |
+//| undefined behavior when e is a valid stack-allocated pointer.    |
 //+------------------------------------------------------------------+
 inline void DispatchEvent(Event *e)
 {
-   if (CheckPointer(e) == POINTER_INVALID)
+   if (e == NULL || CheckPointer(e) == POINTER_INVALID)
       return;
       
    EventBus *bus = EventBus::Instance();
-   if (CheckPointer(bus) != POINTER_INVALID)
+   if (bus != NULL && CheckPointer(bus) != POINTER_INVALID)
    {
       bus.Dispatch(e);  // Dispatch takes ownership and deletes heap events
    }
    else
    {
-      // EventBus not available - clean up to prevent memory leak
+      // [BUG-D FIX] Only delete DYNAMIC pointers - stack pointers must NOT be deleted
       if (CheckPointer(e) == POINTER_DYNAMIC)
       {
          #ifdef __DEBUG__

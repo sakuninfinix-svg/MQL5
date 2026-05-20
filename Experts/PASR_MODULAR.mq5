@@ -189,6 +189,9 @@ int OnInit()
       return INIT_FAILED;
    }
    g_regimeFilter = GetPointer(regimeFilter);  // Set global pointer after initialization
+   
+   // Inject Regime Filter into AIManager for multi-model switching
+   ai.SetRegimeFilter(g_regimeFilter);
 
    // 7. Initialize Dashboard
    dashCtrl = DashboardManagerFactory::Create(GetPointer(dashboard), GetPointer(dta));
