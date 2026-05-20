@@ -16,10 +16,10 @@
 #ifndef __SIGNAL_MANAGER_MQH__
 #define __SIGNAL_MANAGER_MQH__
 
-#include "IManager.mqh"
-#include "10.DataManager.mqh"
-#include "4.SRManager.mqh"
-#include "12.MarketRegime.mqh"
+#include "../Core/IManager.mqh"
+#include "../Infrastructure/10.DataManager.mqh"
+#include "../Data/4.SRManager.mqh"
+#include "../Infrastructure/12.MarketRegime.mqh"
 
 //+------------------------------------------------------------------+
 //| Signal Quality Scoring                                           |

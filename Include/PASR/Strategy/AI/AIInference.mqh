@@ -21,8 +21,8 @@
 #define __AI_INFERENCE_MQH__
 
 #include "AITypes.mqh"
-#include "../IManager.mqh"
-#include "../12.MarketRegime.mqh"
+#include "../../Core/IManager.mqh"
+#include "../../Infrastructure/12.MarketRegime.mqh"
 
 /// Pure inference — no state mutation, no file I/O.
 /// All methods are const. Receives model state and eval context by const-ref.

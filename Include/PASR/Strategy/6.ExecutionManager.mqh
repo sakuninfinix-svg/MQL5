@@ -13,9 +13,9 @@
 #define __EXECUTION_MANAGER_MQH__
 
 #include <Trade/Trade.mqh>
-#include "IManager.mqh"
-#include "10.DataManager.mqh"
-// #include "3.ZoneManager.mqh"  // Removed - ZoneManager not needed for ExecutionManager
+#include "../Core/IManager.mqh"
+#include "../Infrastructure/10.DataManager.mqh"
+// #include "../Data/3.ZoneManager.mqh"  // Removed - ZoneManager not needed for ExecutionManager
 // If zone functionality is required, inject via interface or use SRManager directly
 
 //+------------------------------------------------------------------+

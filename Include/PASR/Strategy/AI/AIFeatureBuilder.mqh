@@ -21,8 +21,8 @@
 #define __AI_FEATURE_BUILDER_MQH__
 
 #include "AITypes.mqh"
-#include "../IManager.mqh"
-#include "../12.MarketRegime.mqh"
+#include "../../Core/IManager.mqh"
+#include "../../Infrastructure/12.MarketRegime.mqh"
 
 /// Pure helper — no IManager inheritance, no event subscriptions.
 /// Holds only a bar cache and a pointer to the regime filter.

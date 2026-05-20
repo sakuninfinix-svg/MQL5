@@ -19,6 +19,6 @@
 #ifndef __AI_MANAGER_MQH__
 #define __AI_MANAGER_MQH__
 
-#include "AI/AIOrchestrator.mqh"
+#include "AIOrchestrator.mqh"
 
 #endif // __AI_MANAGER_MQH__

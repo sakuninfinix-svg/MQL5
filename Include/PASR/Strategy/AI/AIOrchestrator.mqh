@@ -16,12 +16,12 @@
 #ifndef __AI_ORCHESTRATOR_MQH__
 #define __AI_ORCHESTRATOR_MQH__
 
-#include "IManager.mqh"
-#include "10.DataManager.mqh"
-#include "AI/AITypes.mqh"
-#include "AI/AIFeatureBuilder.mqh"
-#include "AI/AIInference.mqh"
-#include "AI/AITrainer.mqh"
+#include "../../Core/IManager.mqh"
+#include "../../Infrastructure/10.DataManager.mqh"
+#include "AITypes.mqh"
+#include "AIFeatureBuilder.mqh"
+#include "AIInference.mqh"
+#include "AITrainer.mqh"
 
 //+------------------------------------------------------------------+
 //| AI Model Status                                                  |

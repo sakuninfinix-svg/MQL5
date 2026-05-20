@@ -21,7 +21,7 @@
 #define __AI_TRAINER_MQH__
 
 #include "AITypes.mqh"
-#include "../IManager.mqh"
+#include "../../Core/IManager.mqh"
 
 /// Owns replay buffer + minibatch backprop + sample outcome labeling.
 /// Receives AIModelState by pointer so it can mutate weights.
