@@ -173,8 +173,8 @@ private:
          case PERIOD_H1:  return PERIOD_H4;
          case PERIOD_H4:  return PERIOD_D1;
          case PERIOD_D1:  return PERIOD_W1;
-         case PERIOD_W1:  return PERIOD_MN1;  // [v2.02 FIX]
-         case PERIOD_MN1: return PERIOD_MN1;  // [v2.02 FIX] ceiling
+         case PERIOD_W1:  return PERIOD_MN1;
+         case PERIOD_MN1: return PERIOD_MN1;  // ceiling
          default:         return PERIOD_W1;
       }
    }
