@@ -22,6 +22,51 @@
 #define MINIBATCH_SIZE   16
 #define L2_LAMBDA        0.0001
 
+//+------------------------------------------------------------------+
+//| Multi-Model Expert Types for Regime-Based Switching
+//+------------------------------------------------------------------+
+enum ExpertType
+{
+   EXPERT_NONE = 0,           // No active expert (skip trading)
+   EXPERT_TREND = 1,          // Trend-following specialist
+   EXPERT_MEAN_REVERSION = 2, // Mean-reversion specialist
+   EXPERT_MOMENTUM = 3        // Momentum breakout specialist
+};
+
+//+------------------------------------------------------------------+
+//| Cached Bar Data Structure for Performance Optimization
+//| Prevents repeated CopyRates calls within same tick
+//+------------------------------------------------------------------+
+struct CachedBarData
+{
+   datetime timestamp;         // Bar open time (cache key)
+   double   open;
+   double   high;
+   double   low;
+   double   close;
+   long     volume;
+   bool     valid;
+   
+   CachedBarData()
+   {
+      timestamp = 0;
+      open = high = low = close = 0.0;
+      volume = 0;
+      valid = false;
+   }
+};
+
+// Cache for multiple timeframes
+struct BarCache
+{
+   CachedBarData current;      // Current chart timeframe
+   CachedBarData higher;       // Higher timeframe
+   CachedBarData longTerm;     // Long-term timeframe
+   datetime      lastUpdate;   // Last cache refresh time
+   
+   BarCache() : lastUpdate(0) {}
+};
+
 class AIManager : public IManager
 {
 private:
@@ -72,6 +117,8 @@ private:
    int              m_labeledSinceLastBatch;
 
    MarketRegimeFilter *m_regime;
+   BarCache          m_barCache;    // Performance cache for bar data
+   ExpertType        m_activeExpert;// Currently selected expert model
 
    struct EvalContext
    {
@@ -149,7 +196,8 @@ public:
                  m_labeledSinceLastBatch(0),
                  m_regime(NULL),
                  m_replayHead(0),
-                 m_replayCount(0)
+                 m_replayCount(0),
+                 m_activeExpert(EXPERT_NONE)
    {
       m_model.bias               = 0.55;
       m_model.atrWeight          = 0.18;
@@ -193,6 +241,10 @@ public:
       m_model.lastUpdateTime    = TimeCurrent();
       m_model.validationCounter = 0;
       ArrayInitialize(m_replayBuffer, 0.0);
+      
+      // Initialize bar cache
+      m_barCache.lastUpdate = 0;
+      m_activeExpert = EXPERT_NONE;
    }
 
    void SetRegimeFilter(MarketRegimeFilter *regime)
@@ -201,6 +253,104 @@ public:
       Log("✅ MarketRegimeFilter injected.");
    }
    MarketRegimeFilter* GetRegimeFilter() const { return m_regime; }
+   
+   //+------------------------------------------------------------------+
+   //| Bar Data Caching for Performance Optimization
+   //| Called once per tick/event to cache OHLCV data
+   //+------------------------------------------------------------------+
+   void CacheCurrentBars()
+   {
+      datetime now = TimeCurrent();
+      
+      // Only refresh cache once per second to avoid redundant calls
+      if(now - m_barCache.lastUpdate < 1) return;
+      
+      MqlRates bars[1];
+      
+      // Cache current timeframe bar (shift=1 for closed bar)
+      if(CopyRates(_Symbol, _Period, 1, 1, bars) == 1)
+      {
+         m_barCache.current.timestamp = bars[0].time;
+         m_barCache.current.open = bars[0].open;
+         m_barCache.current.high = bars[0].high;
+         m_barCache.current.low = bars[0].low;
+         m_barCache.current.close = bars[0].close;
+         m_barCache.current.volume = bars[0].tick_volume;
+         m_barCache.current.valid = true;
+      }
+      
+      // Cache higher timeframe
+      ENUM_TIMEFRAMES htf = GetHigherTimeframe((ENUM_TIMEFRAMES)Period());
+      if(CopyRates(_Symbol, htf, 1, 1, bars) == 1)
+      {
+         m_barCache.higher.timestamp = bars[0].time;
+         m_barCache.higher.open = bars[0].open;
+         m_barCache.higher.high = bars[0].high;
+         m_barCache.higher.low = bars[0].low;
+         m_barCache.higher.close = bars[0].close;
+         m_barCache.higher.volume = bars[0].tick_volume;
+         m_barCache.higher.valid = true;
+      }
+      
+      m_barCache.lastUpdate = now;
+   }
+   
+   // Helper to get cached bars array for a specific timeframe
+   bool GetCachedBars(ENUM_TIMEFRAMES tf, MqlRates &outBars[], int count, int shift = 1) const
+   {
+      // For current timeframe, use cache if available
+      if(tf == (ENUM_TIMEFRAMES)Period() && m_barCache.current.valid)
+      {
+         if(count == 1 && shift == 1)
+         {
+            ArrayResize(outBars, 1);
+            outBars[0].time = m_barCache.current.timestamp;
+            outBars[0].open = m_barCache.current.open;
+            outBars[0].high = m_barCache.current.high;
+            outBars[0].low = m_barCache.current.low;
+            outBars[0].close = m_barCache.current.close;
+            outBars[0].tick_volume = m_barCache.current.volume;
+            return true;
+         }
+      }
+      
+      // Fallback to CopyRates for other cases
+      return CopyRates(_Symbol, tf, shift, count, outBars) >= count;
+   }
+
+   //+------------------------------------------------------------------+
+   //| Multi-Model Expert Switching Logic
+   //+------------------------------------------------------------------+
+   ExpertType GetActiveExpert() const
+   {
+      if(CheckPointer(m_regime) == POINTER_INVALID)
+         return EXPERT_NONE;
+      
+      ENUM_MARKET_REGIME regime = m_regime.GetMarketRegime();
+      const RegimeResult &r = m_regime.GetResult();
+      
+      // Skip trading during transition or low confidence
+      if(regime == REGIME_TRANSITION || r.regimeScore < 0.3)
+         return EXPERT_NONE;
+      
+      // Select expert based on market regime
+      switch(regime)
+      {
+         case REGIME_TRENDING_STRONG:
+         case REGIME_TRENDING_WEAK:
+            return EXPERT_TREND;
+            
+         case REGIME_RANGING_SIDEWAYS:
+            return EXPERT_MEAN_REVERSION;
+            
+         case REGIME_CHOPPY_HIGH_VOL:
+            // In high volatility chop, use momentum for breakouts only
+            return EXPERT_MOMENTUM;
+            
+         default:
+            return EXPERT_NONE;
+      }
+   }
 
    virtual void RefreshConfigCache() override { IManager::RefreshConfigCache(); }
    virtual void DeclareEvents() override
@@ -252,6 +402,8 @@ public:
       m_data.GetConfigCache(cfg);
       if(!cfg.ai.use) return;
       if(CheckPointer(m_regime) != POINTER_INVALID) m_regime.Update();
+      // Refresh bar cache on new bar event
+      CacheCurrentBars();
       DecayFeatureWeightsOnly(0.995);
    }
 
@@ -263,6 +415,8 @@ public:
       if(!cfg.ai.use) return;
       if(TimeCurrent() - m_lastHeartbeat < 5) return;
       m_lastHeartbeat = TimeCurrent();
+      // Refresh bar cache periodically
+      CacheCurrentBars();
       AdaptModelToPerformance();
    }
 
@@ -274,6 +428,9 @@ public:
       StrategyConfig cfg;
       m_data.GetConfigCache(cfg);
       if(!cfg.ai.use || !e.signal.valid) return;
+      
+      // Ensure bar cache is fresh before feature extraction
+      CacheCurrentBars();
 
       EvalContext ctx;
       BuildEvalContext(ctx, e.signal, e.atrPoints, e.support, e.resistance);
@@ -377,38 +534,42 @@ private:
                          const double support, const double resistance,
                          const EvalContext &ctx, const StrategyConfig &cfg) const
    {
-      double trendScore    = EvaluateTrendExpert(signal, ctx, cfg);
-      double meanRevScore  = EvaluateMeanReversionExpert(signal, ctx, cfg);
-      double momentumScore = EvaluateMomentumExpert(ctx);
-
-      double tW  = m_model.trendExpertWeight;
-      double mW  = m_model.meanRevExpertWeight;
-      double moW = m_model.momentumExpertWeight;
-
-      if(CheckPointer(m_regime) != POINTER_INVALID)
+      // Get active expert based on current market regime
+      ExpertType activeExpert = GetActiveExpert();
+      
+      // Skip trading during transition or low confidence regimes
+      if(activeExpert == EXPERT_NONE)
+         return 0.0;  // Return zero score to reject signal
+      
+      double expertScore = 0.0;
+      
+      // Call only the relevant expert model (not weighted average of all)
+      switch(activeExpert)
       {
-         switch(m_regime.GetMarketRegime())
-         {
-            case REGIME_TRENDING_STRONG:  tW *= 1.20; mW *= 0.80;                      break;
-            case REGIME_TRENDING_WEAK:    tW *= 1.10; mW *= 0.90;                      break;
-            case REGIME_RANGING_SIDEWAYS: tW *= 0.80; mW *= 1.25;                      break;
-            case REGIME_CHOPPY_HIGH_VOL:  tW *= 0.70; mW *= 0.80; moW *= 0.70;        break;
-            case REGIME_TRANSITION:       tW *= 0.60; mW *= 0.60; moW *= 0.60;        break;
-            default: break;
-         }
+         case EXPERT_TREND:
+            expertScore = EvaluateTrendExpert(signal, ctx, cfg);
+            break;
+            
+         case EXPERT_MEAN_REVERSION:
+            expertScore = EvaluateMeanReversionExpert(signal, ctx, cfg);
+            break;
+            
+         case EXPERT_MOMENTUM:
+            expertScore = EvaluateMomentumExpert(ctx);
+            break;
+            
+         default:
+            return 0.0;
       }
-
-      double totalWeight = tW + mW + moW;
-      double ensembleScore = 0.0;
-      if(totalWeight > 0.0)
-         ensembleScore = (tW * trendScore + mW * meanRevScore + moW * momentumScore) / totalWeight;
-
+      
+      // Neural network provides additional calibration
       double nnRaw   = ForwardPassNN(ctx);
       double nnScore = PlattCalibrate(nnRaw);
-
-      double nnWeight   = MathMin(0.40, 0.005 * m_model.nnTrainingSamples);
-      double hybridScore = (1.0 - nnWeight) * ensembleScore + nnWeight * nnScore;
-
+      
+      // Weight NN based on training samples - less weight when undertrained
+      double nnWeight   = MathMin(0.30, 0.005 * m_model.nnTrainingSamples);
+      double hybridScore = (1.0 - nnWeight) * expertScore + nnWeight * nnScore;
+      
       return Logistic(hybridScore);
    }
 
@@ -932,6 +1093,107 @@ private:
       Log("Labeled: PnL=" + DoubleToString(pnl, 2) +
           " | " + (pnl > 0 ? "WIN" : "LOSS") +
           " | replay=" + IntegerToString(m_replayCount));
+   }
+   
+   //+------------------------------------------------------------------+
+   //| Time-Based Labeling: Check price X bars ahead for win/loss
+   //| Replaces slow close-position-based labeling with forward-looking
+   //+------------------------------------------------------------------+
+   void ApplyTimeBasedLabel(AISignalSample &sample, int lookforwardBars = 5, double profitThreshold = 1.5)
+   {
+      if(!sample.accepted || sample.labeled) return;
+      
+      MqlRates futureBars[];
+      ArrayResize(futureBars, lookforwardBars);
+      
+      // Get bars starting from entry point (shift=0 from sample timestamp)
+      // We need to find the bar index corresponding to sample.timestamp
+      datetime entryTime = sample.timestamp;
+      int totalBars = Bars(_Symbol, _Period);
+      
+      // Find position of entry bar
+      int entryIndex = -1;
+      MqlRates tempBar[1];
+      for(int i = 1; i < totalBars && i < 50; i++)
+      {
+         if(CopyRates(_Symbol, _Period, i, 1, tempBar) == 1)
+         {
+            if(tempBar[0].time <= entryTime && tempBar[0].time >= entryTime - PeriodSeconds(_Period))
+            {
+               entryIndex = i;
+               break;
+            }
+         }
+      }
+      
+      if(entryIndex < 0 || entryIndex + lookforwardBars >= totalBars)
+         return;  // Not enough data
+      
+      // Get future bars for labeling
+      if(CopyRates(_Symbol, _Period, entryIndex - lookforwardBars, lookforwardBars, futureBars) < lookforwardBars)
+         return;
+      
+      // Calculate max profit potential over lookforward period
+      double maxProfit = 0.0;
+      double maxAdverse = 0.0;
+      
+      for(int i = 0; i < lookforwardBars; i++)
+      {
+         double highDiff = futureBars[i].high - sample.signal.entryPrice;
+         double lowDiff = sample.signal.entryPrice - futureBars[i].low;
+         
+         if(sample.signal.type == ORDER_TYPE_BUY)
+         {
+            maxProfit = MathMax(maxProfit, highDiff);
+            maxAdverse = MathMax(maxAdverse, lowDiff);
+         }
+         else if(sample.signal.type == ORDER_TYPE_SELL)
+         {
+            maxProfit = MathMax(maxProfit, lowDiff);
+            maxAdverse = MathMax(maxAdverse, highDiff);
+         }
+      }
+      
+      // Normalize by ATR at entry
+      double atrNorm = (sample.atrPoints > 0) ? maxProfit / sample.atrPoints : 0.0;
+      double adverseNorm = (sample.atrPoints > 0) ? maxAdverse / sample.atrPoints : 0.0;
+      
+      // Label based on whether profit threshold was reached before stop
+      double label = 0.0;
+      if(atrNorm >= profitThreshold && adverseNorm < profitThreshold * 0.5)
+         label = 1.0;  // Win: reached profit target without major drawdown
+      else if(adverseNorm >= profitThreshold * 0.5)
+         label = -1.0; // Loss: hit significant drawdown
+      
+      // Record time-based label
+      if(label != 0.0)
+      {
+         sample.labeled = true;
+         PushReplayBuffer(sample.features, label);
+         
+         AppendCsvRow(m_outcomeFilename,
+                      "sample_id","ticket","pnl","label_time","label_type","atr_norm","adverse_norm",
+                      sample.sampleId,
+                      IntegerToString((int)sample.ticket),
+                      "0.00",  // No actual PnL yet
+                      TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS),
+                      "TIME_BASED",
+                      DoubleToString(atrNorm, 2),
+                      DoubleToString(adverseNorm, 2));
+         
+         m_labeledSinceLastBatch++;
+         if(m_labeledSinceLastBatch >= MINIBATCH_SIZE)
+         {
+            TrainMiniBatch();
+            StrategyConfig cfg; m_data.GetConfigCache(cfg);
+            m_modelDirty = true;
+            SaveModelState(cfg);
+         }
+         
+         Log("TimeBasedLabel: " + (label > 0 ? "WIN" : "LOSS") +
+             " | ATR_Norm=" + DoubleToString(atrNorm, 2) +
+             " | Adv_Norm=" + DoubleToString(adverseNorm, 2));
+      }
    }
 
    void AppendCsvRow(const string filename,
