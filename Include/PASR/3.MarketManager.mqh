@@ -2,18 +2,22 @@
 //|                                              3.MarketManager.mqh |
 //|                                       Copyright 2026, Agsicentre |
 //|            Market State & Session Management Module              |
-//|                   V2.1 - Context-Aware Improvements              |
+//|                   V2.20 - Refactored & Optimized                 |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link "agsicentre.wordpress.com"
-#property version "2.10"
+#property version "2.20"
 #property strict
 
 #ifndef __MARKET_MANAGER_MQH__
 #define __MARKET_MANAGER_MQH__
 
 #include "IManager.mqh"
+// Forward declarations to reduce coupling
+class DataManager;
+class MarketRegimeFilter;
+
 #include "10.DataManager.mqh"
 #include "12.MarketRegime.mqh"
 
@@ -39,6 +43,9 @@ struct SessionInfo
    bool isOverlap;            // True if overlapping with another session
    int overlapWithIndex;      // Index of overlapping session (-1 if none)
    int minutesToClose;        // Countdown to session close
+   
+   SessionInfo() : startMin(0), endMin(0), isActive(false), isOverlap(false), 
+                   overlapWithIndex(-1), minutesToClose(0) {}
 };
 
 //+------------------------------------------------------------------+
@@ -50,10 +57,69 @@ struct SpreadTrend
    double sma;                // Simple Moving Average
    double slope;              // Trend slope (positive = widening)
    datetime lastUpdate;
+   int maxSamples;            // Maximum samples to keep
    
-   SpreadTrend() : sma(0.0), slope(0.0), lastUpdate(0)
+   SpreadTrend() : sma(0.0), slope(0.0), lastUpdate(0), maxSamples(20)
    {
       ArrayResize(spreads, 0);
+   }
+   
+   void AddSample(double spread)
+   {
+      // Shift buffer efficiently
+      if(ArraySize(spreads) >= maxSamples)
+      {
+         ArrayCopy(spreads, spreads, 0, 1, WHOLE_ARRAY - 1);
+         spreads[maxSamples - 1] = spread;
+      }
+      else
+      {
+         int size = ArraySize(spreads);
+         ArrayResize(spreads, size + 1);
+         spreads[size] = spread;
+      }
+      lastUpdate = TimeCurrent();
+   }
+   
+   void CalculateSMA()
+   {
+      if(ArraySize(spreads) == 0)
+      {
+         sma = 0.0;
+         return;
+      }
+      
+      double sum = 0.0;
+      for(int i = 0; i < ArraySize(spreads); i++)
+         sum += spreads[i];
+      sma = sum / ArraySize(spreads);
+   }
+   
+   void CalculateSlope()
+   {
+      int n = MathMin(10, ArraySize(spreads));
+      if(n < 5)
+      {
+         slope = 0.0;
+         return;
+      }
+      
+      double xSum = 0.0, ySum = 0.0, xySum = 0.0, xxSum = 0.0;
+      for(int i = 0; i < n; i++)
+      {
+         double x = (double)i;
+         double y = spreads[i];
+         xSum += x;
+         ySum += y;
+         xySum += x * y;
+         xxSum += x * x;
+      }
+      
+      double denominator = n * xxSum - xSum * xSum;
+      if(denominator != 0)
+         slope = (n * xySum - xSum * ySum) / denominator;
+      else
+         slope = 0.0;
    }
 };
 
@@ -116,7 +182,7 @@ private:
    MqlTick m_lastTick;
    bool m_hasLastTick;
 
-   // Helper methods
+   // Helper methods - Refactored for clarity
    void FetchWebNews();
    void UpdateGateState(const MqlTick &tick);
    void UpdateInstrumentContext();
@@ -125,6 +191,11 @@ private:
    void DetectSessionOverlaps();
    bool CheckRegimeCompatibility();
    double NormalizeATR(double atr, ENUM_TIMEFRAMES tf);
+   
+   // New helper methods for better separation of concerns
+   bool ValidateSpread(double currentSpread, const StrategyConfig &cfg);
+   bool ValidateATR(double normalizedATR, const StrategyConfig &cfg);
+   bool ValidateNewsImpact(ENUM_NEWS_IMPACT impact, const StrategyConfig &cfg);
    
 public:
    MarketManager() : IManager("MarketManager", 100), 
@@ -144,17 +215,25 @@ public:
                      m_newsImpactExpiry(0),
                      m_spreadWarningActive(false),
                      m_regimeFilter(NULL),
-                     m_lastRegimeCheck(0)
+                     m_lastRegimeCheck(0),
+                     m_consecutiveLosses(0),
+                     m_lastEntryBarTime(0),
+                     m_lastLossBarTime(0),
+                     m_nextNewsTime(0),
+                     m_lastBarTime(0),
+                     m_dayAnchor(0),
+                     m_lastNewsCheck(0),
+                     m_lastWebFetch(0)
    {
       m_baseCurr = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE);
       m_profitCurr = SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT);
-      ZeroMemory(m_sessionStarts);
-      ZeroMemory(m_sessionEnds);
-      ZeroMemory(m_lastTick);
-      ZeroMemory(m_sessions);
+      ArrayInitialize(m_sessionStarts, -1);
+      ArrayInitialize(m_sessionEnds, -1);
+      ArrayFill(m_sessions, 0, 7, SessionInfo());
+      ArrayInitialize(m_webNewsTimes, 0);
       
-      // Initialize spread trend buffer
-      ArrayResize(m_spreadTrend.spreads, 20);
+      // Initialize spread trend buffer with proper size
+      ArrayResize(m_spreadTrend.spreads, m_spreadTrend.maxSamples);
       ArrayInitialize(m_spreadTrend.spreads, 0.0);
    }
    
@@ -305,45 +384,10 @@ double MarketManager::GetNormalizedATR(double currentATR) const
 //+------------------------------------------------------------------+
 void MarketManager::UpdateSpreadTrend(double currentSpread)
 {
-   datetime now = TimeCurrent();
-   
-   // Shift buffer
-   ArrayResize(m_spreadTrend.spreads, ArraySize(m_spreadTrend.spreads) + 1);
-   ArrayCopy(m_spreadTrend.spreads, m_spreadTrend.spreads, 1, 0, WHOLE_ARRAY - 1);
-   m_spreadTrend.spreads[0] = currentSpread;
-   
-   // Keep only last 20 samples
-   if(ArraySize(m_spreadTrend.spreads) > 20)
-      ArrayResize(m_spreadTrend.spreads, 20);
-   
-   // Calculate SMA
-   double sum = 0.0;
-   for(int i = 0; i < ArraySize(m_spreadTrend.spreads); i++)
-      sum += m_spreadTrend.spreads[i];
-   m_spreadTrend.sma = sum / ArraySize(m_spreadTrend.spreads);
-   
-   // Calculate slope (simple linear regression)
-   if(ArraySize(m_spreadTrend.spreads) >= 5)
-   {
-      double xSum = 0.0, ySum = 0.0, xySum = 0.0, xxSum = 0.0;
-      int n = MathMin(10, ArraySize(m_spreadTrend.spreads));
-      
-      for(int i = 0; i < n; i++)
-      {
-         double x = (double)i;
-         double y = m_spreadTrend.spreads[i];
-         xSum += x;
-         ySum += y;
-         xySum += x * y;
-         xxSum += x * x;
-      }
-      
-      double denominator = n * xxSum - xSum * xSum;
-      if(denominator != 0)
-         m_spreadTrend.slope = (n * xySum - xSum * ySum) / denominator;
-   }
-   
-   m_spreadTrend.lastUpdate = now;
+   // Use encapsulated method in SpreadTrend struct
+   m_spreadTrend.AddSample(currentSpread);
+   m_spreadTrend.CalculateSMA();
+   m_spreadTrend.CalculateSlope();
    
    // Check if spread is widening significantly
    if(m_spreadTrend.slope > 1.0 && !m_spreadWarningActive)
@@ -500,99 +544,128 @@ bool MarketManager::PassesGate(const MqlTick &tick, double &currentSpread, doubl
 //+------------------------------------------------------------------+
 bool MarketManager::PassesGateWithContext(const MqlTick &tick, double &currentSpread, double currentATR)
 {
+   if(currentATR <= 0)
+      return false;
+      
    StrategyConfig cfg; m_data.GetConfigCache(cfg);
    
    // 1. Check trading session
    if (!IsTradingSession())
    {
-      m_data.DebugLog(m_debugMode, "Trading session is closed.");
+      if(m_debugMode)
+         PrintFormat("[%s] Gate blocked: Trading session closed", m_name);
       return false;
    }
    
    // Detect session overlaps
    DetectSessionOverlaps();
    
-   // 2. Calculate spread and apply context-aware validation
-   double bid = tick.bid;
-   double ask = tick.ask;
-   currentSpread = (ask - bid) / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   // 2. Calculate spread
+   currentSpread = (tick.ask - tick.bid) / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
-   // Update spread trend
+   // Update spread trend analysis
    UpdateSpreadTrend(currentSpread);
    
-   // Dynamic spread threshold based on average spread
-   double dynamicSpreadThreshold = MathMax(cfg.max_spread, m_avgSpread * 2.5);
+   // Validate spread with dynamic threshold
+   if(!ValidateSpread(currentSpread, cfg))
+      return false;
    
-   // Check if spread is too high
-   if (currentSpread > dynamicSpreadThreshold)
+   // 3. Validate ATR with normalization
+   double normalizedATR = GetNormalizedATR(currentATR);
+   if(!ValidateATR(normalizedATR, cfg))
+      return false;
+   
+   // 4. Validate news impact
+   ENUM_NEWS_IMPACT newsImpact = CalculateNewsImpact();
+   if(!ValidateNewsImpact(newsImpact, cfg))
+      return false;
+   
+   // 5. Check market regime compatibility
+   if(!CheckRegimeCompatibility())
    {
-      m_data.DebugLog(m_debugMode, StringFormat(
-         "Spread too high: %.1f pts (Dynamic Threshold: %.1f, Static: %.1f). Avg Spread: %.2f",
-         currentSpread, dynamicSpreadThreshold, cfg.max_spread, m_avgSpread));
+      if(m_debugMode)
+         PrintFormat("[%s] Gate blocked: Market regime incompatible", m_name);
       return false;
    }
    
-   // Early warning if spread is widening
-   if(IsSpreadTrendWidening() && m_debugMode)
+   // 6. Session overlap notification
+   if(m_overlapDetected && m_debugMode)
+      PrintFormat("[%s] Session overlap detected - higher volatility expected", m_name);
+   
+   // 7. Session close warning
+   int minsToClose = GetMinutesToSessionClose();
+   if(minsToClose > 0 && minsToClose < 30 && m_debugMode)
+      PrintFormat("[%s] WARNING: Session closing in %d minutes", m_name, minsToClose);
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| ValidateSpread - Check spread against dynamic threshold          |
+//+------------------------------------------------------------------+
+bool MarketManager::ValidateSpread(double currentSpread, const StrategyConfig &cfg)
+{
+   // Dynamic threshold based on average spread
+   double dynamicThreshold = MathMax(cfg.max_spread, m_avgSpread * 2.5);
+   
+   if(currentSpread > dynamicThreshold)
    {
-      PrintFormat("[%s] WARNING: Spread trending upward. Current: %.1f, SMA: %.1f",
-                  m_name, currentSpread, m_spreadTrend.sma);
+      if(m_debugMode)
+         PrintFormat("[%s] Spread too high: %.1f pts (Threshold: %.1f, Avg: %.2f)",
+                     m_name, currentSpread, dynamicThreshold, m_avgSpread);
+      return false;
    }
    
-   // 3. ATR check with normalization
-   double normalizedATR = GetNormalizedATR(currentATR);
+   // Warning if spread is widening
+   if(IsSpreadTrendWidening() && m_debugMode)
+      PrintFormat("[%s] WARNING: Spread trending upward. Current: %.1f, SMA: %.1f",
+                  m_name, currentSpread, m_spreadTrend.sma);
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| ValidateATR - Check ATR within normalized bounds                 |
+//+------------------------------------------------------------------+
+bool MarketManager::ValidateATR(double normalizedATR, const StrategyConfig &cfg)
+{
    double normalizedMin = cfg.atr_min / m_timeframeFactor;
    double normalizedMax = cfg.atr_max / m_timeframeFactor;
    
-   if (normalizedATR < normalizedMin || normalizedATR > normalizedMax)
+   if(normalizedATR < normalizedMin || normalizedATR > normalizedMax)
    {
-      if (m_debugMode)
+      if(m_debugMode)
       {
          string reason = (normalizedATR < normalizedMin) ? "Too Low" : "Too High";
-         PrintFormat("[%s] ATR Gate Blocked: Current %.1f (Norm: %.1f), Min: %.1f, Max: %.1f - %s",
-                     m_name, currentATR, normalizedATR, normalizedMin, normalizedMax, reason);
+         PrintFormat("[%s] ATR blocked: %.1f (Norm: %.1f), Range: %.1f-%.1f - %s",
+                     m_name, normalizedATR * m_timeframeFactor, normalizedATR, 
+                     normalizedMin, normalizedMax, reason);
       }
       return false;
    }
    
-   // 4. News impact check (not just binary)
-   ENUM_NEWS_IMPACT newsImpact = CalculateNewsImpact();
-   if(newsImpact >= NEWS_IMPACT_HIGH)
-   {
-      m_data.DebugLog(m_debugMode, "High impact news detected. Blocking trades.");
-      return false;
-   }
-   
-   // Medium impact news - reduce position size or skip depending on config
-   if(newsImpact == NEWS_IMPACT_MEDIUM && cfg.news_level >= NEWS_HIGH_MEDIUM)
-   {
-      m_data.DebugLog(m_debugMode, "Medium impact news detected. Blocking per config.");
-      return false;
-   }
-   
-   // 5. Market regime compatibility check
-   if(!CheckRegimeCompatibility())
-   {
-      m_data.DebugLog(m_debugMode, "Market regime not compatible with current strategy.");
-      return false;
-   }
-   
-   // 6. Session overlap bonus/penalty logic
-   if(m_overlapDetected)
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| ValidateNewsImpact - Check news impact level                     |
+//+------------------------------------------------------------------+
+bool MarketManager::ValidateNewsImpact(ENUM_NEWS_IMPACT impact, const StrategyConfig &cfg)
+{
+   // Block high impact news
+   if(impact >= NEWS_IMPACT_HIGH)
    {
       if(m_debugMode)
-         PrintFormat("[%s] Session overlap detected. Higher volatility expected.", m_name);
-      // During overlaps, we might want to be more conservative
-      // This could be extended to adjust lot size or SL/TP
+         PrintFormat("[%s] Gate blocked: High impact news detected", m_name);
+      return false;
    }
    
-   // 7. Check minutes to session close
-   int minsToClose = GetMinutesToSessionClose();
-   if(minsToClose > 0 && minsToClose < 30)
+   // Block medium impact if configured
+   if(impact == NEWS_IMPACT_MEDIUM && cfg.news_level >= NEWS_HIGH_MEDIUM)
    {
       if(m_debugMode)
-         PrintFormat("[%s] WARNING: Session closing in %d minutes. Avoid new entries.", m_name, minsToClose);
-      // Could block entries in last 15-30 minutes of session
+         PrintFormat("[%s] Gate blocked: Medium impact news per config", m_name);
+      return false;
    }
    
    return true;
