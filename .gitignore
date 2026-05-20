@@ -1,10 +1,9 @@
-```
+```markdown
 # Compiled and build artifacts
 *.pyc
 __pycache__/
 *.o
 *.obj
-*.class
 *.dll
 *.so
 *.a
@@ -33,20 +32,29 @@ venv/
 .DS_Store
 Thumbs.db
 
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+
 # Build directories
 dist/
 build/
 target/
 .gradle/
 
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
 # Python specific
 *.pyc
 __pycache__/
+*.pyo
+*.pyd
+.Python
+*.so
+.Python
+*.egg-info/
+.eggs/
+
+# MyPy cache
 .mypy_cache/
 .pytest_cache/
 
