@@ -2,15 +2,6 @@
 //|                                                   AIManager.mqh  |
 //|                                       Copyright 2026, Agsicentre |
 //|            Adaptive AI & Signal Scoring Module                   |
-//|                   VERSION 2.07 - Bug fixes post code review      |
-//|                                                                  |
-//| CHANGES v2.07:                                                   |
-//|  - FIX: AdaptEnsembleWeights() now normalizes total weight after |
-//|         adjust so ensemble sum stays meaningful                  |
-//|  - FIX: EvaluateSignal() regime-aware bias applied to base       |
-//|         model weights consistently                               |
-//|  - KEEP: all v2.06 fixes (LoadModelState no SaveModelState,      |
-//|          60s window, EvalContext pass-through, NormalizeNNWeight) |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
@@ -209,11 +200,9 @@ public:
       m_regime = regime;
       Log("✅ MarketRegimeFilter injected.");
    }
-
    MarketRegimeFilter* GetRegimeFilter() const { return m_regime; }
 
    virtual void RefreshConfigCache() override { IManager::RefreshConfigCache(); }
-
    virtual void DeclareEvents() override
    {
       AddEvent(EVENT_ID_SIGNAL_GENERATED);
