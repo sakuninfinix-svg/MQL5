@@ -1,13 +1,12 @@
-
 //+------------------------------------------------------------------+
 //|                                                   AIManager.mqh  |
 //|                                       Copyright 2026, Agsicentre |
 //|            Adaptive AI & Signal Scoring Module                   |
-//|                   VERSION 2.02 - Enhanced Stability & Fixes      |
+//|                   VERSION 2.03 - MarketRegime Integration        |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.02"
+#property version   "2.03"
 #property strict
 
 #ifndef __AI_MANAGER_MQH__
@@ -15,6 +14,7 @@
 
 #include "IManager.mqh"
 #include "10.DataManager.mqh"
+#include "12.MarketRegime.mqh"
 
 //+------------------------------------------------------------------+
 //| Helper: map timeframe ke timeframe lebih tinggi yang valid        |
@@ -38,6 +38,7 @@ ENUM_TIMEFRAMES GetHigherTimeframe(ENUM_TIMEFRAMES tf)
 //+------------------------------------------------------------------+
 //| AIManager - Enhances signal quality through adaptive scoring      |
 //| Utilizes lightweight feature scoring and dynamic model feedback   |
+//| v2.03: MarketRegimeFilter integrated — no duplicate indicators   |
 //+------------------------------------------------------------------+
 class AIManager : public IManager
 {
@@ -51,11 +52,11 @@ private:
       double slWeight;
       double momentumWeight;
       double lossStreakWeight;
-      double volNoiseWeight;        // [BUG-01 FIX] sekarang ikut disimpan/dimuat
+      double volNoiseWeight;
       // ML feature weights
-      double volatilityWeight;
+      double regimeScoreWeight;     // [v2.03] ganti volatilityWeight → pakai regime score
       double timeOfDayWeight;
-      double mtConfluenceWeight;
+      double mtConfluenceWeight;    // [v2.03] ganti mtConfluence manual → pakai MarketRegime
       double volumeWeight;
       // Ensemble expert weights
       double trendExpertWeight;
@@ -67,7 +68,7 @@ private:
       int    driftDetectionWindow;
       // Neural Network Weights (2-layer sequential)
       double nn_hidden1_w1, nn_hidden1_w2, nn_hidden1_w3, nn_hidden1_bias;
-      double nn_hidden2_w1, nn_hidden2_bias; // [BUG-02 FIX] hidden2 hanya 1 input (dari hidden1)
+      double nn_hidden2_w1, nn_hidden2_bias;
       double nn_output_w1,  nn_output_w2,  nn_output_bias;
       double nnLearningRate;
       int    nnTrainingSamples;
@@ -77,13 +78,17 @@ private:
       int    validationCounter;
    } m_model;
 
-   datetime m_lastHeartbeat;
-   double   m_lastSavedWinRate;
-   bool     m_modelDirty;
-   string   m_datasetFilename;
-   string   m_ticketMapFilename;
-   string   m_outcomeFilename;
-   int      m_loggedSamples;
+   datetime         m_lastHeartbeat;
+   double           m_lastSavedWinRate;
+   bool             m_modelDirty;
+   string           m_datasetFilename;
+   string           m_ticketMapFilename;
+   string           m_outcomeFilename;
+   int              m_loggedSamples;
+
+   // [v2.03] MarketRegimeFilter injection — TIDAK buat instance baru,
+   // pointer ke instance yang sudah ada di EA utama
+   MarketRegimeFilter *m_regime;
 
    struct AISignalSample
    {
@@ -104,6 +109,24 @@ private:
       SignalDecision signal;
    } m_pendingSamples[];
 
+   // [v2.03] EvalContext: cache semua feature normalization per signal evaluation
+   // untuk menghindari redundant CopyRates() berganda
+   struct EvalContext
+   {
+      double atrNorm;
+      double spreadNorm;
+      double slNorm;
+      double regimeScore;       // dari MarketRegimeFilter.GetRegimeScore()
+      double volatilityScore;   // dari MarketRegimeFilter.GetVolatilityScore()
+      double timeOfDayNorm;
+      double mtConfluenceNorm;  // dari MarketRegimeFilter.GetResult().regimeScore
+      double volumeNorm;
+      double momentumNorm;
+      double zoneNorm;
+      double lossStreakNorm;
+      double noiseNorm;
+   };
+
 public:
    AIManager() : IManager("AIManager", 35),
                  m_lastHeartbeat(0),
@@ -112,7 +135,8 @@ public:
                  m_datasetFilename(""),
                  m_ticketMapFilename(""),
                  m_outcomeFilename(""),
-                 m_loggedSamples(0)
+                 m_loggedSamples(0),
+                 m_regime(NULL)
    {
       // Initialize model with safe defaults
       m_model.bias               = 0.55;
@@ -122,7 +146,7 @@ public:
       m_model.momentumWeight     = 0.08;
       m_model.lossStreakWeight    = 0.06;
       m_model.volNoiseWeight     = 0.12;
-      m_model.volatilityWeight   = 0.15;
+      m_model.regimeScoreWeight  = 0.15;  // [v2.03] bobot regime score dari MarketRegimeFilter
       m_model.timeOfDayWeight    = 0.10;
       m_model.mtConfluenceWeight = 0.20;
       m_model.volumeWeight       = 0.12;
@@ -148,6 +172,16 @@ public:
       m_model.validationCounter = 0;
    }
 
+   // [v2.03] Inject pointer MarketRegimeFilter dari EA utama
+   // Panggil ini sebelum Init(), mirip pola SetDataManager()
+   void SetRegimeFilter(MarketRegimeFilter *regime)
+   {
+      m_regime = regime;
+      Log("✅ MarketRegimeFilter injected.");
+   }
+
+   MarketRegimeFilter* GetRegimeFilter() const { return m_regime; }
+
    virtual void RefreshConfigCache() override
    {
       IManager::RefreshConfigCache();
@@ -170,12 +204,15 @@ public:
 
       m_data = IManager::GetGlobalDataManager();
       
-      // Safety check: validate DataManager pointer
       if (CheckPointer(m_data) == POINTER_INVALID)
       {
          Log("❌ CRITICAL: DataManager is NULL during AIManager initialization");
          return false;
       }
+
+      // [v2.03] Peringatan jika regime filter belum di-inject
+      if (CheckPointer(m_regime) == POINTER_INVALID)
+         Log("⚠️ WARNING: MarketRegimeFilter not injected. Call SetRegimeFilter() before Init() for best results.");
       
       string prefix        = "AI_ml_" + IntegerToString(cfg.magic) + "_" + _Symbol + "_";
       m_datasetFilename    = prefix + "data.csv";
@@ -184,7 +221,7 @@ public:
       
       LoadModelState();
       
-      Log("✅ AIManager initialized successfully. NN samples: " + IntegerToString(m_model.nnTrainingSamples));
+      Log("✅ AIManager v2.03 initialized. NN samples: " + IntegerToString(m_model.nnTrainingSamples));
       return true;
    }
 
@@ -197,15 +234,18 @@ public:
 
    virtual void OnNewBar(NewBarEvent *e) override
    {
-      // [BUG-07 FIX] Pakai cfg inherited (sudah di-refresh via RefreshConfigCache)
       if (!cfg.use_ai)
          return;
+
+      // [v2.03] Update regime filter setiap bar baru (jika tersedia)
+      if (CheckPointer(m_regime) != POINTER_INVALID)
+         m_regime.Update();
+
       DecayModel(0.98);
    }
 
    virtual void OnHeartbeat(HeartbeatEvent *e) override
    {
-      // [BUG-07 FIX] Hapus redeclaration cfg lokal, pakai cfg inherited
       if (!cfg.use_ai)
          return;
       if (TimeCurrent() - m_lastHeartbeat < 5)
@@ -216,7 +256,6 @@ public:
 
    virtual void OnSignalGenerated(SignalGeneratedEvent *e) override
    {
-      // Safety check: validate event pointer
       if (CheckPointer(e) == POINTER_INVALID)
       {
          Log("⚠️ OnSignalGenerated: NULL event pointer");
@@ -226,13 +265,22 @@ public:
       if (!cfg.use_ai || !e.signal.valid)
          return;
 
-      double score = EvaluateSignal(e.signal, e.atrPoints, e.support, e.resistance);
+      // [v2.03] Build EvalContext sekali, dipakai oleh semua expert evaluator
+      EvalContext ctx;
+      BuildEvalContext(ctx, e.signal, e.atrPoints, e.support, e.resistance);
+
+      double score = EvaluateSignal(e.signal, e.atrPoints, e.support, e.resistance, ctx);
 
       // SL Adjustment: 1.0 – 1.12 (berbasis score dan volNoiseWeight)
       double aiSlAdjustment = 1.0 + (Logistic(score) * m_model.volNoiseWeight);
 
-      bool accepted = score >= cfg.ai_min_confidence;
-      Log("AI score=" + DoubleToString(score, 2) + " for signal " + IntegerToString((int)e.signal.patternType));
+      // [v2.03] Threshold dinamis dari MarketRegimeFilter, bukan flat cfg.ai_min_confidence
+      double dynamicThreshold = GetDynamicThreshold();
+      bool accepted = score >= dynamicThreshold;
+
+      Log("AI score=" + DoubleToString(score, 2) +
+          " threshold=" + DoubleToString(dynamicThreshold, 2) +
+          " for signal " + IntegerToString((int)e.signal.patternType));
       LogSignalSample(e.signal, e.atrPoints, e.support, e.resistance, score, accepted);
 
       if (!accepted)
@@ -250,7 +298,6 @@ public:
 
    virtual void OnOrderExecution(OrderExecutionEvent *e) override
    {
-      // Safety check: validate event pointer
       if (CheckPointer(e) == POINTER_INVALID)
       {
          Log("⚠️ OnOrderExecution: NULL event pointer");
@@ -275,7 +322,6 @@ public:
 
    virtual void OnPositionUpdate(PositionUpdateEvent *e) override
    {
-      // Safety check: validate event pointer
       if (CheckPointer(e) == POINTER_INVALID)
       {
          Log("⚠️ OnPositionUpdate: NULL event pointer");
@@ -304,69 +350,131 @@ public:
    }
 
 private:
-   double EvaluateSignal(const SignalDecision &signal, const double atrPoints,
+
+   //+------------------------------------------------------------------+
+   //| [v2.03] BuildEvalContext: hitung semua feature sekali saja        |
+   //| Menghindari redundant CopyRates() di setiap expert evaluator      |
+   //+------------------------------------------------------------------+
+   void BuildEvalContext(EvalContext &ctx,
+                         const SignalDecision &signal, const double atrPoints,
                          const double support, const double resistance) const
    {
-      double trendScore    = EvaluateTrendExpert(signal, atrPoints, support, resistance);
-      double meanRevScore  = EvaluateMeanReversionExpert(signal, atrPoints, support, resistance);
-      double momentumScore = EvaluateMomentumExpert(signal, atrPoints, support, resistance);
+      ctx.atrNorm      = NormalizeATRFeature(atrPoints);
+      ctx.spreadNorm   = NormalizeSpreadFeature();
+      ctx.slNorm       = NormalizeSLFeature(signal.slMultiplier);
+      ctx.timeOfDayNorm = NormalizeTimeOfDayFeature();
+      ctx.volumeNorm   = NormalizeVolumeFeature();
+      ctx.momentumNorm = NormalizeMomentumFeature();
+      ctx.zoneNorm     = NormalizeZoneFeature(signal.zonePrice, support, resistance);
+      ctx.lossStreakNorm = NormalizeLossStreak();
+      ctx.noiseNorm    = NormalizeNoiseFeature();
 
-      double totalWeight = m_model.trendExpertWeight + m_model.meanRevExpertWeight + m_model.momentumExpertWeight;
+      // [v2.03] Regime & volatility: pakai MarketRegimeFilter jika tersedia
+      if (CheckPointer(m_regime) != POINTER_INVALID)
+      {
+         const RegimeResult &r = m_regime.GetResult();
+         ctx.regimeScore      = r.regimeScore;          // ADX-based 0-1 dari MarketRegimeFilter
+         ctx.volatilityScore  = r.volatilityScore;      // ATR ratio-based 0-1
+         ctx.mtConfluenceNorm = r.mtfConfirmed ? 1.0 : (double)r.tfAlignment / 3.0;
+      }
+      else
+      {
+         // Fallback: hitung manual hanya jika regime filter tidak tersedia
+         ctx.regimeScore      = NormalizeVolatilityFeatureFallback();
+         ctx.volatilityScore  = ctx.regimeScore;
+         ctx.mtConfluenceNorm = NormalizeMultiTimeframeConfluenceFallback(signal);
+      }
+   }
+
+   // [v2.03] Threshold dinamis: pakai MarketRegimeFilter.GetDynamicThreshold()
+   // Jika filter tidak tersedia, fallback ke cfg.ai_min_confidence
+   double GetDynamicThreshold() const
+   {
+      if (CheckPointer(m_regime) != POINTER_INVALID)
+         return m_regime.GetDynamicThreshold(cfg.ai_min_confidence);
+      return cfg.ai_min_confidence;
+   }
+
+   double EvaluateSignal(const SignalDecision &signal, const double atrPoints,
+                         const double support, const double resistance,
+                         const EvalContext &ctx) const
+   {
+      double trendScore    = EvaluateTrendExpert(signal, ctx);
+      double meanRevScore  = EvaluateMeanReversionExpert(signal, ctx);
+      double momentumScore = EvaluateMomentumExpert(ctx);
+
+      // [v2.03] Bias ensemble per regime — tanpa indikator baru
+      double tW = m_model.trendExpertWeight;
+      double mW = m_model.meanRevExpertWeight;
+      double moW = m_model.momentumExpertWeight;
+
+      if (CheckPointer(m_regime) != POINTER_INVALID)
+      {
+         switch(m_regime.GetMarketRegime())
+         {
+            case REGIME_TRENDING_STRONG:
+               tW  *= 1.20; mW  *= 0.80; break;
+            case REGIME_TRENDING_WEAK:
+               tW  *= 1.10; mW  *= 0.90; break;
+            case REGIME_RANGING_SIDEWAYS:
+               tW  *= 0.80; mW  *= 1.25; break;
+            case REGIME_CHOPPY_HIGH_VOL:
+               tW  *= 0.70; mW  *= 0.80; moW *= 0.70; break;
+            case REGIME_TRANSITION:
+               tW  *= 0.60; mW  *= 0.60; moW *= 0.60; break;
+            default: break;
+         }
+      }
+
+      double totalWeight = tW + mW + moW;
       double ensembleScore = 0.0;
       if (totalWeight > 0)
-         ensembleScore = (m_model.trendExpertWeight    * trendScore +
-                          m_model.meanRevExpertWeight  * meanRevScore +
-                          m_model.momentumExpertWeight * momentumScore) / totalWeight;
+         ensembleScore = (tW * trendScore + mW * meanRevScore + moW * momentumScore) / totalWeight;
 
-      double nnScore = EvaluateNeuralNetwork(signal, atrPoints, support, resistance);
+      double nnScore = EvaluateNeuralNetwork(ctx);
 
-      // [BUG-05 FIX] NN weight tumbuh lebih lambat: capai max 35% setelah ~70 sample
+      // NN weight tumbuh lambat: max 35% setelah ~70 sample
       double nnWeight  = MathMin(0.35, 0.005 * m_model.nnTrainingSamples);
       double hybridScore = (1.0 - nnWeight) * ensembleScore + nnWeight * nnScore;
 
       return Logistic(hybridScore);
    }
 
-   double EvaluateTrendExpert(const SignalDecision &signal, const double atrPoints,
-                              const double support, const double resistance) const
+   double EvaluateTrendExpert(const SignalDecision &signal, const EvalContext &ctx) const
    {
       double score = m_model.bias;
-      score += m_model.atrWeight          * NormalizeATRFeature(atrPoints);
-      score += m_model.slWeight           * NormalizeSLFeature(signal.slMultiplier);
-      score += m_model.mtConfluenceWeight * NormalizeMultiTimeframeConfluence(signal);
+      score += m_model.atrWeight          * ctx.atrNorm;
+      score += m_model.slWeight           * ctx.slNorm;
+      score += m_model.mtConfluenceWeight * ctx.mtConfluenceNorm;  // [v2.03] dari regime
+      score += m_model.regimeScoreWeight  * ctx.regimeScore;       // [v2.03] regime score
       if (signal.patternType != PATTERN_NONE)
          score += cfg.ai_pattern_bonus * 0.8;
       return score;
    }
 
-   double EvaluateMeanReversionExpert(const SignalDecision &signal, const double atrPoints,
-                                      const double support, const double resistance) const
+   double EvaluateMeanReversionExpert(const SignalDecision &signal, const EvalContext &ctx) const
    {
       double score = m_model.bias;
-      score += m_model.spreadWeight    * NormalizeSpreadFeature();
-      score += m_model.volatilityWeight * NormalizeVolatilityFeature();
-      score += m_model.momentumWeight  * NormalizeZoneFeature(signal.zonePrice, support, resistance);
-      score += m_model.timeOfDayWeight * NormalizeTimeOfDayFeature();
+      score += m_model.spreadWeight    * ctx.spreadNorm;
+      score += m_model.regimeScoreWeight * ctx.volatilityScore;  // [v2.03] volatility dari regime
+      score += m_model.momentumWeight  * ctx.zoneNorm;
+      score += m_model.timeOfDayWeight * ctx.timeOfDayNorm;
       if (signal.patternType != PATTERN_NONE)
          score += cfg.ai_pattern_bonus * 1.2;
       return score;
    }
 
-   double EvaluateMomentumExpert(const SignalDecision &signal, const double atrPoints,
-                                 const double support, const double resistance) const
+   double EvaluateMomentumExpert(const EvalContext &ctx) const
    {
       double score = m_model.bias;
-      score += m_model.volumeWeight      * NormalizeVolumeFeature();
-      score += m_model.momentumWeight    * NormalizeMomentumFeature();
-      score += m_model.lossStreakWeight  * NormalizeLossStreak();
-      // [BUG-04 FIX] volNoiseWeight sekarang mengurangi skor saat noise tinggi
-      score -= m_model.volNoiseWeight    * NormalizeNoiseFeature();
-      if (signal.patternType != PATTERN_NONE)
-         score += cfg.ai_pattern_bonus * 1.0;
+      score += m_model.volumeWeight      * ctx.volumeNorm;
+      score += m_model.momentumWeight    * ctx.momentumNorm;
+      score += m_model.lossStreakWeight  * ctx.lossStreakNorm;
+      score -= m_model.volNoiseWeight    * ctx.noiseNorm;
       return score;
    }
 
-   //--- Feature Normalizers ---
+   //--- Feature Normalizers (atomic, no CopyRates ganda) ---
 
    double NormalizeATRFeature(double atrPoints) const
    {
@@ -395,65 +503,14 @@ private:
       return 1.0 - MathMin(1.0, distance / range);
    }
 
-   double NormalizeVolatilityFeature() const
-   {
-      MqlRates bars[20];
-      int copied = CopyRates(_Symbol, _Period, 0, 20, bars);
-      if (copied < 20) return 0.5;
-
-      double avgClose = 0;
-      for (int i = 0; i < 20; i++) avgClose += bars[i].close;
-      avgClose /= 20;
-
-      double sumSq = 0;
-      for (int i = 0; i < 20; i++)
-      {
-         double d = bars[i].close - avgClose;
-         sumSq += d * d;
-      }
-      double volatility = MathSqrt(sumSq / 20);
-      return MathMin(1.0, volatility / (SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100));
-   }
-
    double NormalizeTimeOfDayFeature() const
    {
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
       int hour = dt.hour;
-      // Sesi London (8-12) dan NY (13-17) = prime time → skor tinggi
       if ((hour >= 8 && hour <= 11) || (hour >= 13 && hour <= 16)) return 1.0;
       if  (hour >= 7 && hour <= 19)                                  return 0.7;
       return 0.3;
-   }
-
-   double NormalizeMultiTimeframeConfluence(const SignalDecision &signal) const
-   {
-      // [BUG-06 FIX] Gunakan fungsi mapping timeframe yang valid
-      ENUM_TIMEFRAMES higherTF = GetHigherTimeframe((ENUM_TIMEFRAMES)Period());
-
-      MqlRates bars[10];
-      int copied = CopyRates(_Symbol, higherTF, 0, 10, bars);
-      if (copied < 10) return 0.5;
-
-      double highestHigh = bars[0].high;
-      double lowestLow   = bars[0].low;
-      for (int i = 1; i < 10; i++)
-      {
-         highestHigh = MathMax(highestHigh, bars[i].high);
-         lowestLow   = MathMin(lowestLow,   bars[i].low);
-      }
-
-      double rangeSize = highestHigh - lowestLow;
-      if (rangeSize == 0) return 0.5;
-
-      // Konfluence tinggi jika harga dekat dengan extreme levels (support/resistance)
-      // bukan midrange — ini lebih sesuai dengan konsep SR confluence
-      double currentPrice  = bars[0].close;
-      double distFromHigh  = MathAbs(currentPrice - highestHigh);
-      double distFromLow   = MathAbs(currentPrice - lowestLow);
-      double minDist       = MathMin(distFromHigh, distFromLow);
-      double confluence    = 1.0 - MathMin(1.0, minDist / (rangeSize * 0.3));
-      return MathMax(0.3, confluence);
    }
 
    double NormalizeVolumeFeature() const
@@ -487,52 +544,90 @@ private:
 
    double NormalizeNoiseFeature() const
    {
-      // [BUG-04 FIX] Noise tinggi → nilai tinggi → digunakan sebagai PENGURANG skor
-      // di EvaluateMomentumExpert (score -= volNoiseWeight * NormalizeNoiseFeature)
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
-      // Jam transisi/overlap (London Open, NY Open) → noise tinggi
       if (dt.hour == 8 || dt.hour == 13) return 1.0;
       return 0.2;
    }
 
    double NormalizeLossStreak() const
    {
-      // [BUG-09 FIX] Cek null pointer sebelum dereference
       if (CheckPointer(m_data) == POINTER_INVALID) return 0.0;
       int losses = (*m_data).GetConsecutiveLosses();
       return MathMax(0.0, 1.0 - MathMin(1.0, losses * 0.1));
    }
 
-   //--- Neural Network ---
-   // Arsitektur: 3 input → hidden1 (1 node, ReLU) → hidden2 (1 node, ReLU) → output (linear)
-   // Sequential 2-layer, bukan 2 node paralel
-
-   double EvaluateNeuralNetwork(const SignalDecision &signal, const double atrPoints,
-                                const double support, const double resistance) const
+   // [v2.03] Fallback hanya digunakan jika MarketRegimeFilter tidak di-inject
+   double NormalizeVolatilityFeatureFallback() const
    {
-      // Safety: validate model state
-      if (!m_model.initialized)
-         return 0.5; // Neutral score for uninitialized model
-      
-      // Input features (normalized 0-1)
-      double input1 = NormalizeATRFeature(atrPoints);
-      double input2 = NormalizeVolatilityFeature();
-      double input3 = NormalizeMultiTimeframeConfluence(signal);
+      MqlRates bars[20];
+      int copied = CopyRates(_Symbol, _Period, 0, 20, bars);
+      if (copied < 20) return 0.5;
 
-      // Hidden Layer 1: 3 inputs → 1 node (ReLU)
+      double avgClose = 0;
+      for (int i = 0; i < 20; i++) avgClose += bars[i].close;
+      avgClose /= 20;
+
+      double sumSq = 0;
+      for (int i = 0; i < 20; i++)
+      {
+         double d = bars[i].close - avgClose;
+         sumSq += d * d;
+      }
+      double volatility = MathSqrt(sumSq / 20);
+      return MathMin(1.0, volatility / (SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 100));
+   }
+
+   // [v2.03] Fallback hanya digunakan jika MarketRegimeFilter tidak di-inject
+   double NormalizeMultiTimeframeConfluenceFallback(const SignalDecision &signal) const
+   {
+      ENUM_TIMEFRAMES higherTF = GetHigherTimeframe((ENUM_TIMEFRAMES)Period());
+
+      MqlRates bars[10];
+      int copied = CopyRates(_Symbol, higherTF, 0, 10, bars);
+      if (copied < 10) return 0.5;
+
+      double highestHigh = bars[0].high;
+      double lowestLow   = bars[0].low;
+      for (int i = 1; i < 10; i++)
+      {
+         highestHigh = MathMax(highestHigh, bars[i].high);
+         lowestLow   = MathMin(lowestLow,   bars[i].low);
+      }
+
+      double rangeSize = highestHigh - lowestLow;
+      if (rangeSize == 0) return 0.5;
+
+      double currentPrice  = bars[0].close;
+      double distFromHigh  = MathAbs(currentPrice - highestHigh);
+      double distFromLow   = MathAbs(currentPrice - lowestLow);
+      double minDist       = MathMin(distFromHigh, distFromLow);
+      double confluence    = 1.0 - MathMin(1.0, minDist / (rangeSize * 0.3));
+      return MathMax(0.3, confluence);
+   }
+
+   //--- Neural Network ---
+
+   double EvaluateNeuralNetwork(const EvalContext &ctx) const
+   {
+      if (!m_model.initialized)
+         return 0.5;
+      
+      // [v2.03] Input: atr, regimeScore (ganti volatility raw), mtConfluence
+      double input1 = ctx.atrNorm;
+      double input2 = ctx.regimeScore;      // [v2.03] dari MarketRegimeFilter
+      double input3 = ctx.mtConfluenceNorm; // [v2.03] dari MarketRegimeFilter
+
       double h1_in  = m_model.nn_hidden1_w1 * input1 +
                       m_model.nn_hidden1_w2 * input2 +
                       m_model.nn_hidden1_w3 * input3 +
                       m_model.nn_hidden1_bias;
-      double h1_out = MathMax(0.0, h1_in); // ReLU
+      double h1_out = MathMax(0.0, h1_in);
 
-      // Hidden Layer 2: 1 input (dari h1_out) → 1 node (ReLU)
       double h2_in  = m_model.nn_hidden2_w1 * h1_out +
                       m_model.nn_hidden2_bias;
-      double h2_out = MathMax(0.0, h2_in); // ReLU
+      double h2_out = MathMax(0.0, h2_in);
 
-      // Output layer: combine h1 dan h2 (residual-like connection)
       double output = m_model.nn_output_w1 * h1_out +
                       m_model.nn_output_w2 * h2_out +
                       m_model.nn_output_bias;
@@ -542,29 +637,29 @@ private:
    void TrainNeuralNetwork(const SignalDecision &signal, const double atrPoints,
                            const double support, const double resistance, bool actualOutcome)
    {
-      // Safety: prevent training on uninitialized model
       if (!m_model.initialized)
          return;
       
-      // --- Forward Pass ---
-      double input1 = NormalizeATRFeature(atrPoints);
-      double input2 = NormalizeVolatilityFeature();
-      double input3 = NormalizeMultiTimeframeConfluence(signal);
+      // Build context untuk training (menggunakan data saat trade ditutup)
+      EvalContext ctx;
+      BuildEvalContext(ctx, signal, atrPoints, support, resistance);
 
-      // Hidden Layer 1
+      // --- Forward Pass ---
+      double input1 = ctx.atrNorm;
+      double input2 = ctx.regimeScore;
+      double input3 = ctx.mtConfluenceNorm;
+
       double h1_in     = m_model.nn_hidden1_w1 * input1 +
                          m_model.nn_hidden1_w2 * input2 +
                          m_model.nn_hidden1_w3 * input3 +
                          m_model.nn_hidden1_bias;
       double h1_out    = MathMax(0.0, h1_in);
-      int    h1_active = (h1_in > 0) ? 1 : 0; // dReLU/dx
+      int    h1_active = (h1_in > 0) ? 1 : 0;
 
-      // Hidden Layer 2 (sequential, input dari h1_out)
       double h2_in     = m_model.nn_hidden2_w1 * h1_out + m_model.nn_hidden2_bias;
       double h2_out    = MathMax(0.0, h2_in);
       int    h2_active = (h2_in > 0) ? 1 : 0;
 
-      // Output (residual: gabungkan h1 dan h2)
       double predicted        = m_model.nn_output_w1 * h1_out +
                                 m_model.nn_output_w2 * h2_out +
                                 m_model.nn_output_bias;
@@ -573,7 +668,6 @@ private:
       double error            = predictedSigmoid - target;
 
       // --- Backward Pass ---
-      // Output gradient (sigmoid derivative)
       double d_out = error * predictedSigmoid * (1.0 - predictedSigmoid);
 
       // Update output weights
@@ -583,10 +677,10 @@ private:
 
       // Gradient ke hidden2
       double d_h2 = d_out * m_model.nn_output_w2 * h2_active;
-      m_model.nn_hidden2_w1   -= m_model.nnLearningRate * d_h2 * h1_out; // input h2 adalah h1_out
+      m_model.nn_hidden2_w1   -= m_model.nnLearningRate * d_h2 * h1_out;
       m_model.nn_hidden2_bias -= m_model.nnLearningRate * d_h2;
 
-      // Gradient ke hidden1 (dari output langsung + melalui hidden2)
+      // Gradient ke hidden1
       double d_h1 = (d_out * m_model.nn_output_w1 + d_h2 * m_model.nn_hidden2_w1) * h1_active;
       m_model.nn_hidden1_w1   -= m_model.nnLearningRate * d_h1 * input1;
       m_model.nn_hidden1_w2   -= m_model.nnLearningRate * d_h1 * input2;
@@ -600,7 +694,6 @@ private:
       if (m_model.nnTrainingSamples % 100 == 0 && m_model.nnLearningRate > 0.001)
          m_model.nnLearningRate *= 0.95;
 
-      // Update last update timestamp
       m_model.lastUpdateTime = TimeCurrent();
 
       Log("NN trained #" + IntegerToString(m_model.nnTrainingSamples) +
@@ -623,19 +716,18 @@ private:
    {
       string prefix = ModelGVPrefix();
       
-      // Load all model weights from Global Variables
       if (GlobalVariableCheck(prefix + "bias"))       m_model.bias             = GlobalVariableGet(prefix + "bias");
       if (GlobalVariableCheck(prefix + "atr"))        m_model.atrWeight        = GlobalVariableGet(prefix + "atr");
       if (GlobalVariableCheck(prefix + "spread"))     m_model.spreadWeight     = GlobalVariableGet(prefix + "spread");
       if (GlobalVariableCheck(prefix + "sl"))         m_model.slWeight         = GlobalVariableGet(prefix + "sl");
       if (GlobalVariableCheck(prefix + "momentum"))   m_model.momentumWeight   = GlobalVariableGet(prefix + "momentum");
       if (GlobalVariableCheck(prefix + "loss"))       m_model.lossStreakWeight = GlobalVariableGet(prefix + "loss");
-      // [BUG-01 FIX] volNoiseWeight sekarang dimuat
       if (GlobalVariableCheck(prefix + "volnoise"))   m_model.volNoiseWeight   = GlobalVariableGet(prefix + "volnoise");
-      if (GlobalVariableCheck(prefix + "volatility")) m_model.volatilityWeight = GlobalVariableGet(prefix + "volatility");
-      if (GlobalVariableCheck(prefix + "timeofday"))  m_model.timeOfDayWeight  = GlobalVariableGet(prefix + "timeofday");
+      // [v2.03] regimeScoreWeight menggantikan volatilityWeight
+      if (GlobalVariableCheck(prefix + "regimescore"))  m_model.regimeScoreWeight  = GlobalVariableGet(prefix + "regimescore");
+      if (GlobalVariableCheck(prefix + "timeofday"))    m_model.timeOfDayWeight    = GlobalVariableGet(prefix + "timeofday");
       if (GlobalVariableCheck(prefix + "mtconfluence")) m_model.mtConfluenceWeight = GlobalVariableGet(prefix + "mtconfluence");
-      if (GlobalVariableCheck(prefix + "volume"))     m_model.volumeWeight     = GlobalVariableGet(prefix + "volume");
+      if (GlobalVariableCheck(prefix + "volume"))       m_model.volumeWeight       = GlobalVariableGet(prefix + "volume");
       if (GlobalVariableCheck(prefix + "trendexpert"))    m_model.trendExpertWeight    = GlobalVariableGet(prefix + "trendexpert");
       if (GlobalVariableCheck(prefix + "meanrevexpert"))  m_model.meanRevExpertWeight  = GlobalVariableGet(prefix + "meanrevexpert");
       if (GlobalVariableCheck(prefix + "momentumexpert")) m_model.momentumExpertWeight = GlobalVariableGet(prefix + "momentumexpert");
@@ -647,7 +739,6 @@ private:
       if (GlobalVariableCheck(prefix + "nn_h1w2")) m_model.nn_hidden1_w2   = GlobalVariableGet(prefix + "nn_h1w2");
       if (GlobalVariableCheck(prefix + "nn_h1w3")) m_model.nn_hidden1_w3   = GlobalVariableGet(prefix + "nn_h1w3");
       if (GlobalVariableCheck(prefix + "nn_h1b"))  m_model.nn_hidden1_bias = GlobalVariableGet(prefix + "nn_h1b");
-      // [BUG-02 FIX] Hidden2 hanya 2 weight
       if (GlobalVariableCheck(prefix + "nn_h2w1")) m_model.nn_hidden2_w1   = GlobalVariableGet(prefix + "nn_h2w1");
       if (GlobalVariableCheck(prefix + "nn_h2b"))  m_model.nn_hidden2_bias = GlobalVariableGet(prefix + "nn_h2b");
       if (GlobalVariableCheck(prefix + "nn_ow1"))  m_model.nn_output_w1    = GlobalVariableGet(prefix + "nn_ow1");
@@ -656,11 +747,8 @@ private:
       if (GlobalVariableCheck(prefix + "nn_lr"))   m_model.nnLearningRate  = GlobalVariableGet(prefix + "nn_lr");
       if (GlobalVariableCheck(prefix + "nn_ts"))   m_model.nnTrainingSamples = (int)GlobalVariableGet(prefix + "nn_ts");
 
-      // Mark model as initialized after loading
       m_model.initialized = true;
-      m_lastSavedWinRate = -1.0;
-      m_modelDirty       = true;
-      SaveModelState();
+      // [v2.03 FIX] Hapus SaveModelState() yang tidak perlu setelah load
       
       Log("📥 Model state loaded. NN samples: " + IntegerToString(m_model.nnTrainingSamples));
    }
@@ -669,16 +757,15 @@ private:
    {
       string prefix = ModelGVPrefix();
       
-      // Save all model weights to Global Variables
       GlobalVariableSet(prefix + "bias",     m_model.bias);
       GlobalVariableSet(prefix + "atr",      m_model.atrWeight);
       GlobalVariableSet(prefix + "spread",   m_model.spreadWeight);
       GlobalVariableSet(prefix + "sl",       m_model.slWeight);
       GlobalVariableSet(prefix + "momentum", m_model.momentumWeight);
       GlobalVariableSet(prefix + "loss",     m_model.lossStreakWeight);
-      // [BUG-01 FIX] volNoiseWeight sekarang disimpan
       GlobalVariableSet(prefix + "volnoise",     m_model.volNoiseWeight);
-      GlobalVariableSet(prefix + "volatility",   m_model.volatilityWeight);
+      // [v2.03] simpan regimeScoreWeight
+      GlobalVariableSet(prefix + "regimescore",  m_model.regimeScoreWeight);
       GlobalVariableSet(prefix + "timeofday",    m_model.timeOfDayWeight);
       GlobalVariableSet(prefix + "mtconfluence", m_model.mtConfluenceWeight);
       GlobalVariableSet(prefix + "volume",       m_model.volumeWeight);
@@ -693,7 +780,6 @@ private:
       GlobalVariableSet(prefix + "nn_h1w2", m_model.nn_hidden1_w2);
       GlobalVariableSet(prefix + "nn_h1w3", m_model.nn_hidden1_w3);
       GlobalVariableSet(prefix + "nn_h1b",  m_model.nn_hidden1_bias);
-      // [BUG-02 FIX] Hidden2 hanya 2 weight
       GlobalVariableSet(prefix + "nn_h2w1", m_model.nn_hidden2_w1);
       GlobalVariableSet(prefix + "nn_h2b",  m_model.nn_hidden2_bias);
       GlobalVariableSet(prefix + "nn_ow1",  m_model.nn_output_w1);
@@ -727,9 +813,14 @@ private:
       sample.support     = support;
       sample.resistance  = resistance;
       sample.signal      = signal;
-      sample.volatility  = NormalizeVolatilityFeature();
-      sample.mtConfluence = NormalizeMultiTimeframeConfluence(signal);
-      sample.volumeRatio = NormalizeVolumeFeature();
+      // [v2.03] Gunakan regime score jika tersedia
+      sample.volatility   = (CheckPointer(m_regime) != POINTER_INVALID)
+                            ? m_regime.GetVolatilityScore()
+                            : NormalizeVolatilityFeatureFallback();
+      sample.mtConfluence = (CheckPointer(m_regime) != POINTER_INVALID)
+                            ? m_regime.GetRegimeScore()
+                            : NormalizeMultiTimeframeConfluenceFallback(signal);
+      sample.volumeRatio  = NormalizeVolumeFeature();
       sample.zoneStrength = NormalizeZoneFeature(signal.zonePrice, support, resistance);
       sample.slMultiplier = signal.slMultiplier;
       sample.patternType  = (int)signal.patternType;
@@ -738,19 +829,18 @@ private:
       ArrayResize(m_pendingSamples, size + 1);
       m_pendingSamples[size] = sample;
 
-      // Jaga buffer maks 48 sample
       while (ArraySize(m_pendingSamples) > 48)
          ArrayRemove(m_pendingSamples, 0);
    }
 
    int FindRecentPendingSampleIndex() const
    {
-      // Cari sample tanpa ticket yang dibuat dalam 15 detik terakhir
+      // [v2.03 FIX] Window diperlebar 15s → 60s untuk market lambat / pending order
       for (int i = ArraySize(m_pendingSamples) - 1; i >= 0; --i)
       {
          if (m_pendingSamples[i].ticket == 0 &&
              !m_pendingSamples[i].labeled &&
-             TimeCurrent() - m_pendingSamples[i].timestamp <= 15)
+             TimeCurrent() - m_pendingSamples[i].timestamp <= 60)
             return i;
       }
       return -1;
@@ -831,20 +921,34 @@ private:
       if (FileTell(handle) == 0)
       {
          FileWrite(handle, "sample_id","time","symbol","pattern","bias","atr","spread",
-                   "sl_mult","zone_conf","loss_streak","volatility","timeofday",
+                   "sl_mult","zone_conf","loss_streak","regime_score","volatility_score","timeofday",
                    "mt_confluence","volume","trend_score","meanrev_score",
-                   "momentum_score","ensemble_score","accepted");
+                   "momentum_score","ensemble_score","regime_type","accepted");
       }
 
       long spreadInt = 0;
       SymbolInfoInteger(_Symbol, SYMBOL_SPREAD, spreadInt);
 
-      // [BUG-09 FIX] Cek null sebelum dereference
       int currentLosses = (CheckPointer(m_data) != POINTER_INVALID) ? (*m_data).GetConsecutiveLosses() : 0;
 
-      double trendScore    = EvaluateTrendExpert(signal, atrPoints, support, resistance);
-      double meanRevScore  = EvaluateMeanReversionExpert(signal, atrPoints, support, resistance);
-      double momentumScore = EvaluateMomentumExpert(signal, atrPoints, support, resistance);
+      // [v2.03] Pakai regime info untuk logging
+      string regimeType = "UNKNOWN";
+      double regimeScoreVal = 0.5;
+      double volScoreVal = 0.5;
+      if (CheckPointer(m_regime) != POINTER_INVALID)
+      {
+         regimeScoreVal = m_regime.GetRegimeScore();
+         volScoreVal    = m_regime.GetVolatilityScore();
+         regimeType     = m_regime.GetDescription();
+      }
+
+      // Build context untuk score detail
+      EvalContext ctx;
+      BuildEvalContext(ctx, signal, atrPoints, support, resistance);
+
+      double trendScore    = EvaluateTrendExpert(signal, ctx);
+      double meanRevScore  = EvaluateMeanReversionExpert(signal, ctx);
+      double momentumScore = EvaluateMomentumExpert(ctx);
 
       FileWrite(handle,
                 sampleId,
@@ -857,22 +961,22 @@ private:
                 DoubleToString(signal.slMultiplier, 2),
                 zoneStrength,
                 IntegerToString(currentLosses),
-                DoubleToString(NormalizeVolatilityFeature(), 4),
-                DoubleToString(NormalizeTimeOfDayFeature(), 2),
-                DoubleToString(NormalizeMultiTimeframeConfluence(signal), 4),
-                DoubleToString(NormalizeVolumeFeature(), 4),
+                DoubleToString(regimeScoreVal, 4),
+                DoubleToString(volScoreVal, 4),
+                DoubleToString(ctx.timeOfDayNorm, 2),
+                DoubleToString(ctx.mtConfluenceNorm, 4),
+                DoubleToString(ctx.volumeNorm, 4),
                 DoubleToString(trendScore, 4),
                 DoubleToString(meanRevScore, 4),
                 DoubleToString(momentumScore, 4),
                 DoubleToString(score, 4),
+                regimeType,
                 accepted ? "1" : "0");
       FileClose(handle);
 
       RegisterPendingSample(sampleId, accepted, atrPoints, support, resistance, signal);
    }
 
-   // [BUG-08 NOTE] Fungsi ini masih stub — implementasi join data + outcomes belum ada.
-   // Tandai eksplisit agar tidak menyesatkan.
    void ExportDatasetForExternalTraining(int minSamples = 100)
    {
       if (m_loggedSamples < minSamples)
@@ -891,14 +995,12 @@ private:
       }
 
       FileWrite(handle, "timestamp","symbol","pattern_type","direction","entry_price",
-                "sl_multiplier","tp_multiplier","atr_points","spread","volatility",
-                "time_of_day","mt_confluence","volume_ratio","zone_strength",
+                "sl_multiplier","tp_multiplier","atr_points","spread","regime_score",
+                "volatility_score","time_of_day","mt_confluence","volume_ratio","zone_strength",
                 "loss_streak","bias","trend_score","meanrev_score","momentum_score",
-                "ensemble_score","accepted","outcome_pnl","outcome_label");
+                "ensemble_score","regime_type","accepted","outcome_pnl","outcome_label");
       FileClose(handle);
 
-      // TODO: Join m_datasetFilename dengan m_outcomeFilename via sampleId
-      // Saat ini hanya header yang ditulis — data aktual belum diimplementasi
       Log("WARNING: ExportDatasetForExternalTraining() is a stub. Only header written.");
       Log("To complete: read " + m_datasetFilename + " and join with " + m_outcomeFilename);
    }
@@ -907,7 +1009,6 @@ private:
 
    void AdaptModelToPerformance()
    {
-      // Safety: validate DataManager pointer
       if (CheckPointer(m_data) == POINTER_INVALID)
       {
          Log("⚠️ AdaptModelToPerformance: DataManager is NULL");
@@ -936,6 +1037,7 @@ private:
       m_model.slWeight         = NormalizeWeight(m_model.slWeight         + error * 0.012);
       m_model.momentumWeight   = NormalizeWeight(m_model.momentumWeight   + error * 0.01);
       m_model.lossStreakWeight  = NormalizeWeight(m_model.lossStreakWeight - ((*m_data).GetConsecutiveLosses() * 0.005));
+      m_model.regimeScoreWeight = NormalizeWeight(m_model.regimeScoreWeight + error * 0.01);
 
       if (driftDetected)
       {
@@ -969,32 +1071,39 @@ private:
    void DecayModel(double decay)
    {
       double d  = (decay > 0.0) ? decay : 0.98;
-      m_model.atrWeight        = NormalizeWeight(m_model.atrWeight        * d);
-      m_model.spreadWeight     = NormalizeWeight(m_model.spreadWeight     * d);
-      m_model.slWeight         = NormalizeWeight(m_model.slWeight         * d);
-      m_model.momentumWeight   = NormalizeWeight(m_model.momentumWeight   * d);
-      m_model.lossStreakWeight  = NormalizeWeight(m_model.lossStreakWeight * d);
-      m_model.volatilityWeight  = NormalizeWeight(m_model.volatilityWeight * d);
-      m_model.timeOfDayWeight   = NormalizeWeight(m_model.timeOfDayWeight  * d);
+      m_model.atrWeight         = NormalizeWeight(m_model.atrWeight         * d);
+      m_model.spreadWeight      = NormalizeWeight(m_model.spreadWeight      * d);
+      m_model.slWeight          = NormalizeWeight(m_model.slWeight          * d);
+      m_model.momentumWeight    = NormalizeWeight(m_model.momentumWeight    * d);
+      m_model.lossStreakWeight   = NormalizeWeight(m_model.lossStreakWeight  * d);
+      m_model.regimeScoreWeight  = NormalizeWeight(m_model.regimeScoreWeight * d);
+      m_model.timeOfDayWeight    = NormalizeWeight(m_model.timeOfDayWeight   * d);
       m_model.mtConfluenceWeight = NormalizeWeight(m_model.mtConfluenceWeight * d);
-      m_model.volumeWeight      = NormalizeWeight(m_model.volumeWeight     * d);
+      m_model.volumeWeight       = NormalizeWeight(m_model.volumeWeight      * d);
 
-      // [BUG-10 FIX] Decay NN bias weights juga (konsisten dengan weight decay)
-      double nd = 0.999; // Decay NN sangat lambat
-      m_model.nn_hidden1_w1   = NormalizeWeight(m_model.nn_hidden1_w1   * nd);
-      m_model.nn_hidden1_w2   = NormalizeWeight(m_model.nn_hidden1_w2   * nd);
-      m_model.nn_hidden1_w3   = NormalizeWeight(m_model.nn_hidden1_w3   * nd);
-      m_model.nn_hidden1_bias = NormalizeWeight(m_model.nn_hidden1_bias * nd); // Fix
-      m_model.nn_hidden2_w1   = NormalizeWeight(m_model.nn_hidden2_w1   * nd);
-      m_model.nn_hidden2_bias = NormalizeWeight(m_model.nn_hidden2_bias * nd); // Fix
-      m_model.nn_output_w1    = NormalizeWeight(m_model.nn_output_w1    * nd);
-      m_model.nn_output_w2    = NormalizeWeight(m_model.nn_output_w2    * nd);
-      m_model.nn_output_bias  = NormalizeWeight(m_model.nn_output_bias  * nd); // Fix
+      // [v2.03 FIX] NN weights pakai NormalizeNNWeight() agar boleh negatif
+      double nd = 0.999;
+      m_model.nn_hidden1_w1   = NormalizeNNWeight(m_model.nn_hidden1_w1   * nd);
+      m_model.nn_hidden1_w2   = NormalizeNNWeight(m_model.nn_hidden1_w2   * nd);
+      m_model.nn_hidden1_w3   = NormalizeNNWeight(m_model.nn_hidden1_w3   * nd);
+      m_model.nn_hidden1_bias = NormalizeNNWeight(m_model.nn_hidden1_bias * nd);
+      m_model.nn_hidden2_w1   = NormalizeNNWeight(m_model.nn_hidden2_w1   * nd);
+      m_model.nn_hidden2_bias = NormalizeNNWeight(m_model.nn_hidden2_bias * nd);
+      m_model.nn_output_w1    = NormalizeNNWeight(m_model.nn_output_w1    * nd);
+      m_model.nn_output_w2    = NormalizeNNWeight(m_model.nn_output_w2    * nd);
+      m_model.nn_output_bias  = NormalizeNNWeight(m_model.nn_output_bias  * nd);
    }
 
+   // Feature weights: hanya positif [0.01, 2.0]
    double NormalizeWeight(double value) const
    {
       return MathMax(0.01, MathMin(2.0, value));
+   }
+
+   // [v2.03 FIX] NN weights: boleh negatif [-2.0, 2.0]
+   double NormalizeNNWeight(double value) const
+   {
+      return MathMax(-2.0, MathMin(2.0, value));
    }
 
 public:
