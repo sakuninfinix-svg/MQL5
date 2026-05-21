@@ -11,7 +11,7 @@
 #ifndef __PATTERN_TYPES_MQH__
 #define __PATTERN_TYPES_MQH__
 
-#include "../2.Config.Types.mqh"
+#include "../Core/Config/Types.mqh"
 
 //+------------------------------------------------------------------+
 //| Pattern Quality Grade                                            |

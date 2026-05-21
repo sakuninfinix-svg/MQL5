@@ -12,7 +12,7 @@
 #ifndef __SIGNAL_AI_INFERENCE_MQH__
 #define __SIGNAL_AI_INFERENCE_MQH__
 
-#include "../../AI/AITypes.mqh"
+#include "../AITypes.mqh"
 
 //--- Maximum network dimensions (compile-time, no heap)
 #define AI_MAX_INPUTS   32
