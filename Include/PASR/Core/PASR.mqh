@@ -13,13 +13,16 @@
 //|     L3  Data     → MarketManager, ZoneManager, SRManager,       |
 //|                    MarketRegime (forward to Infra/ production)   |
 //|     L4  Analysis → PatternManager                               |
-//|     L5  Signal   → SignalManager, AIManager                     |
+//|     L5  Signal   → SignalManager, AIManager (AI/AIManager.mqh)  |
 //|     L6  Trade    → TradePlan, ExecutionManager, RecoveryManager |
 //|     L7  UI       → DashboardManager                             |
-//|     L8  QA       → QA/* + Tools/* (PASR_QA_BUILD define only)   |
+//|     L8  Orchestrator → COrchestrator (wires all managers)       |
+//|     L9  QA       → QA/* + Tools/* (PASR_QA_BUILD define only)   |
 //|                                                                  |
 //|   Replaces: numeric prefix include order (0.mqh … 12.mqh)       |
 //|   Phase 4: QA/ and Tools/ relocated from root (2026-05-21)      |
+//|   Phase 7: AIManager moved to AI/AIManager.mqh (2026-05-21)     |
+//|   Phase 8: Orchestrator.mqh added (2026-05-21)                  |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
@@ -32,7 +35,7 @@
 // Rule: No other PASR header may include Config/* directly.
 // All config access flows through CConfigManager → EventBus → m_cfg in IManager.
 #include "Config/Types.mqh"      // StrategyConfig + 5 domain sub-structs
-#include "Config/Validator.mqh"  // 28-rule validator (zero dependencies)
+#include "Config/Validator.mqh"  // 33-rule validator (zero dependencies)
 #include "Config/Manager.mqh"    // CConfigManager: Init/Reload with Validate() gate
 
 // ─── L1: Core Foundation ─────────────────────────────────────────────────
@@ -63,7 +66,7 @@
 
 // ─── L5: Signal ───────────────────────────────────────────────────────
 #include "../5.SignalManager.mqh"
-#include "../7.AIManager.mqh"
+#include "../AI/AIManager.mqh"    // Phase 7: moved from ../7.AIManager.mqh
 
 // ─── L6: Trade ───────────────────────────────────────────────────────
 #include "../Trade/TradePlan.mqh"
@@ -73,7 +76,11 @@
 // ─── L7: UI ───────────────────────────────────────────────────────────
 #include "../11.DashboardManager.mqh"
 
-// ─── L8: QA / Tools (dev builds only — define PASR_QA_BUILD to enable) ──────
+// ─── L8: Orchestrator — wires all managers into COrchestrator ─────────
+// Include after all managers so Orchestrator can forward-declare them.
+#include "Orchestrator.mqh"
+
+// ─── L9: QA / Tools (dev builds only — define PASR_QA_BUILD to enable) ──────
 // Phase 4: all QA and Tools files relocated from root to subfolders.
 // Update your IDE snippets if you used the old PASR.Xxx.mqh paths directly.
 #ifdef PASR_QA_BUILD
