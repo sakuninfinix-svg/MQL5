@@ -12,17 +12,20 @@
 //|     L2  Infra    → DataManager (production, account-safe GVs)   |
 //|     L3  Data     → MarketManager, ZoneManager, SRManager,       |
 //|                    MarketRegime (forward to Infra/ production)   |
-//|     L4  Analysis → PatternManager                               |
-//|     L5  Signal   → SignalManager, AIManager (AI/AIManager.mqh)  |
+//|     L4  Analysis → PatternManager (canonical subfolder path)    |
+//|     L5a Signal   → SignalManager (canonical subfolder path)     |
+//|     L5b AI       → AIManager + AISignalSource plugin            |
 //|     L6  Trade    → TradePlan, ExecutionManager, RecoveryManager |
-//|     L7  UI       → DashboardManager                             |
+//|     L7  UI       → DashboardManager (canonical subfolder path)  |
 //|     L8  Orchestrator → COrchestrator (wires all managers)       |
 //|     L9  QA       → QA/* + Tools/* (PASR_QA_BUILD define only)   |
 //|                                                                  |
-//|   Replaces: numeric prefix include order (0.mqh … 12.mqh)       |
-//|   Phase 4: QA/ and Tools/ relocated from root (2026-05-21)      |
-//|   Phase 7: AIManager moved to AI/AIManager.mqh (2026-05-21)     |
-//|   Phase 8: Orchestrator.mqh added (2026-05-21)                  |
+//|   CHANGE LOG:                                                    |
+//|   v2.16 (2026-05-21) — FIX #6:                                  |
+//|     L4 path ../9.PatternManager.mqh  → ../Pattern/PatternManager.mqh |
+//|     L5 path ../5.SignalManager.mqh   → ../Signal/SignalManager.mqh   |
+//|     L7 path ../11.DashboardManager.mqh → ../UI/DashboardManager.mqh  |
+//|     L5b ADD ../Signal/AI/AISignalSource.mqh (FIX #7)            |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
@@ -49,47 +52,50 @@
 // Do NOT include Globals.mqh from any other header.
 #include "../Globals.mqh"
 
-// ─── L2: Infra — Production implementations ────────────────────────────
+// ─── L2: Infra — Production implementations ───────────────────────────────
 // DataManager: account-safe GV keys, optimized scavenge, dashboard throttle
 #include "../Infra/DataManager.mqh"
 
 // ─── L3: Data — Forward stubs (→ Infra production files) ─────────────────
 // These stubs exist for backward-compat and as canonical named imports.
-// They all forward to the real implementation in Infra/ or root legacy files.
 #include "../Data/MarketManager.mqh"
 #include "../Data/ZoneManager.mqh"
 #include "../Data/SRManager.mqh"
 #include "../Data/MarketRegime.mqh"
 
-// ─── L4: Analysis ─────────────────────────────────────────────────────
-#include "../9.PatternManager.mqh"
+// ─── L4: Analysis ─────────────────────────────────────────────────────────
+// FIX #6: was ../9.PatternManager.mqh (root-level numbered file)
+#include "../Pattern/PatternManager.mqh"
 
-// ─── L5: Signal ───────────────────────────────────────────────────────
-#include "../5.SignalManager.mqh"
-#include "../AI/AIManager.mqh"    // Phase 7: moved from ../7.AIManager.mqh
+// ─── L5: Signal ───────────────────────────────────────────────────────────
+// FIX #6: was ../5.SignalManager.mqh (root-level numbered file)
+#include "../Signal/SignalManager.mqh"
+// FIX #7: AISignalSource plugin — bridges AIManager score → ISignalSource interface
+#include "../Signal/AI/AISignalSource.mqh"
+#include "../AI/AIManager.mqh"
 
-// ─── L6: Trade ───────────────────────────────────────────────────────
+// ─── L6: Trade ────────────────────────────────────────────────────────────
 #include "../Trade/TradePlan.mqh"
 #include "../Trade/ExecutionManager.mqh"
 #include "../Trade/RecoveryManager.mqh"
 
-// ─── L7: UI ───────────────────────────────────────────────────────────
-#include "../11.DashboardManager.mqh"
+// ─── L7: UI ───────────────────────────────────────────────────────────────
+// FIX #6: was ../11.DashboardManager.mqh (root-level numbered file)
+#include "../UI/DashboardManager.mqh"
 
-// ─── L8: Orchestrator — wires all managers into COrchestrator ─────────
+// ─── L8: Orchestrator — wires all managers into COrchestrator ─────────────
 // Include after all managers so Orchestrator can forward-declare them.
 #include "Orchestrator.mqh"
 
 // ─── L9: QA / Tools (dev builds only — define PASR_QA_BUILD to enable) ──────
 // Phase 4: all QA and Tools files relocated from root to subfolders.
-// Update your IDE snippets if you used the old PASR.Xxx.mqh paths directly.
 #ifdef PASR_QA_BUILD
-   #include "../QA/Audit.mqh"           // was: ../PASR.Audit.mqh
-   #include "../QA/Test.mqh"            // was: ../PASR.Test.mqh
-   #include "../Tools/Optimizations.mqh"  // was: ../PASR.Optimizations.mqh
-   #include "../Tools/BatchProcessor.mqh" // was: ../PASR.BatchProcessor.mqh
-   #include "../Tools/MemoryPool.mqh"     // was: ../PASR.MemoryPool.mqh
-   #include "../Tools/Branchless.mqh"     // was: ../PASR.Branchless.mqh
+   #include "../QA/Audit.mqh"
+   #include "../QA/Test.mqh"
+   #include "../Tools/Optimizations.mqh"
+   #include "../Tools/BatchProcessor.mqh"
+   #include "../Tools/MemoryPool.mqh"
+   #include "../Tools/Branchless.mqh"
 #endif
 
 #endif // __CORE_PASR_MASTER_MQH__

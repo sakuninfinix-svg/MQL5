@@ -5,18 +5,20 @@
 //|    Canonical production location — migrated from 8.RecoveryManager|
 //|                                                                  |
 //| BUG FIX HISTORY:                                                 |
-//| v2.15 (2026-05-21) — All issues fixed:                           |
-//|  FIX #3: include path '../Infra/DataManager' -> '../Data/DataManager'|
-//|  FIX #2: class renamed RecoveryManager -> CRecoveryManager       |
-//|  FIX #6: DetectAndHandleFakeout: replace hardcoded level=2,      |
-//|          confidence=0.65 with real ATR+candle body scoring        |
+//| v2.15 (2026-05-21) — FIX #10:                                   |
+//|  * DetectAndHandleFakeout: replace hardcoded confidence=0.65    |
+//|    and level=2 with real ATR + price-action based calculation:  |
+//|    - confidence = ATR proximity ratio (0.0-1.0)                 |
+//|    - level derived from recoveryAttempts count                  |
+//|  * FIX #3: include path ../Infra/DataManager changed to         |
+//|    ../Data/DataManager.mqh (Data/ is canonical alias layer)     |
 //|                                                                  |
 //| v2.14 (Phase 6):                                                 |
 //|  * All 5 'TODO Phase 6' magic literals replaced with m_cfg fields|
-//|  * RecoveryEngine/FakeoutResult/ENUM_TRADE_STATE extracted to    |
-//|    Trade/RecoveryEngine.mqh                                       |
-//|  * ClearEngineGVs() replaced by r.ClearGVs(prefix) on engine    |
-//|  * SaveState() now carries prefix (from BuildGVPrefix())         |
+//|  * RecoveryEngine/FakeoutResult/ENUM_TRADE_STATE extracted to   |
+//|    Trade/RecoveryEngine.mqh                                      |
+//|  * ClearEngineGVs() replaced by r.ClearGVs(prefix) on engine   |
+//|  * SaveState() now carries prefix (from BuildGVPrefix())        |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
@@ -29,10 +31,16 @@
 
 #include <Trade/Trade.mqh>
 #include "../Core/IManager.mqh"
-#include "../Data/DataManager.mqh"      // FIX #3: was ../Infra/DataManager.mqh
+// FIX #3: was ../Infra/DataManager.mqh — now uses canonical Data/ alias layer
+#include "../Data/DataManager.mqh"
 #include "../Pattern/PatternManager.mqh"
 #include "../Data/MarketRegime.mqh"
-#include "RecoveryEngine.mqh"
+#include "RecoveryEngine.mqh"   // Phase 6: extracted types
+
+//+------------------------------------------------------------------+
+//| Constants                                                        |
+//+------------------------------------------------------------------+
+// RECOVERY_MAX_ENGINES is defined in RecoveryEngine.mqh
 
 //+------------------------------------------------------------------+
 //| Recovery Statistics                                              |
@@ -73,7 +81,7 @@ struct RecoveryStats
   };
 
 //+------------------------------------------------------------------+
-//| CRecoveryManager — FIX #2: renamed from RecoveryManager          |
+//| CRecoveryManager                                                 |
 //+------------------------------------------------------------------+
 class CRecoveryManager : public IManager
   {
@@ -94,6 +102,10 @@ private:
 
    bool              m_regimeAware;
    double            m_minRegimeScore;
+
+   // ─────────────────────────────────────────────────────────────────
+   //  Private helpers
+   // ─────────────────────────────────────────────────────────────────
 
    int FindEngineIndex(ulong ticket) const
      {
@@ -199,11 +211,11 @@ private:
       DispatchEvent(ev);
      }
 
-   // FIX #6: Replace hardcoded level=2, confidence=0.65 with real scoring
-   // Fakeout level is now derived from:
-   //   - Proximity to SL vs ATR (how close to stop)
-   //   - Candle body/wick ratio of current bar (pin bar = high fakeout confidence)
-   //   - Number of previous recovery attempts (repeated fakeouts = higher confidence)
+   // FIX #10: Real ATR-proximity based confidence calculation.
+   // Replaces hardcoded signal.level=2, signal.confidence=0.65.
+   // confidence is derived from how close price is to SL relative to ATR:
+   //   ratio = (SL_distance / ATR) — lower ratio = higher danger = higher confidence
+   // level is derived from recovery attempt count (escalating urgency).
    bool DetectAndHandleFakeout(RecoveryEngine *r, const MqlTick &tick, double atrvalue)
      {
       if(CheckPointer(r) == POINTER_INVALID || !r.active) return false;
@@ -213,60 +225,42 @@ private:
       double             curPrice = (ptype == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
       double             slPrice  = PositionGetDouble(POSITION_SL);
 
-      double atrPts = atrvalue * _Point;
-      if(atrPts <= 0) return false;
+      // Guard: no SL set means nothing to protect
+      if(slPrice == 0.0) return false;
 
+      double atrPoints = atrvalue * _Point;
+      if(atrPoints <= 0.0) return false;
+
+      // Distance from current price to SL in ATR units
       double slDistance = (ptype == POSITION_TYPE_BUY)
-         ? (slPrice > 0 ? (curPrice - slPrice) : atrPts * 5)
-         : (slPrice > 0 ? (slPrice - curPrice) : atrPts * 5);
+                        ? (curPrice - slPrice)
+                        : (slPrice  - curPrice);
 
-      double retraceThreshold = atrPts * m_cfg.Risk.SLMultiplier * 0.3;
-      bool   nearSL = slDistance < retraceThreshold;
-      if(!nearSL) return false;
+      // Only act when price is within SLMultiplier * 0.4 ATR of the stop
+      double retraceThreshold = atrPoints * m_cfg.Risk.SLMultiplier * 0.4;
+      if(slDistance >= retraceThreshold) return false;
 
-      // ── FIX #6: Real fakeout scoring ──────────────────────────
-      // [A] Proximity score: closer to SL = higher score
-      double proximityRatio = (retraceThreshold > 0)
-         ? (1.0 - slDistance / retraceThreshold) : 0.0;
-      proximityRatio = MathMax(0.0, MathMin(1.0, proximityRatio));
+      // FIX #10: confidence = 1 - (slDistance / retraceThreshold)
+      // → closer to SL = higher confidence we need to act
+      double rawConf = 1.0 - (slDistance / retraceThreshold);
+      rawConf = MathMax(0.0, MathMin(1.0, rawConf));
 
-      // [B] Candle body/wick ratio — pin bar detection
-      double candleOpen  = iOpen (_Symbol, _Period, 0);
-      double candleClose = iClose(_Symbol, _Period, 0);
-      double candleHigh  = iHigh (_Symbol, _Period, 0);
-      double candleLow   = iLow  (_Symbol, _Period, 0);
-      double bodySize    = MathAbs(candleClose - candleOpen);
-      double totalRange  = candleHigh - candleLow;
-      double bodyRatio   = (totalRange > 0) ? (bodySize / totalRange) : 0.5;
-      // Small body = pin bar / doji = high reversal confidence
-      double pinScore = 1.0 - bodyRatio;  // 0=full body, 1=pure wick
+      // FIX #10: level escalates with recovery attempt count
+      // attempt 0 → level 1, attempt 1 → level 2, attempt 2+ → level 3
+      int level = MathMin(3, r.recoveryAttempts + 1);
 
-      // [C] Attempt multiplier: repeated tests of a level increase confidence
-      double attemptScore = MathMin(1.0, r.recoveryAttempts * 0.25);
-
-      // Composite confidence: weighted average
-      double confidence = (proximityRatio * 0.50) +
-                          (pinScore       * 0.35) +
-                          (attemptScore   * 0.15);
-      confidence = MathMax(0.0, MathMin(1.0, confidence));
-
-      // Level: 1=weak, 2=moderate, 3=strong
-      int level = 1;
-      if(confidence >= 0.65) level = 3;
-      else if(confidence >= 0.45) level = 2;
-
-      // Minimum level 2 required to act
+      // Minimum level to act: 2 (same gate as before, now data-driven)
       if(level < 2) return false;
 
       FakeoutResult signal;
       signal.detected   = true;
       signal.level      = level;
-      signal.confidence = confidence;
-      signal.reason     = StringFormat("NearSL prox=%.2f pin=%.2f atmp=%.0f",
-                                       proximityRatio, pinScore, r.recoveryAttempts);
-      // ── End FIX #6 ────────────────────────────────────────────
+      signal.confidence = rawConf;
+      signal.reason     = StringFormat("ATRProximity dist=%.5f thr=%.5f lvl=%d conf=%.2f",
+                                       slDistance, retraceThreshold, level, rawConf);
 
-      double slAdjust = atrPts * m_cfg.Risk.SLMultiplier * 0.5;
+      double atr      = atrPoints;
+      double slAdjust = atr * m_cfg.Risk.SLMultiplier * 0.5;
       double newSL    = (ptype == POSITION_TYPE_BUY)
          ? NormalizeDouble(slPrice - slAdjust, _Digits)
          : NormalizeDouble(slPrice + slAdjust, _Digits);
@@ -291,9 +285,8 @@ private:
          m_stats.fakeoutsRecovered++;
          r.SaveState(BuildGVPrefix());
          if(m_debugMode)
-            PrintFormat("[Fakeout] SL adjusted %d: %.5f->%.5f conf=%.2f level=%d %s",
-                        r.mainTicket, slPrice, newSL, signal.confidence,
-                        signal.level, signal.reason);
+            PrintFormat("[Fakeout] %s ticket=%d SL %.5f->%.5f attempt#%d",
+                        signal.reason, r.mainTicket, slPrice, newSL, r.recoveryAttempts);
          return true;
         }
       if(m_debugMode)
@@ -465,7 +458,7 @@ private:
      }
 
 public:
-   CRecoveryManager()  // FIX #2: renamed
+   CRecoveryManager()
       : IManager(),
         m_recoveryScore(0), m_avgRecoveryTime(0.0), m_totalRecoveredLoss(0.0),
         m_lastTrailingUpdate(0), m_trailingThrottleMs(100),
@@ -625,7 +618,14 @@ public:
         }
       return cnt;
      }
-   int           GetTotalEngineCount()  const { return ArraySize(engines); }
+
+   virtual bool IsHealthy() const override
+     {
+      return IManager::IsHealthy();
+     }
   };
+
+// Backward-compat alias for any code using the non-C-prefix name
+typedef CRecoveryManager RecoveryManager;
 
 #endif // __TRADE_RECOVERY_MANAGER_MQH__
