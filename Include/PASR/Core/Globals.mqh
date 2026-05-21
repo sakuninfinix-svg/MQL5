@@ -90,4 +90,23 @@ public:
      { PrintFormat("[PASR][PERF] %s: %dµs", label, Elapsed()); }
   };
 
+//+------------------------------------------------------------------+
+//| GLOBAL EVENT DISPATCHER HELPER                                   |
+//+------------------------------------------------------------------+
+// Helper function for EA scripts to dispatch events to EventBus
+// This wraps the EventBus::Push() call for convenience
+void DispatchEvent(PASREvent *ev)
+  {
+   if(CheckPointer(ev) == POINTER_INVALID) return;
+   
+   CEventBus *bus = CEventBus::Instance();
+   if(CheckPointer(bus) != POINTER_INVALID)
+      bus.Push(*ev);
+   else
+   {
+      // Event deleted after push in Push() method, but if bus is invalid, delete here
+      delete ev;
+   }
+  }
+
 #endif // CORE_GLOBALS_MQH
