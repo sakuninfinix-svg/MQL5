@@ -82,6 +82,12 @@ public:
 class PASREventBus
   {
 private:
+  // Di dalam class PASREventBus, tambahkan method:
+  void ProcessDeferredEvents()
+  {
+   DrainQueue();  // Flush semua event yang di-queue
+  }
+
    // ── Min-heap queue ────────────────────────────────────────────
    PASREvent         m_queue[PASR_BUS_MAX_EVENTS];
    int               m_size;
