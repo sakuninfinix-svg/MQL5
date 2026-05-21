@@ -26,25 +26,33 @@
 //|    L4  PatternManager                                            |
 //|    L5a SignalManager + inject deps + register sources            |
 //|    L5b AIManager + AISignalSource                                |
-//|    L5c RiskManager (NEW Phase 3)                                 |
+//|    L5c RegimeFilter + RegimeSignalSource  [Phase 4 NEW]          |
+//|    L5d RiskManager                        [Phase 4 NEW position] |
 //|    L6a ExecutionManager                                          |
 //|    L6b RecoveryManager                                           |
-//|    L7  DashboardManager + inject deps                            |
+//|    L7  DashboardManager + inject deps (Risk+Signal+Regime)       |
+//|                                                                  |
+//|  SIGNAL SOURCE WIRING (all sources + weights):                   |
+//|    PatternSignalSource  w=1.2  VOTER  — price action patterns    |
+//|    SRSignalSource       w=1.5  VOTER  — SR zone proximity        |
+//|    AISignalSource       w=0.8  VOTER  — neural net confidence    |
+//|    RegimeSignalSource   w=0.0  MULT   — regime modulator         |
+//|      (set w=-1.0 to use VETO mode: VOLATILE blocks all signals)  |
 //|                                                                  |
 //|  CHANGE LOG:                                                     |
-//|  v2.00 (2026-05-21) — Phase 3 complete wiring:                   |
-//|    + CAnalysisSRManager + CAnalysisZoneManager added            |
-//|    + CRiskManager added (missing #7 from architecture)           |
-//|    + SignalManager deps injected (Pattern, SR, Regime)           |
-//|    + 3 ISignalSource plugins registered:                         |
-//|        PatternSignalSource (w=1.2)                               |
-//|        SRSignalSource      (w=1.5)                               |
-//|        AISignalSource      (w=0.8)                               |
-//|    + RiskManager.Check() gate before Execute()                   |
-//|    + DashboardManager gets RiskManager + SignalManager refs      |
-//|    + RecoveryManager.OnTradeOpen/Close called on transactions     |
-//|    + New-bar logic separated from every-tick logic               |
-//|  v1.01 (2026-05-21) — FIX #1/#2/#4 (see history)               |
+//|  v2.10 (2026-05-21) — Phase 4 wiring:                           |
+//|    + CRegimeFilter allocated + init (L5c)                        |
+//|    + CRegimeSignalSource registered as MULT (w=0.0)              |
+//|      Regime TRENDING → x1.3 score boost                         |
+//|      Regime RANGING  → x0.8 score cut                           |
+//|      Regime VOLATILE → SIGNAL_NONE (acts like veto via w=0)     |
+//|      Regime SQUEEZE  → x0.6 score cut                           |
+//|    + SignalManager.SetRegimeManager() call added                 |
+//|    + DashboardManager.SetRegimeFilter() call added               |
+//|    + FreeAll(): m_regime + m_srcRegime added                     |
+//|    + PrintSummary(): all managers listed with version            |
+//|  v2.00 (2026-05-21) — Phase 3 complete wiring                   |
+//|  v1.01 (2026-05-21) — FIX #1/#2/#4                              |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
@@ -54,7 +62,7 @@
 #define __CORE_ORCHESTRATOR_MQH__
 
 #ifdef __CORE_PASR_MASTER_MQH__
-  // OK
+  // OK — included via PASR.mqh
 #else
   #error "Include <PASR/Core/PASR.mqh> instead of Orchestrator.mqh directly."
 #endif
@@ -65,24 +73,26 @@
 class COrchestrator
   {
 private:
-   // ── Managers (owned, heap-allocated)
+   // ── Managers (owned, heap-allocated) ───────────────────────────
    CDataManager           *m_data;
    CAnalysisSRManager     *m_sr;
    CAnalysisZoneManager   *m_zone;
    CPatternManager        *m_pattern;
    CSignalManager         *m_signal;
    AIManager              *m_ai;
+   CRegimeFilter          *m_regime;    // Phase 4 NEW
    CRiskManager           *m_risk;
    CExecutionManager      *m_exec;
    CRecoveryManager       *m_recovery;
    CDashboardManager      *m_dash;
 
-   // ── Signal source plugins (owned)
+   // ── Signal source plugins (owned) ──────────────────────────────
    PatternSignalSource    *m_srcPattern;
    SRSignalSource         *m_srcSR;
    AISignalSource         *m_srcAI;
+   CRegimeSignalSource    *m_srcRegime;  // Phase 4 NEW
 
-   // ── Infrastructure
+   // ── Infrastructure ─────────────────────────────────────────────
    CEventBus              *m_bus;
    StrategyConfig          m_cfg;
    CConfigManager         *m_cfgMgr;
@@ -91,7 +101,7 @@ private:
    bool       m_debugMode;
    bool       m_initialised;
 
-   // ─────────────────────────────────────────────────────────────────
+   // ── Bar detection ──────────────────────────────────────────────
    bool BarChanged()
      {
       datetime t = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
@@ -99,6 +109,7 @@ private:
       return false;
      }
 
+   // ── Manager registration helpers ───────────────────────────────
    void RegisterManager(IManager *mgr)
      {
       if(mgr == NULL) return;
@@ -117,6 +128,7 @@ private:
       return true;
      }
 
+   // ── Event queue drain ──────────────────────────────────────────
    void DrainQueue()
      {
       PASREvent ev;
@@ -124,9 +136,40 @@ private:
          m_bus.Dispatch(ev);
      }
 
+   // ── Init summary log ───────────────────────────────────────────
+   void PrintSummary()
+     {
+      Print("╔══════════════════════════════════════════════════╗");
+      PrintFormat("║  PASR EA v3.00 — %s  %s", _Symbol,
+                  EnumToString((ENUM_TIMEFRAMES)_Period));
+      Print("╠══════════════════════════════════════════════════╣");
+      Print("║  Managers:");
+      PrintFormat("║    DataManager        : OK");
+      PrintFormat("║    SRManager(Analysis): OK  zones=%d",
+                  m_sr != NULL ? m_sr.ZoneCount() : 0);
+      PrintFormat("║    ZoneManager(S/D)   : OK");
+      PrintFormat("║    PatternManager     : OK");
+      PrintFormat("║    SignalManager v3   : OK  sources=%d",
+                  m_signal != NULL ? m_signal.SourceCount() : 0);
+      PrintFormat("║      Registered sources:");
+      PrintFormat("║        PatternSignalSource w=1.2 VOTER");
+      PrintFormat("║        SRSignalSource      w=1.5 VOTER");
+      PrintFormat("║        AISignalSource      w=0.8 VOTER");
+      PrintFormat("║        RegimeSignalSource  w=0.0 MULT");
+      PrintFormat("║    AIManager              : OK");
+      PrintFormat("║    RegimeFilter    [P4]   : OK");
+      PrintFormat("║    RiskManager     [P4]   : OK  magic=%d", m_cfg.MagicNumber);
+      PrintFormat("║    ExecutionManager       : OK");
+      PrintFormat("║    RecoveryManager        : OK");
+      PrintFormat("║    DashboardManager v3    : OK");
+      Print("╚══════════════════════════════════════════════════╝");
+     }
+
+   // ── Cleanup ────────────────────────────────────────────────────
    void FreeAll()
      {
-      // signal sources before managers (non-owning ptrs inside managers)
+      // signal source plugins before managers that hold non-owning ptrs
+      if(m_srcRegime)  { delete m_srcRegime;  m_srcRegime=NULL;  }
       if(m_srcPattern) { delete m_srcPattern; m_srcPattern=NULL; }
       if(m_srcSR)      { delete m_srcSR;      m_srcSR=NULL;      }
       if(m_srcAI)      { delete m_srcAI;      m_srcAI=NULL;      }
@@ -135,6 +178,7 @@ private:
       if(m_recovery) { delete m_recovery; m_recovery=NULL; }
       if(m_exec)     { delete m_exec;     m_exec=NULL;     }
       if(m_risk)     { delete m_risk;     m_risk=NULL;     }
+      if(m_regime)   { delete m_regime;   m_regime=NULL;   }
       if(m_ai)       { delete m_ai;       m_ai=NULL;       }
       if(m_signal)   { delete m_signal;   m_signal=NULL;   }
       if(m_pattern)  { delete m_pattern;  m_pattern=NULL;  }
@@ -145,7 +189,7 @@ private:
       if(m_bus)      { delete m_bus;      m_bus=NULL;      }
      }
 
-   // ── Core trading logic called on new bar ────────────────────────
+   // ── Core trading logic (called once per new bar) ────────────────
    void ProcessNewBar()
      {
       // 1) Signal available?
@@ -154,12 +198,12 @@ private:
       FinalSignal sig = m_signal.GetCurrent();
       if(sig.direction == SIGNAL_NONE) return;
 
-      // 2) Risk gate: check before any execution
-      RiskCheckResult rr = m_risk.Check(0);   // pre-check without lot (margin check uses estimated lot)
+      // 2) Pre-trade risk gate (no lot yet — margin estimate)
+      RiskCheckResult rr = m_risk.Check(0);
       if(!rr.allowed)
         {
          if(m_debugMode)
-            PrintFormat("[Orchestrator] RiskBlock: %s", rr.reason);
+            PrintFormat("[Orchestrator] RiskBlock(pre): %s", rr.reason);
          return;
         }
 
@@ -168,11 +212,12 @@ private:
       builder.Init(m_data, m_bus);
       builder.SetCfg(m_cfg);
 
-      double lot  = m_risk.CalcLot(m_data.GetATRPoints() * m_cfg.Risk.SLMultiplier);
+      double atrSL = m_data.GetATRPoints() * m_cfg.Risk.SLMultiplier;
+      double lot   = m_risk.CalcLot(atrSL);
       TradePlan plan = builder.Build(sig, lot);
       if(!plan.valid) return;
 
-      // 4) Final risk check with real SL points
+      // 4) Final risk check with real SL distance
       RiskCheckResult rr2 = m_risk.Check(plan.slPoints);
       if(!rr2.allowed)
         {
@@ -189,7 +234,9 @@ private:
          m_risk.OnTradeOpened();
          m_recovery.OnTradeOpen(er.ticket, plan.direction, plan.entryPrice);
          if(m_debugMode)
-            PrintFormat("[Orchestrator] Trade opened ticket=%d", er.ticket);
+            PrintFormat("[Orchestrator] ✓ Trade opened ticket=%d lot=%.2f %s",
+                        er.ticket, plan.lot,
+                        plan.direction==SIGNAL_BUY ? "BUY" : "SELL");
         }
      }
 
@@ -197,8 +244,10 @@ public:
    COrchestrator()
       : m_data(NULL), m_sr(NULL), m_zone(NULL),
         m_pattern(NULL), m_signal(NULL), m_ai(NULL),
-        m_risk(NULL), m_exec(NULL), m_recovery(NULL), m_dash(NULL),
-        m_srcPattern(NULL), m_srcSR(NULL), m_srcAI(NULL),
+        m_regime(NULL), m_risk(NULL),
+        m_exec(NULL), m_recovery(NULL), m_dash(NULL),
+        m_srcPattern(NULL), m_srcSR(NULL),
+        m_srcAI(NULL), m_srcRegime(NULL),
         m_bus(NULL), m_cfgMgr(NULL),
         m_lastBarTime(0), m_debugMode(false), m_initialised(false)
      {}
@@ -208,86 +257,102 @@ public:
    void SetDebugMode(bool on) { m_debugMode = on; }
 
    //+----------------------------------------------------------------+
-   //| Init — full Phase 3 wiring                                    |
+   //| Init — Phase 4 complete wiring                                 |
    //+----------------------------------------------------------------+
    int Init()
      {
-      // ── L0: Config
+      // ── L0: Config ──────────────────────────────────────────────
       m_cfgMgr = new CConfigManager();
       if(m_cfgMgr==NULL || !m_cfgMgr.Init(m_cfg))
-        { Print("[Orchestrator] Config init FAILED"); return INIT_PARAMETERS_INCORRECT; }
+        { Print("[Orchestrator] Config FAILED"); return INIT_PARAMETERS_INCORRECT; }
 
       m_bus = new CEventBus();
-      if(m_bus==NULL) { Print("[Orchestrator] EventBus alloc FAILED"); return INIT_FAILED; }
+      if(m_bus==NULL)
+        { Print("[Orchestrator] EventBus alloc FAILED"); return INIT_FAILED; }
 
-      // ── L2: DataManager
+      // ── L2: DataManager ─────────────────────────────────────────
       m_data = new CDataManager();
       if(m_data==NULL || !m_data.Init(m_cfg))
         { Print("[Orchestrator] DataManager FAILED"); FreeAll(); return INIT_FAILED; }
 
-      // ── L3: Analysis — SR + Zone
-      m_sr   = new CAnalysisSRManager();
-      if(!InitManager(m_sr,   "CAnalysisSRManager"))   { FreeAll(); return INIT_FAILED; }
+      // ── L3: Analysis — SR + Zone ────────────────────────────────
+      m_sr = new CAnalysisSRManager();
+      if(!InitManager(m_sr, "CAnalysisSRManager")) { FreeAll(); return INIT_FAILED; }
 
       m_zone = new CAnalysisZoneManager();
       if(!InitManager(m_zone, "CAnalysisZoneManager")) { FreeAll(); return INIT_FAILED; }
 
-      // ── L4: Pattern
+      // ── L4: Pattern ─────────────────────────────────────────────
       m_pattern = new CPatternManager();
       if(!InitManager(m_pattern, "CPatternManager")) { FreeAll(); return INIT_FAILED; }
 
-      // ── L5a: SignalManager + inject deps + register sources
+      // ── L5a: SignalManager ──────────────────────────────────────
       m_signal = new CSignalManager();
       if(!InitManager(m_signal, "CSignalManager")) { FreeAll(); return INIT_FAILED; }
 
       m_signal.SetPatternManager(m_pattern);
-      m_signal.SetSRManager((CSRManager*)m_sr);  // upcast: Analysis SR is-a CSRManager
+      m_signal.SetSRManager((CSRManager*)m_sr);   // Analysis SR is-a CSRManager
 
-      // Register signal sources with weights
+      // Register voter sources
       m_srcPattern = new PatternSignalSource(m_pattern);
       m_srcSR      = new SRSignalSource(m_sr, m_data, 0.5);
+      m_signal.RegisterSource(m_srcPattern, 1.2); // VOTER: PA pattern
+      m_signal.RegisterSource(m_srcSR,      1.5); // VOTER: SR confluence
 
-      m_signal.RegisterSource(m_srcPattern, 1.2);  // PA pattern: high weight
-      m_signal.RegisterSource(m_srcSR,      1.5);  // SR confluence: highest weight
-
-      // ── L5b: AI
+      // ── L5b: AI + AISignalSource ────────────────────────────────
       m_ai = new AIManager();
       if(!InitManager(m_ai, "AIManager")) { FreeAll(); return INIT_FAILED; }
 
       m_srcAI = new AISignalSource(m_ai, 0.6, 0.8);
-      m_signal.RegisterSource(m_srcAI, 0.8);       // AI: lower weight (learning)
+      m_signal.RegisterSource(m_srcAI, 0.8);      // VOTER: AI (learning weight)
 
-      // ── L5c: RiskManager (Phase 3 addition)
+      // ── L5c: RegimeFilter + RegimeSignalSource ── Phase 4 NEW ───
+      m_regime = new CRegimeFilter();
+      if(!InitManager(m_regime, "CRegimeFilter")) { FreeAll(); return INIT_FAILED; }
+
+      m_signal.SetRegimeManager((CMarketRegime*)m_regime); // Regime is-a CMarketRegime
+
+      // Register as MULT (w=0.0):
+      //   TRENDING  → multiplier x1.3 (boost score)
+      //   RANGING   → multiplier x0.8 (reduce score)
+      //   VOLATILE  → direction=SIGNAL_NONE, confidence=0 (suppress)
+      //   SQUEEZE   → multiplier x0.6 (strong reduce)
+      // To use HARD VETO instead: change weight to -1.0
+      m_srcRegime = new CRegimeSignalSource(m_regime);
+      m_signal.RegisterSource(m_srcRegime, 0.0);  // MULT: regime modulator
+
+      // ── L5d: RiskManager ────────────────────────────────────────
       m_risk = new CRiskManager();
       if(!InitManager(m_risk, "CRiskManager")) { FreeAll(); return INIT_FAILED; }
 
-      // ── L6a: ExecutionManager
+      // ── L6a: ExecutionManager ───────────────────────────────────
       m_exec = new CExecutionManager();
       if(!InitManager(m_exec, "CExecutionManager")) { FreeAll(); return INIT_FAILED; }
 
-      // ── L6b: RecoveryManager
+      // ── L6b: RecoveryManager ────────────────────────────────────
       m_recovery = new CRecoveryManager();
       if(!InitManager(m_recovery, "CRecoveryManager")) { FreeAll(); return INIT_FAILED; }
 
-      // ── L7: DashboardManager + inject deps
+      // ── L7: DashboardManager + inject all deps ── v3.00 ────────
       m_dash = new CDashboardManager();
       if(!InitManager(m_dash, "CDashboardManager")) { FreeAll(); return INIT_FAILED; }
-      m_dash.SetRiskManager(m_risk);
+      m_dash.SetRiskManager  (m_risk);
       m_dash.SetSignalManager(m_signal);
+      m_dash.SetRegimeFilter (m_regime);  // Phase 4 NEW
 
       m_initialised = true;
-      Print("[Orchestrator] v2.00 Init OK — all managers wired");
+      PrintSummary();
       return INIT_SUCCEEDED;
      }
 
    //+----------------------------------------------------------------+
-   //| OnTick — separated: every-tick vs new-bar logic               |
+   //| OnTick — every-tick vs new-bar separated                       |
    //+----------------------------------------------------------------+
    void OnTick()
      {
       if(!m_initialised) return;
 
-      // Every tick: price data + price-update event
+      // Every tick: update price + fire PRICE_UPDATE
       m_data.OnTick();
       PASREvent evTick;
       evTick.id       = EVENT_ID_PRICE_UPDATE;
@@ -297,20 +362,19 @@ public:
       bool isNewBar = BarChanged();
       if(isNewBar)
         {
-         // New bar: fire bar event → all analysis managers update
          PASREvent evBar;
          evBar.id       = EVENT_ID_NEW_BAR;
          evBar.priority = 10;
          m_bus.Push(evBar);
 
-         // Drain analysis events first so pattern/signal/SR are up to date
+         // Drain analysis (SR, Pattern, Regime, Signal) before entry attempt
          DrainQueue();
 
-         // Then attempt trade entry
+         // Attempt trade entry
          ProcessNewBar();
         }
 
-      // Final drain: flush trailing stop + dashboard events
+      // Final drain: trailing stop + dashboard updates
       DrainQueue();
      }
 
@@ -342,21 +406,21 @@ public:
       double          profit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT);
       ulong           pos    = HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
 
-      // Trade OPENED (DEAL_ENTRY_IN)
+      // Trade OPENED
       if(entry == DEAL_ENTRY_IN)
         {
-         int    dir      = (int)HistoryDealGetInteger(trans.deal, DEAL_TYPE) == DEAL_TYPE_BUY ? 1 : -1;
-         double price    = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
+         int    dir   = (int)HistoryDealGetInteger(trans.deal, DEAL_TYPE)==DEAL_TYPE_BUY ? 1 : -1;
+         double price = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
          m_recovery.OnTradeOpen((ulong)pos, dir, price);
         }
 
-      // Trade CLOSED (DEAL_ENTRY_OUT / DEAL_ENTRY_INOUT)
+      // Trade CLOSED
       if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_INOUT)
         {
          m_recovery.OnTradeClose((ulong)pos);
          m_risk.OnTradeClosed();
 
-         // AI backprop
+         // AI backpropagation on result
          if(m_ai != NULL)
            {
             float label = (profit >= 0.0) ? 1.0f : 0.0f;
@@ -370,7 +434,7 @@ public:
               }
            }
 
-         // Fire position update event
+         // Fire position update → dashboard redraws immediately
          PASREvent ev;
          ev.id=EVENT_ID_POSITION_UPDATE; ev.priority=8;
          ev.ticket=pos; ev.profit=profit;
@@ -387,20 +451,22 @@ public:
       if(!m_initialised) return;
       m_initialised = false;
       if(m_ai   != NULL) m_ai.Deinit();
-      if(m_dash != NULL) m_dash.Destroy();
+      if(m_dash != NULL) m_dash.Destroy();  // removes chart objects before FreeAll
       FreeAll();
-      PrintFormat("[Orchestrator] Deinit (reason=%d)", reason);
+      PrintFormat("[Orchestrator] Deinit reason=%d", reason);
      }
 
-   // ── Accessors
+   // ── Accessors (for external tools / QA) ────────────────────────
    CDataManager         *GetDataManager()     const { return m_data;     }
    CAnalysisSRManager   *GetSRManager()       const { return m_sr;       }
    CAnalysisZoneManager *GetZoneManager()     const { return m_zone;     }
    CSignalManager       *GetSignalManager()   const { return m_signal;   }
    AIManager            *GetAIManager()       const { return m_ai;       }
+   CRegimeFilter        *GetRegimeFilter()    const { return m_regime;   }
    CRiskManager         *GetRiskManager()     const { return m_risk;     }
    CExecutionManager    *GetExecManager()     const { return m_exec;     }
    CRecoveryManager     *GetRecoveryManager() const { return m_recovery; }
+   CDashboardManager    *GetDashboard()       const { return m_dash;     }
    const StrategyConfig &GetConfig()          const { return m_cfg;      }
   };
 
