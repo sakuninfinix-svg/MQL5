@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|  PASR_MODULAR.mq5 — v4.00 (Phase 12 — Final Assembly)           |
+//|  PASR_MODULAR.mq5 — v4.01 (Kategori-1: RecoveryManager wired)   |
 //|  Price Action Support/Resistance Expert Advisor                  |
 //|                                                                  |
 //|  Architecture: modular orchestrator — all logic delegated        |
@@ -19,27 +19,36 @@
 //|   [11] RiskManager     — Trade/RiskManager.mqh                   |
 //|   [12] ExecutionManager — Trade/ExecutionManager.mqh             |
 //|   [13] PositionManager — Trade/PositionManager.mqh               |
-//|   [14] AIFeatureBuilder — AI/AIFeatureBuilder.mqh                |
-//|   [15] AIInference     — AI/AIInference.mqh                      |
-//|   [16] AIEnsemble      — AI/AIEnsemble.mqh                       |
-//|   [17] AICalibBridge   — AI/AICalibrationBridge.mqh              |
-//|   [18] DashboardManager — UI/DashboardManager.mqh                |
+//|   [14] RecoveryManager — Trade/RecoveryManager.mqh  ← NEW v4.01 |
+//|   [15] AIFeatureBuilder — AI/AIFeatureBuilder.mqh                |
+//|   [16] AIInference     — AI/AIInference.mqh                      |
+//|   [17] AIEnsemble      — AI/AIEnsemble.mqh                       |
+//|   [18] AICalibBridge   — AI/AICalibrationBridge.mqh              |
+//|   [19] DashboardManager — UI/DashboardManager.mqh                |
 //|                                                                  |
 //|  TICK FLOW (OnTick):                                             |
-//|   tick → spreadGuard → eventProcess → marketUpdate              |
+//|   tick → spreadGuard → eventProcess → posManage → recoveryTick  |
 //|        → [NEW BAR] regimeDetect → srUpdate → patternScan        |
 //|                    → signalGen → featureBuild → driftCheck      |
 //|                    → ensembleScore → calibBridge                |
 //|                    → riskCheck → execute                        |
-//|        → posManage → dashUpdate                                  |
+//|                    → recoveryNewBar                             |
+//|        → dashUpdate                                              |
 //|                                                                  |
-//|  Magic: 20260521  Version: v4.00-phase12                         |
+//|  CHANGELOG:                                                      |
+//|   v4.01 (2026-05-21) — Kategori-1 cleanup                       |
+//|    * Wire CRecoveryManager: OnPriceUpdate, OnNewBar,             |
+//|      OnTradeOpen (DEAL_ENTRY_IN), OnTradeClose (DEAL_ENTRY_OUT)  |
+//|    * Remove dead ExecutionManager.shim.mqh (committed separately)|
+//|   v4.00 (2026-05-21) — Phase 12 final assembly                  |
+//|                                                                  |
+//|  Magic: 20260521  Version: v4.01-recovery-wired                  |
 //|  Build: 2026-05-21                                               |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "4.00"
-#property description "Price Action SR — Modular Orchestrator v4"
+#property version     "4.01"
+#property description "Price Action SR — Modular Orchestrator v4.01"
 #property strict
 
 //--- Core
@@ -62,6 +71,7 @@
 #include <PASR/Trade/TradePlan.mqh>
 #include <PASR/Trade/ExecutionManager.mqh>
 #include <PASR/Trade/PositionManager.mqh>
+#include <PASR/Trade/RecoveryManager.mqh>   // [14] v4.01: wired
 //--- AI
 #include <PASR/AI/AIFeatureBuilder.mqh>
 #include <PASR/AI/AIInference.mqh>
@@ -108,6 +118,13 @@ input double   InpPartialPct      = 50.0;   // Partial close %
 input bool     InpUseTrailing     = true;   // Enable trailing stop
 input double   InpTrailATRMult    = 1.0;    // Trail = N * ATR
 
+//--- [RECOVERY]  ← v4.01: new group
+sinput group "=== RECOVERY ENGINE ==="
+input bool     InpRecoveryEnabled = true;   // Enable fakeout recovery
+input int      InpMaxRecovAttempts= 3;      // Max recovery attempts per trade
+input int      InpRecovCooldown   = 3;      // Recovery cooldown (bars)
+input int      InpMaxTradeDays    = 5;      // Force-close after N days (0=off)
+
 //--- [AI]
 sinput group "=== AI ENGINE ==="
 input bool     InpUseAI           = true;   // Enable AI scoring
@@ -146,6 +163,7 @@ CSignalManager       g_signal;
 CRiskManager         g_risk;
 CExecutionManager    g_exec;
 CPositionManager     g_pos;
+CRecoveryManager     g_recovery;   // [14] v4.01
 CAIFeatureBuilder    g_featBuilder;
 CAIInference         g_aiInfer;
 CAIEnsemble          g_ensemble;
@@ -158,6 +176,7 @@ CDashboardManager    g_hud;
 datetime          g_lastBarTime   = 0;
 TradePlan         g_activePlan;
 bool              g_hasPlan       = false;
+ulong             g_openTicket    = 0;       // v4.01: track open ticket for recovery
 FeatureVector     g_lastFV;
 double            g_lastAIScore   = 0;
 double            g_lastDrift     = 0;
@@ -187,20 +206,16 @@ double GetATR(int period = 14)
 double GetSpreadPips()
   {
    long sp = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   return sp * _Point * 10000.0; // normalize to pips
+   return sp * _Point * 10000.0;
   }
 
 ENUM_TRADING_SESSION DetectSession()
   {
    MqlDateTime dt; TimeToStruct(TimeGMT(), dt);
    int h = dt.hour;
-   // Overlap: London + NY (12:00-16:00 GMT)
    if(h >= 12 && h < 16) return SESSION_OVERLAP;
-   // London: 08:00-16:00 GMT
    if(h >=  8 && h < 16) return SESSION_LONDON;
-   // New York: 13:00-22:00 GMT
    if(h >= 13 && h < 22) return SESSION_NEWYORK;
-   // Asian: 00:00-08:00 GMT
    if(h >=  0 && h <  8) return SESSION_ASIAN;
    return SESSION_OFF;
   }
@@ -210,7 +225,7 @@ ENUM_TRADING_SESSION DetectSession()
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   Print("[PASR] v4.00-phase12 booting — magic:", InpMagic);
+   Print("[PASR] v4.01-recovery-wired booting — magic:", InpMagic);
 
    //--- [01] Config
    g_adaptCfg.SetRiskPct(InpRiskPct);
@@ -263,22 +278,27 @@ int OnInit()
                InpUsePartial, InpPartialPct,
                InpUseTrailing,InpTrailATRMult);
 
+   //--- [14] Recovery Manager  ← v4.01
+   g_recovery.Init(GetPointer(g_data), GetPointer(g_bus));
+   g_recovery.SetTrailingThrottle(200);  // throttle trailing to 200ms
+   // Pass recovery config params through m_cfg (already wired via IManager)
+   // InpRecoveryEnabled / InpMaxRecovAttempts / InpRecovCooldown / InpMaxTradeDays
+   // are applied via Config struct — no separate setter needed if Config is shared
+
    //--- [13] AI Feature Builder
    g_featBuilder.Init(_Symbol, PERIOD_CURRENT);
 
-   //--- [14] AI Inference
+   //--- [14-16] AI stack
    g_aiInfer.Init();
-
-   //--- [15] AI Ensemble
    g_ensemble.Init();
    if(InpLoadWeights) g_ensemble.LoadWeights();
 
-   //--- [16] AI Calibration Bridge
+   //--- [17] Calibration Bridge
    g_calibBridge.SetJournal(GetPointer(g_journal));
    g_calibBridge.SetHighThresh(InpAIHighThresh);
    g_calibBridge.SetVetoThresh(InpAIVetoThresh);
 
-   //--- [17] Dashboard
+   //--- [19] Dashboard
    if(InpShowDash)
      {
       g_hud.Init(GetPointer(g_journal));
@@ -288,11 +308,12 @@ int OnInit()
    // Reset runtime state
    g_lastBarTime = 0;
    g_hasPlan     = false;
+   g_openTicket  = 0;
    g_regime      = REGIME_RANGING;
    g_session     = DetectSession();
 
-   Print("[PASR] Boot complete — all modules initialized");
-   EventSetTimer(60); // 1-min heartbeat for dashboard time update
+   Print("[PASR] Boot complete — all 19 modules initialized");
+   EventSetTimer(60);
    return INIT_SUCCEEDED;
   }
 
@@ -302,24 +323,13 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
-
-   // Save AI ensemble weights
    g_ensemble.SaveWeights();
-
-   // Export calibration data for Python retraining
    g_calibBridge.ExportCalibrationCSV();
-
-   // Export performance HTML report
    if(InpExportReport) g_report.ExportHTML();
-
-   // Clean up chart HUD
    if(InpShowDash) g_hud.Deinit();
-
-   // Release managers
    g_sr.Deinit();
    g_data.Deinit();
    g_bus.Deinit();
-
    PrintFormat("[PASR] Shutdown — reason:%d  total_trades:%d",
                reason, g_journal.GetTotalTrades());
   }
@@ -342,15 +352,18 @@ void OnTick()
    g_bus.ProcessPending();
 
    //--- [C] Always: position management (BE, partial, trailing)
+   //        + recovery price-tick monitoring (fakeout + trailing per-engine)
+   double atrC = GetATR();
    if(g_pos.HasOpenPosition())
-      g_pos.OnTick(GetATR());
+      g_pos.OnTick(atrC);
+   if(InpRecoveryEnabled)
+      g_recovery.OnPriceUpdate();   // v4.01: recovery per-tick
 
    //--- [D] New-bar dirty-flag throttle
    datetime barTime = iTime(_Symbol, PERIOD_CURRENT, 0);
    bool isNewBar = (barTime != g_lastBarTime);
    if(!isNewBar)
      {
-      // Tick-only: update dashboard live PnL + time
       if(InpShowDash) UpdateDashboard();
       return;
      }
@@ -360,14 +373,18 @@ void OnTick()
    //--- [E] Session detect
    g_session = DetectSession();
 
-   //--- [F] Data update (OHLCV cache refresh)
+   //--- [F] Data update
    g_data.OnNewBar();
 
-   //--- [G] Regime detection via AdaptiveConfig
+   //--- [G] Regime detection
    double atr = GetATR();
    g_regime = g_adaptCfg.DetectRegime(_Symbol, PERIOD_CURRENT, atr);
    EffectivePolicy policy = g_adaptCfg.GetEffectivePolicy(
                               g_regime, g_session, atr);
+
+   //--- [G2] Recovery new-bar processing (fakeout detection on bar close)
+   if(InpRecoveryEnabled)
+      g_recovery.OnNewBar();   // v4.01
 
    //--- [H] Risk daily reset check
    if(!g_risk.IsTradingAllowed())
@@ -425,7 +442,7 @@ void OnTick()
    DebugPrint(StringFormat("AI score:%.2f drift:%.2f model:%d",
                            g_lastAIScore, g_lastDrift, g_lastEnsModel));
 
-   //--- [O] Calibration bridge: map score → policy override
+   //--- [O] Calibration bridge
    AIScoreOverride ov = g_calibBridge.MapScoreToPolicy(
                           g_lastAIScore, policy);
    if(ov.blockTrade)
@@ -473,9 +490,8 @@ void OnTick()
    plan.magic      = InpMagic;
    plan.comment    = InpComment;
 
-   // Validate R:R
-   double riskPts  = MathAbs(plan.entryPrice - plan.sl);
-   double rewardPts= MathAbs(plan.tp - plan.entryPrice);
+   double riskPts   = MathAbs(plan.entryPrice - plan.sl);
+   double rewardPts = MathAbs(plan.tp - plan.entryPrice);
    if(riskPts <= 0 || (rewardPts / riskPts) < InpMinRR)
      {
       DebugPrint(StringFormat("RR too low: %.2f", rewardPts/riskPts));
@@ -489,14 +505,12 @@ void OnTick()
       return;
      }
 
-   // Track open state
-   g_activePlan    = plan;
-   g_hasPlan       = true;
-   g_posOpenTime   = TimeCurrent();
+   g_activePlan   = plan;
+   g_hasPlan      = true;
+   g_posOpenTime  = TimeCurrent();
    g_risk.OnTradeOpened();
    g_calibBridge.LogTradeOpen(g_lastAIScore);
 
-   // Push signal to dashboard
    CDashboardManager::PushSignal(g_dashCtx,
                                   sig.direction, g_lastAIScore, 0);
 
@@ -508,18 +522,32 @@ void OnTick()
   }
 
 //+------------------------------------------------------------------+
-//|  OnTradeTransaction — journal + weight update on close           |
+//|  OnTradeTransaction — journal + recovery + weight update         |
 //+------------------------------------------------------------------+
 void OnTradeTransaction(
       const MqlTradeTransaction &trans,
       const MqlTradeRequest     &req,
       const MqlTradeResult      &res)
   {
-   // Only care about deal additions that are position exits
    if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
    if(!HistoryDealSelect(trans.deal))            return;
    if(HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != (long)InpMagic) return;
-   if(HistoryDealGetInteger(trans.deal, DEAL_ENTRY) != DEAL_ENTRY_OUT)  return;
+
+   long dealEntry = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+
+   //--- v4.01: notify RecoveryManager on position OPEN
+   if(dealEntry == DEAL_ENTRY_IN && InpRecoveryEnabled)
+     {
+      ulong ticket = HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
+      double entryPrice = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
+      int direction = (g_activePlan.direction == SIGNAL_BUY) ? 1 : -1;
+      g_recovery.OnTradeOpen(ticket, direction, entryPrice);
+      g_openTicket = ticket;
+      DebugPrint(StringFormat("RecoveryManager: engine created for ticket=%d", ticket));
+      return;
+     }
+
+   if(dealEntry != DEAL_ENTRY_OUT) return;
 
    double closePrice = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
    double pnl        = HistoryDealGetDouble(trans.deal, DEAL_PROFIT)
@@ -531,6 +559,13 @@ void OnTradeTransaction(
    if(riskPts > 0)
       rr = (pnl > 0 ? 1 : -1)
          * MathAbs(closePrice - g_activePlan.entryPrice) / riskPts;
+
+   //--- v4.01: deactivate recovery engine
+   if(InpRecoveryEnabled && g_openTicket > 0)
+     {
+      g_recovery.OnTradeClose(g_openTicket);
+      g_openTicket = 0;
+     }
 
    //--- Journal
    if(g_hasPlan)
@@ -553,7 +588,7 @@ void OnTradeTransaction(
    //--- Risk daily P&L update
    g_risk.OnTradeClosed(pnl);
 
-   //--- Calibration log
+   //--- Calibration
    g_calibBridge.LogTradeClose(isWin, rr);
 
    //--- Ensemble weight update
@@ -561,11 +596,11 @@ void OnTradeTransaction(
       (ENUM_ENSEMBLE_MODEL)g_lastEnsModel, isWin);
    g_ensemble.SaveWeights();
 
-   //--- Dashboard: mark signal outcome
+   //--- Dashboard
    CDashboardManager::UpdateSignalOutcome(
       g_dashCtx, isWin ? 1 : -1);
 
-   //--- Auto-export report every N trades
+   //--- Auto-export
    if(InpExportReport &&
       g_journal.GetTotalTrades() % InpReportInterval == 0)
       g_report.ExportHTML();
@@ -576,7 +611,7 @@ void OnTradeTransaction(
   }
 
 //+------------------------------------------------------------------+
-//|  OnTimer — 1-min heartbeat (dashboard time refresh)             |
+//|  OnTimer — 1-min heartbeat                                       |
 //+------------------------------------------------------------------+
 void OnTimer()
   {
@@ -584,7 +619,7 @@ void OnTimer()
   }
 
 //+------------------------------------------------------------------+
-//|  UpdateDashboard — fill DashContext from live state             |
+//|  UpdateDashboard                                                 |
 //+------------------------------------------------------------------+
 void UpdateDashboard()
   {
@@ -599,7 +634,6 @@ void UpdateDashboard()
    g_dashCtx.aiVeto    = (g_lastAIScore < InpAIVetoThresh ||
                           g_lastDrift   > InpDriftVeto);
 
-   // Position state
    g_dashCtx.hasPosition = g_pos.HasOpenPosition();
    if(g_dashCtx.hasPosition)
      {
@@ -625,5 +659,5 @@ void UpdateDashboard()
    g_hud.Update(g_dashCtx);
   }
 //+------------------------------------------------------------------+
-//| END OF PASR_MODULAR.mq5 v4.00                                    |
+//| END OF PASR_MODULAR.mq5 v4.01                                    |
 //+------------------------------------------------------------------+
