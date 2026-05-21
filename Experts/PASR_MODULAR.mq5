@@ -24,6 +24,14 @@
 //--- Single master include — dependency order enforced in PASR.mqh
 #include <PASR/PASR.mqh>
 
+// Global helper untuk dispatch events ke EventBus
+void DispatchEvent(PASREvent *ev)
+{
+   EventBus *bus = EventBus::Instance();
+   if(CheckPointer(bus) != POINTER_INVALID)
+      bus.Push(ev);
+}
+
 //--- Global Pointers Declaration
 EventRecorder      *g_recorder = NULL;  // Defined here, declared extern in EventBus.mqh
 DataManager        *IManager::s_dataCache = NULL;
