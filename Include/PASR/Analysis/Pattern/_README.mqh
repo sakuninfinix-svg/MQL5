@@ -1,22 +1,25 @@
 //+------------------------------------------------------------------+
-//| PASR LAYER 3 — ANALYSIS/PATTERN SUBLAYER                        |
+//| Include/PASR/Analysis/Pattern/_README.mqh                        |
 //|                                                                  |
-//| PURPOSE:                                                         |
-//|   Candlestick and price action pattern detection engine.        |
+//| !! GHOST FOLDER — DEPRECATED !!                                  |
 //|                                                                  |
-//| CONTENTS:                                                        |
-//|   PatternManager.mqh — Orchestrator. Owns all evaluators.      |
-//|                        Called by SignalManager via interface.   |
-//|   Evaluators.mqh     — One evaluation function per pattern.    |
-//|                        Pure logic: input = OHLCV array.        |
-//|                        Output = PatternResult struct.          |
-//|   ScoreEngine.mqh    — Scores and ranks PatternResult set.     |
-//|                        Applies regime and confluence weights.   |
+//| This folder is a tombstone left from an earlier refactoring.     |
+//| It contains NO implementation files.                             |
 //|                                                                  |
-//| DEPENDENCY RULES:                                               |
-//|   PatternManager.mqh : Core/ + Infra/ + Evaluators + ScoreEngine|
-//|   Evaluators.mqh     : Core/Config/Types.mqh only              |
-//|   ScoreEngine.mqh    : Core/Config/Types.mqh only              |
+//| CANONICAL PATTERN MODULE LOCATION:                               |
+//|   Include/PASR/Pattern/                                          |
+//|     - PatternManager.mqh   (10KB, full implementation)           |
+//|     - PatternTypes.mqh     (enums + structs)                     |
+//|     - Evaluators.mqh       (22KB, all pattern evaluators)        |
+//|     - CandleUtils.mqh      (candle geometry helpers)             |
+//|     - FakeoutDetector.mqh  (fakeout/trap detection)              |
+//|     - ScoreEngine.mqh      (confluence scoring)                  |
 //|                                                                  |
-//| STATUS: ✅ MIGRATED — files exist and are production-ready      |
+//| If you reached here via a #include path, update it to:           |
+//|   #include "../../Pattern/PatternManager.mqh"                    |
+//| or use the forward alias:                                         |
+//|   #include "../PatternManager.mqh"  (Analysis/ folder alias)     |
+//|                                                                  |
+//| This folder will be removed in the next major cleanup.           |
 //+------------------------------------------------------------------+
+// (intentionally empty — tombstone only)
