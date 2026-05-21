@@ -22,7 +22,7 @@
 
 #include "AITypes.mqh"
 #include "../IManager.mqh"
-#include "../12.MarketRegime.mqh"
+#include "../Data/MarketRegime.mqh"
 
 /// Pure inference — no state mutation, no file I/O.
 /// All methods are const. Receives model state and eval context by const-ref.

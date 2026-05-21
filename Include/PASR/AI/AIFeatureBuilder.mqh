@@ -22,7 +22,7 @@
 
 #include "AITypes.mqh"
 #include "../IManager.mqh"
-#include "../12.MarketRegime.mqh"
+#include "../Data/MarketRegime.mqh"
 
 /// Pure helper — no IManager inheritance, no event subscriptions.
 /// Holds only a bar cache and a pointer to the regime filter.

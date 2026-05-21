@@ -15,8 +15,8 @@
 
 #include "AIInference.mqh"
 #include "AITrainer.mqh"
-#include "../../Core/IManager.mqh"
-#include "../../Core/Events.mqh"
+#include "../Core/IManager.mqh"
+#include "../Core/Events.mqh"
 
 //--- Regime types detected by Orchestrator
 enum ENUM_MARKET_EXPERT
