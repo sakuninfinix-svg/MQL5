@@ -4,10 +4,15 @@
 //|         Enhanced & Refactored for Performance & Efficiency       |
 //+------------------------------------------------------------------+
 //| CHANGELOG                                                        |
+//|   v1.41 - PHASE 2 Performance Optimization:                      |
+//|           + TickCache integration for duplicate tick filtering   |
+//|           + Zero-allocation event processing in OnTimer()        |
+//|           + Event pool initialization in OnInit()                |
+//|           + Optimized OnTick() with cache hit tracking           |
 //|   v1.40 - Sync with Phase 4-9:                                   |
 //|           + Validator gate (Phase 5) as first OnInit() guard     |
-//|           + DashboardManager v3 setters wired (Phase 9)         |
-//|           + AIManager backprop gating comment (Phase 7)         |
+//|           + DashboardManager v3 setters wired (Phase 9)          |
+//|           + AIManager backprop gating comment (Phase 7)          |
 //|   v1.30 - Replaced 14 individual #include lines with single      |
 //|           #include <PASR/PASR.mqh> master include.               |
 //|           Dependency order is now enforced in PASR.mqh, not here.|
@@ -16,13 +21,15 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "1.40"
+#property version   "1.41"
 #property strict
 #property description "Modular Price Action & SR Trading System"
 #property description "Optimized for efficiency, reduced latency, and better resource management"
 
 //--- Single master include — dependency order enforced in PASR.mqh
 #include <PASR/PASR.mqh>
+//--- PHASE 2: TickCache for high-performance tick filtering
+#include <PASR/Tools/TickCache.mqh>
 
 //--- Global Pointers Declaration
 EventRecorder      *g_recorder = NULL;  // Defined here, declared extern in EventBus.mqh
@@ -74,6 +81,9 @@ struct EAConfigCache
    }
 } eaCfg;
 
+//--- PHASE 2: Cached tick filter for performance
+CTickCache g_tick_cache;
+
 //--- Cached values for performance
 static datetime g_lastBarTime       = 0;
 static datetime g_lastClosedBarTime = 0;
@@ -117,6 +127,20 @@ int OnInit()
    {
       Print("[ERROR] Failed to initialize EventBus");
       return INIT_FAILED;
+   }
+
+   // PHASE 2: Initialize event pool for zero-allocation processing
+   EventBus *bus = EventBus::Instance();
+   if(CheckPointer(bus) != POINTER_INVALID)
+   {
+      if(!bus.InitPool(256)) // 256 events capacity
+         Print("[WARN] Event pool initialization failed, falling back to stack allocation");
+   }
+
+   // PHASE 2: Initialize tick cache
+   if(!g_tick_cache.Init(eaCfg.symbolName))
+   {
+      Print("[WARN] TickCache initialization failed, using fallback mode");
    }
 
    // 2. Initialize config cache with symbol info
@@ -249,6 +273,15 @@ void RestoreExistingPositions()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   
+   // PHASE 2: Log final tick cache statistics
+   if(eaCfg.debugMode)
+   {
+      Print("[PERF] Final TickCache stats - Hits: ", g_tick_cache.GetHitCount(),
+            ", Misses: ", g_tick_cache.GetMissCount(),
+            ", Hit Rate: ", DoubleToString(g_tick_cache.GetHitRate(), 2), "%");
+   }
+   
    EventBus::Release();
 
    //--- DashboardManager v3 cleanup (Phase 9)
@@ -376,7 +409,10 @@ void OnTimer()
 {
    EventBus *bus = EventBus::Instance();
    if(CheckPointer(bus) != POINTER_INVALID)
-      bus.ProcessDeferredEvents();
+   {
+      // PHASE 2: Use zero-allocation event processing if pool is available
+      bus.ProcessDeferredEventsZeroAlloc();
+   }
    
    DispatchEvent(new HeartbeatEvent(2));
 }
@@ -388,8 +424,15 @@ void OnTick()
 {
    eaCfg.RefreshSpread();
    
-   MqlTick tick;
-   if(!SymbolInfoTick(eaCfg.symbolName, tick)) return;
+   // PHASE 2: Use tick cache to filter duplicate ticks (major performance win)
+   if(!g_tick_cache.Update())
+   {
+      // Duplicate tick detected - skip processing to save CPU cycles
+      return;
+   }
+   
+   // Get cached tick data (already validated as new)
+   const MqlTick &tick = g_tick_cache.GetLastTick();
 
    //--- Forward pass only — backprop deferred to OnNewBar() inside AIManager (Phase 7)
    ai.OnPriceUpdate();
@@ -427,5 +470,13 @@ void OnTick()
                 eaCfg.timeframe));
          }
       }
+   }
+   
+   // PHASE 2: Log cache statistics periodically in debug mode
+   if(eaCfg.debugMode && (g_tick_cache.GetMissCount() % 1000 == 0))
+   {
+      Print("[PERF] TickCache stats - Hits: ", g_tick_cache.GetHitCount(),
+            ", Misses: ", g_tick_cache.GetMissCount(),
+            ", Hit Rate: ", DoubleToString(g_tick_cache.GetHitRate(), 2), "%");
    }
 }
