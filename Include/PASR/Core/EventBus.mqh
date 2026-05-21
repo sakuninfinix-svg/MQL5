@@ -2,12 +2,6 @@
 //| Core/EventBus.mqh — CANONICAL v2.15                              |
 //| Priority-queue event bus + subscriber registry + dispatch        |
 //|                                                                  |
-//| CHANGES v2.15 (2026-05-21):                                      |
-//|   FIX #1  — Add Register(IManager*) + subscriber registry       |
-//|   FIX #1  — Add Dispatch(PASREvent&) routed to subscribers       |
-//|   FIX #8  — Dispatch() honours each subscriber's event mask     |
-//|             (set via IManager::AddEvent in DeclareEvents())      |
-//|                                                                  |
 //| INVARIANTS:                                                      |
 //|   - Push()     : enqueue into min-heap (priority order)         |
 //|   - Pop()      : dequeue from min-heap (for DrainQueue pattern) |
