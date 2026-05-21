@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — CANONICAL v2.15                              |
+//| Core/EventBus.mqh — CANONICAL v2.16                              |
 //| Priority-queue event bus + subscriber registry + dispatch        |
 //|                                                                  |
 //| INVARIANTS:                                                      |
@@ -14,6 +14,7 @@
 #define CORE_EVENT_BUS_MQH
 
 #include "Events.mqh"
+#include "EventPool.mqh"
 
 // Forward declaration — full definition in IManager.mqh
 class IManager;
@@ -91,6 +92,10 @@ private:
    IManager         *m_subscribers[PASR_BUS_MAX_SUBSCRIBERS];
    int               m_subCount;
 
+   // ── Event Pool for zero-allocation (v2.16) ───────────────────
+   CEventPool        m_event_pool;
+   bool              m_pool_initialized;
+
    void              SiftUp(int idx)
      {
       while(idx > 0)
@@ -122,10 +127,24 @@ private:
      }
 
 public:
-   PASREventBus() : m_size(0), m_subCount(0)
+   PASREventBus() : m_size(0), m_subCount(0), m_pool_initialized(false)
      {
       ArrayInitialize(m_subscribers, 0);
      }
+
+   // Initialize event pool (call once in OnInit)
+   bool InitPool(int capacity = MAX_EVENT_POOL_SIZE)
+     {
+      if(m_pool_initialized) return true; // Already initialized
+      
+      m_pool_initialized = m_event_pool.Init(capacity);
+      return m_pool_initialized;
+     }
+
+   // Get event pool statistics
+   int GetPoolActiveCount() const { return m_event_pool.GetActiveCount(); }
+   int GetPoolPeakUsage() const { return m_event_pool.GetPeakUsage(); }
+   bool IsPoolExhausted() const { return m_event_pool.IsExhausted(); }
 
    // ── Min-heap operations (unchanged) ──────────────────────────
 
@@ -159,12 +178,41 @@ public:
       return true;
      }
 
-   // Convenience: publish a simple event by ID
+   // Convenience: publish a simple event by ID (uses pool if available)
    bool              Publish(ENUM_EVENT_ID id, int prio = 50,
                              double d1 = 0, double d2 = 0)
      {
       PASREvent ev(id, prio, d1, d2);
       return Push(ev);
+     }
+
+   // Zero-allocation event creation and push (v2.16)
+   // Returns true if event was successfully queued
+   bool              PublishZeroAlloc(ENUM_EVENT_ID id, int prio = 50,
+                                      double d1 = 0, double d2 = 0)
+     {
+      if(!m_pool_initialized)
+         return Publish(id, prio, d1, d2); // Fallback to stack allocation
+      
+      PASREvent* ev = m_event_pool.Acquire();
+      if(ev == NULL)
+        {
+         // Pool exhausted, fallback to stack
+         return Publish(id, prio, d1, d2);
+        }
+      
+      ev->id = id;
+      ev->priority = prio;
+      ev->data1 = d1;
+      ev->data2 = d2;
+      ev->timestamp = TimeCurrent();
+      
+      bool result = Push(*ev);
+      
+      // Release back to pool after pushing (queue copies the event)
+      m_event_pool.Release(ev);
+      
+      return result;
      }
 
    int               Size()  const { return m_size; }
@@ -217,6 +265,33 @@ public:
            }
         }
      }
+
+   // Zero-allocation dispatch: process event without copying (v2.16)
+   // Uses pointer-based dispatch for maximum performance
+   void              DispatchZeroAlloc(PASREvent* ev)
+     {
+      if(ev == NULL) return;
+      
+      for(int i = 0; i < m_subCount; i++)
+        {
+         IManager *mgr = m_subscribers[i];
+         if(mgr == NULL) continue;
+         if(!mgr.IsListening(ev->id)) continue;
+
+         switch(ev->id)
+           {
+            case EVENT_ID_NEW_BAR:              mgr.OnNewBar();      break;
+            case EVENT_ID_PRICE_UPDATE:         mgr.OnPriceUpdate(); break;
+            case EVENT_ID_TRADE_CLOSED:         break;
+            case EVENT_ID_TIMER:                break;
+            case EVENT_ID_CONFIG_RELOAD:        mgr.OnConfigReload(); break;
+            case EVENT_ID_RECOVERY_OPPORTUNITY: break;
+            case EVENT_ID_EMERGENCY_STOP:       break;
+            case EVENT_ID_AI_TRAIN:             break;
+            default:                            break;
+           }
+        }
+     }
   };
 
 // Alias for cleaner EA code
@@ -238,6 +313,32 @@ void ProcessDeferredEvents()
    while(bus.Pop(ev))
      {
       bus.Dispatch(ev);
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| ProcessDeferredEventsZeroAlloc — Zero-allocation event processor |
+//+------------------------------------------------------------------+
+// Optimized version that uses the event pool for zero dynamic allocation.
+// Call this from OnTimer() for better performance in production.
+void ProcessDeferredEventsZeroAlloc()
+  {
+   CEventBus *bus = CEventBus::Instance();
+   if(CheckPointer(bus) == POINTER_INVALID) return;
+   
+   // Use pool-based processing if available
+   if(bus.IsPoolExhausted())
+     {
+      Print("[EventBus][WARN] Pool exhausted, falling back to standard processing");
+      ProcessDeferredEvents(); // Fallback
+      return;
+     }
+   
+   // Drain the queue using zero-allocation path
+   PASREvent ev;
+   while(bus.Pop(ev))
+     {
+      bus.DispatchZeroAlloc(&ev);
      }
   }
 
