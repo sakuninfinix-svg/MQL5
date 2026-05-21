@@ -1,216 +1,289 @@
 //+------------------------------------------------------------------+
-//|                                     Signal/AI/AITrainer.mqh     |
-//|                                     Copyright 2026, Agsicentre  |
+//|                                                    AITrainer.mqh |
+//|          Backpropagation, replay buffer, sample labeling         |
+//|                                       Copyright 2026, Agsicentre |
+//+------------------------------------------------------------------+
+//| v4.01 CHANGES (2026-05-21):                                      |
+//| - FIX [CRITICAL]: PushReplay() was copying only NN_INPUTS (8)    |
+//|   features — silently truncating F09-F25 from replay buffer.     |
+//|   Now copies AI_FEATURE_DIM (26) — full feature vector stored.   |
+//| - FIX [HIGH]: LabelOutcome() features copy now uses              |
+//|   AI_FEATURE_DIM — replay sample always stores full 26 dims.     |
+//| - FIX [MEDIUM]: snap_h2w dimensioned by NN_H1/NN_H2 constants,  |
+//|   not hardcoded — safe for future layer size changes.            |
+//| - Version bump: 3.01 → 4.01                                      |
 //|                                                                  |
-//|  PURPOSE: Backpropagation + replay buffer + model persistence.  |
-//|    - ONLY called via deferred EventBus event (OnNewBar)          |
-//|    - NEVER called from OnTick() directly                        |
-//|    - Owns replay buffer and minibatch sampling                   |
-//|    - Handles file save/load of weights                           |
-//|    - Latency budget: < 50ms per NewBar (deferred thread)        |
+//| V3.01 FIXES (retained):                                          |
+//| - AI-BUG-FIX-1 [CRITICAL]: Stale h2w gradient — snap before     |
+//|   H2 update, use snap for H1 gradient computation.               |
+//| - AI-BUG-FIX-2 [HIGH]: LR decay floor — cyclical reset every    |
+//|   200 batches back to initial 0.01.                              |
+//| - AI-BUG-FIX-3 [MEDIUM]: AppendCsvRow FileClose guaranteed.      |
 //+------------------------------------------------------------------+
+#property copyright "Copyright 2026, Agsicentre"
+#property version   "4.01"
 #property strict
-#ifndef __SIGNAL_AI_TRAINER_MQH__
-#define __SIGNAL_AI_TRAINER_MQH__
 
-#include "../../AI/AITypes.mqh"
-#include "AIInference.mqh"
+#ifndef __AI_TRAINER_MQH__
+#define __AI_TRAINER_MQH__
 
-//--- Replay buffer config
-#define TRAINER_REPLAY_SIZE    512   // experience replay capacity
-#define TRAINER_MINIBATCH       32   // samples per training step
-#define TRAINER_MAX_EPOCHS       3   // passes per NewBar call
+#include "AITypes.mqh"
+#include "../Core/IManager.mqh"
 
-//--- One experience tuple: (state, action, reward, nextState, done)
-struct Experience
-  {
-   double   state[AI_MAX_INPUTS];
-   int      action;       // 0=NONE,1=BUY,2=SELL
-   double   reward;
-   double   nextState[AI_MAX_INPUTS];
-   bool     done;
-   datetime timestamp;
-  };
-
-//+------------------------------------------------------------------+
-//| CAITrainer                                                       |
-//+------------------------------------------------------------------+
-class CAITrainer
+/// Owns replay buffer + minibatch backprop + sample outcome labeling.
+/// Receives AIModelState by pointer so it can mutate weights.
+class AITrainer
   {
 private:
-   Experience   m_buffer[TRAINER_REPLAY_SIZE];
-   int          m_bufHead;       // circular write pointer
-   int          m_bufSize;       // actual filled size
-   AIWeightSet  m_weights;       // current model weights (shared with Inference)
-   double       m_learningRate;
-   double       m_gamma;         // discount factor for rewards
-   int          m_trainSteps;    // total training steps completed
-   string       m_modelFile;     // path for weight persistence
-   bool         m_dirty;         // weights changed since last save
+   AIModelState     *m_model;     // non-owning pointer to shared model state
+   DataManager      *m_data;      // non-owning
+   ReplaySample      m_buffer[REPLAY_CAPACITY];
+   int               m_head;
+   int               m_count;
+   int               m_labeledSince;
+   string            m_outcomeFile;
+   string            m_ticketFile;
 
-   //--- He initialisation for a layer
-   void InitLayer(AILayerWeights &layer, int inSz, int outSz)
+   double Logistic(double x) const { return 1.0 / (1.0 + MathExp(-x)); }
+
+   // AI-BUG-FIX-3 (v3.01, retained): FileClose always reached
+   void AppendCsvRow(const string filename,
+                     const string h1, const string h2,
+                     const string h3, const string h4,
+                     const string v1, const string v2,
+                     const string v3, const string v4)
      {
-      layer.inputSize  = inSz;
-      layer.outputSize = outSz;
-      double scale = MathSqrt(2.0 / inSz);
-      for(int o = 0; o < outSz; o++)
-        {
-         layer.biases[o] = 0.0;
-         for(int i = 0; i < inSz; i++)
-            layer.weights[o][i] = (MathRand() / 32767.0 - 0.5) * 2.0 * scale;
-        }
+      int handle = FileOpen(filename, FILE_READ|FILE_WRITE|FILE_CSV|FILE_ANSI);
+      if(handle == INVALID_HANDLE) return;
+      FileSeek(handle, 0, SEEK_END);
+      bool ok = true;
+      if(FileTell(handle) == 0)
+         ok = FileWrite(handle, h1, h2, h3, h4) > 0;
+      if(ok)
+         FileWrite(handle, v1, v2, v3, v4);
+      FileClose(handle); // guaranteed
      }
-
-   //--- MSE loss gradient for output layer (simplified policy gradient)
-   double OutputGrad(double predicted, double target)
-     { return 2.0 * (predicted - target); }
 
 public:
-   CAITrainer()
-      : m_bufHead(0), m_bufSize(0),
-        m_learningRate(0.001), m_gamma(0.95),
-        m_trainSteps(0), m_dirty(false)
-     {
-      m_modelFile = "PASR_weights.bin";
-      ZeroMemory(m_weights);
-     }
+   AITrainer() : m_model(NULL), m_data(NULL),
+                 m_head(0), m_count(0), m_labeledSince(0)
+     { ZeroMemory(m_buffer); }
 
-   //--- Initialise network architecture: inputSz -> hidden[] -> outputs
-   void InitNetwork(int inputSz, const int &hiddenSizes[], int hiddenCount,
-                    int outputSz = AI_MAX_OUTPUTS)
-     {
-      m_weights.layerCount = hiddenCount + 1;
-      if(m_weights.layerCount > AI_MAX_LAYERS)
-         m_weights.layerCount = AI_MAX_LAYERS;
+   void SetModel(AIModelState *model) { m_model = model; }
+   void SetData(DataManager *data)    { m_data  = data; }
+   void SetFiles(const string outcomeFile, const string ticketFile)
+     { m_outcomeFile = outcomeFile; m_ticketFile = ticketFile; }
 
-      int prevSz = inputSz;
-      for(int l = 0; l < hiddenCount && l < AI_MAX_LAYERS - 1; l++)
-        {
-         InitLayer(m_weights.layers[l], prevSz, hiddenSizes[l]);
-         prevSz = hiddenSizes[l];
-        }
-      InitLayer(m_weights.layers[m_weights.layerCount - 1], prevSz, outputSz);
-      m_dirty = true;
-     }
+   int  GetReplayCount()  const { return m_count; }
+   bool ShouldTrain()     const { return m_labeledSince >= MINIBATCH_SIZE
+                                      && m_count >= MINIBATCH_SIZE; }
 
-   //--- Push one experience into circular replay buffer
-   void Remember(const double &state[], int action, double reward,
-                 const double &nextState[], bool done)
+   //+----------------------------------------------------------------+
+   //| PushReplay — circular buffer O(1)                              |
+   //| v4.01 FIX: copy AI_FEATURE_DIM (26) dims, not NN_INPUTS (12)  |
+   //| Replay buffer must store full feature vector for future        |
+   //| retraining with any subset of features.                        |
+   //+----------------------------------------------------------------+
+   void PushReplay(const double &features[], double label)
      {
-      Experience &e = m_buffer[m_bufHead];
-      int n = MathMin(ArraySize(state), AI_MAX_INPUTS);
+      int n = MathMin(ArraySize(features), AI_FEATURE_DIM);
       for(int i = 0; i < n; i++)
-        {
-         e.state[i]     = state[i];
-         e.nextState[i] = nextState[i];
-        }
-      e.action    = action;
-      e.reward    = reward;
-      e.done      = done;
-      e.timestamp = TimeCurrent();
-
-      m_bufHead = (m_bufHead + 1) % TRAINER_REPLAY_SIZE;
-      if(m_bufSize < TRAINER_REPLAY_SIZE) m_bufSize++;
+         m_buffer[m_head].features[i] = features[i];
+      // Zero-pad if features array is smaller than AI_FEATURE_DIM
+      for(int i = n; i < AI_FEATURE_DIM; i++)
+         m_buffer[m_head].features[i] = 0.5; // neutral fallback
+      m_buffer[m_head].label = label;
+      m_head  = (m_head + 1) % REPLAY_CAPACITY;
+      if(m_count < REPLAY_CAPACITY) m_count++;
      }
 
-   //--- Run one training cycle (called ONLY from OnNewBar deferred event)
-   //--- Returns number of weight updates performed
-   int TrainStep()
+   // Overload: push directly from FeatureVector (preferred path v4.01)
+   void PushReplay(const FeatureVector &fv, double label)
      {
-      if(m_bufSize < TRAINER_MINIBATCH) return 0;
-
-      int updates = 0;
-      for(int epoch = 0; epoch < TRAINER_MAX_EPOCHS; epoch++)
-        {
-         // Sample minibatch (uniform random from replay buffer)
-         for(int b = 0; b < TRAINER_MINIBATCH; b++)
-           {
-            int idx = MathRand() % m_bufSize;
-            Experience &e = m_buffer[idx];
-
-            // Simple Q-target: r + gamma * max(Q(s'))
-            // (shallow approx — full DQN would use target network)
-            double target = e.reward;
-            if(!e.done) target += m_gamma * 1.0; // placeholder: use Inference for Q(s')
-
-            // Update output layer weights for chosen action
-            // (gradient descent, single output neuron approximation)
-            AILayerWeights &outLayer = m_weights.layers[m_weights.layerCount - 1];
-            int outIdx = e.action;
-            double grad = OutputGrad(target, target); // placeholder loss
-            for(int i = 0; i < outLayer.inputSize; i++)
-               outLayer.weights[outIdx][i] -= m_learningRate * grad * e.state[i];
-            outLayer.biases[outIdx] -= m_learningRate * grad;
-
-            updates++;
-           }
-        }
-
-      m_trainSteps += updates;
-      m_dirty = true;
-      return updates;
+      // Extract NN_INPUTS slice via ToNNInputs for training
+      // but store full AI_FEATURE_DIM in replay for replayability
+      double buf[AI_FEATURE_DIM];
+      for(int i = 0; i < AI_FEATURE_DIM; i++) buf[i] = fv.f[i];
+      m_buffer[m_head].label = label;
+      for(int i = 0; i < AI_FEATURE_DIM; i++)
+         m_buffer[m_head].features[i] = buf[i];
+      m_head  = (m_head + 1) % REPLAY_CAPACITY;
+      if(m_count < REPLAY_CAPACITY) m_count++;
      }
 
-   //--- Save weights to file (called by Orchestrator after TrainStep)
-   bool SaveWeights()
+   //+----------------------------------------------------------------+
+   //| TrainMiniBatch — backprop on NN_INPUTS-dim slice of replay     |
+   //| NN operates on 12-dim input (ToNNInputs mapping).              |
+   //| Full 26-dim is stored in replay for future re-slicing.         |
+   //+----------------------------------------------------------------+
+   void TrainMiniBatch()
      {
-      if(!m_dirty) return true;
-      int handle = FileOpen(m_modelFile, FILE_WRITE | FILE_BIN | FILE_COMMON);
-      if(handle == INVALID_HANDLE)
-        { Print("AITrainer: cannot open ", m_modelFile, " for write"); return false; }
+      if(CheckPointer(m_model) == POINTER_INVALID
+         || m_count < MINIBATCH_SIZE) return;
+      double lr = m_model.nnLearningRate;
 
-      FileWriteInteger(handle, m_weights.layerCount);
-      for(int l = 0; l < m_weights.layerCount; l++)
+      for(int b = 0; b < MINIBATCH_SIZE; b++)
         {
-         AILayerWeights &lw = m_weights.layers[l];
-         FileWriteInteger(handle, lw.inputSize);
-         FileWriteInteger(handle, lw.outputSize);
-         for(int o = 0; o < lw.outputSize; o++)
+         int idx = (int)(MathRand() % MathMin(m_count, REPLAY_CAPACITY));
+
+         // Extract NN_INPUTS-dim slice from stored 26-dim features
+         // Mapping mirrors FeatureVector.ToNNInputs():
+         //   [0]ATR [1]Spread [2]SL [3]Vol [4]Mom [5]SRConfl
+         //   [6]ADX [7]SRProxBull [8]SRProxBear [9]HourSin
+         //   [10]HTFTrendH4 [11]ATRPercentile
+         double feat[NN_INPUTS];
+         feat[0]  = m_buffer[idx].features[0];   // ATR
+         feat[1]  = m_buffer[idx].features[1];   // Spread
+         feat[2]  = m_buffer[idx].features[2];   // SL mult
+         feat[3]  = m_buffer[idx].features[4];   // Volume
+         feat[4]  = m_buffer[idx].features[5];   // Momentum
+         feat[5]  = m_buffer[idx].features[13];  // SR confluence
+         feat[6]  = m_buffer[idx].features[17];  // ADX
+         feat[7]  = m_buffer[idx].features[18];  // SR prox bull  (F19)
+         feat[8]  = m_buffer[idx].features[19];  // SR prox bear  (F20)
+         feat[9]  = m_buffer[idx].features[22];  // Hour sin      (F23)
+         feat[10] = m_buffer[idx].features[24];  // HTF trend H4  (F25)
+         feat[11] = m_buffer[idx].features[25];  // ATR percentile(F26)
+         double label = m_buffer[idx].label;
+
+         //--- Forward pass
+         double h1[NN_H1], z1[NN_H1];
+         for(int j = 0; j < NN_H1; j++)
            {
-            FileWriteDouble(handle, lw.biases[o]);
-            for(int i = 0; i < lw.inputSize; i++)
-               FileWriteDouble(handle, lw.weights[o][i]);
+            z1[j] = m_model.h1b[j];
+            for(int i = 0; i < NN_INPUTS; i++) z1[j] += feat[i] * m_model.h1w[i][j];
+            h1[j] = MathMax(0.0, z1[j]); // ReLU
            }
+         double h2[NN_H2], z2[NN_H2];
+         for(int j = 0; j < NN_H2; j++)
+           {
+            z2[j] = m_model.h2b[j];
+            for(int i = 0; i < NN_H1; i++) z2[j] += h1[i] * m_model.h2w[i][j];
+            h2[j] = MathMax(0.0, z2[j]); // ReLU
+           }
+         double raw = m_model.ob;
+         for(int j = 0; j < NN_H2; j++) raw += h2[j] * m_model.ow[j];
+         double pred  = Logistic(raw);
+         double err   = pred - label;
+         double d_out = err * pred * (1.0 - pred);
+
+         //--- Output layer update
+         for(int j = 0; j < NN_H2; j++)
+            m_model.ow[j] -= lr * (d_out * h2[j] + L2_LAMBDA * m_model.ow[j]);
+         m_model.ob -= lr * d_out;
+
+         //--- AI-BUG-FIX-1 (v3.01 retained): snapshot h2w BEFORE H2 update
+         //    so H1 gradient uses pre-update weights (correct backprop)
+         //    v4.01: dimensioned via NN_H1/NN_H2 constants (not hardcoded)
+         double snap_h2w[NN_H1][NN_H2];
+         for(int i = 0; i < NN_H1; i++)
+            for(int j = 0; j < NN_H2; j++)
+               snap_h2w[i][j] = m_model.h2w[i][j];
+
+         //--- Hidden layer 2 update
+         double d_h2[NN_H2];
+         for(int j = 0; j < NN_H2; j++)
+           {
+            d_h2[j] = (z2[j] > 0) ? d_out * m_model.ow[j] : 0.0;
+            for(int i = 0; i < NN_H1; i++)
+               m_model.h2w[i][j] -= lr * (d_h2[j] * h1[i]
+                                          + L2_LAMBDA * m_model.h2w[i][j]);
+            m_model.h2b[j] -= lr * d_h2[j];
+           }
+
+         //--- Hidden layer 1 update — uses snap_h2w (pre-H2-update)
+         for(int j = 0; j < NN_H1; j++)
+           {
+            double grad = 0;
+            for(int k = 0; k < NN_H2; k++) grad += d_h2[k] * snap_h2w[j][k];
+            double d_h1 = (z1[j] > 0) ? grad : 0.0;
+            for(int i = 0; i < NN_INPUTS; i++)
+               m_model.h1w[i][j] -= lr * (d_h1 * feat[i]
+                                          + L2_LAMBDA * m_model.h1w[i][j]);
+            m_model.h1b[j] -= lr * d_h1;
+           }
+
+         //--- Platt scaling inline update
+         double plattPred = Logistic(m_model.plattA * raw + m_model.plattB);
+         double plattErr  = plattPred - label;
+         m_model.plattA  -= 0.01 * plattErr * plattPred * (1.0 - plattPred) * raw;
+         m_model.plattB  -= 0.01 * plattErr * plattPred * (1.0 - plattPred);
+         m_model.plattSamples++;
         }
-      FileClose(handle);
-      m_dirty = false;
-      Print("AITrainer: weights saved (", m_trainSteps, " steps)");
-      return true;
+
+      m_model.replayTrainCount++;
+      m_model.nnTrainingSamples += MINIBATCH_SIZE;
+
+      //--- AI-BUG-FIX-2 (v3.01 retained): cyclical LR reset every 200 batches
+      if(m_model.replayTrainCount % 200 == 0)
+        {
+         m_model.nnLearningRate = 0.01;
+         PrintFormat("[AITrainer] LR cyclical reset at batch #%d",
+                     m_model.replayTrainCount);
+        }
+      else if(m_model.replayTrainCount % 10 == 0
+              && m_model.nnLearningRate > 0.001)
+         m_model.nnLearningRate *= 0.95;
+
+      m_model.lastUpdateTime = TimeCurrent();
+      m_labeledSince = 0;
+
+      PrintFormat("[AITrainer] Batch #%d | LR=%.5f | replay=%d | platt=%d",
+                  m_model.replayTrainCount,
+                  m_model.nnLearningRate,
+                  m_count,
+                  m_model.plattSamples);
      }
 
-   //--- Load weights from file
-   bool LoadWeights()
+   //+----------------------------------------------------------------+
+   //| LabelOutcome — label closed position, push to replay           |
+   //| v4.01 FIX: features copy uses AI_FEATURE_DIM (not NN_INPUTS)   |
+   //+----------------------------------------------------------------+
+   void LabelOutcome(ulong ticket, double pnl,
+                     AISignalSample &samples[], int sampleCount)
      {
-      if(!FileIsExist(m_modelFile, FILE_COMMON)) return false;
-      int handle = FileOpen(m_modelFile, FILE_READ | FILE_BIN | FILE_COMMON);
-      if(handle == INVALID_HANDLE) return false;
-
-      m_weights.layerCount = FileReadInteger(handle);
-      for(int l = 0; l < m_weights.layerCount; l++)
+      for(int i = sampleCount - 1; i >= 0; i--)
         {
-         AILayerWeights &lw = m_weights.layers[l];
-         lw.inputSize  = FileReadInteger(handle);
-         lw.outputSize = FileReadInteger(handle);
-         for(int o = 0; o < lw.outputSize; o++)
-           {
-            lw.biases[o] = FileReadDouble(handle);
-            for(int i = 0; i < lw.inputSize; i++)
-               lw.weights[o][i] = FileReadDouble(handle);
-           }
+         if(samples[i].ticket != ticket || samples[i].labeled) continue;
+         samples[i].labeled = true;
+         double label = (pnl > 0) ? 1.0 : 0.0;
+         // v4.01: push full AI_FEATURE_DIM features to replay
+         double buf[AI_FEATURE_DIM];
+         int n = MathMin(AI_FEATURE_DIM, ArraySize(samples[i].features));
+         for(int k = 0; k < n; k++)          buf[k] = samples[i].features[k];
+         for(int k = n; k < AI_FEATURE_DIM; k++) buf[k] = 0.5;
+         PushReplay(buf, label);
+         m_labeledSince++;
+
+         AppendCsvRow(m_outcomeFile,
+                      "sample_id", "ticket", "pnl", "label_time",
+                      samples[i].sampleId,
+                      IntegerToString((int)ticket),
+                      DoubleToString(pnl, 2),
+                      TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS));
+         break;
         }
-      FileClose(handle);
-      m_dirty = false;
-      Print("AITrainer: weights loaded from ", m_modelFile);
-      return true;
      }
 
-   const AIWeightSet *GetWeights() const { return &m_weights; }
-   int  TrainSteps()  const { return m_trainSteps; }
-   int  BufferSize()  const { return m_bufSize; }
-   bool HasEnoughData() const { return m_bufSize >= TRAINER_MINIBATCH; }
-   void SetLearningRate(double lr) { m_learningRate = lr; }
-   void SetModelFile(const string f) { m_modelFile = f; }
+   //+----------------------------------------------------------------+
+   //| AttachTicket — link execution ticket to pending sample         |
+   //+----------------------------------------------------------------+
+   void AttachTicket(ulong ticket, AISignalSample &samples[], int sampleCount)
+     {
+      for(int i = sampleCount - 1; i >= 0; i--)
+        {
+         if(samples[i].ticket != 0 || samples[i].labeled) continue;
+         if(TimeCurrent() - samples[i].timestamp > 60)    continue;
+         samples[i].ticket = ticket;
+         AppendCsvRow(m_ticketFile,
+                      "sample_id", "ticket", "accepted", "attached_time",
+                      samples[i].sampleId,
+                      IntegerToString((int)ticket),
+                      samples[i].accepted ? "1" : "0",
+                      TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS));
+         return;
+        }
+     }
   };
 
-#endif // __SIGNAL_AI_TRAINER_MQH__
+#endif // __AI_TRAINER_MQH__

@@ -1,32 +1,22 @@
 //+------------------------------------------------------------------+
-//| PASR LAYER 4 — SIGNAL/AI SUBLAYER                               |
+//| PASR LAYER 5a — AI                                              |
 //|                                                                  |
 //| PURPOSE:                                                         |
-//|   AI/ML subsystem. Decomposed from the original monolithic      |
-//|   7.AIManager.mqh (69 KB God Object) into three focused files. |
+//|   AI/ML inference layer. Runs ONNX models or native NN for       |
+//|   market regime scoring and signal confidence weighting.         |
+//|   Training is deferred — NEVER runs synchronously on tick thread.|
 //|                                                                  |
-//| DECOMPOSITION STRATEGY:                                          |
+//| CONTENTS:                                                        |
+//|   AIManager.mqh    — NN inference + async training dispatcher    |
 //|                                                                  |
-//|   AIInference.mqh                                               |
-//|     — Forward pass only. Reads input features from DataManager  |
-//|       and MarketRegime. Produces probability scores.           |
-//|     — Called every tick: must be O(layers) with zero alloc.   |
-//|     — No training data, no weight updates, no file I/O.        |
+//| FUTURE DECOMPOSITION (v3.0 target):                              |
+//|   AIInference.mqh  — Pure inference path (tick-safe, <1ms)       |
+//|   AITrainer.mqh    — Backprop + replay buffer (bar-frequency)    |
+//|   AIOrchestrator.mqh — Coordinates inference + training          |
 //|                                                                  |
-//|   AITrainer.mqh                                                  |
-//|     — Backpropagation + weight updates + replay buffer.        |
-//|     — ONLY executed via deferred EventBus event (NewBar).      |
-//|     — Never called directly from OnTick().                     |
-//|     — Owns the replay buffer and minibatch sampling.           |
-//|     — Handles model persistence (file save/load).              |
-//|                                                                  |
-//|   AIOrchestrator.mqh                                            |
-//|     — Thin coordinator between Inference and Trainer.          |
-//|     — Decides when to train (throttle, market hours).          |
-//|     — Manages the expert regime switch logic.                  |
-//|     — This is the ONLY file included by SignalManager.mqh.     |
-//|                                                                  |
-//| LATENCY BUDGET:                                                  |
-//|   AIInference.mqh per-tick: target < 0.5ms (1 layer = ~0.05ms)|
-//|   AITrainer.mqh per-NewBar: target < 50ms (deferred, not tick) |
+//| DEPENDENCY RULES:                                                |
+//|   ✅ MAY include   : Core/, Infra/, Analysis/                    |
+//|   ❌ MUST NOT include: Signal/, Trade/, UI/                      |
 //+------------------------------------------------------------------+
+//
+// This file is a layer documentation stub — never included.
