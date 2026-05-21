@@ -1,238 +1,96 @@
 //+------------------------------------------------------------------+
-//|                                                    QA/Audit.mqh  |
-//|                                       Copyright 2026, Agsicentre |
-//|            Automated Code Quality & Performance Audit Tool       |
-//|                   VERSION 1.01 - Relocated to QA/               |
+//| QA/Audit.mqh — v1.00                                             |
+//| Config + system health auditor (PASR_QA_BUILD only)              |
 //+------------------------------------------------------------------+
-// NOTE: File relocated from PASR.Audit.mqh (root) to QA/Audit.mqh
-// Update includes: #include <PASR/QA/Audit.mqh>
-//+------------------------------------------------------------------+
-
-#property copyright "Copyright 2026, Agsicentre"
-#property link      "agsicentre.wordpress.com"
-#property version   "1.01"
 #property strict
+#ifndef __QA_AUDIT_MQH__
+#define __QA_AUDIT_MQH__
 
-#ifndef __PASR_QA_AUDIT_MQH__
-#define __PASR_QA_AUDIT_MQH__
+#include "../Core/IManager.mqh"
+#include "../Trade/RiskManager.mqh"
 
-enum ENUM_AUDIT_SEVERITY
-{
-   AUDIT_INFO,
-   AUDIT_WARNING,
-   AUDIT_ERROR,
-   AUDIT_CRITICAL
-};
-
-enum ENUM_AUDIT_CATEGORY
-{
-   AUDIT_CODE_QUALITY,
-   AUDIT_PERFORMANCE,
-   AUDIT_ARCHITECTURE,
-   AUDIT_BEST_PRACTICES,
-   AUDIT_MEMORY,
-   AUDIT_SECURITY
-};
-
-struct AuditFinding
-{
-   string              file;
-   int                 line;
-   string              rule;
-   string              message;
-   ENUM_AUDIT_SEVERITY severity;
-   ENUM_AUDIT_CATEGORY category;
-   string              suggestion;
-   double              impact;
-
-   AuditFinding() : line(0), severity(AUDIT_INFO), category(AUDIT_CODE_QUALITY), impact(0) {}
-
-   string ToString() const
-   {
-      string s = "";
-      switch(severity)
-      {
-         case AUDIT_INFO:     s = "INFO";     break;
-         case AUDIT_WARNING:  s = "WARNING";  break;
-         case AUDIT_ERROR:    s = "ERROR";    break;
-         case AUDIT_CRITICAL: s = "CRITICAL"; break;
-      }
-      return StringFormat("[%s][%s] %s:%d - %s: %s (Impact: %.1f%%)",
-                          s, EnumToString(category), file, line, rule, message, impact);
-   }
-};
-
-struct AuditReport
-{
-   AuditFinding findings[];
-   int          totalFindings;
-   int          criticalCount;
-   int          errorCount;
-   int          warningCount;
-   int          infoCount;
-   double       overallScore;
-   datetime     auditTime;
-
-   AuditReport() : totalFindings(0), criticalCount(0), errorCount(0),
-                   warningCount(0), infoCount(0), overallScore(100.0) {}
-
-   void AddFinding(const AuditFinding &finding)
-   {
-      int idx = ArraySize(findings);
-      ArrayResize(findings, idx + 1);
-      findings[idx] = finding;
-      totalFindings++;
-      switch(finding.severity)
-      {
-         case AUDIT_CRITICAL: criticalCount++; break;
-         case AUDIT_ERROR:    errorCount++;    break;
-         case AUDIT_WARNING:  warningCount++;  break;
-         case AUDIT_INFO:     infoCount++;     break;
-      }
-      double penalty = 0;
-      switch(finding.severity)
-      {
-         case AUDIT_CRITICAL: penalty = 10.0; break;
-         case AUDIT_ERROR:    penalty = 5.0;  break;
-         case AUDIT_WARNING:  penalty = 2.0;  break;
-         case AUDIT_INFO:     penalty = 0.5;  break;
-      }
-      overallScore = MathMax(0, overallScore - penalty * finding.impact / 100.0);
-   }
-
-   void LogReport() const
-   {
-      Print("=== PASR FRAMEWORK AUDIT REPORT ===");
-      Print("Audit Time:     ", TimeToString(auditTime));
-      Print("Overall Score:  ", DoubleToString(overallScore, 2), "/100");
-      Print("Total Findings: ", totalFindings);
-      Print("  Critical: ", criticalCount, "  Errors: ", errorCount,
-            "  Warnings: ", warningCount, "  Info: ", infoCount);
-      Print("");
-      if(totalFindings > 0)
-      {
-         Print("=== DETAILED FINDINGS ===");
-         for(int i = 0; i < totalFindings; i++)
-            Print(findings[i].ToString());
-      }
-      Print("=================================");
-   }
-
-   bool HasCriticalIssues() const { return criticalCount > 0; }
-   bool HasErrors()         const { return errorCount > 0;    }
-};
-
-class CodeQualityAuditor
-{
+//+------------------------------------------------------------------+
+//| CPASRAudit — runtime health checks                               |
+//+------------------------------------------------------------------+
+class CPASRAudit
+  {
 private:
-   AuditReport m_report;
+   const StrategyConfig *m_cfg;
+   CRiskManager         *m_risk;
+
+   struct AuditItem { string check; bool pass; string detail; };
+   AuditItem m_items[32];
+   int       m_count;
+
+   void Add(const string check, bool pass, const string detail="")
+     {
+      if(m_count >= 32) return;
+      m_items[m_count].check  = check;
+      m_items[m_count].pass   = pass;
+      m_items[m_count].detail = detail;
+      m_count++;
+     }
+
 public:
-   AuditReport RunAudit()
-   {
-      CheckFunctionComplexity();
-      CheckNamingConventions();
-      return m_report;
-   }
-private:
-   void CheckFunctionComplexity()
-   {
-      AuditFinding f;
-      f.file = "IManager.mqh"; f.line = 192;
-      f.rule = "FUNCTION_COMPLEXITY";
-      f.message = "HandleEvent has high cyclomatic complexity (>10)";
-      f.severity = AUDIT_WARNING; f.category = AUDIT_CODE_QUALITY;
-      f.suggestion = "Refactor into smaller methods or use Strategy pattern";
-      f.impact = 15.0;
-      m_report.AddFinding(f);
-   }
-   void CheckNamingConventions()
-   {
-      AuditFinding f;
-      f.file = "Globals.mqh"; f.line = 39;
-      f.rule = "NAMING_CONVENTION";
-      f.message = "Global pointer 'g_recorder' — ensure 'g_' prefix is consistent";
-      f.severity = AUDIT_INFO; f.category = AUDIT_BEST_PRACTICES;
-      f.suggestion = "Maintain consistent 'g_' prefix for all global pointers";
-      f.impact = 5.0;
-      m_report.AddFinding(f);
-   }
-};
+   CPASRAudit(const StrategyConfig *cfg, CRiskManager *risk)
+      : m_cfg(cfg), m_risk(risk), m_count(0) {}
 
-class PerformanceProfiler
-{
-private:
-   struct MetricPoint { datetime timestamp; ulong value; string label; };
-   MetricPoint m_metrics[];
-   ulong       m_startTime;
-public:
-   PerformanceProfiler() : m_startTime(0) {}
-   void StartProfiling() { m_startTime = GetMicrosecondCount(); ArrayResize(m_metrics, 0); }
-   void Mark(const string label)
-   {
-      ulong t = GetMicrosecondCount();
-      int idx = ArraySize(m_metrics);
-      ArrayResize(m_metrics, idx + 1);
-      m_metrics[idx].timestamp = TimeCurrent();
-      m_metrics[idx].value     = t - m_startTime;
-      m_metrics[idx].label     = label;
-   }
-   void LogProfile()
-   {
-      Print("=== PERFORMANCE PROFILE ===");
-      Print("Total: ", (GetMicrosecondCount() - m_startTime) / 1000.0, " ms");
-      for(int i = 1; i < ArraySize(m_metrics); i++)
-      {
-         ulong d = m_metrics[i].value - m_metrics[i-1].value;
-         Print("  ", m_metrics[i].label, ": ", d / 1000.0, " ms");
-      }
-      Print("===========================");
-   }
-};
+   // Run all checks; returns true if all pass
+   bool Run()
+     {
+      m_count = 0;
 
-class ArchitectureComplianceChecker
-{
-private:
-   AuditReport m_report;
-public:
-   AuditReport RunCheck()
-   {
-      AuditFinding f;
-      f.file = "PASR.mqh"; f.rule = "LAYER_COMPLIANCE";
-      f.message = "Architecture layers properly defined";
-      f.severity = AUDIT_INFO; f.category = AUDIT_ARCHITECTURE; f.impact = 0.0;
-      m_report.AddFinding(f);
-      return m_report;
-   }
-};
+      // Config checks
+      Add("MagicNumber > 0",           m_cfg.MagicNumber > 0);
+      Add("RiskPerTrade in [0.1,10]",
+          m_cfg.Risk.RiskPerTrade >= 0.1 && m_cfg.Risk.RiskPerTrade <= 10.0,
+          StringFormat("%.2f", m_cfg.Risk.RiskPerTrade));
+      Add("SLMultiplier >= 0.5",        m_cfg.Risk.SLMultiplier >= 0.5);
+      Add("TPMultiplier >= SLMult",     m_cfg.Risk.TPMultiplier >= m_cfg.Risk.SLMultiplier);
+      Add("MaxOpenTrades >= 1",         m_cfg.Risk.MaxOpenTrades >= 1);
+      Add("MaxDailyLossPct in [0,50]",
+          m_cfg.Risk.MaxDailyLossPct >= 0 && m_cfg.Risk.MaxDailyLossPct <= 50.0);
+      Add("MaxDrawdownPct in [0,100]",
+          m_cfg.Risk.MaxDrawdownPct >= 0 && m_cfg.Risk.MaxDrawdownPct <= 100.0);
 
-class PASRAuditor
-{
-private:
-   CodeQualityAuditor        m_codeAuditor;
-   PerformanceProfiler       m_profiler;
-   ArchitectureComplianceChecker m_archChecker;
-public:
-   void RunFullAudit()
-   {
-      Print("Starting PASR Framework Full Audit...");
-      ulong t0 = GetMicrosecondCount();
-      AuditReport code = m_codeAuditor.RunAudit();
-      AuditReport arch = m_archChecker.RunCheck();
-      m_profiler.StartProfiling();
-      m_profiler.Mark("Audit complete");
-      m_profiler.LogProfile();
-      AuditReport final;
-      for(int i = 0; i < code.totalFindings; i++) final.AddFinding(code.findings[i]);
-      for(int i = 0; i < arch.totalFindings; i++) final.AddFinding(arch.findings[i]);
-      final.auditTime = TimeCurrent();
-      final.LogReport();
-      Print("Total Audit Time: ", (GetMicrosecondCount() - t0) / 1000.0, " ms");
-      if(final.HasCriticalIssues()) Print("CRITICAL ISSUES FOUND!");
-      else if(final.HasErrors())    Print("ERRORS FOUND - fix before production");
-      else                          Print("Audit passed.");
-   }
-};
+      // Account checks
+      double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+      Add("AccountBalance > 0", bal > 0, StringFormat("%.2f", bal));
+      Add("Leverage >= 1",      AccountInfoInteger(ACCOUNT_LEVERAGE) >= 1);
 
-void RunPASRAudit() { PASRAuditor a; a.RunFullAudit(); }
+      // Symbol checks
+      Add("Symbol digits valid", _Digits >= 2 && _Digits <= 8);
+      Add("Symbol point > 0",    _Point > 0);
 
-#endif // __PASR_QA_AUDIT_MQH__
+      // Risk state (if available)
+      if(m_risk != NULL)
+        {
+         Add("DD < max", m_risk.GetDrawdownPct() < m_cfg.Risk.MaxDrawdownPct,
+             StringFormat("DD=%.1f%%", m_risk.GetDrawdownPct()));
+         Add("Daily PnL > loss limit",
+             m_risk.GetDailyPnLPct() > -m_cfg.Risk.MaxDailyLossPct,
+             StringFormat("DailyPnL=%.1f%%", m_risk.GetDailyPnLPct()));
+        }
+
+      // Report
+      bool allPass = true;
+      for(int i=0; i<m_count; i++)
+        {
+         if(!m_items[i].pass)
+           {
+            allPass = false;
+            PrintFormat("[Audit] FAIL: %s %s", m_items[i].check, m_items[i].detail);
+           }
+         else if(m_items[i].detail != "")
+            PrintFormat("[Audit] OK:   %s = %s", m_items[i].check, m_items[i].detail);
+        }
+
+      PrintFormat("[Audit] %d/%d checks passed", m_count - (allPass?0:1), m_count);
+      return allPass;
+     }
+
+   int  GetCount()  const { return m_count; }
+   bool GetResult(int i) const { return (i>=0&&i<m_count)?m_items[i].pass:false; }
+  };
+
+#endif

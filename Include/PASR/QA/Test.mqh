@@ -1,207 +1,68 @@
 //+------------------------------------------------------------------+
-//|                                                     QA/Test.mqh  |
-//|                                       Copyright 2026, Agsicentre |
-//|                     Unit Testing Framework for PASR              |
-//|                   VERSION 1.01 - Relocated to QA/               |
+//| QA/Test.mqh — v1.00                                              |
+//| Lightweight synchronous test runner for PASR unit tests.         |
+//| PASR_QA_BUILD define required to include this file.              |
 //+------------------------------------------------------------------+
-// NOTE: File relocated from PASR.Test.mqh (root) to QA/Test.mqh
-// Update includes: #include <PASR/QA/Test.mqh>
-//+------------------------------------------------------------------+
-
-#property copyright "Copyright 2026, Agsicentre"
-#property link      "agsicentre.wordpress.com"
-#property version   "1.01"
 #property strict
+#ifndef __QA_TEST_MQH__
+#define __QA_TEST_MQH__
 
-#ifndef __PASR_QA_TEST_MQH__
-#define __PASR_QA_TEST_MQH__
+#define PASR_ASSERT(expr, msg) CPASRTest::_Assert((expr), (msg), __FILE__, __LINE__)
+#define PASR_TEST(name)        void Test_##name(CPASRTest &T)
+#define PASR_RUN(runner, name) runner.Run(Test_##name, #name)
 
-enum ENUM_TEST_RESULT { TEST_PASS, TEST_FAIL, TEST_SKIP, TEST_ERROR };
-
-struct TestResult
-{
-   string           testName;
-   string           className;
-   ENUM_TEST_RESULT result;
-   string           message;
-   ulong            durationUs;
-   int              lineNumber;
-
-   TestResult() : result(TEST_SKIP), durationUs(0), lineNumber(0) {}
-
-   string ToString() const
-   {
-      string r = "";
-      switch(result)
-      {
-         case TEST_PASS:  r = "PASS";  break;
-         case TEST_FAIL:  r = "FAIL";  break;
-         case TEST_SKIP:  r = "SKIP";  break;
-         case TEST_ERROR: r = "ERROR"; break;
-      }
-      return StringFormat("[%s] %s::%s (%d us) - %s", r, className, testName, durationUs, message);
-   }
-};
-
-struct TestSuiteReport
-{
-   TestResult results[];
-   int        totalTests;
-   int        passCount;
-   int        failCount;
-   int        skipCount;
-   int        errorCount;
-   ulong      totalDuration;
-   double     passRate;
-
-   TestSuiteReport() : totalTests(0), passCount(0), failCount(0),
-                       skipCount(0), errorCount(0), totalDuration(0), passRate(0.0) {}
-
-   void AddResult(const TestResult &r)
-   {
-      int idx = ArraySize(results);
-      ArrayResize(results, idx + 1);
-      results[idx] = r;
-      totalTests++;
-      totalDuration += r.durationUs;
-      switch(r.result)
-      {
-         case TEST_PASS:  passCount++;  break;
-         case TEST_FAIL:  failCount++;  break;
-         case TEST_SKIP:  skipCount++;  break;
-         case TEST_ERROR: errorCount++; break;
-      }
-      passRate = totalTests > 0 ? (double)passCount / (double)totalTests * 100.0 : 0.0;
-   }
-
-   void LogReport() const
-   {
-      Print("=== TEST SUITE REPORT ===");
-      Print("Total: ", totalTests, "  Pass: ", passCount,
-            " (", DoubleToString(passRate, 1), "%)  Fail: ", failCount,
-            "  Error: ", errorCount, "  Skip: ", skipCount);
-      Print("Duration: ", totalDuration / 1000.0, " ms");
-      if(failCount > 0 || errorCount > 0)
-      {
-         Print("=== FAILED TESTS ===");
-         for(int i = 0; i < totalTests; i++)
-            if(results[i].result == TEST_FAIL || results[i].result == TEST_ERROR)
-               Print(results[i].ToString());
-      }
-      Print("=========================");
-   }
-
-   bool AllPassed() const { return failCount == 0 && errorCount == 0; }
-};
-
-class Assert
-{
+//+------------------------------------------------------------------+
+//| CPASRTest — minimal test runner                                  |
+//+------------------------------------------------------------------+
+class CPASRTest
+  {
 private:
-   static int s_assertions;
-   static int s_failures;
+   int m_pass, m_fail, m_total;
+   string m_suiteName;
+
 public:
-   static void Reset() { s_assertions = 0; s_failures = 0; }
-   static int  Count()   { return s_assertions; }
-   static int  Failures(){ return s_failures;   }
+   CPASRTest(string suite="") : m_pass(0), m_fail(0), m_total(0), m_suiteName(suite) {}
 
-   static bool IsTrue(bool c, const string msg = "")
-   { s_assertions++; if(!c){ s_failures++; Print("FAIL IsTrue: ", msg); return false; } return true; }
+   typedef void (*TestFn)(CPASRTest &);
 
-   static bool IsFalse(bool c, const string msg = "")
-   { s_assertions++; if(c){ s_failures++; Print("FAIL IsFalse: ", msg); return false; } return true; }
+   void Run(TestFn fn, const string testName)
+     {
+      PrintFormat("[Test] RUN: %s", testName);
+      fn(this);
+     }
 
-   static bool AreEqual(int exp, int act, const string msg = "")
-   { s_assertions++; if(exp!=act){ s_failures++; Print(StringFormat("FAIL AreEqual: exp=%d act=%d - %s",exp,act,msg)); return false; } return true; }
+   static void _Assert(bool expr, const string msg, const string file, int line)
+     { /* Instance-free — calls Print directly */
+       if(!expr) PrintFormat("[Test] FAIL %s:%d — %s", file, line, msg);
+       else      PrintFormat("[Test] PASS — %s", msg);
+     }
 
-   static bool AreEqual(double exp, double act, double tol=0.0001, const string msg="")
-   { s_assertions++; if(MathAbs(exp-act)>tol){ s_failures++; Print(StringFormat("FAIL AreEqual: exp=%.8f act=%.8f - %s",exp,act,msg)); return false; } return true; }
+   void Expect(bool expr, const string msg)
+     {
+      m_total++;
+      if(expr) { m_pass++; PrintFormat("[Test] PASS %s",  msg); }
+      else     { m_fail++; PrintFormat("[Test] FAIL %s ← assertion false", msg); }
+     }
 
-   static bool AreEqual(string exp, string act, const string msg="")
-   { s_assertions++; if(exp!=act){ s_failures++; Print(StringFormat("FAIL AreEqual: exp='%s' act='%s' - %s",exp,act,msg)); return false; } return true; }
+   void ExpectEq(double a, double b, double tol, const string msg)
+     {
+      Expect(MathAbs(a-b) <= tol,
+             StringFormat("%s (%.6f == %.6f ± %.6f)", msg, a, b, tol));
+     }
 
-   static bool IsNotNull(void *p, const string msg="")
-   { s_assertions++; if(p==NULL){ s_failures++; Print("FAIL IsNotNull: ",msg); return false; } return true; }
+   void ExpectNear(double a, double b, const string msg)
+     { ExpectEq(a, b, 1e-6, msg); }
 
-   static bool IsNull(void *p, const string msg="")
-   { s_assertions++; if(p!=NULL){ s_failures++; Print("FAIL IsNull: ",msg); return false; } return true; }
+   void Summary()
+     {
+      PrintFormat("[Test] ═══ %s: %d/%d passed, %d failed ═══",
+                  m_suiteName, m_pass, m_total, m_fail);
+     }
 
-   static bool IsInRange(int v, int mn, int mx, const string msg="")
-   { s_assertions++; if(v<mn||v>mx){ s_failures++; Print(StringFormat("FAIL InRange: %d not in [%d,%d] - %s",v,mn,mx,msg)); return false; } return true; }
-};
+   bool AllPassed() const { return m_fail == 0; }
+   int  PassCount() const { return m_pass; }
+   int  FailCount() const { return m_fail; }
+   int  TotalCount()const { return m_total; }
+  };
 
-int Assert::s_assertions = 0;
-int Assert::s_failures   = 0;
-
-class CTestBase
-{
-protected:
-   TestSuiteReport m_report;
-   string          m_currentTest;
-   ulong           m_testStart;
-public:
-   CTestBase() {}
-   virtual ~CTestBase() {}
-   virtual void Setup()    {}
-   virtual void Teardown() {}
-   virtual void RunAllTests() = 0;
-   TestSuiteReport GetReport() const { return m_report; }
-protected:
-   void StartTest(const string name)
-   { m_currentTest = name; m_testStart = GetMicrosecondCount(); Assert::Reset(); }
-
-   void EndTest(ENUM_TEST_RESULT result, const string msg = "")
-   {
-      TestResult r;
-      r.testName   = m_currentTest;
-      r.className  = TypeName(this);
-      r.result     = result;
-      r.message    = msg;
-      r.durationUs = GetMicrosecondCount() - m_testStart;
-      m_report.AddResult(r);
-      if(result == TEST_FAIL || result == TEST_ERROR) Print(r.ToString());
-   }
-
-   bool ASSERT_TRUE(bool c,const string m="")        { return Assert::IsTrue(c,m); }
-   bool ASSERT_FALSE(bool c,const string m="")       { return Assert::IsFalse(c,m); }
-   bool ASSERT_EQ(int e,int a,const string m="")     { return Assert::AreEqual(e,a,m); }
-   bool ASSERT_EQD(double e,double a,double t=0.0001,const string m="") { return Assert::AreEqual(e,a,t,m); }
-   bool ASSERT_EQS(string e,string a,const string m="") { return Assert::AreEqual(e,a,m); }
-   bool ASSERT_NULL(void *p,const string m="")       { return Assert::IsNull(p,m); }
-   bool ASSERT_NOT_NULL(void *p,const string m="")   { return Assert::IsNotNull(p,m); }
-   bool ASSERT_RANGE(int v,int mn,int mx,const string m="") { return Assert::IsInRange(v,mn,mx,m); }
-};
-
-class TestRunner
-{
-private:
-   CTestBase *m_suites[];
-   int        m_count;
-public:
-   TestRunner() : m_count(0) {}
-
-   void Register(CTestBase *suite)
-   {
-      ArrayResize(m_suites, m_count + 1);
-      m_suites[m_count++] = suite;
-   }
-
-   TestSuiteReport RunAll()
-   {
-      TestSuiteReport combined;
-      Print("=== STARTING TEST RUN ===");
-      ulong t0 = GetMicrosecondCount();
-      for(int i = 0; i < m_count; i++)
-      {
-         if(!CheckPointer(m_suites[i])) continue;
-         Print("Suite: ", TypeName(m_suites[i]));
-         m_suites[i]->RunAllTests();
-         TestSuiteReport s = m_suites[i]->GetReport();
-         for(int j = 0; j < s.totalTests; j++) combined.AddResult(s.results[j]);
-      }
-      Print("=== DONE in ", (GetMicrosecondCount()-t0)/1000.0, " ms ===");
-      combined.LogReport();
-      return combined;
-   }
-};
-
-#endif // __PASR_QA_TEST_MQH__
+#endif

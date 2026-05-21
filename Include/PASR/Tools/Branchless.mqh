@@ -1,12 +1,8 @@
 //+------------------------------------------------------------------+
-//|                                          Tools/Branchless.mqh   |
-//|                                     Copyright 2026, Agsicentre  |
-//|  Canonical location — migrated from root PASR.Branchless.mqh    |
+//| Tools/Branchless.mqh — canonical forward to PASR.Branchless      |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __TOOLS_BRANCHLESS_MQH__
 #define __TOOLS_BRANCHLESS_MQH__
-
 #include "../PASR.Branchless.mqh"
-
-#endif // __TOOLS_BRANCHLESS_MQH__
+#endif
