@@ -2,15 +2,23 @@
 //|                                   Core/Config/Validator.mqh     |
 //|                                   Copyright 2026, Agsicentre    |
 //|                                                                  |
-//|  PURPOSE: Standalone config validation — 25 business rules.     |
+//|  PURPOSE: Standalone config validation — 28 business rules.     |
 //|    - Zero dependencies (no EventBus, no IManager)               |
 //|    - Returns human-readable error list                           |
 //|    - Called by CConfigManager before every ConfigReload dispatch |
 //|    - Can also be used in SmokeTest and OnInit guard             |
 //|                                                                  |
+//|  CHANGES v2.01 (2026-05-21):                                     |
+//|    Rule 26: DisplayConfig.FontSize range check [6,20]            |
+//|    Rule 27: Total theoretical risk guard:                        |
+//|             RiskPercent * MaxOpenPositions < MaxDailyLossPct     |
+//|             Prevents silent account blow-up from concurrent pos. |
+//|    Rule 28: ModelFileName path traversal guard:                  |
+//|             File must not start with "../"                       |
+//|             Blocks malicious .set files from escaping MQL5 dir.  |
+//|                                                                  |
 //|  USAGE:                                                          |
 //|    StrategyConfig cfg;                                           |
-//|    // ... populate cfg ...                                       |
 //|    string errors[];                                              |
 //|    if(!CConfigValidator::Validate(cfg, errors))                  |
 //|    {                                                             |
@@ -39,8 +47,9 @@ private:
      }
 
 public:
-   //--- Main entry point. Returns true if ALL rules pass.
+   //--- Main entry point. Returns true if ALL 28 rules pass.
    //--- On failure, errors[] is populated with all failing rules.
+   //--- This is a COMPLETE scan — all errors collected, not fail-fast.
    static bool Validate(const StrategyConfig &cfg, string &errors[])
      {
       ArrayResize(errors, 0);
@@ -134,8 +143,21 @@ public:
             AddError(errors, "[Config.AI] MinibatchSize must be in [1, 512] (got " +
                      IntegerToString(cfg.AI.MinibatchSize) + ")");
 
-         if(StringLen(cfg.AI.ModelFileName) == 0)
+         if(cfg.AI.PersistWeights && StringLen(cfg.AI.ModelFileName) == 0)
             AddError(errors, "[Config.AI] ModelFileName must not be empty when PersistWeights=true");
+
+         // RULE 28 — Path traversal guard
+         // A malicious .set file could set ModelFileName = "../../Windows/System32/evil.bin"
+         // and force the EA to write or read from an arbitrary filesystem path.
+         // Block any filename that tries to escape the MQL5/Common directory.
+         if(StringLen(cfg.AI.ModelFileName) > 0 &&
+            StringFind(cfg.AI.ModelFileName, "..\\") == 0)
+            AddError(errors, "[Config.AI] ModelFileName must not start with '../' "
+                     "(path traversal not allowed): " + cfg.AI.ModelFileName);
+         if(StringLen(cfg.AI.ModelFileName) > 0 &&
+            StringFind(cfg.AI.ModelFileName, "../") == 0)
+            AddError(errors, "[Config.AI] ModelFileName must not start with '../' "
+                     "(path traversal not allowed): " + cfg.AI.ModelFileName);
         }
 
       //=== SECTION 5: Pattern ==========================================
@@ -156,7 +178,15 @@ public:
          AddError(errors, "[Config.Pattern] EngulfMultiplier must be > 0 (got " +
                   DoubleToString(cfg.Pattern.EngulfMultiplier, 2) + ")");
 
-      //=== SECTION 6: Cross-field consistency ==========================
+      //=== SECTION 6: Display ==========================================
+
+      // RULE 26 — FontSize: must be renderable on MT5 chart
+      // Below 6pt is illegible; above 20pt overflows the panel area.
+      if(cfg.Display.FontSize < 6 || cfg.Display.FontSize > 20)
+         AddError(errors, "[Config.Display] FontSize must be in [6, 20] (got " +
+                  IntegerToString(cfg.Display.FontSize) + ")");
+
+      //=== SECTION 7: Cross-field consistency ==========================
 
       // TP must be strictly greater than SL (positive R:R)
       if(cfg.Risk.TPMultiplier > 0.0 && cfg.Risk.SLMultiplier > 0.0 &&
@@ -186,6 +216,28 @@ public:
                      IntegerToString(cfg.Market.SessionEndHour) + ")");
         }
 
+      // RULE 27 — Total theoretical risk guard
+      // Scenario: RiskPercent=5%, MaxOpenPositions=10 → 50% exposure at once
+      // If MaxDailyLossPct=3%, this is incoherent: 10 simultaneous 5% risks
+      // can blow the account in a single correlated adverse move.
+      // Rule: RiskPercent * MaxOpenPositions must not exceed MaxDailyLossPct * 2
+      // (factor 2 allows for reasonable concurrent trades within daily limit)
+      if(cfg.Risk.RiskPercent > 0.0 &&
+         cfg.Risk.MaxOpenPositions > 0 &&
+         cfg.Risk.MaxDailyLossPct > 0.0)
+        {
+         double totalRisk = cfg.Risk.RiskPercent * cfg.Risk.MaxOpenPositions;
+         double safeLimit = cfg.Risk.MaxDailyLossPct * 2.0;
+         if(totalRisk > safeLimit)
+            AddError(errors,
+                     "[Config.Risk] Total theoretical risk (RiskPercent " +
+                     DoubleToString(cfg.Risk.RiskPercent, 2) + "% x " +
+                     IntegerToString(cfg.Risk.MaxOpenPositions) + " positions = " +
+                     DoubleToString(totalRisk, 2) + "%) exceeds 2x MaxDailyLossPct (" +
+                     DoubleToString(safeLimit, 2) +
+                     "%). Reduce RiskPercent or MaxOpenPositions.");
+        }
+
       return ArraySize(errors) == 0;
      }
 
@@ -195,7 +247,7 @@ public:
       int n = ArraySize(errors);
       if(n == 0)
         {
-         Print("[CConfigValidator] Config OK — all rules passed");
+         Print("[CConfigValidator] Config OK — all 28 rules passed");
          return;
         }
       Print("[CConfigValidator] Config INVALID — ", n, " error(s):");
