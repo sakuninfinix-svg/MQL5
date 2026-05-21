@@ -73,10 +73,10 @@
 #include <PASR/Trade/PositionManager.mqh>
 #include <PASR/Trade/RecoveryManager.mqh>   // [14] v4.01: wired
 //--- AI
-#include <PASR/AI/AIFeatureBuilder.mqh>
-#include <PASR/AI/AIInference.mqh>
-#include <PASR/AI/AIEnsemble.mqh>
-#include <PASR/AI/AICalibrationBridge.mqh>
+#include <PASR/Signal/AI/AIFeatureBuilder.mqh>
+#include <PASR/Signal/AI/AIInference.mqh>
+#include <PASR/Signal/AI/AIEnsemble.mqh>
+#include <PASR/Signal/AI/AICalibrationBridge.mqh>
 //--- UI
 #include <PASR/UI/DashboardManager.mqh>
 

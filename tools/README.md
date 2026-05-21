@@ -113,10 +113,10 @@ pip install skl2onnx onnxruntime
 python tools/export_onnx.py --weights output/weights.json --out output/PASR_model.onnx
 
 # Copy ke MT5 Files/
-# Di EA: Include/PASR/AI/ONNXBridge.mqh sudah siap menerima model ini
+# Di EA: Include/PASR/Signal/AI/ONNXBridge.mqh sudah siap menerima model ini
 ```
 
-Lihat `Include/PASR/AI/ONNXBridge.mqh` untuk detail loading di sisi MQL5.
+Lihat `Include/PASR/Signal/AI/ONNXBridge.mqh` untuk detail loading di sisi MQL5.
 
 ---
 
