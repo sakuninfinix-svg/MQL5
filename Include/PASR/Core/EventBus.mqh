@@ -2,13 +2,6 @@
 //| Core/EventBus.mqh — CANONICAL v2.16                              |
 //| Priority-queue event bus + subscriber registry + dispatch        |
 //|                                                                  |
-//| CHANGES v2.16 (2024-12-19):                                      |
-//|   FIX #1  — Add Register(IManager*) + subscriber registry       |
-//|   FIX #1  — Add Dispatch(PASREvent&) routed to subscribers       |
-//|   FIX #8  — Dispatch() honours each subscriber's event mask     |
-//|             (set via IManager::AddEvent in DeclareEvents())      |
-//|   PERF    — Integrated CEventPool for zero-allocation events    |
-//|                                                                  |
 //| INVARIANTS:                                                      |
 //|   - Push()     : enqueue into min-heap (priority order)         |
 //|   - Pop()      : dequeue from min-heap (for DrainQueue pattern) |
@@ -84,6 +77,12 @@ public:
 class PASREventBus
   {
 private:
+  // Di dalam class PASREventBus, tambahkan method:
+  void ProcessDeferredEvents()
+  {
+   DrainQueue();  // Flush semua event yang di-queue
+  }
+
    // ── Min-heap queue ────────────────────────────────────────────
    PASREvent         m_queue[PASR_BUS_MAX_EVENTS];
    int               m_size;

@@ -1,192 +1,137 @@
 //+------------------------------------------------------------------+
-//| Trade/ExecutionManager.mqh  — CANONICAL v2.13                    |
-//|                                                                  |
-//| CHANGES v2.13 (2026-05-21):                                      |
-//|   - REMOVED global BuildGVPrefix() free function                 |
-//|     Was duplicate of IManager::BuildGVPrefix() — linker risk.   |
-//|     CExecutionManager inherits it from IManager.                 |
-//|   - REMOVED direct #include "../Core/Globals.mqh"                |
-//|     Globals.mqh must be included ONCE via Core/PASR.mqh.         |
-//|     Double-include causes extern re-declaration errors.          |
-//|   - Init() now uses inherited BuildGVPrefix() for GV prefix.     |
-//|                                                                  |
-//| INVARIANTS:                                                      |
-//|   ALL GlobalVariable keys MUST use prefix from BuildGVPrefix()   |
-//|   Format: PASR_{account_login}_{magic}_T{ticket}_SL / _TP        |
-//|   This prevents state corruption between live+demo instances     |
-//|   sharing the same magic number.                                 |
+//| Trade/ExecutionManager.mqh — v2.00                               |
+//| Order execution with retry, slippage guard, event emission.      |
+//| Replaces root ../6.ExecutionManager.mqh stub.                    |
 //+------------------------------------------------------------------+
-#pragma once
-#ifndef TRADE_EXECUTION_MANAGER_MQH
-#define TRADE_EXECUTION_MANAGER_MQH
+#property strict
+#ifndef __TRADE_EXECUTION_MANAGER_MQH__
+#define __TRADE_EXECUTION_MANAGER_MQH__
 
+#include <Trade/Trade.mqh>
 #include "../Core/IManager.mqh"
-#include "../Core/Events.mqh"
-// NOTE: Do NOT include Globals.mqh here.
-//       It is already included ONCE by Core/PASR.mqh (master include).
-//       Globals.mqh uses extern declarations — double-include = linker error.
+#include "TradePlan.mqh"
 
-//--- max concurrent tracked positions
-#define EXEC_MAX_POSITIONS 64
+enum ENUM_EXEC_RESULT { EXEC_OK=0, EXEC_RETRY=1, EXEC_FAIL=2 };
 
-//+------------------------------------------------------------------+
-//| Cached GV key registry — rebuilt only on trade events            |
-//| O(1) add/remove, O(n) rebuild triggered only by OnTradeOpen/Close|
-//+------------------------------------------------------------------+
-class CGVKeyCache
+struct ExecResult
   {
-public:
-   string            m_keys[EXEC_MAX_POSITIONS];
-   long              m_tickets[EXEC_MAX_POSITIONS];
-   int               m_count;
-   string            m_prefix;
+   ENUM_EXEC_RESULT status;
+   ulong            ticket;
+   int              retcode;
+   string           comment;
 
-   void              Init(const string prefix)
-     {
-      m_prefix = prefix;
-      m_count  = 0;
-     }
-
-   //--- Full rebuild from PositionsTotal() — O(n), call only on trade events
-   void              Rebuild()
-     {
-      m_count = 0;
-      int total = PositionsTotal();
-      for(int i = 0; i < total && m_count < EXEC_MAX_POSITIONS; i++)
-        {
-         ulong ticket = PositionGetTicket(i);
-         if(ticket == 0) continue;
-         m_tickets[m_count] = (long)ticket;
-         m_keys[m_count]    = m_prefix + "T" + IntegerToString((long)ticket);
-         m_count++;
-        }
-     }
-
-   //--- O(n) lookup — n <= EXEC_MAX_POSITIONS (64), effectively O(1) in practice
-   string            GetKey(long ticket) const
-     {
-      for(int i = 0; i < m_count; i++)
-         if(m_tickets[i] == ticket) return m_keys[i];
-      return "";
-     }
-
-   //--- O(n) remove with left-shift — called only on trade close event
-   void              Remove(long ticket)
-     {
-      for(int i = 0; i < m_count; i++)
-        {
-         if(m_tickets[i] == ticket)
-           {
-            for(int j = i; j < m_count - 1; j++)
-              {
-               m_keys[j]    = m_keys[j + 1];
-               m_tickets[j] = m_tickets[j + 1];
-              }
-            m_count--;
-            return;
-           }
-        }
-     }
-
-   //--- O(1) append — called only on trade open event
-   void              Add(long ticket)
-     {
-      if(m_count >= EXEC_MAX_POSITIONS) return;
-      m_tickets[m_count] = ticket;
-      m_keys[m_count]    = m_prefix + "T" + IntegerToString(ticket);
-      m_count++;
-     }
+   void Ok(ulong t)       { status=EXEC_OK;    ticket=t; retcode=0; comment=""; }
+   void Fail(int code, string msg) { status=EXEC_FAIL; ticket=0; retcode=code; comment=msg; }
   };
 
 //+------------------------------------------------------------------+
-//| CExecutionManager — canonical production implementation          |
+//| CExecutionManager — sends orders with retry + event dispatch     |
 //+------------------------------------------------------------------+
 class CExecutionManager : public IManager
   {
 private:
-   CGVKeyCache       m_gvCache;      // O(1) ticket → GV key mapping
-   bool              m_cacheValid;   // false = needs Rebuild() on next access
-
-   void              InvalidateCache() { m_cacheValid = false; }
-
-   //--- Lazy rebuild: only triggers if cache was invalidated
-   void              EnsureCache()
-     {
-      if(!m_cacheValid)
-        {
-         m_gvCache.Rebuild();
-         m_cacheValid = true;
-        }
-     }
+   CTrade  m_trade;
+   int     m_maxRetry;
+   int     m_retryDelayMs;
+   double  m_maxSlippage;   // in points
 
 public:
-   CExecutionManager() : m_cacheValid(false) {}
+   CExecutionManager()
+      : IManager(), m_maxRetry(3), m_retryDelayMs(200), m_maxSlippage(3.0) {}
 
-   bool              Init(IDataManager *data, CEventBus *bus) override
+   virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
-      // BuildGVPrefix() inherited from IManager — account+magic safe
-      // Format: PASR_{login}_{magic}_
-      m_gvCache.Init(BuildGVPrefix());
-      m_gvCache.Rebuild();
-      m_cacheValid = true;
+      m_trade.SetExpertMagicNumber((ulong)m_cfg.MagicNumber);
+      m_trade.SetDeviationInPoints((ulong)m_maxSlippage);
       return true;
      }
 
-   //--- Call from EA OnTradeTransaction to keep cache in sync
-   void              OnTradeOpen(long ticket)
+   virtual void DeclareEvents() override
      {
-      m_gvCache.Add(ticket);
-      m_cacheValid = true;
+      AddEvent(EVENT_ID_POSITION_UPDATE);
+      AddEvent(EVENT_ID_EMERGENCY_STOP);
+      AddEvent(EVENT_ID_CONFIG_RELOAD);
      }
 
-   void              OnTradeClose(long ticket)
-     {
-      m_gvCache.Remove(ticket);
-      m_cacheValid = true;
-     }
+   void SetMaxRetry(int n)         { m_maxRetry    = MathMax(1, n); }
+   void SetRetryDelayMs(int ms)    { m_retryDelayMs = MathMax(0, ms); }
+   void SetMaxSlippage(double pts) { m_maxSlippage  = MathMax(0, pts); }
 
-   //--- Persist SL/TP to GlobalVariable (survives terminal restart)
-   //--- Key format: PASR_{login}_{magic}_T{ticket}_SL / _TP
-   void              SaveTradeState(long ticket, double sl, double tp)
+   // ── Execute a TradePlan ────────────────────────────────────────
+   ExecResult Execute(const TradePlan &plan)
      {
-      EnsureCache();
-      string key = m_gvCache.GetKey(ticket);
-      if(key == "") return;
-      GlobalVariableSet(key + "_SL", sl);
-      GlobalVariableSet(key + "_TP", tp);
-     }
+      ExecResult res; res.Fail(0, "NotExecuted");
 
-   //--- Restore SL/TP from GlobalVariable (e.g. after terminal restart)
-   bool              LoadTradeState(long ticket, double &sl, double &tp)
-     {
-      EnsureCache();
-      string key = m_gvCache.GetKey(ticket);
-      if(key == "") return false;
-      sl = GlobalVariableGet(key + "_SL");
-      tp = GlobalVariableGet(key + "_TP");
-      return true;
-     }
+      if(!plan.valid)
+        { res.Fail(-1, "InvalidPlan"); return res; }
 
-   //--- Delete all GVs belonging to this EA instance (account-isolated)
-   //--- Safe to call on Deinit() or on explicit user reset
-   void              ClearAllGVs()
-     {
-      string prefix = BuildGVPrefix();
-      int total = (int)GlobalVariablesTotal();
-      for(int i = total - 1; i >= 0; i--)
+      for(int attempt = 1; attempt <= m_maxRetry; attempt++)
         {
-         string name = GlobalVariableName(i);
-         if(StringFind(name, prefix) == 0)
-            GlobalVariableDel(name);
+         bool sent = false;
+         if(plan.direction == 1)   // BUY
+            sent = m_trade.Buy(plan.lot, _Symbol,
+                               plan.entryPrice, plan.stopLoss, plan.takeProfit,
+                               StringFormat("PASR#%d", m_cfg.MagicNumber));
+         else                      // SELL
+            sent = m_trade.Sell(plan.lot, _Symbol,
+                                plan.entryPrice, plan.stopLoss, plan.takeProfit,
+                                StringFormat("PASR#%d", m_cfg.MagicNumber));
+
+         if(sent && m_trade.ResultRetcode() == TRADE_RETCODE_DONE)
+           {
+            ulong ticket = m_trade.ResultOrder();
+            if(m_debugMode)
+               PrintFormat("[Exec] OK ticket=%d lot=%.2f dir=%s attempt=%d",
+                           ticket, plan.lot, plan.direction==1?"BUY":"SELL", attempt);
+
+            PASREvent ev;
+            ev.id       = EVENT_ID_POSITION_UPDATE;
+            ev.priority = 50;
+            DispatchEvent(ev);
+
+            res.Ok(ticket);
+            return res;
+           }
+
+         int code = (int)m_trade.ResultRetcode();
+         if(m_debugMode)
+            PrintFormat("[Exec] Attempt %d/%d failed: code=%d %s",
+                        attempt, m_maxRetry, code, m_trade.ResultRetcodeDescription());
+
+         // Non-retriable errors
+         if(code == TRADE_RETCODE_INVALID_PRICE ||
+            code == TRADE_RETCODE_INVALID_STOPS ||
+            code == TRADE_RETCODE_INVALID_VOLUME)
+           { res.Fail(code, m_trade.ResultRetcodeDescription()); return res; }
+
+         if(attempt < m_maxRetry) Sleep(m_retryDelayMs);
         }
-      m_gvCache.Init(prefix);
-      m_cacheValid = false;
+
+      res.Fail((int)m_trade.ResultRetcode(), m_trade.ResultRetcodeDescription());
+      return res;
      }
 
-   void              OnNewBar()        override {}
-   void              OnPriceUpdate()   override {}
-   bool              IsHealthy()  const override { return true; }
+   // Close a specific ticket
+   bool CloseTicket(ulong ticket)
+     {
+      if(!PositionSelectByTicket(ticket)) return false;
+      bool ok = m_trade.PositionClose(ticket);
+      if(ok)
+        {
+         PASREvent ev; ev.id=EVENT_ID_POSITION_UPDATE; ev.priority=50;
+         DispatchEvent(ev);
+        }
+      return ok;
+     }
+
+   virtual void OnConfigReload() override
+     {
+      IManager::OnConfigReload();
+      m_trade.SetExpertMagicNumber((ulong)m_cfg.MagicNumber);
+      m_trade.SetDeviationInPoints((ulong)m_maxSlippage);
+     }
   };
 
-#endif // TRADE_EXECUTION_MANAGER_MQH
+typedef CExecutionManager ExecutionManager;
+#endif

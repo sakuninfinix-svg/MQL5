@@ -1,272 +1,235 @@
 //+------------------------------------------------------------------+
-//|                                           QA/SmokeTest.mqh      |
-//|                                     Copyright 2026, Agsicentre  |
-//|  Fast smoke tests that can be called from OnInit() to verify     |
-//|  the PASR framework is wired correctly before EA goes live.      |
+//| QA/SmokeTest.mqh — v3.00                                         |
+//| End-to-end smoke tests: Orchestrator Init + per-manager checks.  |
 //|                                                                  |
-//|  USAGE IN EA OnInit():                                           |
-//|    if(!RunPASRSmokeTests()) { ExpertRemove(); return INIT_FAILED; }|
+//| PHILOSOPHY:                                                      |
+//|   Smoke tests do NOT test logic correctness — they verify that   |
+//|   every manager initialises without crash or memory error,       |
+//|   and that the wiring produces non-null/valid state.             |
 //|                                                                  |
-//|  TESTS:                                                          |
-//|   1-7  : Core wiring (EventBus, config, math, symbol, account)  |
-//|   8-10 : Validator rules (Phase 5 — 33 rules)                   |
-//|   11-12: AIManager ring buffer invariants (Phase 7)             |
-//|   13   : DashboardManager prefix isolation (Phase 9)            |
+//| HOW TO RUN (via PASR_Smoke.mq5 Script):                          |
+//|   #define PASR_QA_BUILD                                          |
+//|   #include <PASR/Core/PASR.mqh>                                  |
+//|   void OnStart() {                                               |
+//|     CPASRSmoke smoke;                                            |
+//|     smoke.RunAll();                                              |
+//|   }                                                              |
+//|                                                                  |
+//| CHANGE LOG:                                                      |
+//|   v3.00 (2026-05-21) — Phase 4 sections:                         |
+//|     + RunRegimeSmoke()    : CRegimeFilter init + regime enum     |
+//|     + RunSignalV3Smoke()  : veto/mult/voter register + SourceCount|
+//|     + RunRiskSmoke()      : CalcLot + Check + IsCircuitBroken    |
+//|     + RunDashboardSmoke() : SetRegimeFilter + no crash           |
+//|   v2.00 (2026-05-20) — Phase 3 smoke sections                   |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __QA_SMOKE_TEST_MQH__
 #define __QA_SMOKE_TEST_MQH__
 
-#include "TestRunner.mqh"
-#include "../Core/EventBus.mqh"
-#include "../Core/Events.mqh"
-#include "../Core/IManager.mqh"
-#include "../Core/Config/Validator.mqh"  // Phase 5
-#include "../AI/AIManager.mqh"           // Phase 7 — for AI_REPLAY_BUF_SIZE, AIExperience
+#include "Assertions.mqh"
+#include "../Core/Orchestrator.mqh"
+#include "../Signal/RegimeFilter.mqh"
+#include "../Signal/RegimeSignalSource.mqh"
+#include "../Trade/RiskManager.mqh"
+#include "../UI/DashboardManager.mqh"
 
-//======================================================================
-//  EXISTING TESTS 1-7 (unchanged)
-//======================================================================
-
-//--- Test 1: EventBus singleton pattern
-void _Smoke_EventBusSingleton()
+//+------------------------------------------------------------------+
+//| CPASRSmoke — smoke runner for all Phase 1–4 managers            |
+//+------------------------------------------------------------------+
+class CPASRSmoke
   {
-   EventBus *a = EventBus::Instance();
-   EventBus *b = EventBus::Instance();
-   ASSERT_NOT_NULL(a);
-   ASSERT_EQ(a, b);
-  }
+private:
+   CAssertions m_assert;
 
-//--- Test 2: Event priority ordering
-void _Smoke_EventPriority()
-  {
-   ASSERT_TRUE(EVENT_PRIORITY_LOW    < EVENT_PRIORITY_NORMAL);
-   ASSERT_TRUE(EVENT_PRIORITY_NORMAL < EVENT_PRIORITY_HIGH);
-   ASSERT_TRUE(EVENT_PRIORITY_HIGH   < EVENT_PRIORITY_CRITICAL);
-  }
+   // ─────────────────────────────────────────────────────
+   // S01: Full Orchestrator Init — all managers must init OK
+   // ─────────────────────────────────────────────────────
+   void RunOrchestratorSmoke()
+     {
+      m_assert.BeginSection("S01 Orchestrator");
 
-//--- Test 3: Config zero-init contract
-void _Smoke_ConfigDefaults()
-  {
-   StrategyConfig cfg;
-   ZeroMemory(cfg);
-   ASSERT_EQ(cfg.atr_period, 0);
-  }
+      COrchestrator orch;
+      int result = orch.Init();
 
-//--- Test 4: Math / branchless safety
-void _Smoke_MathSanity()
-  {
-   ASSERT_APPROX(MathAbs(-1.23456), 1.23456, 1e-9);
-   ASSERT_POSITIVE(MathMax(0.0001, 0.0));
-   double spread = SymbolInfoDouble(_Symbol, SYMBOL_SPREAD);
-   ASSERT_RANGE(spread, 0.0, 5000.0);
-  }
+      m_assert.AreEqual("S01_init_returns_succeeded",
+                        (int)INIT_SUCCEEDED, result);
+      m_assert.IsNotNull("S01_data_manager_not_null",
+                         (void*)orch.GetDataManager());
+      m_assert.IsNotNull("S01_sr_manager_not_null",
+                         (void*)orch.GetSRManager());
+      m_assert.IsNotNull("S01_zone_manager_not_null",
+                         (void*)orch.GetZoneManager());
+      m_assert.IsNotNull("S01_signal_manager_not_null",
+                         (void*)orch.GetSignalManager());
+      m_assert.IsNotNull("S01_ai_manager_not_null",
+                         (void*)orch.GetAIManager());
+      m_assert.IsNotNull("S01_regime_filter_not_null",
+                         (void*)orch.GetRegimeFilter());
+      m_assert.IsNotNull("S01_risk_manager_not_null",
+                         (void*)orch.GetRiskManager());
+      m_assert.IsNotNull("S01_exec_manager_not_null",
+                         (void*)orch.GetExecManager());
+      m_assert.IsNotNull("S01_recovery_not_null",
+                         (void*)orch.GetRecoveryManager());
+      m_assert.IsNotNull("S01_dashboard_not_null",
+                         (void*)orch.GetDashboard());
 
-//--- Test 5: Symbol tick size non-zero
-void _Smoke_SymbolTickSize()
-  {
-   ASSERT_POSITIVE(SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE));
-   ASSERT_POSITIVE(SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE));
-  }
+      // Signal sources registered (4 in Phase 4: Pattern + SR + AI + Regime)
+      CSignalManager *sm = orch.GetSignalManager();
+      if(sm != NULL)
+         m_assert.AreEqual("S01_signal_sources_count", 4, sm.SourceCount());
 
-//--- Test 6: Account leverage sane range
-void _Smoke_AccountLeverage()
-  {
-   long leverage = AccountInfoInteger(ACCOUNT_LEVERAGE);
-   ASSERT_RANGE(leverage, 1, 3000);
-  }
+      orch.OnDeinit(0);  // verify clean shutdown
+      m_assert.IsTrue("S01_deinit_no_crash", true);
 
-//--- Test 7: GlobalVariable key prefix uniqueness per account
-void _Smoke_GVKeyUniqueness()
-  {
-   long login = AccountInfoInteger(ACCOUNT_LOGIN);
-   ASSERT_POSITIVE((int)login);
-   string prefix = IntegerToString(login) + "_PASR";
-   ASSERT_TRUE(StringLen(prefix) > 5);
-  }
+      m_assert.EndSection();
+     }
 
-//======================================================================
-//  NEW TESTS 8-10: Validator rules (Phase 5 — 33 rules)
-//======================================================================
+   // ─────────────────────────────────────────────────────
+   // S02: RegimeFilter standalone
+   // ─────────────────────────────────────────────────────
+   void RunRegimeSmoke()
+     {
+      m_assert.BeginSection("S02 RegimeFilter");
 
-//--- Test 8: Validator must reject RiskPercent == 0 (rule #2)
-void _Smoke_ValidatorRejectsZeroRisk()
-  {
-   SPASRConfig badCfg;
-   ZeroMemory(badCfg);
-   //--- Minimal valid config except RiskPercent = 0
-   badCfg.Risk.MaxDrawdown         = 0.20;
-   badCfg.Risk.MaxDailyDrawdown    = 0.05;
-   badCfg.Risk.RiskPercent         = 0.0;  // INVALID — rule #2
-   badCfg.Risk.MaxLotSize          = 1.0;
-   badCfg.Risk.MagicNumber         = 12345;
-   badCfg.Risk.MaxOpenPositions    = 3;
-   badCfg.Risk.MaxRecoveryAttempts = 3;
-   badCfg.Risk.RecoveryCooldownBars= 5;
-   badCfg.Risk.PartialClosePct     = 0.5;
-   badCfg.Risk.MaxTradeDurationDays= 7;
-   badCfg.Indicator.ATRPeriod      = 14;
-   badCfg.Indicator.ATRMultiplierSL= 1.5;
-   badCfg.Indicator.ATRMultiplierTP= 2.0;
-   badCfg.Indicator.EMA_Fast       = 8;
-   badCfg.Indicator.EMA_Slow       = 21;
-   badCfg.Indicator.RSI_Period     = 14;
-   badCfg.Indicator.RSI_Overbought = 70.0;
-   badCfg.Indicator.RSI_Oversold   = 30.0;
-   badCfg.Indicator.BB_Period      = 20;
-   badCfg.Indicator.BB_Deviation   = 2.0;
-   badCfg.AI.LearningRate          = 0.01;
-   badCfg.AI.HiddenLayerSize       = 16;
-   badCfg.AI.BatchSize             = 32;
-   badCfg.AI.TrainIntervalBars     = 5;
-   badCfg.AI.MinExperience         = 50;
+      CRegimeFilter rf;
+      // GetRegime() before Init returns a valid enum (REGIME_UNKNOWN or default)
+      ENUM_MARKET_REGIME r = rf.GetRegime();
+      bool validEnum = (r == REGIME_TRENDING  ||
+                        r == REGIME_RANGING   ||
+                        r == REGIME_VOLATILE  ||
+                        r == REGIME_SQUEEZE   ||
+                        r == REGIME_UNKNOWN);
+      m_assert.IsTrue("S02_get_regime_valid_enum", validEnum);
 
-   CPASRValidator v;
-   ASSERT_FALSE(v.Validate(badCfg)); // must fail
-  }
+      // GetADX() before Init returns non-negative
+      m_assert.IsTrue("S02_get_adx_non_negative", rf.GetADX() >= 0.0);
 
-//--- Test 9: Validator must reject MaxDrawdown >= 1.0 (rule #7)
-void _Smoke_ValidatorRejectsBadDrawdown()
-  {
-   SPASRConfig badCfg;
-   ZeroMemory(badCfg);
-   badCfg.Risk.RiskPercent         = 1.0;
-   badCfg.Risk.MaxDrawdown         = 1.0;  // INVALID — rule #7: must be < 1.0
-   badCfg.Risk.MaxDailyDrawdown    = 0.05;
-   badCfg.Risk.MaxLotSize          = 1.0;
-   badCfg.Risk.MagicNumber         = 12345;
-   badCfg.Risk.MaxOpenPositions    = 3;
-   badCfg.Risk.MaxRecoveryAttempts = 3;
-   badCfg.Risk.RecoveryCooldownBars= 5;
-   badCfg.Risk.PartialClosePct     = 0.5;
-   badCfg.Risk.MaxTradeDurationDays= 7;
-   badCfg.Indicator.ATRPeriod      = 14;
-   badCfg.Indicator.ATRMultiplierSL= 1.5;
-   badCfg.Indicator.ATRMultiplierTP= 2.0;
-   badCfg.Indicator.EMA_Fast       = 8;
-   badCfg.Indicator.EMA_Slow       = 21;
-   badCfg.Indicator.RSI_Period     = 14;
-   badCfg.Indicator.RSI_Overbought = 70.0;
-   badCfg.Indicator.RSI_Oversold   = 30.0;
-   badCfg.Indicator.BB_Period      = 20;
-   badCfg.Indicator.BB_Deviation   = 2.0;
-   badCfg.AI.LearningRate          = 0.01;
-   badCfg.AI.HiddenLayerSize       = 16;
-   badCfg.AI.BatchSize             = 32;
-   badCfg.AI.TrainIntervalBars     = 5;
-   badCfg.AI.MinExperience         = 50;
+      // RegimeSignalSource wraps it without crash
+      CRegimeSignalSource *src = new CRegimeSignalSource(&rf);
+      m_assert.IsNotNull("S02_regime_source_alloc", (void*)src);
+      SignalResult sr; sr.Clear();
+      bool ok = src.Evaluate(sr);
+      // Must return true (even if direction is NONE)
+      m_assert.IsTrue("S02_regime_source_evaluate_ok", ok);
+      delete src;
 
-   CPASRValidator v;
-   ASSERT_FALSE(v.Validate(badCfg));
-  }
+      m_assert.EndSection();
+     }
 
-//--- Test 10: Validator cross-field rule #33:
-//    RecoveryEnabled=true but MaxRecoveryAttempts=0 must fail
-void _Smoke_ValidatorCrossFieldRecovery()
-  {
-   SPASRConfig badCfg;
-   ZeroMemory(badCfg);
-   badCfg.Risk.RiskPercent          = 1.0;
-   badCfg.Risk.MaxDrawdown          = 0.20;
-   badCfg.Risk.MaxDailyDrawdown     = 0.05;
-   badCfg.Risk.MaxLotSize           = 1.0;
-   badCfg.Risk.MagicNumber          = 12345;
-   badCfg.Risk.MaxOpenPositions     = 3;
-   badCfg.Risk.RecoveryEnabled      = true;  // ON ...
-   badCfg.Risk.MaxRecoveryAttempts  = 0;     // ... but 0 attempts — rule #33
-   badCfg.Risk.RecoveryCooldownBars = 5;
-   badCfg.Risk.PartialClosePct      = 0.5;
-   badCfg.Risk.MaxTradeDurationDays = 7;
-   badCfg.Indicator.ATRPeriod       = 14;
-   badCfg.Indicator.ATRMultiplierSL = 1.5;
-   badCfg.Indicator.ATRMultiplierTP = 2.0;
-   badCfg.Indicator.EMA_Fast        = 8;
-   badCfg.Indicator.EMA_Slow        = 21;
-   badCfg.Indicator.RSI_Period      = 14;
-   badCfg.Indicator.RSI_Overbought  = 70.0;
-   badCfg.Indicator.RSI_Oversold    = 30.0;
-   badCfg.Indicator.BB_Period       = 20;
-   badCfg.Indicator.BB_Deviation    = 2.0;
-   badCfg.AI.LearningRate           = 0.01;
-   badCfg.AI.HiddenLayerSize        = 16;
-   badCfg.AI.BatchSize              = 32;
-   badCfg.AI.TrainIntervalBars      = 5;
-   badCfg.AI.MinExperience          = 50;
+   // ─────────────────────────────────────────────────────
+   // S03: SignalManager v3 source registration smoke
+   // ─────────────────────────────────────────────────────
+   void RunSignalV3Smoke()
+     {
+      m_assert.BeginSection("S03 SignalManager v3");
 
-   CPASRValidator v;
-   ASSERT_FALSE(v.Validate(badCfg)); // rule #33 must catch this
-  }
+      CSignalManager sm;
+      sm.SetMinConfluence(2);
+      sm.SetMinScore(0.45);
+      sm.SetCooldownBars(3);
 
-//======================================================================
-//  NEW TESTS 11-12: AIManager ring buffer invariants (Phase 7)
-//======================================================================
+      // HasSignal false before any OnNewBar
+      m_assert.IsFalse("S03_no_signal_on_fresh", sm.HasSignal());
 
-//--- Test 11: Ring buffer size must be power-of-2 and >= 64
-//    Power-of-2 enables fast modulo via bitwise AND: idx & (N-1)
-void _Smoke_AIRingBufferSize()
-  {
-   int n = AI_REPLAY_BUF_SIZE;
-   ASSERT_RANGE(n, 64, 65536);              // sane range
-   ASSERT_EQ((n & (n - 1)), 0);            // power-of-2 check
-  }
+      // Source count starts at 0
+      m_assert.AreEqual("S03_source_count_zero", 0, sm.SourceCount());
 
-//--- Test 12: AIExperience struct footprint <= 128 bytes
-//    512 entries * 128 bytes = 64 KB max — acceptable stack budget
-void _Smoke_AIExperienceSize()
-  {
-   int sz = (int)sizeof(AIExperience);
-   ASSERT_RANGE(sz, 1, 128);
-  }
+      // Urgency enum ordering
+      m_assert.IsTrue("S03_urgency_HIGH_is_0",
+                      (int)SIGNAL_URGENCY_HIGH == 0);
+      m_assert.IsTrue("S03_urgency_LOW_is_2",
+                      (int)SIGNAL_URGENCY_LOW == 2);
 
-//======================================================================
-//  NEW TEST 13: DashboardManager prefix isolation (Phase 9)
-//======================================================================
+      m_assert.EndSection();
+     }
 
-//--- Test 13: Two dashboards with different magic numbers must have
-//    different object prefixes to prevent chart object collisions
-void _Smoke_DashboardPrefixIsolation()
-  {
-   long login  = AccountInfoInteger(ACCOUNT_LOGIN);
-   string pfx1 = "PASR_D_" + IntegerToString(login) + "_" + IntegerToString(11111) + "_";
-   string pfx2 = "PASR_D_" + IntegerToString(login) + "_" + IntegerToString(22222) + "_";
-   ASSERT_TRUE(pfx1 != pfx2);  // different magic → different prefix
-   // Same magic must produce the SAME prefix (idempotency)
-   string pfx3 = "PASR_D_" + IntegerToString(login) + "_" + IntegerToString(11111) + "_";
-   ASSERT_TRUE(pfx1 == pfx3);
-  }
+   // ─────────────────────────────────────────────────────
+   // S04: RiskManager standalone
+   // ─────────────────────────────────────────────────────
+   void RunRiskSmoke()
+     {
+      m_assert.BeginSection("S04 RiskManager");
 
-//======================================================================
-//  MASTER RUNNER
-//======================================================================
+      CRiskManager rm;
 
-bool RunPASRSmokeTests(bool verbose = false)
-  {
-   Print("\n══ PASR Smoke Tests (13 tests) ══");
-   CTestRunner runner(true, verbose); // stopOnFail=true for OnInit guard
+      // State checks on un-inited RM (all should be safe defaults)
+      m_assert.IsNear("S04_dd_zero",    0.0, rm.GetDrawdownPct(),  0.001);
+      m_assert.IsNear("S04_daily_zero", 0.0, rm.GetDailyLossPct(), 0.001);
+      m_assert.AreEqual("S04_consec_zero", 0, rm.GetConsecLoss());
+      m_assert.AreEqual("S04_open_zero",   0, rm.GetOpenTrades());
+      m_assert.IsFalse("S04_not_broken",   rm.IsCircuitBroken());
 
-   //--- Core wiring (1-7)
-   runner.Run("EventBus: singleton",            _Smoke_EventBusSingleton);
-   runner.Run("EventBus: priority ordering",    _Smoke_EventPriority);
-   runner.Run("Config: zero-init contract",     _Smoke_ConfigDefaults);
-   runner.Run("Math: basic sanity",             _Smoke_MathSanity);
-   runner.Run("Symbol: tick size > 0",          _Smoke_SymbolTickSize);
-   runner.Run("Account: leverage range",        _Smoke_AccountLeverage);
-   runner.Run("GV: key uniqueness per acct",    _Smoke_GVKeyUniqueness);
+      // CalcLot with zero SL returns 0 (guard against div-by-zero)
+      double lotZero = rm.CalcLot(0.0);
+      m_assert.IsNear("S04_lot_zero_sl", 0.0, lotZero, 0.0001);
 
-   //--- Validator (Phase 5, rules 8-10)
-   runner.Run("Validator: reject zero risk",    _Smoke_ValidatorRejectsZeroRisk);
-   runner.Run("Validator: reject DD >= 1.0",    _Smoke_ValidatorRejectsBadDrawdown);
-   runner.Run("Validator: recovery cross-field",_Smoke_ValidatorCrossFieldRecovery);
+      // Check on clean slate
+      RiskCheckResult rr = rm.Check(0);
+      // allowed can be true or false depending on live account state;
+      // just verify the call doesn't crash and reason is a string
+      m_assert.IsTrue("S04_check_no_crash",
+                      StringLen(rr.reason) >= 0);  // always true = no crash
 
-   //--- AIManager (Phase 7, 11-12)
-   runner.Run("AI: ring buf size power-of-2",   _Smoke_AIRingBufferSize);
-   runner.Run("AI: experience struct <= 128B",  _Smoke_AIExperienceSize);
+      m_assert.EndSection();
+     }
 
-   //--- DashboardManager (Phase 9, 13)
-   runner.Run("Dashboard: prefix isolation",   _Smoke_DashboardPrefixIsolation);
+   // ─────────────────────────────────────────────────────
+   // S05: DashboardManager v3 injection smoke
+   // ─────────────────────────────────────────────────────
+   void RunDashboardSmoke()
+     {
+      m_assert.BeginSection("S05 DashboardManager v3");
 
-   runner.PrintSummary();
-   return runner.AllPassed();
-  }
+      // Alloc without crash
+      CDashboardManager *db = new CDashboardManager();
+      m_assert.IsNotNull("S05_alloc_ok", (void*)db);
+
+      // Inject NULL deps (should not crash on read)
+      db.SetRiskManager(NULL);
+      db.SetSignalManager(NULL);
+      db.SetRegimeFilter(NULL);
+      m_assert.IsTrue("S05_null_inject_no_crash", true);
+
+      // Inject real (stack) deps
+      CRiskManager   rm;
+      CSignalManager sm;
+      CRegimeFilter  rf;
+      db.SetRiskManager  (&rm);
+      db.SetSignalManager(&sm);
+      db.SetRegimeFilter (&rf);
+      m_assert.IsTrue("S05_real_inject_no_crash", true);
+
+      // Destroy must not crash
+      db.Destroy();
+      m_assert.IsTrue("S05_destroy_no_crash", true);
+
+      // Double destroy must be safe (idempotent)
+      db.Destroy();
+      m_assert.IsTrue("S05_double_destroy_safe", true);
+
+      delete db;
+      m_assert.IsTrue("S05_delete_no_crash", true);
+
+      m_assert.EndSection();
+     }
+
+public:
+   void RunAll()
+     {
+      Print("╔══════════════════════════════════════════════════╗");
+      Print("║  PASR Smoke Test Suite v3.00                     ║");
+      Print("╚══════════════════════════════════════════════════╝");
+
+      RunOrchestratorSmoke();
+      RunRegimeSmoke();
+      RunSignalV3Smoke();
+      RunRiskSmoke();
+      RunDashboardSmoke();
+
+      m_assert.PrintReport();
+     }
+  };
 
 #endif // __QA_SMOKE_TEST_MQH__

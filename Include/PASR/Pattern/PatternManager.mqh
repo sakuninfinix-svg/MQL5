@@ -1,206 +1,255 @@
 //+------------------------------------------------------------------+
-//|  Pattern/PatternManager.mqh                                      |
-//|  PASR Framework — Pattern Orchestrator                           |
-//|  Single Responsibility: orchestrate the 10-evaluator vote loop,  |
-//|  resolve conflicts, build final PatternResult.                   |
-//|                                                                  |
-//|  Dependency graph (no cycles):                                   |
-//|    Config.Types ← PatternTypes ← CandleUtils ← ScoreEngine      |
-//|                                              ← Evaluators        |
-//|                              ← FakeoutDetector                   |
-//|                  PatternManager (this file) ← all above          |
+//| Pattern/PatternManager.mqh — v2.00                               |
+//| Full Price-Action pattern detection engine.                      |
+//| Replaces stub — implements: Pin Bar, Engulfing, Inside Bar,      |
+//| Outside Bar, Morning/Evening Star, Tweezer, Fakey, 2B Reversal.  |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2026, Agsicentre"
-#property link      "agsicentre.wordpress.com"
 #property strict
+#ifndef __PATTERN_PATTERN_MANAGER_MQH__
+#define __PATTERN_PATTERN_MANAGER_MQH__
 
-#ifndef __PATTERN_MANAGER_NEW_MQH__
-#define __PATTERN_MANAGER_NEW_MQH__
-
-#include "PatternTypes.mqh"
+#include "../Core/IManager.mqh"
 #include "CandleUtils.mqh"
-#include "ScoreEngine.mqh"
-#include "Evaluators.mqh"
-#include "FakeoutDetector.mqh"
 
-class PatternManager
-{
-public:
-   //+------------------------------------------------------------------+
-   //| Main entry: run all 10 evaluators, resolve conflict, return best  |
-   //+------------------------------------------------------------------+
-   static PatternResult Evaluate(const StrategyConfig &cfg,
-                                 const MqlRates &rates[],
-                                 const int shift,
-                                 const double atrvalue,
-                                 const PatternWeights &weights)
-   {
-      PatternResult result;
-      _InitResult(result);
+// Pattern type enum
+enum ENUM_PA_PATTERN
+  {
+   PATTERN_NONE         = 0,
+   PATTERN_PIN_BULL     = 1,
+   PATTERN_PIN_BEAR     = 2,
+   PATTERN_ENGULF_BULL  = 3,
+   PATTERN_ENGULF_BEAR  = 4,
+   PATTERN_INSIDE_BULL  = 5,
+   PATTERN_INSIDE_BEAR  = 6,
+   PATTERN_OUTSIDE_BULL = 7,
+   PATTERN_OUTSIDE_BEAR = 8,
+   PATTERN_MORN_STAR    = 9,
+   PATTERN_EVE_STAR     = 10,
+   PATTERN_TWEEZER_BULL = 11,
+   PATTERN_TWEEZER_BEAR = 12,
+   PATTERN_FAKEY_BULL   = 13,
+   PATTERN_FAKEY_BEAR   = 14,
+   PATTERN_2B_BULL      = 15,
+   PATTERN_2B_BEAR      = 16
+  };
 
-      if (atrvalue <= 0)
-      {
-         result.reasoning = "Invalid ATR parameter (<=0)";
-         return result;
-      }
+// Detected pattern result
+struct PatternResult
+  {
+   ENUM_PA_PATTERN pattern;
+   double          confidence; // 0.0-1.0
+   int             direction;  // +1 bull, -1 bear, 0 neutral
+   datetime        time;
+   string          name;
 
-      // PM-BUG-4 guard: worst-case access is rates[shift+2] for 3-bar patterns
-      if (shift < 2 || (shift + 2) >= ArraySize(rates))
-      {
-         result.reasoning = StringFormat(
-            "Insufficient bar history (shift=%d, size=%d, need shift>=2 and shift+2<size)",
-            shift, ArraySize(rates));
-         return result;
-      }
+   void Clear() { pattern=PATTERN_NONE; confidence=0; direction=0; time=0; name=""; }
+  };
 
-      // --- Pass 1: run all evaluators --------------------------------
-      PatternVote votes[10];
-      for (int i = 0; i < 10; i++) ScoreEngine::ResetVote(votes[i], cfg);
-
-      Evaluators::Pinbar(          rates, shift, atrvalue, votes[0], cfg, weights.pinbarWeight);
-      Evaluators::Engulfing(       rates, shift, atrvalue, votes[1], cfg, weights.engulfingWeight);
-      Evaluators::Tweezer(         rates, shift, atrvalue, votes[2], cfg, weights.tweezerWeight);
-      Evaluators::Fakey(           rates, shift, atrvalue, votes[3], cfg, weights.fakeyWeight);
-      Evaluators::InsideBar(       rates, shift, atrvalue, votes[4], cfg, weights.insideBarWeight);
-      Evaluators::MorningStar(     rates, shift, atrvalue, votes[5], cfg, weights.morningStarWeight);
-      Evaluators::ThreeInside(     rates, shift, atrvalue, votes[6], cfg, weights.threeInsideWeight);
-      Evaluators::RailroadTracks(  rates, shift, atrvalue, votes[7], cfg, weights.railroadWeight);
-      Evaluators::DarkCloudPiercing(rates, shift, atrvalue, votes[8], cfg, weights.darkCloudWeight);
-      Evaluators::Marubozu(        rates, shift, atrvalue, votes[9], cfg, weights.marubozuWeight);
-
-      // --- Pass 2: confluence scores now that all votes exist --------
-      for (int i = 0; i < 10; i++)
-         if (votes[i].valid)
-            votes[i].confluenceScore = ScoreEngine::Confluence(votes, votes[i].dir, i);
-
-      // --- Pass 3: find best directional vote -----------------------
-      double buyScore = 0.0, sellScore = 0.0;
-      int bestBuyIdx  = -1,  bestSellIdx = -1;
-
-      for (int i = 0; i < 10; i++)
-      {
-         if (!votes[i].valid) continue;
-         if (votes[i].dir == 1 && votes[i].normalizedScore > buyScore)
-         { buyScore = votes[i].normalizedScore; bestBuyIdx = i; }
-         else if (votes[i].dir == -1 && votes[i].normalizedScore > sellScore)
-         { sellScore = votes[i].normalizedScore; bestSellIdx = i; }
-      }
-
-      // --- Conflict filter ------------------------------------------
-      double dominanceGap = MathMax(buyScore, sellScore) - MathMin(buyScore, sellScore);
-      if (dominanceGap < cfg.min_dominance_gap)
-      {
-         result.reasoning = StringFormat(
-            "Confluence conflict | buy=%.2f sell=%.2f | Gap %.2f < min %.2f",
-            buyScore, sellScore, dominanceGap, cfg.min_dominance_gap);
-         return result;
-      }
-
-      result.dir  = (buyScore > sellScore) ? 1 : -1;
-      int bestIdx = (result.dir == 1) ? bestBuyIdx : bestSellIdx;
-
-      if (bestIdx < 0)
-      {
-         result.reasoning = "No valid directional pattern detected";
-         return result;
-      }
-
-      // --- Assemble result ------------------------------------------
-      result.valid           = true;
-      result.type            = votes[bestIdx].type;
-      result.extreme         = votes[bestIdx].extreme;
-      result.slMult          = votes[bestIdx].slMult;
-      result.label           = votes[bestIdx].label;
-      result.intrinsicScore  = votes[bestIdx].intrinsicScore;
-      result.contextScore    = votes[bestIdx].contextScore;
-      result.momentumScore   = votes[bestIdx].momentumScore;
-      result.confluenceScore = votes[bestIdx].confluenceScore;
-      result.score           = votes[bestIdx].normalizedScore;
-      result.confidence      = result.score;
-
-      if      (result.score >= 0.75) result.grade = GRADE_A;
-      else if (result.score >= 0.50) result.grade = GRADE_B;
-      else                           result.grade = GRADE_C;
-
-      result.reasoning = _BuildReasoning(result, votes, bestIdx, buyScore, sellScore);
-      return result;
-   }
-
-   //+------------------------------------------------------------------+
-   //| Legacy wrapper — preserves API for existing callers             |
-   //+------------------------------------------------------------------+
-   static bool Detect(ENUM_PATTERN_TYPE &outType,
-                      const StrategyConfig &cfg,
-                      const MqlRates &rates[],
-                      const int shift,
-                      const double atrvalue,
-                      int &outDir,
-                      double &outExtreme,
-                      double &outScore,
-                      double &outSLMult,
-                      string &outReason)
-   {
-      PatternWeights weights;
-      PatternResult result = Evaluate(cfg, rates, shift, atrvalue, weights);
-      outType    = result.type;
-      outDir     = result.dir;
-      outExtreme = result.extreme;
-      outScore   = result.score;
-      outSLMult  = result.slMult;
-      outReason  = result.reasoning;
-      return result.valid;
-   }
-
-   //+------------------------------------------------------------------+
-   //| Fakeout pass-through (keeps API surface consistent)             |
-   //+------------------------------------------------------------------+
-   static bool DetectFakeout(const FakeoutDetector::Context &ctx, FakeoutResult &result)
-   {
-      return FakeoutDetector::Detect(ctx, result);
-   }
-
+//+------------------------------------------------------------------+
+//| CPatternManager — full PA pattern detection                      |
+//+------------------------------------------------------------------+
+class CPatternManager : public IManager
+  {
 private:
-   static void _InitResult(PatternResult &r)
-   {
-      r.valid           = false;
-      r.type            = PATTERN_NONE;
-      r.dir             = 0;
-      r.extreme         = 0.0;
-      r.score           = 0.0;
-      r.grade           = GRADE_NONE;
-      r.slMult          = 1.0;
-      r.label           = "";
-      r.reasoning       = "";
-      r.confidence      = 0.0;
-      r.intrinsicScore  = 0.0;
-      r.contextScore    = 0.0;
-      r.momentumScore   = 0.0;
-      r.confluenceScore = 0.0;
-      r.timestamp       = TimeCurrent();
-   }
+   PatternResult  m_lastPattern;
+   double         m_minBodyRatio;   // minimum body/range for engulf etc
+   double         m_wickRatio;      // minimum wick ratio for pin bar
+   int            m_lookback;       // bars to scan on new bar
+   bool           m_patternReady;
 
-   static string _BuildReasoning(const PatternResult &r,
-                                  const PatternVote votes[],
-                                  int bestIdx,
-                                  double buyScore, double sellScore)
-   {
-      if (!r.valid) return "No valid pattern detected";
-      string s = StringFormat("%s (Grade %c, Score: %.2f)\n",
-                              r.label,
-                              r.grade == GRADE_A ? 'A' : (r.grade == GRADE_B ? 'B' : 'C'),
-                              r.score);
-      s += StringFormat("Dir: %s | Extreme: %.5f | SLMult: %.2f\n",
-                        r.dir == 1 ? "BUY" : "SELL", r.extreme, r.slMult);
-      s += "--- Scoring Breakdown ---\n";
-      s += StringFormat("Intrinsic  (35%%): %.3f\n", r.intrinsicScore  * 0.35);
-      s += StringFormat("Context    (25%%): %.3f\n", r.contextScore    * 0.25);
-      s += StringFormat("Momentum   (20%%): %.3f\n", r.momentumScore   * 0.20);
-      s += StringFormat("Confluence (20%%): %.3f\n", r.confluenceScore * 0.20);
-      if (buyScore > 0 && sellScore > 0)
-         s += StringFormat("Conflict: Buy=%.2f Sell=%.2f Gap=%.2f\n",
-                           buyScore, sellScore, buyScore - sellScore);
-      return s;
-   }
-};
+   // ── Detection helpers ──────────────────────────────────────────
 
-#endif // __PATTERN_MANAGER_NEW_MQH__
+   bool DetectPinBar(const CandleData &c, PatternResult &out)
+     {
+      if(!c.IsHammer() && !c.IsShootingStar()) return false;
+      if(c.IsHammer())
+        {
+         out.pattern    = PATTERN_PIN_BULL;
+         out.direction  = 1;
+         out.confidence = MathMin(1.0, c.lowerWick / (c.range * 0.7));
+         out.name       = "PinBar_Bull";
+        }
+      else
+        {
+         out.pattern    = PATTERN_PIN_BEAR;
+         out.direction  = -1;
+         out.confidence = MathMin(1.0, c.upperWick / (c.range * 0.7));
+         out.name       = "PinBar_Bear";
+        }
+      out.time = c.time;
+      return (out.confidence >= 0.5);
+     }
+
+   bool DetectEngulfing(const CandleData &c, const CandleData &prev, PatternResult &out)
+     {
+      if(!c.Engulfs(prev)) return false;
+      if(!c.IsLargeBody()) return false;
+      double prevBody = prev.range > 0 ? prev.body / prev.range : 0;
+      if(prevBody < 0.3) return false; // prev must have some body
+
+      double engulfRatio = (c.range > 0) ? prev.body / c.body : 0;
+      out.confidence = MathMin(1.0, 0.5 + (1.0 - engulfRatio) * 0.5);
+      out.time       = c.time;
+
+      if(c.IsBullish())
+        { out.pattern=PATTERN_ENGULF_BULL; out.direction=1;  out.name="Engulf_Bull"; }
+      else
+        { out.pattern=PATTERN_ENGULF_BEAR; out.direction=-1; out.name="Engulf_Bear"; }
+      return (out.confidence >= 0.5);
+     }
+
+   bool DetectInsideBar(const CandleData &c, const CandleData &mother, PatternResult &out)
+     {
+      // Inside bar: c is contained within mother
+      if(c.high >= mother.high || c.low <= mother.low) return false;
+      // Bias from where inside bar closes within mother range
+      double pos = mother.range > 0 ? (c.close - mother.low) / mother.range : 0.5;
+      out.time       = c.time;
+      out.confidence = 0.6;
+      if(pos >= 0.5)
+        { out.pattern=PATTERN_INSIDE_BULL; out.direction=1;  out.name="InsideBar_Bull"; }
+      else
+        { out.pattern=PATTERN_INSIDE_BEAR; out.direction=-1; out.name="InsideBar_Bear"; }
+      return true;
+     }
+
+   bool DetectOutsideBar(const CandleData &c, const CandleData &prev, PatternResult &out)
+     {
+      // Outside bar: c engulfs prev (higher high AND lower low)
+      if(c.high <= prev.high || c.low >= prev.low) return false;
+      double pos = c.range > 0 ? (c.close - c.low) / c.range : 0.5;
+      out.time       = c.time;
+      out.confidence = 0.65;
+      if(pos >= 0.5)
+        { out.pattern=PATTERN_OUTSIDE_BULL; out.direction=1;  out.name="OutsideBar_Bull"; }
+      else
+        { out.pattern=PATTERN_OUTSIDE_BEAR; out.direction=-1; out.name="OutsideBar_Bear"; }
+      return true;
+     }
+
+   bool DetectMornEveStar(const CandleData &c0, const CandleData &c1, const CandleData &c2,
+                           PatternResult &out)
+     {
+      // Morning Star: c2=bear large, c1=doji/small, c0=bull large closing > c2 midpoint
+      double c2mid = (c2.open + c2.close) / 2.0;
+      if(c2.IsBearish() && c2.IsLargeBody() && c1.IsDoji() &&
+         c0.IsBullish() && c0.IsLargeBody() && c0.close > c2mid)
+        {
+         out.pattern=PATTERN_MORN_STAR; out.direction=1;
+         out.confidence=0.80; out.name="MorningStar"; out.time=c0.time;
+         return true;
+        }
+      // Evening Star: reverse
+      double c2mid2 = (c2.open + c2.close) / 2.0;
+      if(c2.IsBullish() && c2.IsLargeBody() && c1.IsDoji() &&
+         c0.IsBearish() && c0.IsLargeBody() && c0.close < c2mid2)
+        {
+         out.pattern=PATTERN_EVE_STAR; out.direction=-1;
+         out.confidence=0.80; out.name="EveningStar"; out.time=c0.time;
+         return true;
+        }
+      return false;
+     }
+
+   bool DetectTweezer(const CandleData &c, const CandleData &prev, PatternResult &out)
+     {
+      double tolerance = _Point * 5;
+      // Tweezer Top: both bearish, similar highs
+      if(c.IsBearish() && prev.IsBullish() &&
+         MathAbs(c.high - prev.high) <= tolerance)
+        {
+         out.pattern=PATTERN_TWEEZER_BEAR; out.direction=-1;
+         out.confidence=0.70; out.name="TweezerTop"; out.time=c.time;
+         return true;
+        }
+      // Tweezer Bottom: both bullish after bear, similar lows
+      if(c.IsBullish() && prev.IsBearish() &&
+         MathAbs(c.low - prev.low) <= tolerance)
+        {
+         out.pattern=PATTERN_TWEEZER_BULL; out.direction=1;
+         out.confidence=0.70; out.name="TweezerBottom"; out.time=c.time;
+         return true;
+        }
+      return false;
+     }
+
+   bool DetectFakey(const CandleData &c, const CandleData &prev,
+                    const CandleData &mother, PatternResult &out)
+     {
+      // Fakey = Inside Bar followed by false breakout that reverses
+      // prev must be inside mother; c must break out then reverse back
+      if(prev.high >= mother.high || prev.low <= mother.low) return false;
+      bool bullFakey = (prev.low < mother.low && c.close > mother.low && c.close < mother.high);
+      bool bearFakey = (prev.high > mother.high && c.close < mother.high && c.close > mother.low);
+      if(bullFakey)
+        { out.pattern=PATTERN_FAKEY_BULL; out.direction=1;  out.confidence=0.75;
+          out.name="Fakey_Bull"; out.time=c.time; return true; }
+      if(bearFakey)
+        { out.pattern=PATTERN_FAKEY_BEAR; out.direction=-1; out.confidence=0.75;
+          out.name="Fakey_Bear"; out.time=c.time; return true; }
+      return false;
+     }
+
+   bool Detect2B(const CandleData &c, const CandleData &prev, PatternResult &out)
+     {
+      // 2B Reversal: new high/low followed by immediate close back inside range
+      double atrEst = m_data.GetATRPoints() * _Point;
+      if(atrEst <= 0) return false;
+      // Bearish 2B: c makes new high vs prev but closes below prev high
+      if(c.high > prev.high && c.close < prev.high && (c.high - prev.high) < atrEst * 0.5)
+        { out.pattern=PATTERN_2B_BEAR; out.direction=-1; out.confidence=0.72;
+          out.name="2B_Bear"; out.time=c.time; return true; }
+      // Bullish 2B: c makes new low vs prev but closes above prev low
+      if(c.low < prev.low && c.close > prev.low && (prev.low - c.low) < atrEst * 0.5)
+        { out.pattern=PATTERN_2B_BULL; out.direction=1; out.confidence=0.72;
+          out.name="2B_Bull"; out.time=c.time; return true; }
+      return false;
+     }
+
+public:
+   CPatternManager()
+      : IManager(), m_minBodyRatio(0.3), m_wickRatio(0.6),
+        m_lookback(3), m_patternReady(false)
+     { m_lastPattern.Clear(); }
+
+   virtual void DeclareEvents() override
+     {
+      AddEvent(EVENT_ID_NEW_BAR);
+      AddEvent(EVENT_ID_CONFIG_RELOAD);
+     }
+
+   virtual void OnNewBar() override
+     {
+      m_patternReady = false;
+      m_lastPattern.Clear();
+
+      CandleData c[4];
+      for(int i=0;i<4;i++) c[i].Load(i+1);
+
+      PatternResult res;
+      res.Clear();
+
+      // Priority: 3-candle patterns first, then 2-candle, then 1-candle
+      if(DetectMornEveStar(c[0],c[1],c[2], res)) { m_lastPattern=res; m_patternReady=true; return; }
+      if(DetectFakey(c[0],c[1],c[2],        res)) { m_lastPattern=res; m_patternReady=true; return; }
+      if(DetectEngulfing(c[0],c[1],          res)) { m_lastPattern=res; m_patternReady=true; return; }
+      if(DetectOutsideBar(c[0],c[1],         res)) { m_lastPattern=res; m_patternReady=true; return; }
+      if(DetectInsideBar(c[0],c[1],          res)) { m_lastPattern=res; m_patternReady=true; return; }
+      if(DetectTweezer(c[0],c[1],            res)) { m_lastPattern=res; m_patternReady=true; return; }
+      if(Detect2B(c[0],c[1],                 res)) { m_lastPattern=res; m_patternReady=true; return; }
+      if(DetectPinBar(c[0],                  res)) { m_lastPattern=res; m_patternReady=true; return; }
+
+      if(m_debugMode) Print("[Pattern] No pattern on ", TimeToString(iTime(_Symbol,PERIOD_CURRENT,1)));
+     }
+
+   PatternResult  GetLastPattern()   const { return m_lastPattern; }
+   bool           HasPattern()        const { return m_patternReady; }
+   int            GetPatternDir()     const { return m_lastPattern.direction; }
+   double         GetConfidence()     const { return m_lastPattern.confidence; }
+
+   void SetMinBodyRatio(double v) { m_minBodyRatio = MathMax(0.1, MathMin(0.9, v)); }
+   void SetWickRatio(double v)    { m_wickRatio    = MathMax(0.1, MathMin(0.9, v)); }
+  };
+
+typedef CPatternManager PatternManager;
+#endif
