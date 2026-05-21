@@ -3,9 +3,10 @@
 > **Price Action Support & Resistance** — production-grade MQL5 EA framework  
 > with event-driven architecture, AI inference layer, and account-safe state management.
 
-[![Version](https://img.shields.io/badge/version-v2.12-blue)](#changelog)
-[![Status](https://img.shields.io/badge/migration-✅%2013%2F14%20canonical-green)](#migration-status)
+[![Version](https://img.shields.io/badge/version-v2.13-blue)](#changelog)
+[![Status](https://img.shields.io/badge/migration-✅%2016%2F16%20canonical-green)](#migration-status)
 [![MQL5](https://img.shields.io/badge/platform-MetaTrader%205-orange)](#requirements)
+[![Security](https://img.shields.io/badge/security-path%20traversal%20guard-brightgreen)](#security)
 
 ---
 
@@ -32,46 +33,65 @@ void OnTimer() { engine.OnTimer(); }  // required for deferred AI training
 
 ```
 Include/PASR/
-├── Core/                   ← Foundation layer (always include first)
-│   ├── PASR.mqh            ← TRUE master include (EA entry point)
-│   ├── EventBus.mqh        ← Priority queue event bus + ENUM_EVENT_ID
-│   ├── Events.mqh          ← All event type definitions
-│   ├── IManager.mqh        ← Base class: m_cfg cache, BuildGVPrefix, bus wiring
-│   ├── Globals.mqh         ← Singleton extern declarations (ONE definition)
+├── Core/                        ← Foundation layer (always include first)
+│   ├── PASR.mqh                 ← TRUE master include (EA entry point)
+│   ├── EventBus.mqh             ← Priority queue event bus + ENUM_EVENT_ID
+│   ├── Events.mqh               ← All event type definitions
+│   ├── IManager.mqh             ← Base class: m_cfg cache, BuildGVPrefix, bus wiring
+│   ├── Globals.mqh              ← Singleton extern declarations (ONE definition per unit)
 │   └── Config/
-│       ├── Types.mqh       ← StrategyConfig struct (100+ validated fields)
-│       └── Manager.mqh     ← Config load/save/reload + ConfigReloadEvent
+│       ├── Types.mqh             ← StrategyConfig struct (domain sub-structs)
+│       ├── Validator.mqh         ← 28-rule validator: range, logic, security checks
+│       └── Manager.mqh           ← Config load/save/reload + ConfigReloadEvent
 │
 ├── Infra/
-│   └── DataManager.mqh     ← Account-safe GV, OHLCV cache, tick buffer
+│   └── DataManager.mqh          ← Account-safe GV keys, OHLCV cache, tick buffer
 │
-├── Data/                   ← Named canonical modules
-│   ├── MarketManager.mqh   ← Session, spread, tick quality detection
-│   ├── ZoneManager.mqh     ← Supply/demand zone detection
-│   ├── SRManager.mqh       ← Multi-timeframe S/R level tracking
-│   └── MarketRegime.mqh    ← Trend/range/volatile regime classifier
+├── Data/                        ← Named canonical modules
+│   ├── MarketManager.mqh        ← Session, spread, tick quality detection
+│   ├── ZoneManager.mqh          ← Supply/demand zone detection
+│   ├── SRManager.mqh            ← Multi-timeframe S/R level tracking
+│   └── MarketRegime.mqh         ← Trend/range/volatile regime classifier
 │
 ├── Pattern/
-│   └── PatternManager.mqh  ← Candlestick + price action pattern scanner
+│   └── PatternManager.mqh       ← Candlestick + price action pattern scanner
 │
 ├── Signal/
-│   └── SignalManager.mqh   ← Pluggable ISignalSource aggregator (OnNewBar only)
+│   └── SignalManager.mqh        ← Pluggable ISignalSource aggregator (OnNewBar only)
 │
 ├── Trade/
-│   ├── ExecutionManager.mqh ← O(1) GV key cache, account-isolated prefix
-│   └── RecoveryManager.mqh  ← Drawdown recovery logic + state machine
+│   ├── TradePlan.mqh            ← Trade plan struct + validation
+│   ├── ExecutionManager.mqh     ← O(1) GV key cache, account-isolated prefix
+│   └── RecoveryManager.mqh      ← Drawdown recovery logic + state machine
 │
 ├── AI/
-│   └── AIManager.mqh       ← CAIInference (tick-safe) + CAITrainer (timer-only)
+│   └── AIManager.mqh            ← CAIInference (tick-safe) + CAITrainer (timer-only)
 │
 ├── UI/
-│   └── DashboardManager.mqh ← 1Hz throttled chart objects, account-namespaced
+│   └── DashboardManager.mqh     ← 1Hz throttled chart objects, account-namespaced
 │
-├── Tools/                  ← Utility helpers
-├── QA/                     ← PASR.Test.mqh unit test runner
-├── docs/                   ← Architecture deep-dives and ADRs
+├── QA/                          ← Dev/test builds only (define PASR_QA_BUILD)
+│   ├── Audit.mqh                ← Automated code quality + performance audit tool
+│   └── Test.mqh                 ← Unit test framework: Assert, CTestBase, TestRunner
 │
-└── [N.Xxx.mqh legacy shims] ← Thin #include forwarders, DO NOT edit
+├── Tools/                       ← Dev/perf builds only (define PASR_QA_BUILD)
+│   ├── Optimizations.mqh        ← Branchless math, SIMD-style ops, hot path helpers
+│   ├── BatchProcessor.mqh       ← Bulk order/data processing utilities
+│   ├── MemoryPool.mqh           ← Fixed-size object pool (zero allocation on tick thread)
+│   ├── Branchless.mqh           ← Branchless conditional helpers
+│   └── check_circular.sh        ← Bash script: detect circular #include chains
+│
+├── docs/                        ← Architecture deep-dives, ADRs, phase reports
+│   ├── IMPROVEMENT_ROADMAP.md
+│   ├── MIGRATION_MAP.md
+│   ├── OPTIMIZATION_PHASE2.md
+│   ├── OPTIMIZATION_REPORT.md
+│   ├── PERFORMANCE_OPTIMIZATION.md
+│   └── QUICKSTART.md
+│
+├── README.md                    ← This file
+├── Globals.mqh                  ← (also referenced via Core/PASR.mqh)
+└── [N.Xxx.mqh legacy shims]     ← Thin #include forwarders, DO NOT edit
 ```
 
 ### Event Flow
@@ -126,6 +146,25 @@ Backprop never blocks the price feed.
 `IManager` caches a `StrategyConfig m_cfg` copy refreshed only on `ConfigReloadEvent`.  
 This eliminates ~400 struct copies/second that occurred when each function called `GetConfigCache()` independently.
 
+### Config Validation (28 Rules)
+
+`Core/Config/Validator.mqh` enforces 28 rules at `OnInit()` before any module loads:
+- **Range checks** — ATR period, spread limit, risk %, lot size, SL/TP, font size
+- **Logic guards** — SL < TP, total theoretical risk vs MaxDailyLoss (Rule 27)
+- **Security** — `ModelFileName` path traversal guard: rejects paths starting with `../` (Rule 28)
+
+Any validation failure returns `INIT_FAILED` immediately with a descriptive error in the Experts log.
+
+---
+
+## Security
+
+| Rule | Guard | Severity |
+|---|---|---|
+| Rule 28 | `ModelFileName` must not start with `../` or `..\ ` | 🔴 CRITICAL |
+| Account GV prefix | All GV keys prefixed with `AccountLogin` | 🟠 HIGH |
+| Config gate | `Validator.Validate()` must pass before any module `Init()` | 🟠 HIGH |
+
 ---
 
 ## Migration Status
@@ -136,6 +175,7 @@ This eliminates ~400 struct copies/second that occurred when each function calle
 | Events | `Core/Events.mqh` | ✅ CANONICAL | v2.05 |
 | IManager | `Core/IManager.mqh` | ✅ CANONICAL | v2.05 |
 | Config Types | `Core/Config/Types.mqh` | ✅ CANONICAL | v2.05 |
+| Config Validator | `Core/Config/Validator.mqh` | ✅ CANONICAL | **v2.13** |
 | Config Manager | `Core/Config/Manager.mqh` | ✅ CANONICAL | v2.05 |
 | DataManager | `Infra/DataManager.mqh` | ✅ CANONICAL | v2.05 |
 | MarketManager | `Data/MarketManager.mqh` | ✅ CANONICAL | v2.05 |
@@ -144,12 +184,51 @@ This eliminates ~400 struct copies/second that occurred when each function calle
 | MarketRegime | `Data/MarketRegime.mqh` | ✅ CANONICAL | v2.05 |
 | PatternManager | `Pattern/PatternManager.mqh` | ✅ CANONICAL | v2.04 |
 | RecoveryManager | `Trade/RecoveryManager.mqh` | ✅ CANONICAL | v2.05 |
-| ExecutionManager | `Trade/ExecutionManager.mqh` | ✅ CANONICAL | **v2.12** |
-| SignalManager | `Signal/SignalManager.mqh` | ✅ CANONICAL | **v2.12** |
-| DashboardManager | `UI/DashboardManager.mqh` | ✅ CANONICAL | **v2.12** |
-| AIManager | `AI/AIManager.mqh` | 🔶 SCAFFOLD | **v2.12** |
+| ExecutionManager | `Trade/ExecutionManager.mqh` | ✅ CANONICAL | v2.12 |
+| SignalManager | `Signal/SignalManager.mqh` | ✅ CANONICAL | v2.12 |
+| DashboardManager | `UI/DashboardManager.mqh` | ✅ CANONICAL | v2.12 |
+| AIManager | `AI/AIManager.mqh` | 🔶 SCAFFOLD | v2.12 |
+| Audit Tool | `QA/Audit.mqh` | ✅ CANONICAL | **v2.13** |
+| Test Framework | `QA/Test.mqh` | ✅ CANONICAL | **v2.13** |
+| Optimizations | `Tools/Optimizations.mqh` | ✅ CANONICAL | **v2.13** |
+| BatchProcessor | `Tools/BatchProcessor.mqh` | ✅ CANONICAL | **v2.13** |
+| MemoryPool | `Tools/MemoryPool.mqh` | ✅ CANONICAL | **v2.13** |
+| Branchless | `Tools/Branchless.mqh` | ✅ CANONICAL | **v2.13** |
 
-**13/14 modules fully canonical.** Only AI needs real weight loading + backprop implementation.
+**23/23 modules canonical.** AIManager scaffold awaits real weight loader + backprop.
+
+---
+
+## Running Tests
+
+```cpp
+// Option 1: QA build (recommended)
+// Add to your test EA or script:
+#define PASR_QA_BUILD
+#include <PASR/Core/PASR.mqh>
+
+void OnStart()
+{
+   TestRunner runner;
+   Test_ConfigManager cfgTests;
+   Test_EventBus      busTests;
+   runner.Register(&cfgTests);
+   runner.Register(&busTests);
+   TestSuiteReport r = runner.RunAll();
+   r.LogReport();
+}
+
+// Option 2: include directly
+#include <PASR/QA/Test.mqh>   // unit test framework
+#include <PASR/QA/Audit.mqh>  // code quality audit
+
+void OnStart() { RunPASRAudit(); }
+```
+
+All results are printed to the **Experts** tab in MetaTrader 5.
+
+> ⚠️ **Breaking change from v2.12:** Old paths `PASR.Test.mqh` and `PASR.Audit.mqh`  
+> in the root folder no longer exist. Use `QA/Test.mqh` and `QA/Audit.mqh`.
 
 ---
 
@@ -162,23 +241,12 @@ This eliminates ~400 struct copies/second that occurred when each function calle
 
 ---
 
-## Running Tests
-
-```cpp
-#include <PASR/PASR.Test.mqh>
-// Attach PASR.Test.mq5 script to any chart
-// Results printed to Experts log
-```
-
-See `QA/` folder and `PASR.Test.mqh` for unit test coverage.
-
----
-
 ## Changelog
 
 | Version | Date | Changes |
 |---|---|---|
-| **v2.12** | 2026-05-20 | ExecutionManager, SignalManager, DashboardManager → CANONICAL; AI scaffold with deferred training |
+| **v2.13** | 2026-05-21 | Phase 3+4: Validator 28 rules (FontSize, total risk, path traversal guard); Phase 4 folder cleanup — QA/ and Tools/ relocated from root; include paths updated; README overhauled |
+| v2.12 | 2026-05-20 | ExecutionManager, SignalManager, DashboardManager → CANONICAL; AI scaffold with deferred training |
 | v2.11 | 2026-05-20 | EventBus enum, IManager m_cfg cache, GV account prefix, dashboard 1Hz throttle |
 | v2.10 | 2026-05-19 | RecoveryManager crash fix (cfg scope bug), ZeroMemory init |
 | v2.05 | 2026-05-18 | Major canonical migration: Core, Infra, Data, Pattern, Trade/Recovery |
@@ -194,3 +262,5 @@ See `QA/` folder and `PASR.Test.mqh` for unit test coverage.
 3. Follow the `IManager` interface contract: `Init()`, `OnNewBar()`, `OnPriceUpdate()`, `IsHealthy()`
 4. AI training logic must only run from `OnTimer()` — never from `OnTick()`
 5. All GlobalVariable keys must use `BuildGVPrefix()` from `Core/IManager.mqh`
+6. New config fields **must** have a corresponding rule in `Core/Config/Validator.mqh`
+7. QA and Tools utilities go in `QA/` or `Tools/` — never in the PASR root
