@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|  PASR_MODULAR.mq5 — v5.00 (Multi-Symbol Ready)                   |
+//|  PASR_MODULAR.mq5 — v5.10 (Advanced AI Feature Engineering)      |
 //|  Price Action Support/Resistance Expert Advisor                  |
 //|                                                                  |
 //|  Architecture: modular orchestrator — all logic delegated        |
@@ -26,6 +26,7 @@
 //|   [18] AICalibrationBridge — AI/AICalibrationBridge.mqh          |
 //|   [19] DashboardManager — UI/DashboardManager.mqh                |
 //|   [20] SymbolScanner   — Data/SymbolScanner.mqh (NEW v5.00)      |
+//|   [21] FeatureEngine   — AI/FeatureEngine.mqh (NEW v5.10)        |
 //|                                                                  |
 //|  TICK FLOW (OnTick):                                             |
 //|   scanner.ScanNext() → for each valid symbol:                    |
@@ -38,6 +39,12 @@
 //|     → dashUpdate                                                 |
 //|                                                                  |
 //|  CHANGELOG:                                                      |
+//|   v5.10 (2026-05-21) — Advanced AI Feature Engineering           |
+//|    * Add CFeatureEngine for statistical features (Z-score,       |
+//|      Skewness, Kurtosis, Volatility Regime Detection)            |
+//|    * Volatility-adjusted AI scoring & position sizing            |
+//|    * Dynamic veto threshold based on market regime               |
+//|    * New input params: InpFeatureWindow, InpUseAdvFeatures       |
 //|   v5.00 (2026-05-21) — Multi-Symbol Integration                  |
 //|    * Add CSymbolScanner for multi-symbol scanning                |
 //|    * Refactor OnTick() for round-robin symbol processing         |
@@ -49,13 +56,13 @@
 //|    * Remove dead ExecutionManager.shim.mqh (committed separately)|
 //|   v4.00 (2026-05-21) — Phase 12 final assembly                  |
 //|                                                                  |
-//|  Magic: 20260521  Version: v5.00-multi-symbol                    |
+//|  Magic: 20260521  Version: v5.10-advanced-features               |
 //|  Build: 2026-05-21                                               |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "5.00"
-#property description "Price Action SR — Modular Orchestrator v5.00 (Multi-Symbol)"
+#property version     "5.10"
+#property description "Price Action SR — Modular Orchestrator v5.10 (Advanced AI Features)"
 #property strict
 
 //--- Core
@@ -84,6 +91,7 @@
 #include <PASR/Signal/AI/AIInference.mqh>
 #include <PASR/Signal/AI/AIEnsemble.mqh>
 #include <PASR/Signal/AI/AICalibrationBridge.mqh>
+#include <PASR/Signal/AI/FeatureEngine.mqh>   // [NEW] Advanced statistical features
 //--- UI
 #include <PASR/UI/DashboardManager.mqh>
 //--- Data (Multi-Symbol)
@@ -150,6 +158,8 @@ input double   InpDriftVeto       = 0.60;   // Drift veto above
 input double   InpAIHighThresh    = 0.80;   // High-confidence threshold
 input bool     InpUseEnsemble     = true;   // Use ensemble voting
 input bool     InpLoadWeights     = true;   // Load saved ensemble weights
+input int      InpFeatureWindow   = 20;     // Feature engine rolling window
+input bool     InpUseAdvFeatures  = true;   // Use advanced statistical features
 
 //--- [DASHBOARD]
 sinput group "=== DASHBOARD ==="
@@ -185,6 +195,7 @@ CAIFeatureBuilder    g_featBuilder;
 CAIInference         g_aiInfer;
 CAIEnsemble          g_ensemble;
 CAICalibrationBridge g_calibBridge;
+CFeatureEngine       g_featEngine;   // [21] Advanced statistical feature engine
 CDashboardManager    g_hud;
 //--- Multi-Symbol Scanner (NEW v5.00)
 CSymbolScanner       g_scanner;
@@ -356,6 +367,19 @@ int OnInit()
       ZeroMemory(g_dashCtx);
      }
 
+   //--- [21] Feature Engine (NEW) - Advanced statistical features
+   if(InpUseAdvFeatures)
+     {
+      if(!g_featEngine.Init(_Symbol, PERIOD_CURRENT, InpFeatureWindow))
+        {
+         Print("[PASR][WARN] FeatureEngine init failed - using basic features only");
+        }
+      else
+        {
+         Print("[PASR] FeatureEngine initialized with window=", InpFeatureWindow);
+        }
+     }
+
    // Reset runtime state
    g_lastBarTime = 0;
    g_hasPlan     = false;
@@ -493,16 +517,51 @@ void OnTick()
       DebugPrint(StringFormat("Signal: %s  confluence:%.2f",
                  sig.direction==SIGNAL_BUY?"BUY":"SELL", sig.confluence));
 
-      //--- [M] AI Feature build
+      //--- [M] AI Feature build + Advanced Statistical Features (NEW)
       SRZone zones[20];
       int nZones = g_sr.GetZones(zones, 20);
       g_lastFV = g_featBuilder.Build(sig, atr,
                                       sig.nearestSupport,
                                       sig.nearestResistance,
                                       zones, nZones);
+      
+      // Compute advanced statistical features if enabled
+      FeatureSet adv_features;
+      if(InpUseAdvFeatures && g_featEngine.IsInitialized())
+        {
+         adv_features = g_featEngine.ComputeFeatures();
+         
+         // Log regime detection from FeatureEngine
+         if(adv_features.regime != VOLATILITY_MEDIUM)
+           {
+            DebugPrint(StringFormat("[%s] Volatility regime: %s (z-score=%.2f, skew=%.2f, kurt=%.2f)",
+                                    current_symbol, 
+                                    EnumToString(adv_features.regime),
+                                    adv_features.z_score,
+                                    adv_features.skewness,
+                                    adv_features.kurtosis));
+           }
+        }
 
-      //--- [N] Drift check
+      //--- [N] Drift check + Volatility Regime Adjustment (NEW)
       g_lastDrift = g_featBuilder.ComputeDrift(g_lastFV);
+      
+      // Adjust AI veto threshold based on volatility regime (NEW)
+      double effective_veto_thresh = InpAIVetoThresh;
+      if(InpUseAdvFeatures && g_featEngine.IsInitialized())
+        {
+         ENUM_VOLATILITY_REGIME regime = g_featEngine.GetCurrentRegime();
+         
+         // Increase veto threshold in high volatility (be more conservative)
+         if(regime == VOLATILITY_HIGH)
+            effective_veto_thresh = InpAIVetoThresh * 1.2;  // Require higher AI score
+         else if(regime == VOLATILITY_EXTREME)
+            effective_veto_thresh = InpAIVetoThresh * 1.5;  // Much more conservative
+         // In low volatility, keep standard threshold or slightly lower
+         else if(regime == VOLATILITY_LOW)
+            effective_veto_thresh = InpAIVetoThresh * 0.9;  // Slightly more permissive
+        }
+      
       if(InpUseAI && g_lastDrift > InpDriftVeto)
         {
          DebugPrint(StringFormat("Drift veto: %.2f", g_lastDrift));
@@ -511,13 +570,40 @@ void OnTick()
          continue;
         }
 
-      //--- [O] AI Ensemble scoring
+      //--- [O] AI Ensemble scoring + Volatility Regime Adjustment (NEW)
       double patternBonus = g_pattern.GetPatternBonus(sig.direction);
-      g_lastAIScore = InpUseAI
+      
+      // Base AI score from ensemble or inference
+      double base_ai_score = InpUseAI
          ? (InpUseEnsemble
               ? g_ensemble.GetScore(g_lastFV, sig, patternBonus, g_lastDrift)
               : g_aiInfer.ForwardPass18(g_lastFV, patternBonus, g_lastDrift))
          : sig.confluence;
+      
+      // Apply volatility regime adjustment to AI score (NEW)
+      if(InpUseAdvFeatures && g_featEngine.IsInitialized())
+        {
+         ENUM_VOLATILITY_REGIME regime = g_featEngine.GetCurrentRegime();
+         
+         // Reduce AI confidence in high/extreme volatility (more uncertainty)
+         if(regime == VOLATILITY_HIGH)
+            base_ai_score *= 0.9;   // 10% confidence reduction
+         else if(regime == VOLATILITY_EXTREME)
+            base_ai_score *= 0.75;  // 25% confidence reduction
+         // Slight boost in low volatility (clearer signals)
+         else if(regime == VOLATILITY_LOW)
+            base_ai_score = MathMin(1.0, base_ai_score * 1.05);  // 5% boost, capped at 1.0
+         
+         DebugPrint(StringFormat("[%s] Regime adj: %s -> AI score %.2f -> %.2f",
+                                 current_symbol,
+                                 EnumToString(regime),
+                                 base_ai_score / ((regime == VOLATILITY_HIGH) ? 0.9 : 
+                                                 (regime == VOLATILITY_EXTREME) ? 0.75 :
+                                                 (regime == VOLATILITY_LOW) ? 1.05 : 1.0),
+                                 base_ai_score));
+        }
+      
+      g_lastAIScore = base_ai_score;
       g_lastEnsModel = g_ensemble.GetActiveModel();
 
       DebugPrint(StringFormat("AI score:%.2f drift:%.2f model:%d",
@@ -536,7 +622,7 @@ void OnTick()
         }
       EffectivePolicy ep = g_calibBridge.ApplyOverride(policy, ov);
 
-      //--- [Q] Risk sizing
+      //--- [Q] Risk sizing + Volatility-Adjusted Position Sizing (NEW)
       if(!g_risk.CanOpenTrade())
         {
          DebugPrint("Risk: trade blocked (daily limit or max trades)");
@@ -544,8 +630,30 @@ void OnTick()
          continue;
         }
 
+      // Base lot size calculation
       double lotSize = g_risk.CalcLotSize(
                          current_symbol, atr * InpSLATRMult, ep.lotMultiplier);
+      
+      // Apply volatility regime position sizing adjustment (NEW)
+      if(InpUseAdvFeatures && g_featEngine.IsInitialized())
+        {
+         ENUM_VOLATILITY_REGIME regime = g_featEngine.GetCurrentRegime();
+         
+         // Reduce position size in high/extreme volatility
+         if(regime == VOLATILITY_HIGH)
+            lotSize *= 0.8;   // 20% reduction
+         else if(regime == VOLATILITY_EXTREME)
+            lotSize *= 0.5;   // 50% reduction - significant de-risking
+         // Slight increase in low volatility (controlled environment)
+         else if(regime == VOLATILITY_LOW)
+            lotSize = MathMin(lotSize * 1.1, lotSize + 0.05);  // 10% boost or +0.05 lots, whichever is lower
+         
+         DebugPrint(StringFormat("[%s] Regime position adj: %s -> %.2f lots",
+                                 current_symbol,
+                                 EnumToString(regime),
+                                 lotSize));
+        }
+      
       if(lotSize <= 0)
         {
          DebugPrint("Risk: lot size = 0");
