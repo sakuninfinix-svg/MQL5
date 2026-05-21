@@ -1,490 +1,629 @@
 //+------------------------------------------------------------------+
-//|                                                 PASR_MODULAR.mq5 |
-//|                                       Copyright 2026, Agsicentre |
-//|         Enhanced & Refactored for Performance & Efficiency       |
+//|  PASR_MODULAR.mq5 — v4.00 (Phase 12 — Final Assembly)           |
+//|  Price Action Support/Resistance Expert Advisor                  |
+//|                                                                  |
+//|  Architecture: modular orchestrator — all logic delegated        |
+//|  to Include/PASR/* managers. This file is glue only.            |
+//|                                                                  |
+//|  MODULES (boot order):                                           |
+//|   [01] Config          — Core/Config.mqh                         |
+//|   [02] EventBus        — Core/EventBus.mqh (deferred queue)      |
+//|   [03] DataManager     — Infra/DataManager.mqh                   |
+//|   [04] StateManager    — Infra/StateManager.mqh                  |
+//|   [05] AdaptiveConfig  — Infra/AdaptiveConfig.mqh                |
+//|   [06] JournalManager  — Infra/JournalManager.mqh                |
+//|   [07] PerformanceReport — Infra/PerformanceReport.mqh           |
+//|   [08] SRManager       — Analysis/SRManager.mqh                  |
+//|   [09] PatternManager  — Pattern/PatternManager.mqh              |
+//|   [10] SignalManager   — Signal/SignalManager.mqh                 |
+//|   [11] RiskManager     — Trade/RiskManager.mqh                   |
+//|   [12] ExecutionManager — Trade/ExecutionManager.mqh             |
+//|   [13] PositionManager — Trade/PositionManager.mqh               |
+//|   [14] AIFeatureBuilder — AI/AIFeatureBuilder.mqh                |
+//|   [15] AIInference     — AI/AIInference.mqh                      |
+//|   [16] AIEnsemble      — AI/AIEnsemble.mqh                       |
+//|   [17] AICalibBridge   — AI/AICalibrationBridge.mqh              |
+//|   [18] DashboardManager — UI/DashboardManager.mqh                |
+//|                                                                  |
+//|  TICK FLOW (OnTick):                                             |
+//|   tick → spreadGuard → eventProcess → marketUpdate              |
+//|        → [NEW BAR] regimeDetect → srUpdate → patternScan        |
+//|                    → signalGen → featureBuild → driftCheck      |
+//|                    → ensembleScore → calibBridge                |
+//|                    → riskCheck → execute                        |
+//|        → posManage → dashUpdate                                  |
+//|                                                                  |
+//|  Magic: 20260521  Version: v4.00-phase12                         |
+//|  Build: 2026-05-21                                               |
 //+------------------------------------------------------------------+
-//| CHANGELOG                                                        |
-//|   v1.41 - PHASE 2 Performance Optimization:                      |
-//|           + TickCache integration for duplicate tick filtering   |
-//|           + Zero-allocation event processing in OnTimer()        |
-//|           + Event pool initialization in OnInit()                |
-//|           + Optimized OnTick() with cache hit tracking           |
-//|   v1.40 - Sync with Phase 4-9:                                   |
-//|           + Validator gate (Phase 5) as first OnInit() guard     |
-//|           + DashboardManager v3 setters wired (Phase 9)          |
-//|           + AIManager backprop gating comment (Phase 7)          |
-//|   v1.30 - Replaced 14 individual #include lines with single      |
-//|           #include <PASR/PASR.mqh> master include.               |
-//|           Dependency order is now enforced in PASR.mqh, not here.|
-//|           PatternManager now sourced from Pattern/ subfolder.    |
-//|   v1.20 - Performance & efficiency refactor                      |
-//+------------------------------------------------------------------+
-#property copyright "Copyright 2026, Agsicentre"
-#property link      "agsicentre.wordpress.com"
-#property version   "1.41"
+#property copyright   "PASR EA © 2026"
+#property link        "https://github.com/sakuninfinix-svg/MQL5"
+#property version     "4.00"
+#property description "Price Action SR — Modular Orchestrator v4"
 #property strict
-#property description "Modular Price Action & SR Trading System"
-#property description "Optimized for efficiency, reduced latency, and better resource management"
 
-//--- Single master include — dependency order enforced in PASR.mqh
-#include <PASR/PASR.mqh>
-//--- PHASE 2: TickCache for high-performance tick filtering
-#include <PASR/Tools/TickCache.mqh>
-
-// Global helper untuk dispatch events ke EventBus
-void DispatchEvent(PASREvent *ev)
-{
-   EventBus *bus = EventBus::Instance();
-   if(CheckPointer(bus) != POINTER_INVALID)
-      bus.Push(ev);
-}
-
-//--- Global Pointers Declaration
-EventRecorder      *g_recorder = NULL;  // Defined here, declared extern in EventBus.mqh
-DataManager        *IManager::s_dataCache = NULL;
-MarketRegimeFilter *g_regimeFilter = NULL;  // Global pointer for managers to access regime filter
-
-//--- Manager Instances (Stack-allocated for automatic cleanup)
-MarketManager      market;
-SRManager          sr;
-SignalManager      signal;
-AIManager          ai;
-ExecutionManager   exec;
-RecoveryManager    recovery;
-CDashboardManager  dashboard;   // v3.00 — CDashboardManager (Phase 9)
-DataManager        dta;
-MarketRegimeFilter regimeFilter;
-
-//--- Internal Config Cache for the EA Script
-struct EAConfigCache
-{
-   ulong   magicNum;
-   bool    debugMode;
-   string  symbolName;
-   int     symbolDigits;
-   double  symbolPoint;
-   ENUM_TIMEFRAMES timeframe;
-   double  symbolSpread;
-   
-   void Initialize()
-   {
-      magicNum      = CFG.risk.magic;
-      debugMode     = CFG.system.debug;
-      symbolName    = _Symbol;
-      timeframe     = _Period;
-      symbolDigits  = (int)SymbolInfoInteger(symbolName, SYMBOL_DIGITS);
-      symbolPoint   = SymbolInfoDouble(symbolName, SYMBOL_POINT);
-      symbolSpread  = (double)SymbolInfoInteger(symbolName, SYMBOL_SPREAD);
-   }
-   
-   bool IsValidSymbol() const
-   {
-      return (symbolName.Length() > 0 && symbolDigits > 0 && symbolPoint > 0);
-   }
-   
-   void RefreshSpread()
-   {
-      long spread = SymbolInfoInteger(symbolName, SYMBOL_SPREAD);
-      if(spread >= 0) symbolSpread = (double)spread;
-   }
-} eaCfg;
-
-//--- PHASE 2: Cached tick filter for performance
-CTickCache g_tick_cache;
-
-//--- Cached values for performance
-static datetime g_lastBarTime       = 0;
-static datetime g_lastClosedBarTime = 0;
-static bool     g_isInitialized     = false;
+//--- Core
+#include <PASR/Core/EventBus.mqh>
+#include <PASR/Core/Config.mqh>
+//--- Infra
+#include <PASR/Infra/DataManager.mqh>
+#include <PASR/Infra/StateManager.mqh>
+#include <PASR/Infra/AdaptiveConfig.mqh>
+#include <PASR/Infra/JournalManager.mqh>
+#include <PASR/Infra/PerformanceReport.mqh>
+//--- Analysis
+#include <PASR/Analysis/SRManager.mqh>
+//--- Pattern
+#include <PASR/Pattern/PatternManager.mqh>
+//--- Signal
+#include <PASR/Signal/SignalManager.mqh>
+//--- Trade
+#include <PASR/Trade/RiskManager.mqh>
+#include <PASR/Trade/TradePlan.mqh>
+#include <PASR/Trade/ExecutionManager.mqh>
+#include <PASR/Trade/PositionManager.mqh>
+//--- AI
+#include <PASR/AI/AIFeatureBuilder.mqh>
+#include <PASR/AI/AIInference.mqh>
+#include <PASR/AI/AIEnsemble.mqh>
+#include <PASR/AI/AICalibrationBridge.mqh>
+//--- UI
+#include <PASR/UI/DashboardManager.mqh>
 
 //+------------------------------------------------------------------+
-//| Global accessor function for spread cache                        |
+//|  INPUT PARAMETERS — grouped by module                            |
 //+------------------------------------------------------------------+
-double GetGlobalSpread()
-{
-   return eaCfg.symbolSpread;
-}
+
+//--- [RISK]
+sinput group "=== RISK MANAGEMENT ==="
+input double   InpRiskPct         = 1.0;    // Risk per trade (%)
+input double   InpMaxDailyLossPct = 3.0;    // Max daily loss (%)
+input double   InpMaxDrawdownPct  = 10.0;   // Circuit-breaker DD (%)
+input int      InpMaxTradesPerDay = 5;      // Max trades/day
+input double   InpMinRR           = 1.5;    // Minimum R:R to trade
+
+//--- [SR]
+sinput group "=== SUPPORT / RESISTANCE ==="
+input int      InpSRLookback      = 200;    // SR lookback bars
+input int      InpSRMinTouches    = 2;      // Min touches for zone
+input double   InpSRMergeATR      = 0.5;    // Merge threshold (ATR multiplier)
+input int      InpSRMaxZones      = 20;     // Max active zones
+
+//--- [SIGNAL]
+sinput group "=== SIGNAL ENGINE ==="
+input double   InpMinConfluence   = 0.60;   // Min signal confluence
+input double   InpMaxSpreadPips   = 2.0;    // Max allowed spread (pips)
+input bool     InpUsePatterns     = true;   // Use candlestick patterns
+input bool     InpUseTrend        = true;   // Use trend filter
+
+//--- [TRADE]
+sinput group "=== TRADE EXECUTION ==="
+input double   InpSLATRMult       = 1.5;    // SL = N * ATR
+input double   InpTP1RR           = 1.5;    // TP1 R:R
+input double   InpTP2RR           = 3.0;    // TP2 R:R (runner)
+input bool     InpUseBE           = true;   // Enable break-even
+input double   InpBEActivateRR    = 1.0;    // BE activates at R:R
+input bool     InpUsePartial      = true;   // Enable partial close
+input double   InpPartialPct      = 50.0;   // Partial close %
+input bool     InpUseTrailing     = true;   // Enable trailing stop
+input double   InpTrailATRMult    = 1.0;    // Trail = N * ATR
+
+//--- [AI]
+sinput group "=== AI ENGINE ==="
+input bool     InpUseAI           = true;   // Enable AI scoring
+input double   InpAIVetoThresh    = 0.40;   // AI veto below score
+input double   InpDriftVeto       = 0.60;   // Drift veto above
+input double   InpAIHighThresh    = 0.80;   // High-confidence threshold
+input bool     InpUseEnsemble     = true;   // Use ensemble voting
+input bool     InpLoadWeights     = true;   // Load saved ensemble weights
+
+//--- [DASHBOARD]
+sinput group "=== DASHBOARD ==="
+input bool     InpShowDash        = true;   // Show on-chart HUD
+input bool     InpShowAIPanel     = true;   // Show AI panel
+input bool     InpExportReport    = true;   // Export HTML report on deinit
+input int      InpReportInterval  = 50;     // Export every N trades
+
+//--- [GENERAL]
+sinput group "=== GENERAL ==="
+input ulong    InpMagic           = 20260521; // Magic number
+input string   InpComment        = "PASR_v4";  // Order comment
+sinput bool    InpJournalEnabled  = true;    // Enable CSV journal
+sinput bool    InpDebugLog        = false;   // Verbose debug logging
 
 //+------------------------------------------------------------------+
-//| Expert initialization function                                   |
+//|  MODULE INSTANCES                                                |
+//+------------------------------------------------------------------+
+CEventBus            g_bus;
+CDataManager         g_data;
+CStateManager        g_state;
+CAdaptiveConfig      g_adaptCfg;
+CJournalManager      g_journal;
+CPerformanceReport   g_report;
+CSRManager           g_sr;
+CPatternManager      g_pattern;
+CSignalManager       g_signal;
+CRiskManager         g_risk;
+CExecutionManager    g_exec;
+CPositionManager     g_pos;
+CAIFeatureBuilder    g_featBuilder;
+CAIInference         g_aiInfer;
+CAIEnsemble          g_ensemble;
+CAICalibrationBridge g_calibBridge;
+CDashboardManager    g_hud;
+
+//+------------------------------------------------------------------+
+//|  RUNTIME STATE                                                   |
+//+------------------------------------------------------------------+
+datetime          g_lastBarTime   = 0;
+TradePlan         g_activePlan;
+bool              g_hasPlan       = false;
+FeatureVector     g_lastFV;
+double            g_lastAIScore   = 0;
+double            g_lastDrift     = 0;
+int               g_lastEnsModel  = 0;
+ENUM_MARKET_REGIME  g_regime      = REGIME_RANGING;
+ENUM_TRADING_SESSION g_session    = SESSION_OFF;
+datetime          g_posOpenTime   = 0;
+DashContext       g_dashCtx;
+
+//+------------------------------------------------------------------+
+//|  HELPERS                                                         |
+//+------------------------------------------------------------------+
+void DebugPrint(string msg)
+  { if(InpDebugLog) Print("[PASR_DBG] ", msg); }
+
+double GetATR(int period = 14)
+  {
+   double atr[];
+   ArraySetAsSeries(atr, true);
+   int h = iATR(_Symbol, PERIOD_CURRENT, period);
+   if(h == INVALID_HANDLE) return 0;
+   CopyBuffer(h, 0, 0, 1, atr);
+   IndicatorRelease(h);
+   return (ArraySize(atr) > 0) ? atr[0] : 0;
+  }
+
+double GetSpreadPips()
+  {
+   long sp = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   return sp * _Point * 10000.0; // normalize to pips
+  }
+
+ENUM_TRADING_SESSION DetectSession()
+  {
+   MqlDateTime dt; TimeToStruct(TimeGMT(), dt);
+   int h = dt.hour;
+   // Overlap: London + NY (12:00-16:00 GMT)
+   if(h >= 12 && h < 16) return SESSION_OVERLAP;
+   // London: 08:00-16:00 GMT
+   if(h >=  8 && h < 16) return SESSION_LONDON;
+   // New York: 13:00-22:00 GMT
+   if(h >= 13 && h < 22) return SESSION_NEWYORK;
+   // Asian: 00:00-08:00 GMT
+   if(h >=  0 && h <  8) return SESSION_ASIAN;
+   return SESSION_OFF;
+  }
+
+//+------------------------------------------------------------------+
+//|  OnInit — ordered boot sequence                                  |
 //+------------------------------------------------------------------+
 int OnInit()
-{
-   //=================================================================
-   // STEP 0 — VALIDATOR GATE (Phase 5 / 33 rules)
-   //   Must be the VERY FIRST check — before any manager allocation.
-   //   On failure MT5 logs exact rule violations and blocks the EA.
-   //=================================================================
-   CPASRValidator validator;
-   if(!validator.Validate(CFG))
-   {
-      validator.PrintErrors();
-      Print("[ERROR] PASR_MODULAR: configuration validation failed — EA will not start.");
-      return INIT_PARAMETERS_INCORRECT;
-   }
+  {
+   Print("[PASR] v4.00-phase12 booting — magic:", InpMagic);
 
-   //--- Validate symbol information (fail-fast)
-   if(!SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE))
-   {
-      Print("[ERROR] Invalid symbol or trading not allowed: ", _Symbol);
-      return INIT_FAILED;
-   }
-   
-   // 1. Initialize Event Bus first
-   if(CheckPointer(EventBus::Instance()) == POINTER_INVALID)
-   {
-      Print("[ERROR] Failed to initialize EventBus");
-      return INIT_FAILED;
-   }
+   //--- [01] Config
+   g_adaptCfg.SetRiskPct(InpRiskPct);
+   g_adaptCfg.SetMaxDailyLossPct(InpMaxDailyLossPct);
+   g_adaptCfg.SetMaxDrawdownPct(InpMaxDrawdownPct);
+   g_adaptCfg.SetMinRR(InpMinRR);
 
-   // PHASE 2: Initialize event pool for zero-allocation processing
-   EventBus *bus = EventBus::Instance();
-   if(CheckPointer(bus) != POINTER_INVALID)
-   {
-      if(!bus.InitPool(256)) // 256 events capacity
-         Print("[WARN] Event pool initialization failed, falling back to stack allocation");
-   }
+   //--- [02] EventBus
+   g_bus.Init();
 
-   // PHASE 2: Initialize tick cache
-   if(!g_tick_cache.Init(eaCfg.symbolName))
-   {
-      Print("[WARN] TickCache initialization failed, using fallback mode");
-   }
+   //--- [03] DataManager
+   if(!g_data.Init(_Symbol, PERIOD_CURRENT))
+     { Alert("[PASR] DataManager init failed"); return INIT_FAILED; }
 
-   // 2. Initialize config cache with symbol info
-   eaCfg.Initialize();
-   if(!eaCfg.IsValidSymbol())
-   {
-      Print("[ERROR] Failed to initialize symbol configuration");
-      return INIT_FAILED;
-   }
-   
-   // 3. Initialize debug recorder if enabled
-   if(eaCfg.debugMode)
-   {
-      g_recorder = new EventRecorder();
-      if(CheckPointer(g_recorder) == POINTER_INVALID)
-      {
-         Print("[ERROR] Failed to create EventRecorder");
-         return INIT_FAILED;
-      }
-      g_recorder.Start();
-   }
+   //--- [04] StateManager
+   g_state.Init(InpMagic);
 
-   // 4. Print configuration summary
-   PrintConfigSummary();
+   //--- [05] JournalManager
+   g_journal.SetCSVEnabled(InpJournalEnabled);
+   g_journal.SetCSVPrefix("PASR_Journal");
 
-   // 5. Initialize DataManager (required by all other managers)
-   if(!dta.Init())
-   {
-      Print("[ERROR] Failed to initialize DataManager");
-      return INIT_FAILED;
-   }
-   IManager::SetGlobalDataManager(GetPointer(dta));
+   //--- [06] PerformanceReport
+   g_report.SetJournal(GetPointer(g_journal));
 
-   // 6. Initialize managers in dependency order
-   if(!signal.Init())
-   { Print("[ERROR] Failed to initialize SignalManager");  return INIT_FAILED; }
-   
-   // AIManager: forward pass runs OnPriceUpdate(), backprop deferred to OnNewBar() (Phase 7)
-   if(!ai.Init())
-   { Print("[ERROR] Failed to initialize AIManager");      return INIT_FAILED; }
-   
-   if(!market.Init())
-   { Print("[ERROR] Failed to initialize MarketManager");  return INIT_FAILED; }
-   
-   if(!sr.Init())
-   { Print("[ERROR] Failed to initialize SRManager");      return INIT_FAILED; }
-   
-   if(!exec.Init())
-   { Print("[ERROR] Failed to initialize ExecutionManager"); return INIT_FAILED; }
-   
-   if(!recovery.Init())
-   { Print("[ERROR] Failed to initialize RecoveryManager"); return INIT_FAILED; }
+   //--- [07] SR Manager
+   if(!g_sr.Init(_Symbol, PERIOD_CURRENT,
+                 InpSRLookback, InpSRMinTouches,
+                 InpSRMergeATR, InpSRMaxZones))
+     { Alert("[PASR] SRManager init failed"); return INIT_FAILED; }
 
-   // Initialize Market Regime Filter
-   regimeFilter.SetDataManager(GetPointer(dta));
-   if(!regimeFilter.CreateIndicators())
-   {
-      Print("[ERROR] Failed to create MarketRegime indicators");
-      return INIT_FAILED;
-   }
-   g_regimeFilter = GetPointer(regimeFilter);
-   ai.SetRegimeFilter(g_regimeFilter);
+   //--- [08] Pattern Manager
+   g_pattern.Init(_Symbol, PERIOD_CURRENT);
 
-   // 7. Initialize DashboardManager v3 (Phase 9 — CDashboardManager)
-   if(!dashboard.Init(GetPointer(dta), EventBus::Instance()))
-   {
-      Print("[ERROR] Failed to initialize DashboardManager v3");
-      return INIT_FAILED;
-   }
+   //--- [09] Signal Manager
+   g_signal.Init(_Symbol, PERIOD_CURRENT,
+                 InpMinConfluence, InpUseTrend, InpUsePatterns,
+                 GetPointer(g_sr), GetPointer(g_pattern));
 
-   // 8. Start periodic timer (2 seconds)
-   EventSetTimer(2);
+   //--- [10] Risk Manager
+   g_risk.Init(InpMagic, InpRiskPct, InpMaxDailyLossPct,
+               InpMaxDrawdownPct, InpMaxTradesPerDay, InpMinRR);
 
-   // 9. Restore existing positions from previous session
-   RestoreExistingPositions();
+   //--- [11] Execution Manager
+   g_exec.Init(InpMagic, InpComment,
+               InpSLATRMult, InpTP1RR, InpTP2RR);
 
-   // 10. Dispatch initial system ready event
-   DispatchEvent(new HeartbeatEvent(0));
-   
-   g_isInitialized = true;
-   Print("[INFO] PASR_MODULAR v1.40 initialized on ", eaCfg.symbolName);
+   //--- [12] Position Manager
+   g_pos.Init(InpMagic,
+               InpUseBE,      InpBEActivateRR,
+               InpUsePartial, InpPartialPct,
+               InpUseTrailing,InpTrailATRMult);
 
+   //--- [13] AI Feature Builder
+   g_featBuilder.Init(_Symbol, PERIOD_CURRENT);
+
+   //--- [14] AI Inference
+   g_aiInfer.Init();
+
+   //--- [15] AI Ensemble
+   g_ensemble.Init();
+   if(InpLoadWeights) g_ensemble.LoadWeights();
+
+   //--- [16] AI Calibration Bridge
+   g_calibBridge.SetJournal(GetPointer(g_journal));
+   g_calibBridge.SetHighThresh(InpAIHighThresh);
+   g_calibBridge.SetVetoThresh(InpAIVetoThresh);
+
+   //--- [17] Dashboard
+   if(InpShowDash)
+     {
+      g_hud.Init(GetPointer(g_journal));
+      ZeroMemory(g_dashCtx);
+     }
+
+   // Reset runtime state
+   g_lastBarTime = 0;
+   g_hasPlan     = false;
+   g_regime      = REGIME_RANGING;
+   g_session     = DetectSession();
+
+   Print("[PASR] Boot complete — all modules initialized");
+   EventSetTimer(60); // 1-min heartbeat for dashboard time update
    return INIT_SUCCEEDED;
-}
+  }
 
 //+------------------------------------------------------------------+
-//| Restore existing positions from previous session                 |
-//+------------------------------------------------------------------+
-void RestoreExistingPositions()
-{
-   int restoredCount = 0;
-   
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket <= 0) continue;
-      if(!PositionSelectByTicket(ticket)) continue;
-      if(PositionGetInteger(POSITION_MAGIC)  != eaCfg.magicNum)   continue;
-      if(PositionGetString(POSITION_SYMBOL)  != eaCfg.symbolName) continue;
-      
-      ENUM_ORDER_TYPE posType  = (ENUM_ORDER_TYPE)PositionGetInteger(POSITION_TYPE);
-      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-      double tp        = PositionGetDouble(POSITION_TP);
-      double sl        = PositionGetDouble(POSITION_SL);
-      double volume    = PositionGetDouble(POSITION_VOLUME);
-      double currentATR = dta.GetATRPoints();
-      
-      RecoveryEngine *eng = recovery.GetEngine(ticket);
-      if(eng == NULL)
-         recovery.Register(ticket, posType, openPrice, tp, sl, currentATR, volume, 0, 1.0);
-      eng = recovery.GetEngine(ticket);
-
-      if(CheckPointer(eng) != POINTER_INVALID)
-      {
-         eng.LoadState(ticket);
-         DispatchEvent(new PositionUpdateEvent(ticket,
-                       PositionGetDouble(POSITION_PRICE_CURRENT),
-                       PositionGetDouble(POSITION_PROFIT)));
-         restoredCount++;
-      }
-   }
-   
-   if(restoredCount > 0)
-      Print("[INFO] Restored ", restoredCount, " existing position(s)");
-}
-
-//+------------------------------------------------------------------+
-//| Expert deinitialization function                                 |
+//|  OnDeinit — ordered shutdown                                     |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
-{
+  {
    EventKillTimer();
-   
-   // PHASE 2: Log final tick cache statistics
-   if(eaCfg.debugMode)
-   {
-      Print("[PERF] Final TickCache stats - Hits: ", g_tick_cache.GetHitCount(),
-            ", Misses: ", g_tick_cache.GetMissCount(),
-            ", Hit Rate: ", DoubleToString(g_tick_cache.GetHitRate(), 2), "%");
-   }
-   
-   EventBus::Release();
 
-   //--- DashboardManager v3 cleanup (Phase 9)
-   dashboard.Destroy();
-   
-   if(CheckPointer(g_recorder) != POINTER_INVALID)
-   {
-      delete g_recorder;
-      g_recorder = NULL;
-   }
-   
-   Comment("");
-   
-   if(eaCfg.debugMode)
-      Print("[INFO] PASR_MODULAR deinitialized. Reason: ", reason);
-}
+   // Save AI ensemble weights
+   g_ensemble.SaveWeights();
+
+   // Export calibration data for Python retraining
+   g_calibBridge.ExportCalibrationCSV();
+
+   // Export performance HTML report
+   if(InpExportReport) g_report.ExportHTML();
+
+   // Clean up chart HUD
+   if(InpShowDash) g_hud.Deinit();
+
+   // Release managers
+   g_sr.Deinit();
+   g_data.Deinit();
+   g_bus.Deinit();
+
+   PrintFormat("[PASR] Shutdown — reason:%d  total_trades:%d",
+               reason, g_journal.GetTotalTrades());
+  }
 
 //+------------------------------------------------------------------+
-//| Chart event handler                                              |
-//+------------------------------------------------------------------+
-void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
-{
-   // Forward chart events to dashboard for toggle/button interactions
-   dashboard.OnChartEvent(id, lparam, dparam, sparam);
-}
-
-//+------------------------------------------------------------------+
-//| Trade transaction handler                                        |
-//+------------------------------------------------------------------+
-void OnTradeTransaction(const MqlTradeTransaction &trans,
-                        const MqlTradeRequest &request,
-                        const MqlTradeResult &result)
-{
-   if(trans.type != TRADE_TRANSACTION_DEAL_ADD || !HistoryDealSelect(trans.deal))
-      return;
-   if(HistoryDealGetInteger(trans.deal, DEAL_MAGIC)  != eaCfg.magicNum)   return;
-   if(HistoryDealGetString(trans.deal,  DEAL_SYMBOL) != eaCfg.symbolName) return;
-   
-   long  entryType = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
-   ulong positionID = trans.position;
-
-   if(entryType == DEAL_ENTRY_IN)
-   {
-      string comment  = HistoryDealGetString(trans.deal, DEAL_COMMENT);
-      int    hashPos  = StringFind(comment, "#");
-      ulong  tsID     = (hashPos >= 0) ? (ulong)StringToInteger(StringSubstr(comment, hashPos + 1)) : 0;
-
-      ENUM_ORDER_TYPE type   = (ENUM_ORDER_TYPE)HistoryDealGetInteger(trans.deal, DEAL_TYPE);
-      double entry   = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
-      double volume  = HistoryDealGetDouble(trans.deal, DEAL_VOLUME);
-      double sl      = HistoryDealGetDouble(trans.deal, DEAL_SL);
-      double tp      = HistoryDealGetDouble(trans.deal, DEAL_TP);
-      double slMult  = 1.0;
-
-      if(PositionSelectByTicket(positionID))
-      {
-         if(sl <= 0) sl = PositionGetDouble(POSITION_SL);
-         if(tp <= 0) tp = PositionGetDouble(POSITION_TP);
-      }
-
-      if(tsID > 0)
-      {
-         string prefix = "PASR_PEND_" + IntegerToString(eaCfg.magicNum) + "_"
-                        + eaCfg.symbolName + "_" + IntegerToString(tsID) + "_";
-         if(GlobalVariableCheck(prefix + "ts"))
-         {
-            if(tp <= 0) tp = GlobalVariableGet(prefix + "tp");
-            if(GlobalVariableCheck(prefix + "sm")) slMult = GlobalVariableGet(prefix + "sm");
-            GlobalVariablesDeleteAll("PASR_PEND_" + IntegerToString(eaCfg.magicNum)
-                                    + "_" + eaCfg.symbolName + "_" + IntegerToString(tsID));
-         }
-      }
-
-      DispatchEvent(new OrderExecutionEvent(true, positionID, type, entry, sl, tp, volume,
-                                            "Confirmed", comment));
-      recovery.Register(positionID, type, entry, tp, sl, dta.GetATRPoints(), volume, 0, slMult);
-
-      datetime times[];
-      if(CopyTime(eaCfg.symbolName, eaCfg.timeframe, 0, 1, times) > 0)
-         market.UpdateLastEntryBarTime(times[0]);
-   }
-   else if(entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_INOUT)
-   {
-      dta.RefreshDailyProfit();
-      
-      double netProfit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT)
-                       + HistoryDealGetDouble(trans.deal, DEAL_COMMISSION)
-                       + HistoryDealGetDouble(trans.deal, DEAL_SWAP);
-      dta.UpdateConsecutiveLosses(netProfit);
-
-      //--- Feed AI with trade result (Phase 7)
-      ai.OnTradeResult(positionID, netProfit);
-
-      string comment  = HistoryDealGetString(trans.deal, DEAL_COMMENT);
-      int    recovPos = StringFind(comment, "RECOV_ORIG_");
-      if(recovPos == 0)
-      {
-         int ticketStart = StringLen("RECOV_ORIG_");
-         int ticketEnd   = StringFind(comment, "_P_", ticketStart);
-         if(ticketEnd > ticketStart)
-         {
-            ulong origTicket = (ulong)StringToInteger(StringSubstr(comment, ticketStart,
-                                                      ticketEnd - ticketStart));
-            recovery.NotifyRecoverySuccess(origTicket);
-         }
-      }
-
-      DispatchEvent(new PositionUpdateEvent(positionID,
-                   HistoryDealGetDouble(trans.deal, DEAL_PRICE),
-                   netProfit, true));
-
-      //--- Update dashboard P&L row (Phase 9)
-      double dd = (dta.GetStartBalance() > 0)
-                  ? (dta.GetStartBalance() - AccountInfoDouble(ACCOUNT_EQUITY))
-                    / dta.GetStartBalance() * 100.0
-                  : 0.0;
-      dashboard.SetPnL(dta.GetDailyProfit(), dd);
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Timer handler                                                    |
-//+------------------------------------------------------------------+
-void OnTimer()
-{
-   EventBus *bus = EventBus::Instance();
-   if(CheckPointer(bus) != POINTER_INVALID)
-   {
-      // PHASE 2: Use zero-allocation event processing if pool is available
-      bus.ProcessDeferredEventsZeroAlloc();
-   }
-   
-   DispatchEvent(new HeartbeatEvent(2));
-}
-
-//+------------------------------------------------------------------+
-//| Tick event handler                                               |
+//|  OnTick — main execution loop                                    |
 //+------------------------------------------------------------------+
 void OnTick()
-{
-   eaCfg.RefreshSpread();
-   
-   // PHASE 2: Use tick cache to filter duplicate ticks (major performance win)
-   if(!g_tick_cache.Update())
-   {
-      // Duplicate tick detected - skip processing to save CPU cycles
+  {
+   //--- [A] Always: spread guard
+   double spreadPips = GetSpreadPips();
+   if(spreadPips > InpMaxSpreadPips)
+     {
+      DebugPrint(StringFormat("Spread guard: %.1f > %.1f pips",
+                              spreadPips, InpMaxSpreadPips));
       return;
-   }
-   
-   // Get cached tick data (already validated as new)
-   const MqlTick &tick = g_tick_cache.GetLastTick();
+     }
 
-   //--- Forward pass only — backprop deferred to OnNewBar() inside AIManager (Phase 7)
-   ai.OnPriceUpdate();
+   //--- [B] Always: process deferred EventBus queue
+   g_bus.ProcessPending();
 
-   DispatchEvent(new PriceUpdateEvent(tick));
+   //--- [C] Always: position management (BE, partial, trailing)
+   if(g_pos.HasOpenPosition())
+      g_pos.OnTick(GetATR());
 
-   if(CFG.market.useRegime)
-      regimeFilter.Update();
+   //--- [D] New-bar dirty-flag throttle
+   datetime barTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+   bool isNewBar = (barTime != g_lastBarTime);
+   if(!isNewBar)
+     {
+      // Tick-only: update dashboard live PnL + time
+      if(InpShowDash) UpdateDashboard();
+      return;
+     }
+   g_lastBarTime = barTime;
+   DebugPrint(StringFormat("New bar: %s", TimeToString(barTime)));
 
-   //--- Update dashboard at tick rate (throttled internally to 1Hz)
-   dashboard.SetSignal(signal.GetLastDirection(), signal.GetLastScore());
-   dashboard.SetAIScore(ai.GetConfidence(), ai.GetLastLoss(), ai.GetEpochCount());
-   dashboard.SetRecoveryState(recovery.GetState(), recovery.GetAttemptCount());
-   dashboard.OnPriceUpdate();
+   //--- [E] Session detect
+   g_session = DetectSession();
 
-   //--- Bar detection using CopyTime (MQL5 best practice)
-   datetime times[];
-   if(CopyTime(eaCfg.symbolName, eaCfg.timeframe, 0, 2, times) <= 0) return;
-      
-   datetime lastClosedBar = times[1];
-   if(lastClosedBar != g_lastClosedBarTime)
-   {
-      g_lastClosedBarTime = lastClosedBar;
-      market.SetLastBarTime(lastClosedBar);
+   //--- [F] Data update (OHLCV cache refresh)
+   g_data.OnNewBar();
 
-      MqlRates rates[];
-      ArraySetAsSeries(rates, true);
-      if(CopyRates(eaCfg.symbolName, eaCfg.timeframe, 0, 2, rates) > 1)
-      {
-         if(rates[1].high >= rates[1].low && rates[1].open > 0 && rates[1].close > 0)
-         {
-            DispatchEvent(new NewBarEvent(
-                lastClosedBar,
-                rates[1].open, rates[1].high, rates[1].low, rates[1].close,
-                eaCfg.timeframe));
-         }
-      }
-   }
-   
-   // PHASE 2: Log cache statistics periodically in debug mode
-   if(eaCfg.debugMode && (g_tick_cache.GetMissCount() % 1000 == 0))
-   {
-      Print("[PERF] TickCache stats - Hits: ", g_tick_cache.GetHitCount(),
-            ", Misses: ", g_tick_cache.GetMissCount(),
-            ", Hit Rate: ", DoubleToString(g_tick_cache.GetHitRate(), 2), "%");
-   }
-}
+   //--- [G] Regime detection via AdaptiveConfig
+   double atr = GetATR();
+   g_regime = g_adaptCfg.DetectRegime(_Symbol, PERIOD_CURRENT, atr);
+   EffectivePolicy policy = g_adaptCfg.GetEffectivePolicy(
+                              g_regime, g_session, atr);
+
+   //--- [H] Risk daily reset check
+   if(!g_risk.IsTradingAllowed())
+     {
+      DebugPrint("Risk circuit breaker active — skip bar");
+      if(InpShowDash) UpdateDashboard();
+      return;
+     }
+
+   //--- [I] SR recalculation
+   g_sr.OnNewBar();
+
+   //--- [J] Pattern scan
+   g_pattern.OnNewBar();
+
+   //--- [K] Signal generation
+   TradeSignal sig;
+   bool hasSignal = g_signal.GenerateSignal(sig, atr);
+   if(!hasSignal)
+     {
+      DebugPrint("No signal this bar");
+      if(InpShowDash) UpdateDashboard();
+      return;
+     }
+   DebugPrint(StringFormat("Signal: %s  confluence:%.2f",
+              sig.direction==SIGNAL_BUY?"BUY":"SELL", sig.confluence));
+
+   //--- [L] AI Feature build
+   SRZone zones[20];
+   int nZones = g_sr.GetZones(zones, 20);
+   g_lastFV = g_featBuilder.Build(sig, atr,
+                                   sig.nearestSupport,
+                                   sig.nearestResistance,
+                                   zones, nZones);
+
+   //--- [M] Drift check
+   g_lastDrift = g_featBuilder.ComputeDrift(g_lastFV);
+   if(InpUseAI && g_lastDrift > InpDriftVeto)
+     {
+      DebugPrint(StringFormat("Drift veto: %.2f", g_lastDrift));
+      CDashboardManager::PushSignal(g_dashCtx, sig.direction, 0, 0);
+      if(InpShowDash) UpdateDashboard();
+      return;
+     }
+
+   //--- [N] AI Ensemble scoring
+   double patternBonus = g_pattern.GetPatternBonus(sig.direction);
+   g_lastAIScore = InpUseAI
+      ? (InpUseEnsemble
+           ? g_ensemble.GetScore(g_lastFV, sig, patternBonus, g_lastDrift)
+           : g_aiInfer.ForwardPass18(g_lastFV, patternBonus, g_lastDrift))
+      : sig.confluence;
+   g_lastEnsModel = g_ensemble.GetActiveModel();
+
+   DebugPrint(StringFormat("AI score:%.2f drift:%.2f model:%d",
+                           g_lastAIScore, g_lastDrift, g_lastEnsModel));
+
+   //--- [O] Calibration bridge: map score → policy override
+   AIScoreOverride ov = g_calibBridge.MapScoreToPolicy(
+                          g_lastAIScore, policy);
+   if(ov.blockTrade)
+     {
+      DebugPrint(StringFormat("CalibBridge veto: score=%.2f", g_lastAIScore));
+      CDashboardManager::PushSignal(g_dashCtx, sig.direction,
+                                    g_lastAIScore, 0);
+      if(InpShowDash) UpdateDashboard();
+      return;
+     }
+   EffectivePolicy ep = g_calibBridge.ApplyOverride(policy, ov);
+
+   //--- [P] Risk sizing
+   if(!g_risk.CanOpenTrade())
+     {
+      DebugPrint("Risk: trade blocked (daily limit or max trades)");
+      if(InpShowDash) UpdateDashboard();
+      return;
+     }
+
+   double lotSize = g_risk.CalcLotSize(
+                      _Symbol, atr * InpSLATRMult, ep.lotMultiplier);
+   if(lotSize <= 0)
+     {
+      DebugPrint("Risk: lot size = 0");
+      return;
+     }
+
+   //--- [Q] Build TradePlan
+   TradePlan plan;
+   plan.direction  = sig.direction;
+   plan.entryPrice = (sig.direction == SIGNAL_BUY)
+                     ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+                     : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   plan.sl         = plan.entryPrice
+                   + ((sig.direction==SIGNAL_BUY ? -1 : 1)
+                      * atr * ep.slATRMult);
+   plan.tp         = plan.entryPrice
+                   + ((sig.direction==SIGNAL_BUY ? 1 : -1)
+                      * atr * ep.slATRMult * ep.tp1RR);
+   plan.tp2        = plan.entryPrice
+                   + ((sig.direction==SIGNAL_BUY ? 1 : -1)
+                      * atr * ep.slATRMult * ep.tp2RR);
+   plan.lot        = lotSize;
+   plan.magic      = InpMagic;
+   plan.comment    = InpComment;
+
+   // Validate R:R
+   double riskPts  = MathAbs(plan.entryPrice - plan.sl);
+   double rewardPts= MathAbs(plan.tp - plan.entryPrice);
+   if(riskPts <= 0 || (rewardPts / riskPts) < InpMinRR)
+     {
+      DebugPrint(StringFormat("RR too low: %.2f", rewardPts/riskPts));
+      return;
+     }
+
+   //--- [R] Execute
+   if(!g_exec.OpenTrade(plan))
+     {
+      DebugPrint(StringFormat("Execution failed: %d", GetLastError()));
+      return;
+     }
+
+   // Track open state
+   g_activePlan    = plan;
+   g_hasPlan       = true;
+   g_posOpenTime   = TimeCurrent();
+   g_risk.OnTradeOpened();
+   g_calibBridge.LogTradeOpen(g_lastAIScore);
+
+   // Push signal to dashboard
+   CDashboardManager::PushSignal(g_dashCtx,
+                                  sig.direction, g_lastAIScore, 0);
+
+   PrintFormat("[PASR] OPENED %s  entry:%.5f  sl:%.5f  tp:%.5f  lots:%.2f  AI:%.2f",
+               plan.direction==SIGNAL_BUY?"BUY":"SELL",
+               plan.entryPrice, plan.sl, plan.tp, plan.lot, g_lastAIScore);
+
+   if(InpShowDash) UpdateDashboard();
+  }
+
+//+------------------------------------------------------------------+
+//|  OnTradeTransaction — journal + weight update on close           |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(
+      const MqlTradeTransaction &trans,
+      const MqlTradeRequest     &req,
+      const MqlTradeResult      &res)
+  {
+   // Only care about deal additions that are position exits
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+   if(!HistoryDealSelect(trans.deal))            return;
+   if(HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != (long)InpMagic) return;
+   if(HistoryDealGetInteger(trans.deal, DEAL_ENTRY) != DEAL_ENTRY_OUT)  return;
+
+   double closePrice = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
+   double pnl        = HistoryDealGetDouble(trans.deal, DEAL_PROFIT)
+                     + HistoryDealGetDouble(trans.deal, DEAL_SWAP)
+                     + HistoryDealGetDouble(trans.deal, DEAL_COMMISSION);
+   bool   isWin      = (pnl > 0);
+   double rr         = 0;
+   double riskPts    = MathAbs(g_activePlan.entryPrice - g_activePlan.sl);
+   if(riskPts > 0)
+      rr = (pnl > 0 ? 1 : -1)
+         * MathAbs(closePrice - g_activePlan.entryPrice) / riskPts;
+
+   //--- Journal
+   if(g_hasPlan)
+     {
+      g_journal.OnPositionClosed(
+         trans.deal,
+         g_posOpenTime,
+         g_activePlan,
+         closePrice, pnl,
+         g_regime, g_session,
+         g_lastAIScore, g_lastDrift,
+         g_lastEnsModel,
+         g_lastFV,
+         g_pos.IsBEDone(),
+         g_pos.IsPartialDone(),
+         g_pos.IsRunnerActive());
+      g_hasPlan = false;
+     }
+
+   //--- Risk daily P&L update
+   g_risk.OnTradeClosed(pnl);
+
+   //--- Calibration log
+   g_calibBridge.LogTradeClose(isWin, rr);
+
+   //--- Ensemble weight update
+   g_ensemble.UpdateWeight(
+      (ENUM_ENSEMBLE_MODEL)g_lastEnsModel, isWin);
+   g_ensemble.SaveWeights();
+
+   //--- Dashboard: mark signal outcome
+   CDashboardManager::UpdateSignalOutcome(
+      g_dashCtx, isWin ? 1 : -1);
+
+   //--- Auto-export report every N trades
+   if(InpExportReport &&
+      g_journal.GetTotalTrades() % InpReportInterval == 0)
+      g_report.ExportHTML();
+
+   PrintFormat("[PASR] CLOSED %s  PnL:%.2f  RR:%.2f  AI:%.2f  Win:%s",
+               g_activePlan.direction==SIGNAL_BUY?"BUY":"SELL",
+               pnl, rr, g_lastAIScore, isWin?"YES":"NO");
+  }
+
+//+------------------------------------------------------------------+
+//|  OnTimer — 1-min heartbeat (dashboard time refresh)             |
+//+------------------------------------------------------------------+
+void OnTimer()
+  {
+   if(InpShowDash) UpdateDashboard();
+  }
+
+//+------------------------------------------------------------------+
+//|  UpdateDashboard — fill DashContext from live state             |
+//+------------------------------------------------------------------+
+void UpdateDashboard()
+  {
+   if(!InpShowDash) return;
+
+   g_dashCtx.regime    = g_regime;
+   g_dashCtx.session   = g_session;
+   g_dashCtx.spread    = GetSpreadPips();
+   g_dashCtx.aiScore   = g_lastAIScore;
+   g_dashCtx.driftScore= g_lastDrift;
+   g_dashCtx.ensembleModel = g_lastEnsModel;
+   g_dashCtx.aiVeto    = (g_lastAIScore < InpAIVetoThresh ||
+                          g_lastDrift   > InpDriftVeto);
+
+   // Position state
+   g_dashCtx.hasPosition = g_pos.HasOpenPosition();
+   if(g_dashCtx.hasPosition)
+     {
+      g_dashCtx.posDir    = g_activePlan.direction;
+      g_dashCtx.posEntry  = g_activePlan.entryPrice;
+      g_dashCtx.posSL     = g_activePlan.sl;
+      g_dashCtx.posTP1    = g_activePlan.tp;
+      g_dashCtx.posTP2    = g_activePlan.tp2;
+      g_dashCtx.posLots   = g_activePlan.lot;
+      g_dashCtx.posPnL    = g_pos.GetFloatingPnL();
+      g_dashCtx.beDone    = g_pos.IsBEDone();
+      g_dashCtx.partialDone = g_pos.IsPartialDone();
+     }
+   else
+     {
+      ZeroMemory(g_dashCtx.posDir);
+      g_dashCtx.posEntry = g_dashCtx.posSL  = 0;
+      g_dashCtx.posTP1   = g_dashCtx.posTP2 = 0;
+      g_dashCtx.posLots  = g_dashCtx.posPnL = 0;
+      g_dashCtx.beDone   = g_dashCtx.partialDone = false;
+     }
+
+   g_hud.Update(g_dashCtx);
+  }
+//+------------------------------------------------------------------+
+//| END OF PASR_MODULAR.mq5 v4.00                                    |
+//+------------------------------------------------------------------+
