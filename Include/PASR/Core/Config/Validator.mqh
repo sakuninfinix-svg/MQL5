@@ -2,11 +2,19 @@
 //|                                   Core/Config/Validator.mqh     |
 //|                                   Copyright 2026, Agsicentre    |
 //|                                                                  |
-//|  PURPOSE: Standalone config validation — 28 business rules.     |
+//|  PURPOSE: Standalone config validation — 33 business rules.     |
 //|    - Zero dependencies (no EventBus, no IManager)               |
 //|    - Returns human-readable error list                           |
 //|    - Called by CConfigManager before every ConfigReload dispatch |
 //|    - Can also be used in SmokeTest and OnInit guard             |
+//|                                                                  |
+//|  CHANGES v2.02 (2026-05-21) — Phase 5:                          |
+//|    Rule 29: MaxRecoveryAttempts in [1, 10]                      |
+//|    Rule 30: RecoveryCooldownBars in [1, 50]                     |
+//|    Rule 31: PartialClosePct in [0.0, 0.9]  (0 = disabled)      |
+//|    Rule 32: MaxTradeDurationDays in [0, 30] (0 = disabled)      |
+//|    Rule 33: cross-field: RecoveryEnabled implies                 |
+//|             MaxRecoveryAttempts >= 1                            |
 //|                                                                  |
 //|  CHANGES v2.01 (2026-05-21):                                     |
 //|    Rule 26: DisplayConfig.FontSize range check [6,20]            |
@@ -47,7 +55,7 @@ private:
      }
 
 public:
-   //--- Main entry point. Returns true if ALL 28 rules pass.
+   //--- Main entry point. Returns true if ALL 33 rules pass.
    //--- On failure, errors[] is populated with all failing rules.
    //--- This is a COMPLETE scan — all errors collected, not fail-fast.
    static bool Validate(const StrategyConfig &cfg, string &errors[])
@@ -238,6 +246,50 @@ public:
                      "%). Reduce RiskPercent or MaxOpenPositions.");
         }
 
+      //=== SECTION 8: Recovery system (Phase 5) ========================
+
+      // RULE 29 — MaxRecoveryAttempts: reasonable range
+      // 0 would mean never attempt recovery (use RecoveryEnabled=false instead).
+      // Above 10 is excessive and likely to compound losses.
+      if(cfg.Risk.MaxRecoveryAttempts < 1 || cfg.Risk.MaxRecoveryAttempts > 10)
+         AddError(errors, "[Config.Risk] MaxRecoveryAttempts must be in [1, 10] (got " +
+                  IntegerToString(cfg.Risk.MaxRecoveryAttempts) +
+                  "). Use RecoveryEnabled=false to disable recovery entirely.");
+
+      // RULE 30 — RecoveryCooldownBars: must allow at least 1 bar to pass
+      // 0 would trigger another recovery attempt on the very next tick.
+      // Above 50 bars is impractically long (would be 50+ hours on H1).
+      if(cfg.Risk.RecoveryCooldownBars < 1 || cfg.Risk.RecoveryCooldownBars > 50)
+         AddError(errors, "[Config.Risk] RecoveryCooldownBars must be in [1, 50] (got " +
+                  IntegerToString(cfg.Risk.RecoveryCooldownBars) + ")");
+
+      // RULE 31 — PartialClosePct: [0.0, 0.9] where 0 = disabled
+      // Capping at 0.9 ensures at least 10% of the position remains open after
+      // partial close, so the trade is still meaningful.
+      if(cfg.Risk.PartialClosePct < 0.0 || cfg.Risk.PartialClosePct > 0.9)
+         AddError(errors, "[Config.Risk] PartialClosePct must be in [0.0, 0.9] (got " +
+                  DoubleToString(cfg.Risk.PartialClosePct, 2) +
+                  "). Use 0 to disable partial close.");
+
+      // RULE 32 — MaxTradeDurationDays: [0, 30] where 0 = disabled
+      // Capping at 30 days prevents extremely stale positions from being
+      // held open inadvertently. Values above 30 suggest a misconfiguration.
+      if(cfg.Risk.MaxTradeDurationDays < 0 || cfg.Risk.MaxTradeDurationDays > 30)
+         AddError(errors, "[Config.Risk] MaxTradeDurationDays must be in [0, 30] (got " +
+                  IntegerToString(cfg.Risk.MaxTradeDurationDays) +
+                  "). Use 0 to disable expiry.");
+
+      // RULE 33 — Cross-field: RecoveryEnabled requires MaxRecoveryAttempts >= 1
+      // This is a semantic check: turning on recovery while allowing 0 attempts
+      // would mean the recovery system is active but can never do anything.
+      // Normally this is guaranteed by Rule 29, but an explicit cross-field
+      // check makes the intent visible and the error message actionable.
+      if(cfg.Risk.RecoveryEnabled && cfg.Risk.MaxRecoveryAttempts < 1)
+         AddError(errors,
+                  "[Config.Risk] RecoveryEnabled=true but MaxRecoveryAttempts=" +
+                  IntegerToString(cfg.Risk.MaxRecoveryAttempts) +
+                  ". Set MaxRecoveryAttempts >= 1 or disable recovery.");
+
       return ArraySize(errors) == 0;
      }
 
@@ -247,7 +299,7 @@ public:
       int n = ArraySize(errors);
       if(n == 0)
         {
-         Print("[CConfigValidator] Config OK — all 28 rules passed");
+         Print("[CConfigValidator] Config OK — all 33 rules passed");
          return;
         }
       Print("[CConfigValidator] Config INVALID — ", n, " error(s):");
