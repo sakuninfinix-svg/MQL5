@@ -222,4 +222,23 @@ public:
 // Alias for cleaner EA code
 typedef PASREventBus CEventBus;
 
+//+------------------------------------------------------------------+
+//| ProcessDeferredEvents — Process queued events from timer         |
+//+------------------------------------------------------------------+
+// This method is called from OnTimer() to process deferred events
+// that were queued during tick processing. It drains the priority
+// queue and dispatches each event to registered subscribers.
+void ProcessDeferredEvents()
+  {
+   CEventBus *bus = CEventBus::Instance();
+   if(CheckPointer(bus) == POINTER_INVALID) return;
+   
+   // Drain the queue by popping and dispatching each event
+   PASREvent ev;
+   while(bus.Pop(ev))
+     {
+      bus.Dispatch(ev);
+     }
+  }
+
 #endif // CORE_EVENT_BUS_MQH
