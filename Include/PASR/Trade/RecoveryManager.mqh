@@ -5,26 +5,25 @@
 //|    Canonical production location — migrated from 8.RecoveryManager|
 //|                                                                  |
 //| BUG FIX HISTORY:                                                 |
-//| v2.14 (this version):                                            |
-//|  * BUG-001 [HIGH]     12.MarketRegime.mqh → Data/MarketRegime.mqh|
-//|  * BUG-002 [CRITICAL] RecoveryEngine undefined → defined inline  |
-//|  * BUG-003 [CRITICAL] Config().xxx → m_cfg.Risk/Market/xxx       |
-//|  * BUG-005 [CRITICAL] Init() now calls IManager::Init(data,bus)  |
-//|  * BUG-008 [HIGH]     ClearEngineGVs only on CLOSE, not on tick  |
-//|  * BUG-009 [HIGH]     avgRecoveryProfit off-by-one fixed          |
-//|  * REF-004 [MEDIUM]   ENUM_TRADE_STATE defined here              |
-//| v2.05:                                                           |
-//|  * RM-BUG-007  engines[] unbounded growth → MAX_ENGINES cap      |
-//|  * RM-BUG-008  OnPositionUpdate: engine without PositionSelect    |
-//|  * RM-BUG-009  GetPartialCloseInfo double-close → throttle guard  |
-//|  * RM-BUG-010  include 10.DataManager.mqh → Infra/               |
-//|  * RM-OPT-1    engine array compaction on OnNewBar               |
-//|  * RM-OPT-2    trailing throttle now configurable                |
-//| v2.04 (8.RecoveryManager.mqh — legacy source):                   |
-//|  * RM-BUG-001  ClearEngineGVs cfg undeclared → fixed             |
-//|  * RM-BUG-002  GV keys missing ACCOUNT_LOGIN prefix              |
-//|  * RM-BUG-003  CFG macro undefined → Config() accessor           |
-//|  * RM-BUG-004  Init() magic via CFG → Config().magic             |
+//| v2.14 (Phase 6):                                                 |
+//|  * All 5 'TODO Phase 6' magic literals replaced with m_cfg fields|
+//|    - partialPct          → m_cfg.Risk.PartialClosePct            |
+//|    - maxAttempts         → m_cfg.Risk.MaxRecoveryAttempts        |
+//|    - cooldownBars        → m_cfg.Risk.RecoveryCooldownBars       |
+//|    - recoveryEnabled     → m_cfg.Risk.RecoveryEnabled            |
+//|    - MaxTradeDurationDays→ m_cfg.Risk.MaxTradeDurationDays       |
+//|  * RecoveryEngine/FakeoutResult/ENUM_TRADE_STATE extracted to    |
+//|    Trade/RecoveryEngine.mqh                                       |
+//|  * ClearEngineGVs() replaced by r.ClearGVs(prefix) on engine    |
+//|  * SaveState() now carries prefix (from BuildGVPrefix())         |
+//|                                                                  |
+//| v2.14 (prior commit):                                            |
+//|  * BUG-001: include path ../12.MarketRegime.mqh→Data/MarketRegime|
+//|  * BUG-002: RecoveryEngine defined (was missing)                 |
+//|  * BUG-003: Config().xxx → m_cfg.Risk/Market/AI/Pattern.xxx      |
+//|  * BUG-005: Init() calls IManager::Init(data,bus)                |
+//|  * BUG-008: ClearEngineGVs only on CLOSE path                    |
+//|  * BUG-009: avgRecoveryProfit off-by-one fixed                   |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
@@ -39,77 +38,13 @@
 #include "../Core/IManager.mqh"
 #include "../Infra/DataManager.mqh"
 #include "../Pattern/PatternManager.mqh"
-#include "../Data/MarketRegime.mqh"   // [BUG-001] was ../12.MarketRegime.mqh
-
-//+------------------------------------------------------------------+
-//| [REF-004] Trade state machine enum                               |
-//+------------------------------------------------------------------+
-enum ENUM_TRADE_STATE
-  {
-   TRADE_STATE_NORMAL   = 0,  // position open, monitoring normally
-   TRADE_STATE_RECOVERY = 1,  // SL was hit, recovery attempt active
-   TRADE_STATE_DONE     = 2,  // position closed, engine to be compacted
-  };
-
-//+------------------------------------------------------------------+
-//| [BUG-002] RecoveryEngine — per-position state                   |
-//| Phase 6 target: extract to Trade/RecoveryEngine.mqh              |
-//+------------------------------------------------------------------+
-struct RecoveryEngine
-  {
-   ulong              mainTicket;
-   int                direction;         // +1 = buy, -1 = sell
-   double             entryPrice;
-   datetime           entryTime;
-   ENUM_TRADE_STATE   state;
-   int                recoveryAttempts;
-   double             lastKnownATR;
-   bool               partialClosed;
-   bool               active;
-   datetime           recoveryCooldownExpiry;
-
-   RecoveryEngine()
-      : mainTicket(0), direction(0), entryPrice(0.0), entryTime(0),
-        state(TRADE_STATE_NORMAL), recoveryAttempts(0), lastKnownATR(0.0),
-        partialClosed(false), active(false), recoveryCooldownExpiry(0) {}
-
-   void Reset()
-     {
-      mainTicket             = 0;
-      direction              = 0;
-      entryPrice             = 0.0;
-      entryTime              = 0;
-      state                  = TRADE_STATE_NORMAL;
-      recoveryAttempts       = 0;
-      lastKnownATR           = 0.0;
-      partialClosed          = false;
-      active                 = false;
-      recoveryCooldownExpiry = 0;
-     }
-
-   // Persist engine state to GlobalVariable (survives terminal restart)
-   // Key format managed by ClearEngineGVs in RecoveryManager
-   void SaveState() { /* TODO Phase 6: persist state fields to GV */ }
-  };
-
-//+------------------------------------------------------------------+
-//| FakeoutResult / FakeoutContext — pattern detection output        |
-//| Phase 6: move to Pattern/PatternTypes.mqh                        |
-//+------------------------------------------------------------------+
-struct FakeoutResult
-  {
-   bool   detected;
-   string reason;
-   double confidence;  // [0.0 – 1.0]
-   int    level;       // 1=weak, 2=medium, 3=strong
-
-   FakeoutResult() : detected(false), reason(""), confidence(0.0), level(0) {}
-  };
+#include "../Data/MarketRegime.mqh"
+#include "RecoveryEngine.mqh"   // Phase 6: extracted types
 
 //+------------------------------------------------------------------+
 //| Constants                                                        |
 //+------------------------------------------------------------------+
-#define RECOVERY_MAX_ENGINES 64   // RM-BUG-007: hard cap
+// RECOVERY_MAX_ENGINES is defined in RecoveryEngine.mqh
 
 //+------------------------------------------------------------------+
 //| Recovery Statistics                                              |
@@ -166,13 +101,15 @@ private:
    ulong             m_lastTrailingUpdate;
    int               m_trailingThrottleMs;
 
-   ulong             m_lastPartialCloseMs;    // RM-BUG-009: debounce
+   ulong             m_lastPartialCloseMs;
    int               m_partialCloseThrottleMs;
 
    bool              m_regimeAware;
    double            m_minRegimeScore;
 
-   // ─ Private helpers ─────────────────────────────────────────────
+   // ─────────────────────────────────────────────────────────────────
+   //  Private helpers
+   // ─────────────────────────────────────────────────────────────────
 
    int FindEngineIndex(ulong ticket) const
      {
@@ -186,21 +123,7 @@ private:
       return -1;
      }
 
-   // [BUG-008] ClearEngineGVs: O(N) GV scan — call ONLY on position CLOSE.
-   // Never call from OnPriceUpdate() or OnNewBar() hot paths.
-   void ClearEngineGVs(ulong ticket)
-     {
-      string prefix = BuildGVPrefix() + "T" + IntegerToString((long)ticket) + "_";
-      for(int i = (int)GlobalVariablesTotal() - 1; i >= 0; i--)
-        {
-         string gv = GlobalVariableName(i);
-         if(StringFind(gv, prefix) == 0)
-            GlobalVariableDel(gv);
-        }
-     }
-
    // RM-OPT-1: compact engines[] — remove DONE/inactive slots.
-   // Call on OnNewBar (low-frequency). O(n), n capped at RECOVERY_MAX_ENGINES.
    void CompactEngines()
      {
       int keep = 0;
@@ -246,7 +169,6 @@ private:
         {
          if(m_trade.PositionClose(r.mainTicket))
            {
-            // [BUG-009] off-by-one fix: capture prev count BEFORE increment
             int prevCount = m_stats.totalRecoveries;
             m_stats.totalRecoveries++;
 
@@ -255,7 +177,6 @@ private:
                if(profitPoints > 0) m_stats.successfulRecoveries++;
                else                 m_stats.failedRecoveries++;
 
-               // Rolling average: (avg * n + newVal) / (n + 1), where n = prevCount
                m_stats.avgRecoveryProfit =
                   (prevCount > 0)
                   ? ((m_stats.avgRecoveryProfit * prevCount) + profitPoints)
@@ -285,8 +206,8 @@ private:
                         r.mainTicket, GetLastError(), m_trade.ResultRetcodeDescription());
         }
 
-      // [BUG-008] GV cleanup only here (close path) — not on tick
-      ClearEngineGVs(r.mainTicket);
+      // Phase 6: use engine's own ClearGVs with prefix
+      r.ClearGVs(BuildGVPrefix());
       r.Reset();
       r.active = false;
 
@@ -301,13 +222,10 @@ private:
       if(CheckPointer(r) == POINTER_INVALID || !r.active) return false;
       if(!PositionSelectByTicket(r.mainTicket)) return false;
 
-      // Simple placeholder fakeout detection — Phase 6: integrate PatternManager
-      // For now: if price reversed back above entry after SL region, consider fakeout
-      ENUM_POSITION_TYPE ptype = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      double curPrice = (ptype == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
-      double slPrice  = PositionGetDouble(POSITION_SL);
+      ENUM_POSITION_TYPE ptype    = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      double             curPrice = (ptype == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
+      double             slPrice  = PositionGetDouble(POSITION_SL);
 
-      // Minimum detection: price moved back toward entry from near-SL region
       double retraceThreshold = atrvalue * m_cfg.Risk.SLMultiplier * 0.3 * _Point;
       bool   nearSL = (ptype == POSITION_TYPE_BUY)
                     ? (slPrice > 0 && (curPrice - slPrice) < retraceThreshold)
@@ -315,23 +233,22 @@ private:
 
       if(!nearSL) return false;
 
-      // Build result
       FakeoutResult signal;
-      signal.detected    = true;
-      signal.level       = 2;
-      signal.confidence  = 0.65;
-      signal.reason      = "NearSLRetrace";
+      signal.detected   = true;
+      signal.level      = 2;
+      signal.confidence = 0.65;
+      signal.reason     = "NearSLRetrace";
 
       if(signal.level < 2) return false;
 
-      double atr       = atrvalue * _Point;
-      double slAdjust  = atr * m_cfg.Risk.SLMultiplier * 0.5;
-      double newSL     = (ptype == POSITION_TYPE_BUY)
+      double atr      = atrvalue * _Point;
+      double slAdjust = atr * m_cfg.Risk.SLMultiplier * 0.5;
+      double newSL    = (ptype == POSITION_TYPE_BUY)
          ? NormalizeDouble(slPrice - slAdjust, _Digits)
          : NormalizeDouble(slPrice + slAdjust, _Digits);
 
       double stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
-      bool slValid = (ptype == POSITION_TYPE_BUY)
+      bool   slValid   = (ptype == POSITION_TYPE_BUY)
          ? (curPrice - newSL) > stopLevel
          : (newSL - curPrice) > stopLevel;
 
@@ -344,11 +261,11 @@ private:
       double currentTP = PositionGetDouble(POSITION_TP);
       if(m_trade.PositionModify(r.mainTicket, newSL, currentTP))
         {
-         r.lastKnownATR     = atrvalue;
+         r.lastKnownATR    = atrvalue;
          r.recoveryAttempts++;
          m_stats.fakeoutsDetected++;
          m_stats.fakeoutsRecovered++;
-         r.SaveState();
+         r.SaveState(BuildGVPrefix());   // Phase 6: persist with prefix
          if(m_debugMode)
             PrintFormat("[Fakeout] SL adjusted %d: %.5f->%.5f conf=%.2f attempt#%d",
                         r.mainTicket, slPrice, newSL, signal.confidence, r.recoveryAttempts);
@@ -362,7 +279,6 @@ private:
 
    void ProcessTrailingAndPartial(RecoveryEngine *r, const MqlTick &tick, double atrvalue)
      {
-      // [BUG-003] was Config().use_trailing — now m_cfg.Risk.UseTrailingStop
       if(!m_cfg.Risk.UseTrailingStop || !r.active) return;
       if(!PositionSelectByTicket(r.mainTicket)) return;
 
@@ -380,9 +296,7 @@ private:
               : (openPrice - curPrice) / atr)
          : 0.0;
 
-      double newSL = slPrice;
-      // [BUG-003] was Config().lock_profit_atr / Config().trail_step_atr
-      //           now uses m_cfg.Risk.BreakEvenATRMult / TrailATRMult
+      double newSL    = slPrice;
       double lockATR  = m_cfg.Risk.BreakEvenATRMult;
       double trailATR = m_cfg.Risk.TrailATRMult;
 
@@ -395,8 +309,7 @@ private:
         {
          if(profitATR >= lockATR)
            {
-            double lockBase = openPrice;
-            newSL = (newSL == 0) ? lockBase : MathMin(newSL, lockBase);
+            newSL = (newSL == 0) ? openPrice : MathMin(newSL, openPrice);
            }
          if(profitATR >= trailATR)
            {
@@ -405,14 +318,11 @@ private:
            }
         }
 
-      // Partial close with RM-BUG-009 throttle
-      // [BUG-003] was Config().partial_close_lot_pct / Config().partial_close_atr
-      //           no direct equivalent in new config — use Risk.TPMultiplier as proxy
-      //           Phase 6: add PartialClosePct / PartialCloseATR to RiskConfig
-      double partialPct = 0.5;  // TODO Phase 6: promote to m_cfg.Risk.PartialClosePct
+      // Phase 6: partial close uses real config field (no more magic literal)
+      double partialPct = m_cfg.Risk.PartialClosePct;   // was: 0.5 hardcoded
       double partialATR = m_cfg.Risk.TPMultiplier * 0.5;
 
-      if(partialPct > 0 && profitATR >= partialATR && !r.partialClosed)
+      if(partialPct > 0.0 && profitATR >= partialATR && !r.partialClosed)
         {
          ulong nowMs = GetTickCount64();
          if(nowMs - m_lastPartialCloseMs >= (ulong)m_partialCloseThrottleMs)
@@ -420,8 +330,9 @@ private:
             double closeLot = m_data.NormalizeVolume(_Symbol, curLot * partialPct);
             if(closeLot > 0 && m_trade.PositionClosePartial(r.mainTicket, closeLot))
               {
-               r.partialClosed       = true;
-               m_lastPartialCloseMs  = nowMs;
+               r.partialClosed      = true;
+               m_lastPartialCloseMs = nowMs;
+               r.SaveState(BuildGVPrefix());
                if(m_debugMode)
                   PrintFormat("[Trailing] Partial close %d: %.2f lots", r.mainTicket, closeLot);
               }
@@ -440,9 +351,10 @@ private:
 
    bool AttemptRecovery(RecoveryEngine *r)
      {
-      // [BUG-003] was Config().max_recovery_attempts — use MaxOpenPositions as proxy
-      // Phase 6: add MaxRecoveryAttempts to RiskConfig
-      int maxAttempts = 3; // TODO Phase 6: m_cfg.Risk.MaxRecoveryAttempts
+      // Phase 6: use real config field
+      int maxAttempts  = m_cfg.Risk.MaxRecoveryAttempts;  // was: 3 hardcoded
+      int cooldownBars = m_cfg.Risk.RecoveryCooldownBars; // was: 5 hardcoded
+
       if(r.recoveryAttempts >= maxAttempts)
         {
          if(m_debugMode)
@@ -453,10 +365,9 @@ private:
 
       r.state = TRADE_STATE_RECOVERY;
       r.recoveryAttempts++;
-      // [BUG-003] was Config().recovery_cooldown_bars — default 5 bars
-      int cooldownBars = 5; // TODO Phase 6: m_cfg.Risk.RecoveryCooldownBars
-      r.recoveryCooldownExpiry = TimeCurrent() + ((datetime)cooldownBars * PeriodSeconds(_Period));
-      r.SaveState();
+      r.recoveryCooldownExpiry = TimeCurrent()
+         + ((datetime)cooldownBars * PeriodSeconds(_Period));
+      r.SaveState(BuildGVPrefix());
 
       if(m_debugMode)
          PrintFormat("[Recovery] Attempt %d/%d ticket=%d",
@@ -471,21 +382,23 @@ private:
 
    void CheckRecoveryTimeout(RecoveryEngine *r)
      {
-      int maxAttempts = 3; // TODO Phase 6: m_cfg.Risk.MaxRecoveryAttempts
+      int  maxAttempts  = m_cfg.Risk.MaxRecoveryAttempts;
+      int  cooldownBars = m_cfg.Risk.RecoveryCooldownBars;
+      bool recovEnabled = m_cfg.Risk.RecoveryEnabled;     // Phase 6
+
       if(r.recoveryAttempts >= maxAttempts)
         {
-         PrintFormat("[Recovery] Max attempts %d/%d ticket=%d",
+         PrintFormat("[Recovery] Max attempts %d/%d ticket=%d. Abandoning.",
                      r.recoveryAttempts, maxAttempts, r.mainTicket);
-         // [BUG-008] ClearEngineGVs only on definitive close paths
-         ClearEngineGVs(r.mainTicket);
+         r.ClearGVs(BuildGVPrefix());
          r.Reset();
          return;
         }
       if(r.state != TRADE_STATE_NORMAL) return;
       if(!PositionSelectByTicket(r.mainTicket)) return;
 
-      ENUM_POSITION_TYPE ptype   = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      double             slPrice = PositionGetDouble(POSITION_SL);
+      ENUM_POSITION_TYPE ptype    = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      double             slPrice  = PositionGetDouble(POSITION_SL);
       double             curPrice = (ptype == POSITION_TYPE_BUY)
          ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
          : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -499,23 +412,19 @@ private:
                              TimeCurrent() < r.recoveryCooldownExpiry);
       if(cooldownActive) return;
 
-      // [BUG-003] was Config().recovery_use — use EnablePatterns as proxy for now
-      // Phase 6: add RecoveryEnabled bool to RiskConfig
-      bool recoveryEnabled = true; // TODO Phase 6: m_cfg.Risk.RecoveryEnabled
-
-      if(recoveryEnabled && r.recoveryAttempts < maxAttempts)
+      if(recovEnabled && r.recoveryAttempts < maxAttempts)
         {
-         int cooldownBars = 5;
          r.recoveryCooldownExpiry = TimeCurrent()
             + ((datetime)cooldownBars * PeriodSeconds(_Period));
          r.lastKnownATR = m_data.GetATRPoints();
-         r.SaveState();
+         r.SaveState(BuildGVPrefix());
          AttemptRecovery(r);
         }
       else
         {
-         PrintFormat("[Recovery] SL hit ticket=%d, no recovery. Closing.", r.mainTicket);
-         ClearEngineGVs(r.mainTicket);
+         PrintFormat("[Recovery] SL hit ticket=%d, recovery disabled or maxed. Closing.",
+                     r.mainTicket);
+         r.ClearGVs(BuildGVPrefix());
          r.state = TRADE_STATE_DONE;
          r.Reset();
         }
@@ -523,17 +432,14 @@ private:
 
    void CheckExpiryAndForcedClose(RecoveryEngine *r)
      {
-      // [BUG-003] was Config().max_trade_duration_days
-      // Phase 6: add MaxTradeDurationDays to RiskConfig
-      int maxDays = 0; // 0 = disabled; TODO Phase 6: m_cfg.Risk.MaxTradeDurationDays
-      if(maxDays > 0 && r.entryTime > 0)
+      int maxDays = m_cfg.Risk.MaxTradeDurationDays;  // Phase 6: was 0 hardcoded
+      if(maxDays <= 0 || r.entryTime == 0) return;
+
+      if(TimeCurrent() > r.entryTime + ((datetime)maxDays * 86400))
         {
-         if(TimeCurrent() > r.entryTime + ((datetime)maxDays * 86400))
-           {
-            PrintFormat("[Recovery] Trade %d expired (%d days). Force closing.",
-                        r.mainTicket, maxDays);
-            CloseActivePosition(r, "MaxDurationExpiry");
-           }
+         PrintFormat("[Recovery] Trade %d expired (%d days). Force closing.",
+                     r.mainTicket, maxDays);
+         CloseActivePosition(r, "MaxDurationExpiry");
         }
      }
 
@@ -560,7 +466,6 @@ public:
       ArrayResize(engines, 0);
      }
 
-   // [BUG-005] Init now correctly calls IManager::Init(data, bus)
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
@@ -592,8 +497,7 @@ public:
 
          if(!PositionSelectByTicket(r.mainTicket))
            {
-            // [BUG-008] ClearEngineGVs only when position definitively gone
-            ClearEngineGVs(r.mainTicket);
+            r.ClearGVs(BuildGVPrefix());
             r.Reset();
             r.active = false;
             continue;
@@ -606,7 +510,7 @@ public:
             CheckRecoveryTimeout(r);
         }
 
-      CompactEngines(); // RM-OPT-1
+      CompactEngines();
      }
 
    virtual void OnPriceUpdate() override
@@ -627,7 +531,6 @@ public:
 
          if(!PositionSelectByTicket(r.mainTicket))
            {
-            // [BUG-008] Only clear GVs here — no ClearEngineGVs on every tick
             r.Reset();
             r.active = false;
             continue;
@@ -638,10 +541,8 @@ public:
         }
      }
 
-   // Called from EA OnTradeTransaction (equivalent of old OnPositionUpdate event)
    void OnTradeOpen(ulong ticket, int direction, double entryPrice)
      {
-      // RM-BUG-008: validate position exists first
       if(!PositionSelectByTicket(ticket))
         {
          if(m_debugMode)
@@ -650,7 +551,7 @@ public:
         }
 
       int idx = FindEngineIndex(ticket);
-      if(idx >= 0) return; // already tracked
+      if(idx >= 0) return;
 
       if(ArraySize(engines) >= RECOVERY_MAX_ENGINES)
         {
@@ -661,13 +562,14 @@ public:
 
       int sz = ArraySize(engines);
       ArrayResize(engines, sz + 1);
-      engines[sz]            = new RecoveryEngine();
+      engines[sz] = new RecoveryEngine();
       engines[sz].mainTicket = ticket;
       engines[sz].active     = true;
       engines[sz].entryPrice = entryPrice;
       engines[sz].direction  = direction;
       engines[sz].entryTime  = TimeCurrent();
       engines[sz].state      = TRADE_STATE_NORMAL;
+      engines[sz].SaveState(BuildGVPrefix());   // persist immediately
 
       if(m_debugMode)
          PrintFormat("[Recovery] Engine created ticket=%d dir=%d", ticket, direction);
@@ -677,8 +579,7 @@ public:
      {
       int idx = FindEngineIndex(ticket);
       if(idx < 0) return;
-      // [BUG-008] GV cleanup ONLY here on confirmed close
-      ClearEngineGVs(ticket);
+      engines[idx].ClearGVs(BuildGVPrefix());   // Phase 6: engine clears own GVs
       engines[idx].Reset();
       engines[idx].active = false;
       if(m_debugMode)
