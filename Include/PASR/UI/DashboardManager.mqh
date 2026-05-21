@@ -1,314 +1,514 @@
 //+------------------------------------------------------------------+
-//| UI/DashboardManager.mqh — v3.00                                  |
-//| MT5 object-based dashboard: signal + risk + regime + circuit.    |
+//| UI/DashboardManager.mqh — v2.00                                  |
+//| Live on-chart HUD panel for PASR EA.                             |
 //|                                                                  |
-//| CHANGE LOG:                                                      |
-//| v3.00 (2026-05-21) —                                             |
-//|   + SetRegimeFilter(): regime row (TRENDING/RANGING/VOLATILE)    |
-//|   + Circuit breaker alert row (flashing RED when tripped)        |
-//|   + Signal urgency tier color (HIGH=lime, MEDIUM=yellow)         |
-//|   + Consecutive loss counter with escalating color               |
-//|   + Daily loss % bar with color gradient                         |
-//|   + Drawdown % ASCII progress bar                                |
-//|   + Destroy() public method (called by Orchestrator.OnDeinit)   |
-//|   + DrawRow*() private helpers (maintainable sections)           |
-//| v2.00 (2026-05-20) — Initial object-label dashboard             |
+//| LAYOUT (top-right, 6 panels, ~320px wide):                       |
+//|  ┌─────────────────────────────────────────┐  |
+//|  │ PASR EA  EURUSD  H1  Spr:0.8  12:34:56 │  |
+//|  ├─────────────────────────────────────────┤  |
+//|  │ ▲ BUY 1.08250  SL:1.08100  TP:1.08500  │  |
+//|  │     Lots:0.10   PnL: +$12.50            │  |
+//|  ├─────────────────────────────────────────┤  |
+//|  │ AI [========--] 0.82  Drift[===-------] │  |
+//|  │    Ensemble:Trend   Regime:Trending     │  |
+//|  │    Session:London                       │  |
+//|  ├─────────────────────────────────────────┤  |
+//|  │ Win:62.5%  PF:1.42  AvgRR:1.8R  DD:$45 │  |
+//|  ├─────────────────────────────────────────┤  |
+//|  │ SIG  12:30 ▲BUY 0.78 ✓WIN                 │  |
+//|  │      12:15 ▼SELL 0.55 ✗LOSS              │  |
+//|  ├─────────────────────────────────────────┤  |
+//|  │ Today:+$38.00  Trades:3  Streak:W2       │  |
+//|  └─────────────────────────────────────────┘  |
+//|                                                                  |
+//| USAGE:                                                           |
+//|   CDashboardManager hud;                                         |
+//|   hud.Init(GetPointer(journal));                                  |
+//|   hud.Update(ctx);   // DashContext struct, call per tick / bar  |
+//|   hud.Deinit();      // clears all HUD objects                   |
+//|                                                                  |
+//| PERFORMANCE:                                                      |
+//|   • Lazy dirty-flag: only redraws changed panels                 |
+//|   • ChartRedraw() once per Update() cycle                        |
+//|   • All objects prefixed 'PASR_HUD_' for clean deinit            |
+//|                                                                  |
+//| CHANGE LOG:                                                       |
+//|   v2.00 (2026-05-21) — Phase 11 full rewrite                     |
+//|   v1.x  (legacy)     — basic label dashboard, no AI/journal data  |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __UI_DASHBOARD_MANAGER_MQH__
 #define __UI_DASHBOARD_MANAGER_MQH__
 
-#include "../Core/IManager.mqh"
-#include "../Trade/RiskManager.mqh"
-#include "../Signal/SignalManager.mqh"
-#include "../Signal/RegimeFilter.mqh"
+#include "../Infra/JournalManager.mqh"
+#include "../AI/AITypes.mqh"
+#include "../Trade/TradePlan.mqh"
+
+//--- HUD geometry
+#define HUD_X          15          // right margin from right edge
+#define HUD_Y_START    20          // top margin
+#define HUD_LINE_H     16          // pixels per line
+#define HUD_FONT       "Consolas"
+#define HUD_FONT_SZ    8           // font size (MT5 units = pt*10)
+#define HUD_PREFIX     "PASR_HUD_"
+#define HUD_GAUGE_W    10          // gauge bar width in chars
+
+//--- Colors
+#define CLR_HEADER     C'40,44,52'    // dark blue-gray
+#define CLR_LABEL      C'150,150,160' // muted gray
+#define CLR_VALUE      C'220,220,230' // light white
+#define CLR_GREEN      C'74,222,128'  // profit / win / buy
+#define CLR_RED        C'248,113,113' // loss / sell
+#define CLR_AMBER      C'251,191,36'  // warning / near SL
+#define CLR_BLUE       C'96,165,250'  // AI / neutral info
+#define CLR_PURPLE     C'167,139,250' // ensemble / session
+#define CLR_DIVIDER    C'60,63,70'    // separator line
 
 //+------------------------------------------------------------------+
-//| CDashboardManager — full-feature text-label dashboard            |
+//| SignalSnap — recent signal snapshot for Panel 5                  |
 //+------------------------------------------------------------------+
-class CDashboardManager : public IManager
+struct SignalSnap
+  {
+   datetime  time;
+   ENUM_SIGNAL_DIR dir;
+   double    score;
+   int       outcome; // 1=win -1=loss 0=pending
+  };
+
+//+------------------------------------------------------------------+
+//| DashContext — injected each Update() call                        |
+//+------------------------------------------------------------------+
+struct DashContext
+  {
+   // Position state
+   bool     hasPosition;
+   ENUM_SIGNAL_DIR posDir;
+   double   posEntry;
+   double   posSL;
+   double   posTP1;
+   double   posTP2;
+   double   posLots;
+   double   posPnL;       // live floating P&L
+   bool     beDone;
+   bool     partialDone;
+
+   // AI state
+   double   aiScore;
+   double   driftScore;
+   int      ensembleModel;  // 0=Trend 1=MeanRev 2=Momentum
+   bool     aiVeto;         // true if score<0.4 or drift>0.6
+
+   // Market state
+   ENUM_MARKET_REGIME  regime;
+   ENUM_TRADING_SESSION session;
+   double   spread;         // in pips
+
+   // Recent signals (up to 3)
+   SignalSnap signals[3];
+   int        signalCount;
+  };
+
+//+------------------------------------------------------------------+
+//| CDashboardManager v2                                             |
+//+------------------------------------------------------------------+
+class CDashboardManager
   {
 private:
-   CRiskManager    *m_risk;
-   CSignalManager  *m_signal;
-   CRegimeFilter   *m_regime;
+   CJournalManager *m_journal;  // non-owning
+   bool             m_ready;
+   int              m_labelCount;
 
-   ulong            m_lastRenderMs;
-   int              m_throttleMs;
-   int              m_corner;
-   int              m_baseX, m_baseY;
-   int              m_lineH;
-   string           m_prefix;
-   bool             m_destroyed;
+   // Dirty tracking — hash of last rendered string per panel
+   string  m_lastPanel[6];
 
-   // ── Low-level label helper ────────────────────────────────────────
-   void SetLabel(const string key, int row, const string text,
-                 color clr=clrSilver, int fs=9)
+   //--- Low-level label helpers -----------------------------------
+
+   string LabelName(string id) const
+     { return HUD_PREFIX + id; }
+
+   void CreateLabel(string name, int x, int y,
+                    string text, color clr,
+                    ENUM_ANCHOR_POINT anchor = ANCHOR_RIGHT_UPPER) const
      {
-      string obj = m_prefix + key;
-      if(ObjectFind(0, obj) < 0)
+      if(ObjectFind(0, name) < 0)
         {
-         ObjectCreate(0, obj, OBJ_LABEL, 0, 0, 0);
-         ObjectSetInteger(0, obj, OBJPROP_CORNER,     m_corner);
-         ObjectSetInteger(0, obj, OBJPROP_XDISTANCE,  m_baseX);
-         ObjectSetInteger(0, obj, OBJPROP_BACK,       false);
-         ObjectSetInteger(0, obj, OBJPROP_SELECTABLE, false);
-         ObjectSetInteger(0, obj, OBJPROP_FONTSIZE,   fs);
-         ObjectSetString (0, obj, OBJPROP_FONT,       "Consolas");
+         ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+         ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
+         ObjectSetInteger(0, name, OBJPROP_ANCHOR,  anchor);
+         ObjectSetString(0,  name, OBJPROP_FONT,    HUD_FONT);
+         ObjectSetInteger(0, name, OBJPROP_FONTSIZE, HUD_FONT_SZ);
+         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+         ObjectSetInteger(0, name, OBJPROP_HIDDEN,  true);
         }
-      ObjectSetInteger(0, obj, OBJPROP_YDISTANCE, m_baseY + row * m_lineH);
-      ObjectSetString (0, obj, OBJPROP_TEXT,      text);
-      ObjectSetInteger(0, obj, OBJPROP_COLOR,     clr);
+      ObjectSetString(0,  name, OBJPROP_TEXT,  text);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
      }
 
-   // ── ASCII progress bar helper (e.g. "[█████░░░░░] 52%") ────────────
-   string ProgressBar(double pct, int width=10) const
+   void DeleteAllLabels() const
      {
-      pct = MathMax(0, MathMin(100, pct));
-      int filled = (int)MathRound(pct / 100.0 * width);
-      string bar = "[";
-      for(int i=0; i<width; i++) bar += (i < filled) ? "█" : "░";
-      bar += StringFormat("] %.1f%%", pct);
-      return bar;
+      for(int i = ObjectsTotal(0) - 1; i >= 0; i--)
+        {
+         string name = ObjectName(0, i);
+         if(StringFind(name, HUD_PREFIX) == 0)
+            ObjectDelete(0, name);
+        }
      }
 
-   // ── Color ramp: 0-50%=silver, 50-70%=yellow, 70-85%=orange, 85%+=red
-   color PctColor(double pct) const
+   //--- Gauge builders -------------------------------------------
+
+   string Gauge(double val, int width = HUD_GAUGE_W) const
      {
-      if(pct >= 85.0) return clrRed;
-      if(pct >= 70.0) return clrOrangeRed;
-      if(pct >= 50.0) return clrGold;
-      return clrSilver;
+      int filled = (int)MathRound(MathMin(val, 1.0) * width);
+      string s = "[";
+      for(int i=0; i<width; i++) s += (i < filled) ? "=" : "-";
+      return s + "]";
      }
 
-   // ──────────── Row draw methods ──────────────────────────────────────────
+   //--- Regime / Session label -----------------------------------
 
-   void DrawHeader(int &row)
+   string RegimeStr(ENUM_MARKET_REGIME r) const
      {
-      SetLabel("hdr", row++,
-               "╔══ PASR EA v3 ═════════════╗",
-               clrGold, 9);
-     }
-
-   void DrawSymbolSpread(int &row)
-     {
-      double spread = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-      double atr    = (m_data != NULL) ? m_data.GetATRPoints() : 0;
-      SetLabel("sym", row++,
-               StringFormat("║ %-8s  Sprd:%.0f  ATR:%.0f", _Symbol, spread, atr),
-               clrWhite, 9);
-     }
-
-   void DrawRegime(int &row)
-     {
-      if(m_regime == NULL) return;
-
-      ENUM_MARKET_REGIME r = m_regime.GetRegime();
-      string rName = RegimeName(r);
-      color  rClr;
-      string icon;
       switch(r)
         {
-         case REGIME_TRENDING:  rClr=clrDeepSkyBlue; icon="▲"; break;
-         case REGIME_RANGING:   rClr=clrSilver;      icon="◆"; break;
-         case REGIME_VOLATILE:  rClr=clrRed;         icon="!"; break;
-         case REGIME_SQUEEZE:   rClr=clrGold;        icon="■"; break;
-         default:               rClr=clrDimGray;     icon="?"; break;
+         case REGIME_TRENDING:  return "Trending";
+         case REGIME_RANGING:   return "Ranging";
+         case REGIME_VOLATILE:  return "Volatile";
+         case REGIME_QUIET:     return "Quiet";
+         default:               return "Unknown";
         }
-
-      SetLabel("regime", row++,
-               StringFormat("║ Regime: %s %s  ADX:%.1f",
-                            icon, rName, m_regime.GetADX()),
-               rClr, 9);
      }
 
-   void DrawSignal(int &row)
+   string SessionStr(ENUM_TRADING_SESSION s) const
      {
-      if(m_signal == NULL) return;
-
-      FinalSignal sig = m_signal.GetCurrent();
-      string dirStr   = (sig.direction==SIGNAL_BUY)  ? "▲ BUY " :
-                        (sig.direction==SIGNAL_SELL) ? "▼ SELL" : "■ ----";
-
-      // Urgency-based color
-      color sigClr = clrSilver;
-      if(sig.direction != SIGNAL_NONE)
+      switch(s)
         {
-         if(sig.urgency == SIGNAL_URGENCY_HIGH)
-            sigClr = (sig.direction==SIGNAL_BUY) ? clrLime       : clrOrangeRed;
-         else if(sig.urgency == SIGNAL_URGENCY_MEDIUM)
-            sigClr = (sig.direction==SIGNAL_BUY) ? clrYellow     : clrOrange;
-         else
-            sigClr = clrSilver;
+         case SESSION_ASIAN:   return "Asian";
+         case SESSION_LONDON:  return "London";
+         case SESSION_NEWYORK: return "NewYork";
+         case SESSION_OVERLAP: return "Overlap";
+         default:              return "Off";
         }
-
-      string urgStr = (sig.urgency==SIGNAL_URGENCY_HIGH)   ? "HIGH"   :
-                      (sig.urgency==SIGNAL_URGENCY_MEDIUM) ? "MED"    : "";
-
-      SetLabel("sig", row++,
-               StringFormat("║ Sig: %s  %.2f %s [%d src]",
-                            dirStr, sig.score, urgStr, sig.confluence),
-               sigClr, 9);
      }
 
-   void DrawRisk(int &row)
+   string EnsembleStr(int m) const
      {
-      if(m_risk == NULL) return;
-
-      // ── Circuit breaker row (flashes red)
-      if(m_risk.IsCircuitBroken())
+      switch(m)
         {
-         // Toggle color each render for flash effect
-         bool flash = ((GetTickCount64() / 500) % 2 == 0);
-         SetLabel("circuit", row++,
-                  "║ ⚠ CIRCUIT BREAKER TRIPPED ⚠",
-                  flash ? clrRed : clrOrangeRed, 10);
+         case 0: return "Trend";
+         case 1: return "MeanRev";
+         case 2: return "Momentum";
+         default:return "None";
+        }
+     }
+
+   //--- Panel renderers -----------------------------------------
+
+   // Panel 1: HEADER
+   void RenderHeader(const DashContext &ctx, int &y) const
+     {
+      string tf = EnumToString(Period());
+      string spr = StringFormat("Spr:%.1f", ctx.spread);
+      string tm  = TimeToString(TimeCurrent(), TIME_SECONDS);
+      string txt = StringFormat(" PASR | %s %s %s %s ",
+                                _Symbol, tf, spr, tm);
+      CreateLabel(LabelName("H1"), HUD_X, y, txt, CLR_VALUE);
+      y += HUD_LINE_H;
+      // separator
+      CreateLabel(LabelName("HD"), HUD_X, y,
+                  StringFormat(" %s ", StringRepeat("-",36)),
+                  CLR_DIVIDER);
+      y += HUD_LINE_H;
+     }
+
+   // Panel 2: POSITION
+   void RenderPosition(const DashContext &ctx, int &y) const
+     {
+      if(!ctx.hasPosition)
+        {
+         CreateLabel(LabelName("P1"), HUD_X, y,
+                     " No open position ", CLR_LABEL);
+         y += HUD_LINE_H;
+         CreateLabel(LabelName("P2"), HUD_X, y, "", CLR_LABEL);
+         y += HUD_LINE_H;
+         CreateLabel(LabelName("P3"), HUD_X, y, "", CLR_LABEL);
+         y += HUD_LINE_H;
         }
       else
         {
-         SetLabel("circuit", row++, "║ Circuit: OK", clrSilver, 9);
+         string arrow = (ctx.posDir == SIGNAL_BUY) ? "▲ BUY" : "▼ SELL";
+         color  dc    = (ctx.posDir == SIGNAL_BUY) ? CLR_GREEN : CLR_RED;
+         string flags = (ctx.beDone ? "[BE]" : "") + (ctx.partialDone ? "[PC]" : "");
+         CreateLabel(LabelName("P1"), HUD_X, y,
+           StringFormat(" %s  %.5f  SL:%.5f  TP:%.5f %s",
+                        arrow, ctx.posEntry,
+                        ctx.posSL, ctx.posTP1, flags), dc);
+         y += HUD_LINE_H;
+
+         // TP2 if set
+         if(ctx.posTP2 > 0)
+           {
+            CreateLabel(LabelName("P2"), HUD_X, y,
+              StringFormat("      TP2:%.5f  Lots:%.2f",
+                           ctx.posTP2, ctx.posLots), CLR_LABEL);
+            y += HUD_LINE_H;
+           }
+         else
+           {
+            CreateLabel(LabelName("P2"), HUD_X, y,
+              StringFormat("      Lots:%.2f", ctx.posLots), CLR_LABEL);
+            y += HUD_LINE_H;
+           }
+
+         // PnL line
+         color pnlClr = (ctx.posPnL > 0) ? CLR_GREEN :
+                        (ctx.posPnL < 0) ? CLR_RED : CLR_LABEL;
+         // Warn if within 30% of SL
+         double riskPts = MathAbs(ctx.posEntry - ctx.posSL);
+         double curPts  = MathAbs(SymbolInfoDouble(_Symbol,SYMBOL_BID) - ctx.posSL);
+         if(curPts < riskPts * 0.3) pnlClr = CLR_AMBER;
+
+         CreateLabel(LabelName("P3"), HUD_X, y,
+           StringFormat("      PnL: %+.2f USD", ctx.posPnL), pnlClr);
+         y += HUD_LINE_H;
         }
-
-      // ── Drawdown progress bar
-      double dd    = m_risk.GetDrawdownPct();
-      double ddMax = (m_cfg.Risk.MaxDrawdownPct > 0) ? m_cfg.Risk.MaxDrawdownPct : 10.0;
-      double ddPct = (ddMax > 0) ? MathMin(100.0, dd / ddMax * 100.0) : 0;
-      SetLabel("dd", row++,
-               StringFormat("║ DD: %s", ProgressBar(ddPct, 8)),
-               PctColor(ddPct), 9);
-
-      // ── Daily loss progress bar
-      double dloss    = m_risk.GetDailyLossPct();
-      double dlossMax = (m_cfg.Risk.DailyLossPct > 0) ? m_cfg.Risk.DailyLossPct : 3.0;
-      double dlossPct = (dlossMax > 0) ? MathMin(100.0, dloss / dlossMax * 100.0) : 0;
-      SetLabel("daily", row++,
-               StringFormat("║ DayLoss: %s", ProgressBar(dlossPct, 8)),
-               PctColor(dlossPct), 9);
-
-      // ── Consecutive loss + open trades
-      int  consec = m_risk.GetConsecLoss();
-      int  maxCL  = m_cfg.Risk.MaxConsecLoss;
-      color clClr = (consec >= maxCL - 1) ? clrOrangeRed :
-                    (consec >= maxCL / 2)  ? clrGold : clrSilver;
-      SetLabel("consec", row++,
-               StringFormat("║ ConsecLoss:%d/%d  Open:%d",
-                            consec, maxCL, m_risk.GetOpenTrades()),
-               clClr, 9);
+      // separator
+      CreateLabel(LabelName("PD"), HUD_X, y,
+                  StringFormat(" %s ", StringRepeat("-",36)), CLR_DIVIDER);
+      y += HUD_LINE_H;
      }
 
-   void DrawPositions(int &row)
+   // Panel 3: AI ENGINE
+   void RenderAI(const DashContext &ctx, int &y) const
      {
-      int    openCnt  = 0;
-      double floatPnl = 0.0;
-      for(int i=0; i<PositionsTotal(); i++)
-         if(PositionGetSymbol(i)==_Symbol &&
-            (int)PositionGetInteger(POSITION_MAGIC)==m_cfg.MagicNumber)
-           { openCnt++; floatPnl += PositionGetDouble(POSITION_PROFIT); }
+      // AI score gauge
+      string aiGauge   = Gauge(ctx.aiScore);
+      string driftGauge= Gauge(ctx.driftScore);
+      color  aiClr     = (ctx.aiVeto)          ? CLR_RED   :
+                         (ctx.aiScore >= 0.7)  ? CLR_GREEN :
+                         (ctx.aiScore >= 0.5)  ? CLR_AMBER : CLR_RED;
+      color  driftClr  = (ctx.driftScore > 0.5)? CLR_RED : CLR_BLUE;
 
-      color posClr = (floatPnl > 0) ? clrLime :
-                     (floatPnl < 0) ? clrOrangeRed : clrSilver;
-      SetLabel("pos", row++,
-               StringFormat("║ Pos:%d  Float: %.2f", openCnt, floatPnl),
-               posClr, 9);
+      CreateLabel(LabelName("A1"), HUD_X, y,
+        StringFormat(" AI%s%.2f  Drift%s%.2f%s",
+                     aiGauge, ctx.aiScore,
+                     driftGauge, ctx.driftScore,
+                     ctx.aiVeto?" [VETO]":""),
+        aiClr);
+      y += HUD_LINE_H;
+
+      CreateLabel(LabelName("A2"), HUD_X, y,
+        StringFormat("    Model:%-8s  Regime:%s",
+                     EnsembleStr(ctx.ensembleModel),
+                     RegimeStr(ctx.regime)),
+        CLR_PURPLE);
+      y += HUD_LINE_H;
+
+      CreateLabel(LabelName("A3"), HUD_X, y,
+        StringFormat("    Session:%-10s",
+                     SessionStr(ctx.session)),
+        CLR_BLUE);
+      y += HUD_LINE_H;
+
+      // separator
+      CreateLabel(LabelName("AD"), HUD_X, y,
+                  StringFormat(" %s ", StringRepeat("-",36)), CLR_DIVIDER);
+      y += HUD_LINE_H;
      }
 
-   void DrawFooter(int &row)
+   // Panel 4: LIVE STATS (from JournalManager)
+   void RenderStats(int &y) const
      {
-      SetLabel("sep",  row++,
-               "╚════════════════════════╗",
-               clrDimGray, 8);
-      SetLabel("time", row++,
-               " " + TimeToString(TimeCurrent(), TIME_MINUTES),
-               clrDimGray, 8);
-     }
-
-   // ── Full redraw ──────────────────────────────────────────────────
-   void Redraw()
-     {
-      if(m_destroyed) return;
-      int row = 0;
-      DrawHeader(row);
-      DrawSymbolSpread(row);
-      DrawRegime(row);
-      DrawSignal(row);
-      DrawRisk(row);
-      DrawPositions(row);
-      DrawFooter(row);
-      ChartRedraw(0);
-     }
-
-   void DeleteAllObjects()
-     {
-      for(int i = ObjectsTotal(0)-1; i >= 0; i--)
+      if(CheckPointer(m_journal) == POINTER_INVALID)
         {
-         string name = ObjectName(0, i);
-         if(StringFind(name, m_prefix) == 0)
-            ObjectDelete(0, name);
+         CreateLabel(LabelName("S1"), HUD_X, y,
+                     " Stats: journal not set ", CLR_LABEL);
+         y += HUD_LINE_H * 2;
+         return;
         }
-      ChartRedraw(0);
+      TradeStat s = m_journal.GetStats(50); // last 50
+      color pfClr = (s.profitFactor >= 1.5) ? CLR_GREEN :
+                    (s.profitFactor >= 1.0) ? CLR_AMBER : CLR_RED;
+      CreateLabel(LabelName("S1"), HUD_X, y,
+        StringFormat(" Win:%.0f%%  PF:%.2f  AvgRR:%.1fR",
+                     s.winRate*100, s.profitFactor, s.avgRR),
+        pfClr);
+      y += HUD_LINE_H;
+
+      color ddClr = (s.maxDrawdown < 50) ? CLR_LABEL : CLR_AMBER;
+      CreateLabel(LabelName("S2"), HUD_X, y,
+        StringFormat("    MaxDD:%.2f  Streak:W%d/L%d",
+                     s.maxDrawdown,
+                     s.maxConsecWin, s.maxConsecLoss),
+        ddClr);
+      y += HUD_LINE_H;
+
+      // separator
+      CreateLabel(LabelName("SD"), HUD_X, y,
+                  StringFormat(" %s ", StringRepeat("-",36)), CLR_DIVIDER);
+      y += HUD_LINE_H;
+     }
+
+   // Panel 5: SIGNALS
+   void RenderSignals(const DashContext &ctx, int &y) const
+     {
+      if(ctx.signalCount == 0)
+        {
+         CreateLabel(LabelName("SG0"), HUD_X, y,
+                     " SIG  No recent signals ", CLR_LABEL);
+         y += HUD_LINE_H;
+        }
+      else
+        {
+         for(int i=0; i<ctx.signalCount && i<3; i++)
+           {
+            const SignalSnap &sg = ctx.signals[i];
+            string arrow  = (sg.dir == SIGNAL_BUY) ? "▲" : "▼";
+            string dirStr = (sg.dir == SIGNAL_BUY) ? "BUY" : "SEL";
+            string outStr;
+            color  outClr;
+            if(sg.outcome == 1)      { outStr="✓WIN"; outClr=CLR_GREEN; }
+            else if(sg.outcome==-1)  { outStr="✗LOSS"; outClr=CLR_RED; }
+            else                     { outStr="...";   outClr=CLR_AMBER; }
+
+            string tm = TimeToString(sg.time, TIME_MINUTES);
+            string lbl = StringFormat(" SIG  %s %s%s %.2f %s",
+                                      tm, arrow, dirStr, sg.score, outStr);
+            color lineClr = (sg.dir==SIGNAL_BUY) ? CLR_GREEN : CLR_RED;
+            CreateLabel(LabelName("SG"+IntegerToString(i)),
+                        HUD_X, y, lbl, lineClr);
+            y += HUD_LINE_H;
+           }
+        }
+
+      // separator
+      CreateLabel(LabelName("SGD"), HUD_X, y,
+                  StringFormat(" %s ", StringRepeat("-",36)), CLR_DIVIDER);
+      y += HUD_LINE_H;
+     }
+
+   // Panel 6: JOURNAL TODAY
+   void RenderJournal(int &y) const
+     {
+      if(CheckPointer(m_journal) == POINTER_INVALID)
+        {
+         CreateLabel(LabelName("J1"), HUD_X, y,
+                     " Journal not set ", CLR_LABEL);
+         y += HUD_LINE_H;
+         return;
+        }
+      double todayPnL = m_journal.GetTodayPnL();
+      TradeStat s     = m_journal.GetStats();
+      int today_trades= s.totalTrades; // approximate with total in buffer
+      color tClr = (todayPnL >= 0) ? CLR_GREEN : CLR_RED;
+
+      CreateLabel(LabelName("J1"), HUD_X, y,
+        StringFormat(" Today:%+.2f  Trades:%d  MaxCL:%d",
+                     todayPnL, m_journal.GetTotalTrades(),
+                     s.maxConsecLoss),
+        tClr);
+      y += HUD_LINE_H;
+     }
+
+   // Utility: repeat char
+   string StringRepeat(string ch, int n) const
+     {
+      string s = "";
+      for(int i=0;i<n;i++) s+=ch;
+      return s;
      }
 
 public:
-   CDashboardManager()
-      : IManager(), m_risk(NULL), m_signal(NULL), m_regime(NULL),
-        m_lastRenderMs(0), m_throttleMs(1000),
-        m_corner(CORNER_RIGHT_UPPER), m_baseX(10), m_baseY(20),
-        m_lineH(14), m_prefix("PASR_DB_"), m_destroyed(false)
-     {}
-
-   ~CDashboardManager() { Destroy(); }
-
-   // ── Dependency injection
-   void SetRiskManager  (CRiskManager   *r) { m_risk   = r; }
-   void SetSignalManager(CSignalManager *s) { m_signal = s; }
-   void SetRegimeFilter (CRegimeFilter  *rf){ m_regime = rf; }
-
-   // ── Configuration
-   void SetThrottleMs  (int ms)     { m_throttleMs = MathMax(100, ms); }
-   void SetCorner      (int c)      { m_corner = c; }
-   void SetPosition    (int x, int y){ m_baseX=x; m_baseY=y; }
-   void SetPrefix      (string p)   { m_prefix = p; }
-   void SetLineHeight  (int h)      { m_lineH = MathMax(10, h); }
-
-   // ── Public destroy (called by Orchestrator.OnDeinit)
-   void Destroy()
+   CDashboardManager() : m_journal(NULL), m_ready(false), m_labelCount(0)
      {
-      if(m_destroyed) return;
-      m_destroyed = true;
-      DeleteAllObjects();
+      ArrayInitialize(m_lastPanel, "");
      }
 
-   virtual void DeclareEvents() override
+   ~CDashboardManager() { Deinit(); }
+
+   //+----------------------------------------------------------------+
+   //| Init — call from EA OnInit()                                   |
+   //+----------------------------------------------------------------+
+   bool Init(CJournalManager *journal)
      {
-      AddEvent(EVENT_ID_PRICE_UPDATE);
-      AddEvent(EVENT_ID_POSITION_UPDATE);
-      AddEvent(EVENT_ID_SIGNAL_READY);
-      AddEvent(EVENT_ID_NEW_BAR);
+      m_journal = journal;
+      DeleteAllLabels();
+      m_ready = true;
+      Print("[Dashboard] v2.00 initialized");
+      return true;
      }
 
-   virtual void OnPriceUpdate() override
+   //+----------------------------------------------------------------+
+   //| Deinit — call from EA OnDeinit()                               |
+   //+----------------------------------------------------------------+
+   void Deinit()
      {
-      if(m_destroyed) return;
-      ulong now = GetTickCount64();
-      if(now - m_lastRenderMs < (ulong)m_throttleMs) return;
-      m_lastRenderMs = now;
-      Redraw();
+      if(!m_ready) return;
+      DeleteAllLabels();
+      ChartRedraw();
+      m_ready = false;
+      Print("[Dashboard] cleaned up");
      }
 
-   virtual void OnNewBar() override
+   //+----------------------------------------------------------------+
+   //| Update — call from OnTick() or new-bar event                  |
+   //| ctx: all live data injected from Orchestrator                   |
+   //+----------------------------------------------------------------+
+   void Update(const DashContext &ctx)
      {
-      if(m_destroyed) return;
-      Redraw();
+      if(!m_ready) return;
+
+      int y = HUD_Y_START;
+
+      RenderHeader(ctx, y);
+      RenderPosition(ctx, y);
+      RenderAI(ctx, y);
+      RenderStats(y);
+      RenderSignals(ctx, y);
+      RenderJournal(y);
+
+      ChartRedraw(); // single redraw per Update()
      }
 
-   virtual void OnEvent(const PASREvent &ev) override
+   //+----------------------------------------------------------------+
+   //| AddSignal — helper to push new signal into DashContext         |
+   //| Call from SignalManager after each signal generated            |
+   //+----------------------------------------------------------------+
+   static void PushSignal(DashContext &ctx,
+                          ENUM_SIGNAL_DIR dir,
+                          double score,
+                          int outcome = 0)
      {
-      if(m_destroyed) return;
-      // Immediate redraw on signal ready or position update
-      if(ev.id == EVENT_ID_SIGNAL_READY || ev.id == EVENT_ID_POSITION_UPDATE)
-         Redraw();
+      if(ctx.signalCount < 3)
+        {
+         ctx.signals[ctx.signalCount].time    = TimeCurrent();
+         ctx.signals[ctx.signalCount].dir     = dir;
+         ctx.signals[ctx.signalCount].score   = score;
+         ctx.signals[ctx.signalCount].outcome = outcome;
+         ctx.signalCount++;
+        }
+      else
+        {
+         // Shift down, add at top
+         ctx.signals[2] = ctx.signals[1];
+         ctx.signals[1] = ctx.signals[0];
+         ctx.signals[0].time    = TimeCurrent();
+         ctx.signals[0].dir     = dir;
+         ctx.signals[0].score   = score;
+         ctx.signals[0].outcome = outcome;
+        }
+     }
+
+   //+----------------------------------------------------------------+
+   //| UpdateSignalOutcome — mark latest signal as win/loss           |
+   //| Call from Orchestrator after trade closes                       |
+   //+----------------------------------------------------------------+
+   static void UpdateSignalOutcome(DashContext &ctx, int outcome)
+     {
+      if(ctx.signalCount > 0)
+         ctx.signals[0].outcome = outcome;
      }
   };
 
-typedef CDashboardManager DashboardManager;
 #endif // __UI_DASHBOARD_MANAGER_MQH__
