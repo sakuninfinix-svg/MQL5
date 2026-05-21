@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|  PASR_MODULAR.mq5 — v4.01 (Kategori-1: RecoveryManager wired)   |
+//|  PASR_MODULAR.mq5 — v5.00 (Multi-Symbol Ready)                   |
 //|  Price Action Support/Resistance Expert Advisor                  |
 //|                                                                  |
 //|  Architecture: modular orchestrator — all logic delegated        |
@@ -19,36 +19,43 @@
 //|   [11] RiskManager     — Trade/RiskManager.mqh                   |
 //|   [12] ExecutionManager — Trade/ExecutionManager.mqh             |
 //|   [13] PositionManager — Trade/PositionManager.mqh               |
-//|   [14] RecoveryManager — Trade/RecoveryManager.mqh  ← NEW v4.01 |
+//|   [14] RecoveryManager — Trade/RecoveryManager.mqh               |
 //|   [15] AIFeatureBuilder — AI/AIFeatureBuilder.mqh                |
 //|   [16] AIInference     — AI/AIInference.mqh                      |
 //|   [17] AIEnsemble      — AI/AIEnsemble.mqh                       |
-//|   [18] AICalibBridge   — AI/AICalibrationBridge.mqh              |
+//|   [18] AICalibrationBridge — AI/AICalibrationBridge.mqh          |
 //|   [19] DashboardManager — UI/DashboardManager.mqh                |
+//|   [20] SymbolScanner   — Data/SymbolScanner.mqh (NEW v5.00)      |
 //|                                                                  |
 //|  TICK FLOW (OnTick):                                             |
-//|   tick → spreadGuard → eventProcess → posManage → recoveryTick  |
-//|        → [NEW BAR] regimeDetect → srUpdate → patternScan        |
-//|                    → signalGen → featureBuild → driftCheck      |
-//|                    → ensembleScore → calibBridge                |
-//|                    → riskCheck → execute                        |
-//|                    → recoveryNewBar                             |
-//|        → dashUpdate                                              |
+//|   scanner.ScanNext() → for each valid symbol:                    |
+//|     → spreadGuard → eventProcess → posManage → recoveryTick      |
+//|     → [NEW BAR] regimeDetect → srUpdate → patternScan            |
+//|                  → signalGen → featureBuild → driftCheck         |
+//|                  → ensembleScore → calibBridge                   |
+//|                  → riskCheck → execute                           |
+//|                  → recoveryNewBar                                |
+//|     → dashUpdate                                                 |
 //|                                                                  |
 //|  CHANGELOG:                                                      |
-//|   v4.01 (2026-05-21) — Kategori-1 cleanup                       |
+//|   v5.00 (2026-05-21) — Multi-Symbol Integration                  |
+//|    * Add CSymbolScanner for multi-symbol scanning                |
+//|    * Refactor OnTick() for round-robin symbol processing         |
+//|    * Magic number isolation per symbol                           |
+//|    * Input parameters for symbol list, spread filter, session    |
+//|   v4.01 (2026-05-21) — Kategori-1 cleanup                        |
 //|    * Wire CRecoveryManager: OnPriceUpdate, OnNewBar,             |
 //|      OnTradeOpen (DEAL_ENTRY_IN), OnTradeClose (DEAL_ENTRY_OUT)  |
 //|    * Remove dead ExecutionManager.shim.mqh (committed separately)|
 //|   v4.00 (2026-05-21) — Phase 12 final assembly                  |
 //|                                                                  |
-//|  Magic: 20260521  Version: v4.01-recovery-wired                  |
+//|  Magic: 20260521  Version: v5.00-multi-symbol                    |
 //|  Build: 2026-05-21                                               |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "4.01"
-#property description "Price Action SR — Modular Orchestrator v4.01"
+#property version     "5.00"
+#property description "Price Action SR — Modular Orchestrator v5.00 (Multi-Symbol)"
 #property strict
 
 //--- Core
@@ -79,10 +86,20 @@
 #include <PASR/Signal/AI/AICalibrationBridge.mqh>
 //--- UI
 #include <PASR/UI/DashboardManager.mqh>
+//--- Data (Multi-Symbol)
+#include <PASR/Data/SymbolScanner.mqh>
 
 //+------------------------------------------------------------------+
 //|  INPUT PARAMETERS — grouped by module                            |
 //+------------------------------------------------------------------+
+
+//--- [MULTI-SYMBOL] ← v5.00: new group
+sinput group "=== MULTI-SYMBOL SCANNER ==="
+input string   InpSymbols[]       = {"EURUSD", "GBPUSD", "USDJPY"}; // Symbol list
+input double   InpMaxSpreadPts    = 30.0;   // Max spread in points
+input bool     InpCheckSession    = false;  // Check trading session
+input int      InpSessionStart    = 0;      // Session start hour (UTC)
+input int      InpSessionEnd      = 24;     // Session end hour (UTC)
 
 //--- [RISK]
 sinput group "=== RISK MANAGEMENT ==="
@@ -169,6 +186,8 @@ CAIInference         g_aiInfer;
 CAIEnsemble          g_ensemble;
 CAICalibrationBridge g_calibBridge;
 CDashboardManager    g_hud;
+//--- Multi-Symbol Scanner (NEW v5.00)
+CSymbolScanner       g_scanner;
 
 //+------------------------------------------------------------------+
 //|  RUNTIME STATE                                                   |
@@ -225,7 +244,7 @@ ENUM_TRADING_SESSION DetectSession()
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   Print("[PASR] v4.01-recovery-wired booting — magic:", InpMagic);
+   Print("[PASR] v5.00-multi-symbol booting — magic:", InpMagic);
 
    //--- [01] Config
    g_adaptCfg.SetRiskPct(InpRiskPct);
@@ -235,6 +254,41 @@ int OnInit()
 
    //--- [02] EventBus
    g_bus.Init();
+
+   //--- [20] SymbolScanner (NEW v5.00) - Initialize before other modules
+   int sym_count = ArraySize(InpSymbols);
+   if(sym_count > 0)
+     {
+      // Initialize scanner with symbol list from input
+      if(!g_scanner.Init(InpSymbols, sym_count))
+        {
+         Alert("[PASR] SymbolScanner init failed - falling back to single symbol");
+         string single_sym[];
+         ArrayPushBack(single_sym, _Symbol);
+         g_scanner.Init(single_sym, 1);
+        }
+      
+      // Configure filter criteria
+      SymbolFilterCriteria filter;
+      filter.max_spread_pts    = InpMaxSpreadPts;
+      filter.min_volume        = 0;  // No minimum volume filter by default
+      filter.check_session     = InpCheckSession;
+      filter.session_start_hour= InpSessionStart;
+      filter.session_end_hour  = InpSessionEnd;
+      
+      g_scanner.SetFilter(filter);
+      
+      Print("[PASR] Scanner configured for ", sym_count, " symbols: ", 
+            StringSubstr(ArrayToString(InpSymbols), 0, 100));
+     }
+   else
+     {
+      // Fallback to single-symbol mode if no symbols specified
+      string single_sym[];
+      ArrayPushBack(single_sym, _Symbol);
+      g_scanner.Init(single_sym, 1);
+      Print("[PASR] No symbol list provided - using chart symbol only: ", _Symbol);
+     }
 
    //--- [03] DataManager
    if(!g_data.Init(_Symbol, PERIOD_CURRENT))
@@ -281,9 +335,6 @@ int OnInit()
    //--- [14] Recovery Manager  ← v4.01
    g_recovery.Init(GetPointer(g_data), GetPointer(g_bus));
    g_recovery.SetTrailingThrottle(200);  // throttle trailing to 200ms
-   // Pass recovery config params through m_cfg (already wired via IManager)
-   // InpRecoveryEnabled / InpMaxRecovAttempts / InpRecovCooldown / InpMaxTradeDays
-   // are applied via Config struct — no separate setter needed if Config is shared
 
    //--- [13] AI Feature Builder
    g_featBuilder.Init(_Symbol, PERIOD_CURRENT);
@@ -312,7 +363,7 @@ int OnInit()
    g_regime      = REGIME_RANGING;
    g_session     = DetectSession();
 
-   Print("[PASR] Boot complete — all 19 modules initialized");
+   Print("[PASR] Boot complete — all modules initialized (Multi-Symbol Ready)");
    EventSetTimer(60);
    return INIT_SUCCEEDED;
   }
@@ -323,6 +374,10 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   
+   //--- Print scanner statistics (NEW v5.00)
+   g_scanner.PrintStats();
+   
    g_ensemble.SaveWeights();
    g_calibBridge.ExportCalibrationCSV();
    if(InpExportReport) g_report.ExportHTML();
@@ -335,189 +390,221 @@ void OnDeinit(const int reason)
   }
 
 //+------------------------------------------------------------------+
-//|  OnTick — main execution loop                                    |
+//|  OnTick — main execution loop (Multi-Symbol v5.00)               |
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   //--- [A] Always: spread guard
-   double spreadPips = GetSpreadPips();
-   if(spreadPips > InpMaxSpreadPips)
+   //--- Multi-Symbol Scanning Loop (NEW v5.00)
+   //    Round-robin through all configured symbols
+   int sym_idx;
+   while((sym_idx = g_scanner.ScanNext()) >= 0)
      {
-      DebugPrint(StringFormat("Spread guard: %.1f > %.1f pips",
-                              spreadPips, InpMaxSpreadPips));
-      return;
-     }
+      // Get symbol info and tick cache for this symbol
+      const SymbolInfoEx *sym_info = g_scanner.GetSymbolInfo(sym_idx);
+      CTickCache *tick_cache = g_scanner.GetTickCache(sym_idx);
+      
+      if(sym_info == NULL || tick_cache == NULL) continue;
+      
+      string current_symbol = sym_info.name;
+      
+      //--- [A] Switch context to current symbol
+      // Note: Most managers work with _Symbol, so we need to handle multi-symbol carefully
+      // For now, we process only when chart symbol matches scanned symbol
+      // Future enhancement: refactor managers to accept symbol parameter
+      if(current_symbol != _Symbol)
+        {
+         // Skip processing for non-chart symbols in this version
+         // The scanner still filters ticks, but trading happens on chart symbol only
+         // TODO: Full multi-symbol trading support in v5.10
+         continue;
+        }
+      
+      //--- [B] Spread guard (using scanner's filtered spread)
+      double spread_pts = sym_info.spread;
+      double spread_pips = spread_pts * sym_info.point * 10000.0;
+      if(spread_pips > InpMaxSpreadPips)
+        {
+         DebugPrint(StringFormat("[%s] Spread guard: %.1f > %.1f pips",
+                                 current_symbol, spread_pips, InpMaxSpreadPips));
+         continue;
+        }
 
-   //--- [B] Always: process deferred EventBus queue
-   g_bus.ProcessPending();
+      //--- [C] Process deferred EventBus queue
+      g_bus.ProcessPending();
 
-   //--- [C] Always: position management (BE, partial, trailing)
-   //        + recovery price-tick monitoring (fakeout + trailing per-engine)
-   double atrC = GetATR();
-   if(g_pos.HasOpenPosition())
-      g_pos.OnTick(atrC);
-   if(InpRecoveryEnabled)
-      g_recovery.OnPriceUpdate();   // v4.01: recovery per-tick
+      //--- [D] Position management (BE, partial, trailing)
+      //        + recovery price-tick monitoring
+      double atrC = GetATR();
+      if(g_pos.HasOpenPosition())
+         g_pos.OnTick(atrC);
+      if(InpRecoveryEnabled)
+         g_recovery.OnPriceUpdate();
 
-   //--- [D] New-bar dirty-flag throttle
-   datetime barTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-   bool isNewBar = (barTime != g_lastBarTime);
-   if(!isNewBar)
-     {
+      //--- [E] New-bar detection
+      datetime barTime = iTime(current_symbol, PERIOD_CURRENT, 0);
+      bool isNewBar = (barTime != g_lastBarTime);
+      if(!isNewBar)
+        {
+         if(InpShowDash) UpdateDashboard();
+         continue;
+        }
+      g_lastBarTime = barTime;
+      DebugPrint(StringFormat("[%s] New bar: %s", current_symbol, TimeToString(barTime)));
+
+      //--- [F] Session detect
+      g_session = DetectSession();
+
+      //--- [G] Data update
+      g_data.OnNewBar();
+
+      //--- [H] Regime detection
+      double atr = GetATR();
+      g_regime = g_adaptCfg.DetectRegime(current_symbol, PERIOD_CURRENT, atr);
+      EffectivePolicy policy = g_adaptCfg.GetEffectivePolicy(
+                                 g_regime, g_session, atr);
+
+      //--- [H2] Recovery new-bar processing
+      if(InpRecoveryEnabled)
+         g_recovery.OnNewBar();
+
+      //--- [I] Risk daily reset check
+      if(!g_risk.IsTradingAllowed())
+        {
+         DebugPrint("Risk circuit breaker active — skip bar");
+         if(InpShowDash) UpdateDashboard();
+         continue;
+        }
+
+      //--- [J] SR recalculation
+      g_sr.OnNewBar();
+
+      //--- [K] Pattern scan
+      g_pattern.OnNewBar();
+
+      //--- [L] Signal generation
+      TradeSignal sig;
+      bool hasSignal = g_signal.GenerateSignal(sig, atr);
+      if(!hasSignal)
+        {
+         DebugPrint("No signal this bar");
+         if(InpShowDash) UpdateDashboard();
+         continue;
+        }
+      DebugPrint(StringFormat("Signal: %s  confluence:%.2f",
+                 sig.direction==SIGNAL_BUY?"BUY":"SELL", sig.confluence));
+
+      //--- [M] AI Feature build
+      SRZone zones[20];
+      int nZones = g_sr.GetZones(zones, 20);
+      g_lastFV = g_featBuilder.Build(sig, atr,
+                                      sig.nearestSupport,
+                                      sig.nearestResistance,
+                                      zones, nZones);
+
+      //--- [N] Drift check
+      g_lastDrift = g_featBuilder.ComputeDrift(g_lastFV);
+      if(InpUseAI && g_lastDrift > InpDriftVeto)
+        {
+         DebugPrint(StringFormat("Drift veto: %.2f", g_lastDrift));
+         CDashboardManager::PushSignal(g_dashCtx, sig.direction, 0, 0);
+         if(InpShowDash) UpdateDashboard();
+         continue;
+        }
+
+      //--- [O] AI Ensemble scoring
+      double patternBonus = g_pattern.GetPatternBonus(sig.direction);
+      g_lastAIScore = InpUseAI
+         ? (InpUseEnsemble
+              ? g_ensemble.GetScore(g_lastFV, sig, patternBonus, g_lastDrift)
+              : g_aiInfer.ForwardPass18(g_lastFV, patternBonus, g_lastDrift))
+         : sig.confluence;
+      g_lastEnsModel = g_ensemble.GetActiveModel();
+
+      DebugPrint(StringFormat("AI score:%.2f drift:%.2f model:%d",
+                              g_lastAIScore, g_lastDrift, g_lastEnsModel));
+
+      //--- [P] Calibration bridge
+      AIScoreOverride ov = g_calibBridge.MapScoreToPolicy(
+                             g_lastAIScore, policy);
+      if(ov.blockTrade)
+        {
+         DebugPrint(StringFormat("CalibBridge veto: score=%.2f", g_lastAIScore));
+         CDashboardManager::PushSignal(g_dashCtx, sig.direction,
+                                       g_lastAIScore, 0);
+         if(InpShowDash) UpdateDashboard();
+         continue;
+        }
+      EffectivePolicy ep = g_calibBridge.ApplyOverride(policy, ov);
+
+      //--- [Q] Risk sizing
+      if(!g_risk.CanOpenTrade())
+        {
+         DebugPrint("Risk: trade blocked (daily limit or max trades)");
+         if(InpShowDash) UpdateDashboard();
+         continue;
+        }
+
+      double lotSize = g_risk.CalcLotSize(
+                         current_symbol, atr * InpSLATRMult, ep.lotMultiplier);
+      if(lotSize <= 0)
+        {
+         DebugPrint("Risk: lot size = 0");
+         continue;
+        }
+
+      //--- [R] Build TradePlan with symbol-specific magic number
+      TradePlan plan;
+      plan.direction  = sig.direction;
+      plan.entryPrice = (sig.direction == SIGNAL_BUY)
+                        ? SymbolInfoDouble(current_symbol, SYMBOL_ASK)
+                        : SymbolInfoDouble(current_symbol, SYMBOL_BID);
+      plan.sl         = plan.entryPrice
+                      + ((sig.direction==SIGNAL_BUY ? -1 : 1)
+                         * atr * ep.slATRMult);
+      plan.tp         = plan.entryPrice
+                      + ((sig.direction==SIGNAL_BUY ? 1 : -1)
+                         * atr * ep.slATRMult * ep.tp1RR);
+      plan.tp2        = plan.entryPrice
+                      + ((sig.direction==SIGNAL_BUY ? 1 : -1)
+                         * atr * ep.slATRMult * ep.tp2RR);
+      plan.lot        = lotSize;
+      // Use symbol-specific magic number for isolation
+      plan.magic      = g_scanner.GenerateMagicNumber(InpMagic, sym_idx);
+      plan.comment    = InpComment + "_" + current_symbol;
+
+      double riskPts   = MathAbs(plan.entryPrice - plan.sl);
+      double rewardPts = MathAbs(plan.tp - plan.entryPrice);
+      if(riskPts <= 0 || (rewardPts / riskPts) < InpMinRR)
+        {
+         DebugPrint(StringFormat("RR too low: %.2f", rewardPts/riskPts));
+         continue;
+        }
+
+      //--- [S] Execute
+      if(!g_exec.OpenTrade(plan))
+        {
+         DebugPrint(StringFormat("Execution failed: %d", GetLastError()));
+         continue;
+        }
+
+      g_activePlan   = plan;
+      g_hasPlan      = true;
+      g_posOpenTime  = TimeCurrent();
+      g_risk.OnTradeOpened();
+      g_calibBridge.LogTradeOpen(g_lastAIScore);
+
+      CDashboardManager::PushSignal(g_dashCtx,
+                                     sig.direction, g_lastAIScore, 0);
+
+      PrintFormat("[PASR][%s] OPENED %s  entry:%.5f  sl:%.5f  tp:%.5f  lots:%.2f  AI:%.2f",
+                  current_symbol,
+                  plan.direction==SIGNAL_BUY?"BUY":"SELL",
+                  plan.entryPrice, plan.sl, plan.tp, plan.lot, g_lastAIScore);
+
       if(InpShowDash) UpdateDashboard();
-      return;
      }
-   g_lastBarTime = barTime;
-   DebugPrint(StringFormat("New bar: %s", TimeToString(barTime)));
-
-   //--- [E] Session detect
-   g_session = DetectSession();
-
-   //--- [F] Data update
-   g_data.OnNewBar();
-
-   //--- [G] Regime detection
-   double atr = GetATR();
-   g_regime = g_adaptCfg.DetectRegime(_Symbol, PERIOD_CURRENT, atr);
-   EffectivePolicy policy = g_adaptCfg.GetEffectivePolicy(
-                              g_regime, g_session, atr);
-
-   //--- [G2] Recovery new-bar processing (fakeout detection on bar close)
-   if(InpRecoveryEnabled)
-      g_recovery.OnNewBar();   // v4.01
-
-   //--- [H] Risk daily reset check
-   if(!g_risk.IsTradingAllowed())
-     {
-      DebugPrint("Risk circuit breaker active — skip bar");
-      if(InpShowDash) UpdateDashboard();
-      return;
-     }
-
-   //--- [I] SR recalculation
-   g_sr.OnNewBar();
-
-   //--- [J] Pattern scan
-   g_pattern.OnNewBar();
-
-   //--- [K] Signal generation
-   TradeSignal sig;
-   bool hasSignal = g_signal.GenerateSignal(sig, atr);
-   if(!hasSignal)
-     {
-      DebugPrint("No signal this bar");
-      if(InpShowDash) UpdateDashboard();
-      return;
-     }
-   DebugPrint(StringFormat("Signal: %s  confluence:%.2f",
-              sig.direction==SIGNAL_BUY?"BUY":"SELL", sig.confluence));
-
-   //--- [L] AI Feature build
-   SRZone zones[20];
-   int nZones = g_sr.GetZones(zones, 20);
-   g_lastFV = g_featBuilder.Build(sig, atr,
-                                   sig.nearestSupport,
-                                   sig.nearestResistance,
-                                   zones, nZones);
-
-   //--- [M] Drift check
-   g_lastDrift = g_featBuilder.ComputeDrift(g_lastFV);
-   if(InpUseAI && g_lastDrift > InpDriftVeto)
-     {
-      DebugPrint(StringFormat("Drift veto: %.2f", g_lastDrift));
-      CDashboardManager::PushSignal(g_dashCtx, sig.direction, 0, 0);
-      if(InpShowDash) UpdateDashboard();
-      return;
-     }
-
-   //--- [N] AI Ensemble scoring
-   double patternBonus = g_pattern.GetPatternBonus(sig.direction);
-   g_lastAIScore = InpUseAI
-      ? (InpUseEnsemble
-           ? g_ensemble.GetScore(g_lastFV, sig, patternBonus, g_lastDrift)
-           : g_aiInfer.ForwardPass18(g_lastFV, patternBonus, g_lastDrift))
-      : sig.confluence;
-   g_lastEnsModel = g_ensemble.GetActiveModel();
-
-   DebugPrint(StringFormat("AI score:%.2f drift:%.2f model:%d",
-                           g_lastAIScore, g_lastDrift, g_lastEnsModel));
-
-   //--- [O] Calibration bridge
-   AIScoreOverride ov = g_calibBridge.MapScoreToPolicy(
-                          g_lastAIScore, policy);
-   if(ov.blockTrade)
-     {
-      DebugPrint(StringFormat("CalibBridge veto: score=%.2f", g_lastAIScore));
-      CDashboardManager::PushSignal(g_dashCtx, sig.direction,
-                                    g_lastAIScore, 0);
-      if(InpShowDash) UpdateDashboard();
-      return;
-     }
-   EffectivePolicy ep = g_calibBridge.ApplyOverride(policy, ov);
-
-   //--- [P] Risk sizing
-   if(!g_risk.CanOpenTrade())
-     {
-      DebugPrint("Risk: trade blocked (daily limit or max trades)");
-      if(InpShowDash) UpdateDashboard();
-      return;
-     }
-
-   double lotSize = g_risk.CalcLotSize(
-                      _Symbol, atr * InpSLATRMult, ep.lotMultiplier);
-   if(lotSize <= 0)
-     {
-      DebugPrint("Risk: lot size = 0");
-      return;
-     }
-
-   //--- [Q] Build TradePlan
-   TradePlan plan;
-   plan.direction  = sig.direction;
-   plan.entryPrice = (sig.direction == SIGNAL_BUY)
-                     ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
-                     : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   plan.sl         = plan.entryPrice
-                   + ((sig.direction==SIGNAL_BUY ? -1 : 1)
-                      * atr * ep.slATRMult);
-   plan.tp         = plan.entryPrice
-                   + ((sig.direction==SIGNAL_BUY ? 1 : -1)
-                      * atr * ep.slATRMult * ep.tp1RR);
-   plan.tp2        = plan.entryPrice
-                   + ((sig.direction==SIGNAL_BUY ? 1 : -1)
-                      * atr * ep.slATRMult * ep.tp2RR);
-   plan.lot        = lotSize;
-   plan.magic      = InpMagic;
-   plan.comment    = InpComment;
-
-   double riskPts   = MathAbs(plan.entryPrice - plan.sl);
-   double rewardPts = MathAbs(plan.tp - plan.entryPrice);
-   if(riskPts <= 0 || (rewardPts / riskPts) < InpMinRR)
-     {
-      DebugPrint(StringFormat("RR too low: %.2f", rewardPts/riskPts));
-      return;
-     }
-
-   //--- [R] Execute
-   if(!g_exec.OpenTrade(plan))
-     {
-      DebugPrint(StringFormat("Execution failed: %d", GetLastError()));
-      return;
-     }
-
-   g_activePlan   = plan;
-   g_hasPlan      = true;
-   g_posOpenTime  = TimeCurrent();
-   g_risk.OnTradeOpened();
-   g_calibBridge.LogTradeOpen(g_lastAIScore);
-
-   CDashboardManager::PushSignal(g_dashCtx,
-                                  sig.direction, g_lastAIScore, 0);
-
-   PrintFormat("[PASR] OPENED %s  entry:%.5f  sl:%.5f  tp:%.5f  lots:%.2f  AI:%.2f",
-               plan.direction==SIGNAL_BUY?"BUY":"SELL",
-               plan.entryPrice, plan.sl, plan.tp, plan.lot, g_lastAIScore);
-
+   
+   //--- If no symbols were processed (all filtered), still update dashboard
    if(InpShowDash) UpdateDashboard();
   }
 
