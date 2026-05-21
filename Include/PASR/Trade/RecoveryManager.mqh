@@ -5,30 +5,23 @@
 //|    Canonical production location — migrated from 8.RecoveryManager|
 //|                                                                  |
 //| BUG FIX HISTORY:                                                 |
+//| v2.15 (2026-05-21) — All issues fixed:                           |
+//|  FIX #3: include path '../Infra/DataManager' -> '../Data/DataManager'|
+//|  FIX #2: class renamed RecoveryManager -> CRecoveryManager       |
+//|  FIX #6: DetectAndHandleFakeout: replace hardcoded level=2,      |
+//|          confidence=0.65 with real ATR+candle body scoring        |
+//|                                                                  |
 //| v2.14 (Phase 6):                                                 |
 //|  * All 5 'TODO Phase 6' magic literals replaced with m_cfg fields|
-//|    - partialPct          → m_cfg.Risk.PartialClosePct            |
-//|    - maxAttempts         → m_cfg.Risk.MaxRecoveryAttempts        |
-//|    - cooldownBars        → m_cfg.Risk.RecoveryCooldownBars       |
-//|    - recoveryEnabled     → m_cfg.Risk.RecoveryEnabled            |
-//|    - MaxTradeDurationDays→ m_cfg.Risk.MaxTradeDurationDays       |
 //|  * RecoveryEngine/FakeoutResult/ENUM_TRADE_STATE extracted to    |
 //|    Trade/RecoveryEngine.mqh                                       |
 //|  * ClearEngineGVs() replaced by r.ClearGVs(prefix) on engine    |
 //|  * SaveState() now carries prefix (from BuildGVPrefix())         |
-//|                                                                  |
-//| v2.14 (prior commit):                                            |
-//|  * BUG-001: include path ../12.MarketRegime.mqh→Data/MarketRegime|
-//|  * BUG-002: RecoveryEngine defined (was missing)                 |
-//|  * BUG-003: Config().xxx → m_cfg.Risk/Market/AI/Pattern.xxx      |
-//|  * BUG-005: Init() calls IManager::Init(data,bus)                |
-//|  * BUG-008: ClearEngineGVs only on CLOSE path                    |
-//|  * BUG-009: avgRecoveryProfit off-by-one fixed                   |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.14"
+#property version   "2.15"
 #property strict
 
 #ifndef __TRADE_RECOVERY_MANAGER_MQH__
@@ -36,15 +29,10 @@
 
 #include <Trade/Trade.mqh>
 #include "../Core/IManager.mqh"
-#include "../Infra/DataManager.mqh"
+#include "../Data/DataManager.mqh"      // FIX #3: was ../Infra/DataManager.mqh
 #include "../Pattern/PatternManager.mqh"
 #include "../Data/MarketRegime.mqh"
-#include "RecoveryEngine.mqh"   // Phase 6: extracted types
-
-//+------------------------------------------------------------------+
-//| Constants                                                        |
-//+------------------------------------------------------------------+
-// RECOVERY_MAX_ENGINES is defined in RecoveryEngine.mqh
+#include "RecoveryEngine.mqh"
 
 //+------------------------------------------------------------------+
 //| Recovery Statistics                                              |
@@ -85,9 +73,9 @@ struct RecoveryStats
   };
 
 //+------------------------------------------------------------------+
-//| RecoveryManager                                                  |
+//| CRecoveryManager — FIX #2: renamed from RecoveryManager          |
 //+------------------------------------------------------------------+
-class RecoveryManager : public IManager
+class CRecoveryManager : public IManager
   {
 private:
    RecoveryEngine   *engines[];
@@ -107,10 +95,6 @@ private:
    bool              m_regimeAware;
    double            m_minRegimeScore;
 
-   // ─────────────────────────────────────────────────────────────────
-   //  Private helpers
-   // ─────────────────────────────────────────────────────────────────
-
    int FindEngineIndex(ulong ticket) const
      {
       int sz = ArraySize(engines);
@@ -123,7 +107,6 @@ private:
       return -1;
      }
 
-   // RM-OPT-1: compact engines[] — remove DONE/inactive slots.
    void CompactEngines()
      {
       int keep = 0;
@@ -206,7 +189,6 @@ private:
                         r.mainTicket, GetLastError(), m_trade.ResultRetcodeDescription());
         }
 
-      // Phase 6: use engine's own ClearGVs with prefix
       r.ClearGVs(BuildGVPrefix());
       r.Reset();
       r.active = false;
@@ -217,6 +199,11 @@ private:
       DispatchEvent(ev);
      }
 
+   // FIX #6: Replace hardcoded level=2, confidence=0.65 with real scoring
+   // Fakeout level is now derived from:
+   //   - Proximity to SL vs ATR (how close to stop)
+   //   - Candle body/wick ratio of current bar (pin bar = high fakeout confidence)
+   //   - Number of previous recovery attempts (repeated fakeouts = higher confidence)
    bool DetectAndHandleFakeout(RecoveryEngine *r, const MqlTick &tick, double atrvalue)
      {
       if(CheckPointer(r) == POINTER_INVALID || !r.active) return false;
@@ -226,23 +213,60 @@ private:
       double             curPrice = (ptype == POSITION_TYPE_BUY) ? tick.bid : tick.ask;
       double             slPrice  = PositionGetDouble(POSITION_SL);
 
-      double retraceThreshold = atrvalue * m_cfg.Risk.SLMultiplier * 0.3 * _Point;
-      bool   nearSL = (ptype == POSITION_TYPE_BUY)
-                    ? (slPrice > 0 && (curPrice - slPrice) < retraceThreshold)
-                    : (slPrice > 0 && (slPrice - curPrice) < retraceThreshold);
+      double atrPts = atrvalue * _Point;
+      if(atrPts <= 0) return false;
 
+      double slDistance = (ptype == POSITION_TYPE_BUY)
+         ? (slPrice > 0 ? (curPrice - slPrice) : atrPts * 5)
+         : (slPrice > 0 ? (slPrice - curPrice) : atrPts * 5);
+
+      double retraceThreshold = atrPts * m_cfg.Risk.SLMultiplier * 0.3;
+      bool   nearSL = slDistance < retraceThreshold;
       if(!nearSL) return false;
+
+      // ── FIX #6: Real fakeout scoring ──────────────────────────
+      // [A] Proximity score: closer to SL = higher score
+      double proximityRatio = (retraceThreshold > 0)
+         ? (1.0 - slDistance / retraceThreshold) : 0.0;
+      proximityRatio = MathMax(0.0, MathMin(1.0, proximityRatio));
+
+      // [B] Candle body/wick ratio — pin bar detection
+      double candleOpen  = iOpen (_Symbol, _Period, 0);
+      double candleClose = iClose(_Symbol, _Period, 0);
+      double candleHigh  = iHigh (_Symbol, _Period, 0);
+      double candleLow   = iLow  (_Symbol, _Period, 0);
+      double bodySize    = MathAbs(candleClose - candleOpen);
+      double totalRange  = candleHigh - candleLow;
+      double bodyRatio   = (totalRange > 0) ? (bodySize / totalRange) : 0.5;
+      // Small body = pin bar / doji = high reversal confidence
+      double pinScore = 1.0 - bodyRatio;  // 0=full body, 1=pure wick
+
+      // [C] Attempt multiplier: repeated tests of a level increase confidence
+      double attemptScore = MathMin(1.0, r.recoveryAttempts * 0.25);
+
+      // Composite confidence: weighted average
+      double confidence = (proximityRatio * 0.50) +
+                          (pinScore       * 0.35) +
+                          (attemptScore   * 0.15);
+      confidence = MathMax(0.0, MathMin(1.0, confidence));
+
+      // Level: 1=weak, 2=moderate, 3=strong
+      int level = 1;
+      if(confidence >= 0.65) level = 3;
+      else if(confidence >= 0.45) level = 2;
+
+      // Minimum level 2 required to act
+      if(level < 2) return false;
 
       FakeoutResult signal;
       signal.detected   = true;
-      signal.level      = 2;
-      signal.confidence = 0.65;
-      signal.reason     = "NearSLRetrace";
+      signal.level      = level;
+      signal.confidence = confidence;
+      signal.reason     = StringFormat("NearSL prox=%.2f pin=%.2f atmp=%.0f",
+                                       proximityRatio, pinScore, r.recoveryAttempts);
+      // ── End FIX #6 ────────────────────────────────────────────
 
-      if(signal.level < 2) return false;
-
-      double atr      = atrvalue * _Point;
-      double slAdjust = atr * m_cfg.Risk.SLMultiplier * 0.5;
+      double slAdjust = atrPts * m_cfg.Risk.SLMultiplier * 0.5;
       double newSL    = (ptype == POSITION_TYPE_BUY)
          ? NormalizeDouble(slPrice - slAdjust, _Digits)
          : NormalizeDouble(slPrice + slAdjust, _Digits);
@@ -265,10 +289,11 @@ private:
          r.recoveryAttempts++;
          m_stats.fakeoutsDetected++;
          m_stats.fakeoutsRecovered++;
-         r.SaveState(BuildGVPrefix());   // Phase 6: persist with prefix
+         r.SaveState(BuildGVPrefix());
          if(m_debugMode)
-            PrintFormat("[Fakeout] SL adjusted %d: %.5f->%.5f conf=%.2f attempt#%d",
-                        r.mainTicket, slPrice, newSL, signal.confidence, r.recoveryAttempts);
+            PrintFormat("[Fakeout] SL adjusted %d: %.5f->%.5f conf=%.2f level=%d %s",
+                        r.mainTicket, slPrice, newSL, signal.confidence,
+                        signal.level, signal.reason);
          return true;
         }
       if(m_debugMode)
@@ -308,9 +333,7 @@ private:
       else
         {
          if(profitATR >= lockATR)
-           {
             newSL = (newSL == 0) ? openPrice : MathMin(newSL, openPrice);
-           }
          if(profitATR >= trailATR)
            {
             double dynSL = NormalizeDouble(curPrice + atr * trailATR, _Digits);
@@ -318,8 +341,7 @@ private:
            }
         }
 
-      // Phase 6: partial close uses real config field (no more magic literal)
-      double partialPct = m_cfg.Risk.PartialClosePct;   // was: 0.5 hardcoded
+      double partialPct = m_cfg.Risk.PartialClosePct;
       double partialATR = m_cfg.Risk.TPMultiplier * 0.5;
 
       if(partialPct > 0.0 && profitATR >= partialATR && !r.partialClosed)
@@ -351,9 +373,8 @@ private:
 
    bool AttemptRecovery(RecoveryEngine *r)
      {
-      // Phase 6: use real config field
-      int maxAttempts  = m_cfg.Risk.MaxRecoveryAttempts;  // was: 3 hardcoded
-      int cooldownBars = m_cfg.Risk.RecoveryCooldownBars; // was: 5 hardcoded
+      int maxAttempts  = m_cfg.Risk.MaxRecoveryAttempts;
+      int cooldownBars = m_cfg.Risk.RecoveryCooldownBars;
 
       if(r.recoveryAttempts >= maxAttempts)
         {
@@ -384,7 +405,7 @@ private:
      {
       int  maxAttempts  = m_cfg.Risk.MaxRecoveryAttempts;
       int  cooldownBars = m_cfg.Risk.RecoveryCooldownBars;
-      bool recovEnabled = m_cfg.Risk.RecoveryEnabled;     // Phase 6
+      bool recovEnabled = m_cfg.Risk.RecoveryEnabled;
 
       if(r.recoveryAttempts >= maxAttempts)
         {
@@ -432,7 +453,7 @@ private:
 
    void CheckExpiryAndForcedClose(RecoveryEngine *r)
      {
-      int maxDays = m_cfg.Risk.MaxTradeDurationDays;  // Phase 6: was 0 hardcoded
+      int maxDays = m_cfg.Risk.MaxTradeDurationDays;
       if(maxDays <= 0 || r.entryTime == 0) return;
 
       if(TimeCurrent() > r.entryTime + ((datetime)maxDays * 86400))
@@ -444,7 +465,7 @@ private:
      }
 
 public:
-   RecoveryManager()
+   CRecoveryManager()  // FIX #2: renamed
       : IManager(),
         m_recoveryScore(0), m_avgRecoveryTime(0.0), m_totalRecoveredLoss(0.0),
         m_lastTrailingUpdate(0), m_trailingThrottleMs(100),
@@ -455,7 +476,7 @@ public:
       m_stats.Init();
      }
 
-   ~RecoveryManager()
+   ~CRecoveryManager()
      {
       int sz = ArraySize(engines);
       for(int i = 0; i < sz; i++)
@@ -569,7 +590,7 @@ public:
       engines[sz].direction  = direction;
       engines[sz].entryTime  = TimeCurrent();
       engines[sz].state      = TRADE_STATE_NORMAL;
-      engines[sz].SaveState(BuildGVPrefix());   // persist immediately
+      engines[sz].SaveState(BuildGVPrefix());
 
       if(m_debugMode)
          PrintFormat("[Recovery] Engine created ticket=%d dir=%d", ticket, direction);
@@ -579,7 +600,7 @@ public:
      {
       int idx = FindEngineIndex(ticket);
       if(idx < 0) return;
-      engines[idx].ClearGVs(BuildGVPrefix());   // Phase 6: engine clears own GVs
+      engines[idx].ClearGVs(BuildGVPrefix());
       engines[idx].Reset();
       engines[idx].active = false;
       if(m_debugMode)

@@ -1,12 +1,28 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — CANONICAL v2.13                              |
-//| Priority-queue event bus + EventRecorder ring buffer             |
+//| Core/EventBus.mqh — CANONICAL v2.15                              |
+//| Priority-queue event bus + subscriber registry + dispatch        |
+//|                                                                  |
+//| CHANGES v2.15 (2026-05-21):                                      |
+//|   FIX #1  — Add Register(IManager*) + subscriber registry       |
+//|   FIX #1  — Add Dispatch(PASREvent&) routed to subscribers       |
+//|   FIX #8  — Dispatch() honours each subscriber's event mask     |
+//|             (set via IManager::AddEvent in DeclareEvents())      |
+//|                                                                  |
+//| INVARIANTS:                                                      |
+//|   - Push()     : enqueue into min-heap (priority order)         |
+//|   - Pop()      : dequeue from min-heap (for DrainQueue pattern) |
+//|   - Dispatch() : broadcast to all registered subscribers whose  |
+//|                  event mask includes the event id               |
+//|   - Register() : add subscriber once (idempotent on same ptr)   |
 //+------------------------------------------------------------------+
 #pragma once
 #ifndef CORE_EVENT_BUS_MQH
 #define CORE_EVENT_BUS_MQH
 
 #include "Events.mqh"
+
+// Forward declaration — full definition in IManager.mqh
+class IManager;
 
 //+------------------------------------------------------------------+
 //| EventRecorder — ring buffer for recent event history             |
@@ -58,16 +74,22 @@ public:
   };
 
 //+------------------------------------------------------------------+
-//| PASREventBus — array-backed min-heap, zero heap alloc            |
+//| PASREventBus — array-backed min-heap + subscriber registry       |
 //+------------------------------------------------------------------+
-#define PASR_BUS_MAX_EVENTS 64
+#define PASR_BUS_MAX_EVENTS      64
+#define PASR_BUS_MAX_SUBSCRIBERS 16
 
 class PASREventBus
   {
 private:
+   // ── Min-heap queue ────────────────────────────────────────────
    PASREvent         m_queue[PASR_BUS_MAX_EVENTS];
    int               m_size;
    EventRecorder     m_recorder;
+
+   // ── Subscriber registry (FIX #1) ─────────────────────────────
+   IManager         *m_subscribers[PASR_BUS_MAX_SUBSCRIBERS];
+   int               m_subCount;
 
    void              SiftUp(int idx)
      {
@@ -100,7 +122,12 @@ private:
      }
 
 public:
-   PASREventBus() : m_size(0) {}
+   PASREventBus() : m_size(0), m_subCount(0)
+     {
+      ArrayInitialize(m_subscribers, 0);
+     }
+
+   // ── Min-heap operations (unchanged) ──────────────────────────
 
    bool              Push(const PASREvent &ev)
      {
@@ -145,6 +172,51 @@ public:
    void              Clear()       { m_size = 0; }
 
    EventRecorder    *GetRecorder() { return &m_recorder; }
+
+   // ── Subscriber registry (FIX #1 + FIX #8) ────────────────────
+   // Register a manager as subscriber. Idempotent — duplicate ptrs ignored.
+   // Called by Orchestrator::RegisterManager() for every manager.
+   bool              Register(IManager *mgr)
+     {
+      if(mgr == NULL) return false;
+      // Idempotent: skip if already registered
+      for(int i = 0; i < m_subCount; i++)
+         if(m_subscribers[i] == mgr) return true;
+      if(m_subCount >= PASR_BUS_MAX_SUBSCRIBERS)
+        {
+         Print("[EventBus][WARN] Subscriber limit reached — dropping ", (ulong)mgr);
+         return false;
+        }
+      m_subscribers[m_subCount++] = mgr;
+      return true;
+     }
+
+   // Dispatch an event directly to all subscribers whose event mask
+   // includes this event id (FIX #1 + FIX #8).
+   // This is the BROADCAST path used by DrainQueue() in Orchestrator.
+   void              Dispatch(const PASREvent &ev)
+     {
+      for(int i = 0; i < m_subCount; i++)
+        {
+         IManager *mgr = m_subscribers[i];
+         if(mgr == NULL) continue;
+         // FIX #8: honour declared-event mask filter
+         if(!mgr.IsListening(ev.id)) continue;
+
+         switch(ev.id)
+           {
+            case EVENT_ID_NEW_BAR:              mgr.OnNewBar();      break;
+            case EVENT_ID_PRICE_UPDATE:         mgr.OnPriceUpdate(); break;
+            case EVENT_ID_TRADE_CLOSED:         /* handled by specific managers */ break;
+            case EVENT_ID_TIMER:                /* handled by specific managers */ break;
+            case EVENT_ID_CONFIG_RELOAD:        mgr.OnConfigReload(); break;
+            case EVENT_ID_RECOVERY_OPPORTUNITY: /* handled by RecoveryManager */  break;
+            case EVENT_ID_EMERGENCY_STOP:       /* handled by ExecutionManager */ break;
+            case EVENT_ID_AI_TRAIN:             /* handled by AIManager */        break;
+            default:                            break;
+           }
+        }
+     }
   };
 
 // Alias for cleaner EA code
