@@ -45,6 +45,12 @@ struct EvalContext
    double candleBodyRatio;
    double emaDistNorm;
    double sessionNorm;
+   
+   // V3.02: Advanced statistical features from FeatureEngine
+   double zScore;            // Price Z-score (standardized position)
+   double skewness;          // Return distribution asymmetry
+   double kurtosis;          // Tail risk measure
+   double volatilityRegime;  // Normalized volatility regime (0-1)
 
    void Reset() { ZeroMemory(this); }
 };

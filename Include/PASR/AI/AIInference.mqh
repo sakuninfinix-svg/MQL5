@@ -3,6 +3,11 @@
 //|          Pure forward-pass inference + expert scoring module     |
 //|                                       Copyright 2026, Agsicentre |
 //+------------------------------------------------------------------+
+//| V3.02 ENHANCEMENTS:                                              |
+//| - Added confidence thresholding based on volatility regime       |
+//| - Time-of-day and volatility regime features integrated          |
+//| - Dynamic threshold adjustment for sideways/choppy markets       |
+//|                                                                  |
 //| V3.01 FIXES:                                                     |
 //| - AI-INF-FIX-1 [CRITICAL]: Double Logistic bug in Evaluate().   |
 //|   expertScore (raw weighted sum) was passed directly into hybrid |
@@ -14,7 +19,7 @@
 //|   when volume is critically low (spread proxy guard).            |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
-#property version   "3.01"
+#property version   "3.02"
 #property strict
 
 #ifndef __AI_INFERENCE_MQH__
@@ -23,6 +28,7 @@
 #include "AITypes.mqh"
 #include "../IManager.mqh"
 #include "../Data/MarketRegime.mqh"
+#include "FeatureEngine.mqh"
 
 /// Pure inference — no state mutation, no file I/O.
 /// All methods are const. Receives model state and eval context by const-ref.
@@ -30,13 +36,27 @@ class AIInference
 {
 private:
    MarketRegimeFilter *m_regime; // non-owning
+   CFeatureEngine     *m_feature_engine; // optional feature engine
+   
+   // Confidence thresholding
+   double            m_base_threshold;      // Base confidence threshold
+   double            m_volatility_adjustment; // Additional threshold for high vol
 
    double Logistic(double x)         const { return 1.0 / (1.0 + MathExp(-x)); }
    double NormalizeWeight(double v)  const { return MathMax(0.01, MathMin(2.0, v)); }
 
 public:
-   AIInference() : m_regime(NULL) {}
+   AIInference() : m_regime(NULL), m_feature_engine(NULL),
+                   m_base_threshold(0.55), m_volatility_adjustment(0.15) {}
    void SetRegime(MarketRegimeFilter *r) { m_regime = r; }
+   void SetFeatureEngine(CFeatureEngine *fe) { m_feature_engine = fe; }
+   
+   // Set adaptive threshold base
+   void SetThresholds(double base_thresh, double vol_adjust)
+     {
+      m_base_threshold = MathMax(0.3, MathMin(0.8, base_thresh));
+      m_volatility_adjustment = MathMax(0.0, MathMin(0.3, vol_adjust));
+     }
 
    //--- Select the active expert based on current regime
    //    AI-INF-FIX-2: guard against abnormally wide spread (illiquid market)
@@ -63,24 +83,52 @@ public:
    }
 
    //--- Adaptive threshold — regime uncertainty raises the bar
-   double AdaptiveThreshold(double baseThreshold) const
-   {
-      if(CheckPointer(m_regime) == POINTER_INVALID) return baseThreshold;
+   //    V3.02: Enhanced with volatility regime and time-of-day adjustments
+   double AdaptiveThreshold(double baseThreshold = -1) const
+     {
+      if(baseThreshold < 0) baseThreshold = m_base_threshold;
+      
+      if(CheckPointer(m_regime) == POINTER_INVALID) 
+         return baseThreshold;
+      
       const RegimeResult &r = m_regime.GetResult();
       double uncertainty = 0.0;
+      
+      // Base uncertainty from regime type
       switch(r.regime)
-      {
+        {
          case REGIME_TRANSITION:       uncertainty = 1.0; break;
          case REGIME_CHOPPY_HIGH_VOL:  uncertainty = 0.8; break;
          case REGIME_RANGING_SIDEWAYS: uncertainty = 0.5; break;
          case REGIME_TRENDING_WEAK:    uncertainty = 0.3; break;
          case REGIME_TRENDING_STRONG:  uncertainty = 0.1; break;
          default:                      uncertainty = 0.6; break;
-      }
+        }
+      
+      // MTF confirmation penalty
       if(!r.mtfConfirmed) uncertainty *= 1.3;
-      double adaptive = baseThreshold + uncertainty * 0.15;
+      
+      // V3.02: Additional adjustment from feature engine (volatility regime)
+      if(CheckPointer(m_feature_engine) != POINTER_INVALID)
+        {
+         ENUM_VOLATILITY_REGIME vol_regime = m_feature_engine->GetCurrentRegime();
+         if(vol_regime >= VOLATILITY_HIGH)
+            uncertainty += 0.2;  // Raise bar during high volatility
+         if(vol_regime >= VOLATILITY_EXTREME)
+            uncertainty += 0.1;  // Extra caution in extreme conditions
+        }
+      
+      // Calculate adaptive threshold
+      double adaptive = baseThreshold + uncertainty * m_volatility_adjustment;
       return MathMax(baseThreshold, MathMin(0.9, adaptive));
-   }
+     }
+
+   //--- Get dynamic confidence threshold based on current market conditions
+   //    V3.02: New method for external use
+   double GetDynamicThreshold() const
+     {
+      return AdaptiveThreshold(m_base_threshold);
+     }
 
    //--- Expert scorers (pure — const ref inputs, no mutation)
    double ScoreTrend(const AIModelState &m, const EvalContext &ctx,

@@ -85,7 +85,7 @@ public:
    //--- Build a full EvalContext from cached data + signal
    void Build(EvalContext &ctx, const SignalDecision &signal,
               double atrPoints, double support, double resistance) const
-   {
+     {
       ctx.atrNorm        = NormalizeATR(atrPoints);
       ctx.spreadNorm     = NormalizeSpread();
       ctx.slNorm         = NormalizeSL(signal.slMultiplier);
@@ -101,19 +101,56 @@ public:
       ctx.sessionNorm     = NormalizeSession();
 
       if(CheckPointer(m_regime) != POINTER_INVALID)
-      {
+        {
          const RegimeResult &r = m_regime.GetResult();
          ctx.regimeScore      = r.regimeScore;
          ctx.volatilityScore  = r.volatilityScore;
          ctx.mtConfluenceNorm = r.mtfConfirmed ? 1.0 : (double)r.tfAlignment / 3.0;
-      }
+        }
       else
-      {
+        {
          ctx.regimeScore      = NormalizeVolatilityFallback();
          ctx.volatilityScore  = ctx.regimeScore;
          ctx.mtConfluenceNorm = NormalizeMTFFallback(signal);
-      }
-   }
+        }
+      
+      // V3.02: Initialize advanced statistical features with defaults
+      ctx.zScore          = 0.0;
+      ctx.skewness        = 0.0;
+      ctx.kurtosis        = 3.0;  // Normal distribution baseline
+      ctx.volatilityRegime = 0.5;  // Medium regime default
+     }
+
+   //+----------------------------------------------------------------+
+   //| Build context with advanced features from FeatureEngine        |
+   //| @param ctx Output evaluation context                           |
+   //| @param signal Signal decision                                  |
+   //| @param atrPoints ATR in points                                 |
+   //| @param support Support level                                   |
+   //| @param resistance Resistance level                             |
+   //| @param feat_engine Optional feature engine for stats           |
+   //+----------------------------------------------------------------+
+   void BuildWithFeatures(EvalContext &ctx, const SignalDecision &signal,
+                          double atrPoints, double support, double resistance,
+                          CFeatureEngine *feat_engine = NULL) const
+     {
+      // Build base context
+      Build(ctx, signal, atrPoints, support, resistance);
+      
+      // Extract advanced features if engine provided
+      if(CheckPointer(feat_engine) != POINTER_INVALID && feat_engine.IsInitialized())
+        {
+         const FeatureSet &features = feat_engine.ComputeFeatures();
+         
+         ctx.zScore          = features.z_score;
+         ctx.skewness        = features.skewness;
+         ctx.kurtosis        = features.kurtosis;
+         ctx.volatilityRegime = (double)features.regime / 3.0;  // Normalize to [0,1]
+         
+         // Override volatility score with regime-based value
+         ctx.volatilityScore = features.volatility_norm;
+        }
+     }
 
    // ─── Individual normalizers (const — no side effects) ─────────
 
