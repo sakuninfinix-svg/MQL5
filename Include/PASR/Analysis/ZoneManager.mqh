@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//| Analysis/ZoneManager.mqh — v2.00  (Optimized & Clean)            |
+//| Analysis/ZoneManager.mqh — v2.01  (Optimized & Clean)            |
 //| Supply/Demand zone detection via impulse-base candle method.     |
 //|                                                                  |
-//| ARCHITECTURE IMPROVEMENTS v2.00:                                 |
-//|   ✓ Moved SDZone struct to dedicated header for reusability      |
+//| ARCHITECTURE IMPROVEMENTS v2.01:                                 |
+//|   ✓ Self-contained: SDZone struct defined inline                 |
 //|   ✓ Enhanced zone confidence scoring system                      |
 //|   ✓ Multi-factor strength calculation                            |
 //|   ✓ Weighted average price update on re-tests                    |
@@ -24,7 +24,35 @@
 #define __ANALYSIS_ZONE_MANAGER_MQH__
 
 #include "../Core/IManager.mqh"
-#include "../Data/ZoneStruct.mqh"  // SDZone struct (shared)
+
+//+------------------------------------------------------------------+
+//| SDZone — Supply/Demand zone structure                            |
+//+------------------------------------------------------------------+
+struct SDZone
+  {
+   double   high;            // Zone high price
+   double   low;             // Zone low price
+   bool     isSupply;        // true=supply (resistance), false=demand (support)
+   datetime createdTime;     // When zone was created
+   datetime consumedTime;    // When zone was consumed/breached
+   double   freshnessPct;    // 1.0 = fresh, decays on re-tests
+   int      touchCount;      // Number of times price touched zone
+   bool     isActive;        // Whether zone is still valid
+   double   confidence;      // Confidence score 0.0-1.0
+   
+   void Init()
+     {
+      high = 0; low = 0; isSupply = false;
+      createdTime = 0; consumedTime = 0;
+      freshnessPct = 1.0; touchCount = 0;
+      isActive = false; confidence = 0.0;
+     }
+   
+   double Midpoint() const { return (high + low) * 0.5; }
+   double Height() const { return high - low; }
+   bool Contains(double price) const { return (price >= low && price <= high); }
+   double Strength() const { return confidence * freshnessPct; }
+  };
 
 // ── Configuration Constants ───────────────────────────────────────
 #define AZ_MAX_ZONES        30
