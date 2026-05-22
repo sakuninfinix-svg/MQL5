@@ -25,7 +25,7 @@
 //|    L3  SRManager (Analysis) + ZoneManager (Analysis)            |
 //|    L4  PatternManager                                            |
 //|    L5a SignalManager + inject deps + register sources            |
-//|    L5b AIManager + AISignalSource                                |
+//|    L5b CAIOrchestrator + AISignalSource (26-dim AI system)       |
 //|    L5c RegimeFilter + RegimeSignalSource  [Phase 4 NEW]          |
 //|    L5d RiskManager                        [Phase 4 NEW position] |
 //|    L6a ExecutionManager                                          |
@@ -91,7 +91,7 @@ private:
    CAnalysisZoneManager   *m_zone;
    CPatternManager        *m_pattern;
    CSignalManager         *m_signal;
-   AIManager              *m_ai;
+   CAIOrchestrator        *m_ai_orch;  // Phase 7: 26-dim AI system (replaced AIManager)
    CMarketRegimeDetector  *m_regime_det; // Phase 5: Market Regime Detection
    CRegimeFilter          *m_regime;     // Phase 4: Legacy Regime Filter
    CRiskManager           *m_risk;
@@ -232,7 +232,7 @@ private:
       if(m_risk)     { delete m_risk;     m_risk=NULL;     }
       if(m_regime_det){ delete m_regime_det; m_regime_det=NULL; } // Phase 5 NEW
       if(m_regime)   { delete m_regime;   m_regime=NULL;   }
-      if(m_ai)       { delete m_ai;       m_ai=NULL;       }
+      if(m_ai_orch)  { delete m_ai_orch;  m_ai_orch=NULL;  }
       if(m_signal)   { delete m_signal;   m_signal=NULL;   }
       if(m_pattern)  { delete m_pattern;  m_pattern=NULL;  }
       if(m_zone)     { delete m_zone;     m_zone=NULL;     }
