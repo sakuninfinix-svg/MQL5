@@ -333,7 +333,7 @@ public:
         m_lastInferenceTime(0),  m_featuresValid(false),
         m_trainPending(false),   m_trainTargetModel(-1)
      {
-      ArrayResize(m_cachedFeatures, 100);
+      ArrayResize(m_cachedFeatures, AI_FEATURE_DIM);
      }
 
    virtual ~CAIOrchestrator()
