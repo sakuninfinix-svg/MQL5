@@ -19,7 +19,9 @@
 //|   [11] RiskManager     — Trade/RiskManager.mqh                   |
 //|   [12] ExecutionManager — Trade/ExecutionManager.mqh             |
 //|   [13] PositionManager — Trade/PositionManager.mqh               |
-//|   [14] RecoveryManager — Trade/RecoveryManager.mqh               |
+//|   [14] ExitEngine      — Trade/ExitEngine.mqh (NEW v6.10)        |
+//|   [15] CorrelationMgr  — Trade/CorrelationManager.mqh (NEW v6.10)|
+//|   [16] RecoveryManager — Trade/RecoveryManager.mqh               |
 //|   [15] AIFeatureBuilder — AI/AIFeatureBuilder.mqh                |
 //|   [16] AIInference     — AI/AIInference.mqh                      |
 //|   [17] AIEnsemble      — AI/AIEnsemble.mqh                       |
@@ -40,6 +42,12 @@
 //|     → dashUpdate                                                 |
 //|                                                                  |
 //|  CHANGELOG:                                                      |
+//|   v6.10 (2026-05-22) — Institutional Grade Features              |
+//|    * NEW: CorrelationManager - Dynamic correlation matrix        |
+//|      Circuit Breaker #7: Block high-correlation entries          |
+//|    * NEW: ExitEngine - Smart exit logic (Chandelier, Time,       |
+//|      Structure Break, Profit Fade)                               |
+//|    * Enhanced multi-symbol risk management                       |
 //|   v5.30 (2026-05-21) — Full Multi-Symbol Trading + API Fix       |
 //|    * Add IsTradingAllowed() method to CRiskManager               |
 //|    * Refactor managers to accept symbol parameter for multi-symbol|
@@ -75,8 +83,8 @@
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "5.30"
-#property description "Price Action SR — Modular Orchestrator v5.30 (Full Multi-Symbol)"
+#property version     "6.10"
+#property description "Price Action SR — Modular Orchestrator v6.10 (Institutional Grade)"
 #property strict
 
 //--- Compilation Flags
@@ -104,6 +112,8 @@
 #include <PASR/Trade/TradePlan.mqh>
 #include <PASR/Trade/ExecutionManager.mqh>
 #include <PASR/Trade/PositionManager.mqh>
+#include <PASR/Trade/ExitEngine.mqh>         // [NEW v6.10] Smart exit logic
+#include <PASR/Trade/CorrelationManager.mqh>  // [NEW v6.10] Correlation matrix
 #include <PASR/Trade/RecoveryManager.mqh>   // [14] v4.01: wired
 //--- AI
 #include <PASR/Signal/AI/AIFeatureBuilder.mqh>
@@ -131,6 +141,22 @@ input double   InpMaxSpreadPts    = 30.0;   // Max spread in points
 input bool     InpCheckSession    = false;  // Check trading session
 input int      InpSessionStart    = 0;      // Session start hour (UTC)
 input int      InpSessionEnd      = 24;     // Session end hour (UTC)
+
+//--- [CORRELATION] ← v6.10: new group
+sinput group "=== CORRELATION RISK ==="
+input bool     InpUseCorrelation  = true;   // Enable correlation check
+input double   InpCorrThreshold   = 0.80;   // Max allowed correlation
+input int      InpCorrWindow      = 20;     // Correlation lookback bars
+
+//--- [EXIT ENGINE] ← v6.10: new group
+sinput group "=== SMART EXIT LOGIC ==="
+input bool     InpUseChandelier   = true;   // Use Chandelier trailing stop
+input double   InpChanATRMult     = 3.0;    // Chandelier ATR multiplier
+input int      InpChanPeriod      = 22;     // Chandelier lookback period
+input bool     InpUseTimeExit     = false;  // Exit if no profit after N bars
+input int      InpTimeExitBars    = 10;     // Time exit threshold
+input bool     InpUseStructBreak  = true;   // Exit on structure break
+input bool     InpUseProfitFade   = true;   // Exit on momentum fade
 
 //--- [RISK]
 sinput group "=== RISK MANAGEMENT ==="
@@ -220,6 +246,8 @@ CSignalManager       g_signal;
 CRiskManager         g_risk;
 CExecutionManager    g_exec;
 CPositionManager     g_pos;
+CExitEngine          g_exit;            // [NEW v6.10] Smart exit logic
+CCorrelationManager  g_corr;           // [NEW v6.10] Correlation matrix
 CRecoveryManager     g_recovery;   // [14] v4.01
 CAIFeatureBuilder    g_featBuilder;
 CAIInference         g_aiInfer;
@@ -461,7 +489,17 @@ int OnInit()
                InpUsePartial, InpPartialPct,
                InpUseTrailing,InpTrailATRMult);
 
-   //--- [14] Recovery Manager  ← v4.01
+   //--- [13] Exit Engine ← v6.10
+   g_exit.Init();
+   
+   //--- [14] Correlation Manager ← v6.10
+   if(InpUseCorrelation)
+   {
+      g_corr.Initialize();
+      Print("[INIT] Correlation risk enabled (threshold=", InpCorrThreshold, ", window=", InpCorrWindow, ")");
+   }
+
+   //--- [15] Recovery Manager  ← v4.01
    g_recovery.Init(GetPointer(g_data), GetPointer(g_bus));
    g_recovery.SetTrailingThrottle(200);  // throttle trailing to 200ms
 
@@ -549,6 +587,11 @@ void OnDeinit(const int reason)
    //--- Print scanner statistics (NEW v5.00)
    g_scanner.PrintStats();
    
+   //--- Print exit engine statistics (NEW v6.10)
+   g_exit.PrintStats();
+   
+   //--- Print correlation statistics (NEW v6.10)
+   if(InpUseCorrelation) g_corr.PrintStatus();
    g_ensemble.SaveWeights();
    g_calibBridge.ExportCalibrationCSV();
    if(InpExportReport) g_report.ExportHTML();
