@@ -74,7 +74,7 @@ private:
      {
       if(!m_models[idx].initialized) return 0.5;
       // Build minimal SignalDecision clone for expert routing
-      return m_infer.Evaluate18(m_models[idx], fv, signal, patternBonus, drift);
+      return m_infer.Evaluate26(m_models[idx], fv, signal, patternBonus, drift);
      }
 
 public:

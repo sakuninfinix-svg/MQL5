@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/ONNXBridge.mqh — v1.00                                         |
+//| AI/ONNXBridge.mqh — v1.01                                         |
 //| ONNX model load + inference wrapper for MT5 ONNX API.           |
 //|                                                                  |
 //| PURPOSE:                                                         |
@@ -15,16 +15,18 @@
 //|   3. ONNXBridge auto-loads on Init(); falls back if not found   |
 //|   4. RunInference(FeatureVector) returns [raw_logit, calib_prob] |
 //|                                                                  |
-//| ONNX INPUT:  float[1][18]  — FeatureVector.ToFloatArray()       |
+//| ONNX INPUT:  float[1][26]  — FeatureVector.ToFloatArray()       |
 //| ONNX OUTPUT: float[1][1]   — probability in [0,1]               |
 //|                                                                  |
 //| CHANGE LOG:                                                      |
+//|   v1.01 (2026-05-21) — Added AITypes.mqh for AI_FEATURE_DIM      |
 //|   v1.00 (2026-05-21) — Phase 8 initial ONNX path                 |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ONNX_BRIDGE_MQH__
 #define __AI_ONNX_BRIDGE_MQH__
 
+#include "AITypes.mqh"
 #include "AIFeatureBuilder.mqh"
 #include "ConfidenceCalibrator.mqh"
 
