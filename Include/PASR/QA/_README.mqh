@@ -6,9 +6,9 @@
 //|   performance profiling. NEVER included in production builds.  |
 //|                                                                  |
 //| CONTENTS:                                                        |
-//|   Audit.mqh         — Runtime audit log (from PASR.Audit.mqh)  |
-//|   Test.mqh          — Unit test runner (from PASR.Test.mqh)    |
-//|   Optimizations.mqh — Optimization helpers (PASR.Optimizations) |
+//|   Audit.mqh         — Runtime audit log (from Infra/Optimizations)  |
+//|   Test.mqh          — Unit test runner (from QA/Test.mqh)    |
+//|   Optimizations.mqh — Optimization helpers (Infra/Optimizations) |
 //|                                                                  |
 //| DEPENDENCY RULES:                                               |
 //|   ✅ MAY include   : any layer (QA needs full system access)    |
@@ -26,6 +26,9 @@
 //+------------------------------------------------------------------+
 //
 // Migration status:
-//   [ ] Audit.mqh         — pending (source: ../PASR.Audit.mqh)
-//   [ ] Test.mqh          — pending (source: ../PASR.Test.mqh)
-//   [ ] Optimizations.mqh — pending (source: ../PASR.Optimizations.mqh)
+//   [✓] Audit.mqh         — completed
+//   [✓] Test.mqh          — completed
+//   [✓] Optimizations.mqh — completed (moved to Infra/Optimizations/)
+//   [✓] BatchProcessor.mqh — completed (moved to Infra/Optimizations/)
+//   [✓] MemoryPool.mqh    — completed (moved to Infra/Optimizations/)
+//   [✓] Branchless.mqh    — completed (moved to Infra/Optimizations/)

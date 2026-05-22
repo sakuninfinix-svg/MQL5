@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                             PASR.Optimizations.mqh |
+//|                                   Infra/Optimizations/Optimizations.mqh |
 //|                                    Copyright 2026, Agsicentre    |
 //|            Advanced Performance Optimizations Module - V1.00     |
 //|                                                                  |
@@ -15,7 +15,7 @@
 //| - Cache efficiency: >95% hit rate on hot data                    |
 //|                                                                  |
 //| USAGE:                                                           |
-//|   #include "PASR.Optimizations.mqh"                              |
+//|   #include <PASR/Infra/Optimizations/Optimizations.mqh>          |
 //|                                                                  |
 //|   // Initialize string pool at startup                           |
 //|   CStringPool::Initialize();                                     |

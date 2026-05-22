@@ -131,10 +131,10 @@
 #ifdef PASR_QA_BUILD
    #include "../QA/Audit.mqh"
    #include "../QA/Test.mqh"
-   #include "../Tools/Optimizations.mqh"
-   #include "../Tools/BatchProcessor.mqh"
-   #include "../Tools/MemoryPool.mqh"
-   #include "../Tools/Branchless.mqh"
+   #include "../Infra/Optimizations/Optimizations.mqh"
+   #include "../Infra/Optimizations/BatchProcessor.mqh"
+   #include "../Infra/Optimizations/MemoryPool.mqh"
+   #include "../Infra/Optimizations/Branchless.mqh"
 #endif
 
 #endif // __CORE_PASR_MASTER_MQH__
