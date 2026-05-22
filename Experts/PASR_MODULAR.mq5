@@ -1,55 +1,36 @@
 //+------------------------------------------------------------------+
-//|  PASR_MODULAR.mq5 — v9.00 (OOP Divide & Conquer Architecture)    |
+//|  PASR_MODULAR.mq5 — v9.00                                        |
 //|  Price Action Support/Resistance Expert Advisor                  |
 //|                                                                  |
-//|  Architecture: FULLY MODULAR OOP + ASYNC MULTI-SYMBOL            |
-//|  ✓ CExecutor - Async order execution with smart retry            |
-//|  ✓ CSymbolManager - Multi-symbol load balancing & correlation    |
-//|  ✓ Parallel processing per symbol (divide & conquer)             |
-//|  ✓ Event-driven architecture with deferred execution             |
+//|  Model: PASR (Price Action Support Resistance)                   |
+//|  Architecture: OOP Divide & Conquer with Async Execution         |
 //|                                                                  |
-//|  NEW FEATURES v9.00:                                             |
-//|  • Full OOP Refactoring - True divide & conquer architecture     |
-//|  • CExecutor Integration - Advanced async execution engine       |
-//|  • CSymbolManager Integration - Smart multi-symbol orchestration |
-//|  • Per-Symbol Processing - Independent pipelines per pair        |
-//|  • Correlation-Aware Trading - Dynamic portfolio risk control    |
-//|  • Load Balancing - Round-robin symbol processing                |
+//|  Core Modules:                                                   |
+//|   - CExecutor        : Async order execution & retry logic       |
+//|   - CSymbolManager   : Multi-symbol load balancing               |
+//|   - Config, EventBus : Core configuration & event handling       |
+//|   - DataManager      : Historical data management                |
+//|   - SRDetector       : Support/Resistance detection              |
+//|   - PatternDetector  : Candlestick pattern recognition           |
+//|   - SignalGenerator  : Trading signal generation                 |
+//|   - RiskManager      : Position sizing & risk control            |
+//|   - PositionManager  : Trade management (BE, Trailing)           |
+//|   - RecoveryModule   : Drawdown recovery system                  |
+//|   - AI Module        : Adaptive learning & optimization          |
 //|                                                                  |
-//|  BENEFITS vs v8.00:                                              |
-//|  • Modularity ↑ 100% - True separation of concerns               |
-//|  • Multi-pair scaling ↑ 3x (from 30-40 to 80-100 pairs)          |
-//|  • Code maintainability ↑ 200% - Clean OOP design                |
-//|  • Execution reliability ↑ 20-30% with advanced retry logic      |
-//|  • Portfolio risk ↓ 40% with dynamic correlation control         |
-//|                                                                  |
-//|  MODULES (boot order):                                           |
-//|   [CORE] CExecutor        — Core/Executor.mqh (NEW v9.00)        |
-//|   [CORE] CSymbolManager   — Core/SymbolManager.mqh (NEW v9.00)   |
-//|   [01] Config             — Core/Config.mqh                      |
-//|   [02] EventBus           — Core/EventBus.mqh                    |
-//|   [03] DataManager        — Infra/DataManager.mqh                |
-//|   ... (remaining modules unchanged)                              |
-//|                                                                  |
-//|  Magic: 20260521  Version: v9.00-oop-divide-conquer              |
-//|  Build: 2026-05-24                                               |
-//+------------------------------------------------------------------+
-//|   ... (previous versions retained)                               |
-//|                                                                  |
-//|  Magic: 20260521  Version: v8.00-adaptive                        |
-//|  Build: 2026-05-24                                               |
+//|  Magic: 20260521  Version: 9.00                                  |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
 #property version     "9.00"
-#property description "Price Action SR — OOP Divide & Conquer v9.00"
+#property description "PASR Model - Price Action Support Resistance"
 #property strict
 
 //--- Compilation Flags
 //#define DEBUG_MODE      // Enable verbose logging
-#define QA_BUILD          // ENABLE STRESS TESTING & CHAOS ENGINEERING
-#define PERF_METRICS      // Enable detailed performance counters
-#define OOP_ARCHITECTURE  // Enable full OOP divide & conquer (v9.00)
+#define QA_BUILD          // Enable stress testing & chaos engineering
+#define PERF_METRICS      // Enable performance counters
+#define OOP_ARCHITECTURE  // Enable OOP divide & conquer architecture
 
 //--- NEW CORE MODULES v9.00
 #include <PASR/Core/PASR_Executor.mqh>
@@ -240,7 +221,7 @@ datetime             g_lastChaosTime  = 0;
 #endif
 
 //+------------------------------------------------------------------+
-//|  RUNTIME STATE — ADAPTIVE DUAL PATH ARCHITECTURE                 |
+//|  RUNTIME STATE — OOP DIVIDE & CONQUER ARCHITECTURE               |
 //+------------------------------------------------------------------+
 //--- Bar processing state (OnTimer path)
 datetime          g_lastBarTime   = 0;
@@ -254,10 +235,9 @@ ENUM_MARKET_REGIME  g_regime      = REGIME_RANGING;
 ENUM_TRADING_SESSION g_session    = SESSION_OFF;
 DashContext       g_dashCtx;
 
-//--- Adaptive Throttling State (DEPRECATED v9.00 - replaced by OOP architecture)
-#ifdef ADAPTIVE_THROTTLE
-#warning "ADAPTIVE_THROTTLE is deprecated in v9.00. Use OOP_ARCHITECTURE instead."
-#endif
+//--- Global State
+ENUM_TRADING_SESSION g_session    = SESSION_OFF;
+DashContext       g_dashCtx;
 
 //--- Performance metrics
 #ifdef PERF_METRICS
@@ -1050,7 +1030,6 @@ void OnTimer()
      }
 
    //--- [BAR PATH 17] Execute trade (with smart retry logic)
-   #ifdef ADAPTIVE_THROTTLE
    // Smart retry with exponential backoff
    bool executed = false;
    int retry_count = 0;
