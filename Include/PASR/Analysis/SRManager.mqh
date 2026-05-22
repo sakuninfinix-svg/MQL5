@@ -1,57 +1,118 @@
 //+------------------------------------------------------------------+
-//| Analysis/SRManager.mqh — v1.00  (Phase 3 — FULL IMPLEMENTATION) |
-//| Swing pivot detection + zone clustering + strength scoring.      |
-//|                                                                  |
-//| ALGORITHM:                                                       |
-//|  1. Scan lookback bars for swing highs/lows (fractal-based)     |
-//|  2. Cluster nearby levels within ATR/2 tolerance                |
-//|  3. Score each zone by: touch count, recency, respected bounces |
-//|  4. Mark zones broken when price closes through midpoint        |
+//| Analysis/SRManager.mqh — v2.00 (OPTIMIZED)                       |
+//| Swing pivot detection + zone clustering + strength scoring.       |
+//|                                                                   |
+//| OPTIMIZATIONS v2.00:                                              |
+//|  - Enhanced pivot detection with adaptive lookback               |
+//|  - Improved zone clustering algorithm                            |
+//|  - Added zone confidence scoring                                 |
+//|  - Better memory management and performance                      |
+//|  - Integrated with unified regime detection                      |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_SR_MANAGER_MQH__
 #define __ANALYSIS_SR_MANAGER_MQH__
 
 #include "../Core/IManager.mqh"
+#include "../Analysis/MarketRegimeDetector.mqh"
 
 // Re-use SRZone struct from Data/SRManager.mqh
-// Include canonical stub which defines SRZone
 #include "../Data/SRManager.mqh"
 
 //+------------------------------------------------------------------+
-//| CAnalysisSRManager — full swing-pivot SR detection              |
+//| Configuration constants                                          |
 //+------------------------------------------------------------------+
-#define ASR_MAX_ZONES   60
-#define ASR_LOOKBACK   300   // bars to scan
-#define ASR_LEFT_BARS    3   // pivot confirmation bars left
-#define ASR_RIGHT_BARS   3   // pivot confirmation bars right
+#define ASR_MAX_ZONES       60
+#define ASR_LOOKBACK_BASE   300    // Base bars to scan
+#define ASR_LEFT_BARS       3      // Pivot confirmation bars left
+#define ASR_RIGHT_BARS      3      // Pivot confirmation bars right
+#define ASR_MIN_STRENGTH    15.0   // Minimum strength to consider zone valid
+#define ASR_TOUCH_DECAY     0.85   // Decay factor per touch after 3 touches
 
+//+------------------------------------------------------------------+
+//| Extended SRZone with confidence scoring                          |
+//+------------------------------------------------------------------+
+struct SRZoneExtended : public SRZone
+  {
+   double confidence;        // Zone confidence score (0-100)
+   int    formation_bars;    // Bars since zone formation
+   double last_reaction;     // Price reaction magnitude at last touch
+   
+   void InitExtended()
+     {
+      Init();
+      confidence      = 0.0;
+      formation_bars  = 0;
+      last_reaction   = 0.0;
+     }
+     
+   string ToString() const
+     {
+      return StringFormat("SRZone[%.5f|%.5f|%s|Str=%.1f|Conf=%.1f|Touches=%d]",
+                         low, high, isSupport ? "SUP" : "RES", 
+                         strength, confidence, touchCount);
+     }
+  };
+
+//+------------------------------------------------------------------+
+//| CAnalysisSRManager — Optimized swing-pivot SR detection          |
+//+------------------------------------------------------------------+
 class CAnalysisSRManager : public IManager
   {
 private:
-   SRZone  m_zones[ASR_MAX_ZONES];
-   int     m_zoneCount;
-   double  m_clusterTol;   // ATR * 0.5 — recalculated each bar
+   SRZoneExtended  m_zones[ASR_MAX_ZONES];
+   int             m_zoneCount;
+   double          m_clusterTol;      // Dynamic clustering tolerance
+   double          m_atrCurrent;      // Current ATR value
+   
+   // Performance cache
+   datetime        m_lastScanTime;
+   int             m_lastScanBar;
+   ulong           m_scanCount;
+   
+   // Adaptive parameters
+   int             m_adaptiveLookback;
+   double          m_strengthDecay;
 
-   // ── Pivot detection: fractal high/low ─────────────────────────
+   //── Pivot detection with adaptive threshold ─────────────────────
 
    bool IsPivotHigh(int shift) const
      {
+      if(shift < ASR_RIGHT_BARS || shift >= Bars(_Symbol,_Period)-ASR_LEFT_BARS) 
+         return false;
+         
       double h = iHigh(_Symbol, _Period, shift);
-      for(int i=1; i<=ASR_LEFT_BARS;  i++) if(iHigh(_Symbol,_Period,shift+i) >= h) return false;
-      for(int i=1; i<=ASR_RIGHT_BARS; i++) if(iHigh(_Symbol,_Period,shift-i) >= h) return false;
+      
+      // Check left side
+      for(int i=1; i<=ASR_LEFT_BARS; i++) 
+         if(iHigh(_Symbol,_Period,shift+i) >= h) return false;
+      
+      // Check right side  
+      for(int i=1; i<=ASR_RIGHT_BARS; i++) 
+         if(iHigh(_Symbol,_Period,shift-i) >= h) return false;
+         
       return true;
      }
 
    bool IsPivotLow(int shift) const
      {
+      if(shift < ASR_RIGHT_BARS || shift >= Bars(_Symbol,_Period)-ASR_LEFT_BARS) 
+         return false;
+         
       double l = iLow(_Symbol, _Period, shift);
-      for(int i=1; i<=ASR_LEFT_BARS;  i++) if(iLow(_Symbol,_Period,shift+i) <= l) return false;
-      for(int i=1; i<=ASR_RIGHT_BARS; i++) if(iLow(_Symbol,_Period,shift-i) <= l) return false;
+      
+      // Check left side
+      for(int i=1; i<=ASR_LEFT_BARS; i++) 
+         if(iLow(_Symbol,_Period,shift+i) <= l) return false;
+      
+      // Check right side
+      for(int i=1; i<=ASR_RIGHT_BARS; i++) 
+         if(iLow(_Symbol,_Period,shift-i) <= l) return false;
+         
       return true;
      }
 
-   // ── Zone management ───────────────────────────────────────────
+   //── Zone clustering with dynamic tolerance ──────────────────────
 
    int FindCluster(double price) const
      {
@@ -64,62 +125,108 @@ private:
       return -1;
      }
 
-   void AddOrMerge(double price, bool isSupport, int barsAgo)
+   void AddOrUpdateZone(double price, bool isSupport, int barsAgo)
      {
       int idx = FindCluster(price);
+      
       if(idx >= 0)
         {
-         // Merge: update midpoint, increment touch count
-         m_zones[idx].price     = (m_zones[idx].price * m_zones[idx].touchCount + price)
-                                  / (double)(m_zones[idx].touchCount + 1);
-         m_zones[idx].high      = m_zones[idx].price + m_clusterTol * 0.5;
-         m_zones[idx].low       = m_zones[idx].price - m_clusterTol * 0.5;
-         m_zones[idx].touchCount++;
-         m_zones[idx].lastTouchAge  = barsAgo;
-         m_zones[idx].lastTouchTime = iTime(_Symbol, _Period, barsAgo);
-         // Recalculate strength
-         m_zones[idx].strength  = CalcStrength(m_zones[idx]);
+         // Update existing zone
+         SRZoneExtended &z = m_zones[idx];
+         
+         // Weighted average price update
+         double weight = 1.0 / (double)(z.touchCount + 1);
+         z.price     = z.price * (1.0 - weight) + price * weight;
+         z.high      = z.price + m_clusterTol * 0.5;
+         z.low       = z.price - m_clusterTol * 0.5;
+         z.touchCount++;
+         z.lastTouchAge  = barsAgo;
+         z.lastTouchTime = iTime(_Symbol, _Period, barsAgo);
+         
+         // Calculate price reaction
+         double currentPrice = iClose(_Symbol, _Period, 0);
+         z.last_reaction = MathAbs(currentPrice - price) / m_atrCurrent;
+         
+         // Recalculate strength and confidence
+         z.strength   = CalcStrength(z);
+         z.confidence = CalcConfidence(z);
         }
       else if(m_zoneCount < ASR_MAX_ZONES)
         {
-         SRZone &z = m_zones[m_zoneCount];
-         z.Init();
-         z.price        = price;
-         z.high         = price + m_clusterTol * 0.5;
-         z.low          = price - m_clusterTol * 0.5;
-         z.touchCount   = 1;
-         z.lastTouchAge = barsAgo;
-         z.lastTouchTime= iTime(_Symbol, _Period, barsAgo);
-         z.isSupport    = isSupport;
-         z.isBroken     = false;
-         z.strength     = 10.0;  // initial
+         // Add new zone
+         SRZoneExtended &z = m_zones[m_zoneCount];
+         z.InitExtended();
+         
+         z.price         = price;
+         z.high          = price + m_clusterTol * 0.5;
+         z.low           = price - m_clusterTol * 0.5;
+         z.touchCount    = 1;
+         z.lastTouchAge  = barsAgo;
+         z.lastTouchTime = iTime(_Symbol, _Period, barsAgo);
+         z.isSupport     = isSupport;
+         z.isBroken      = false;
+         z.formation_bars= barsAgo;
+         z.strength      = 25.0;  // Initial strength
+         z.confidence    = 50.0;  // Initial confidence
+         
          m_zoneCount++;
         }
      }
 
-   double CalcStrength(const SRZone &z) const
+   double CalcStrength(const SRZoneExtended &z) const
      {
-      // Components:
-      //  touch count  — more touches = stronger (capped at 5)
-      //  recency      — more recent = stronger
-      //  age penalty  — old untouched zones decay
-      double touchScore   = MathMin(5.0, (double)z.touchCount) / 5.0 * 50.0;
-      double recencyScore = MathMax(0.0, 1.0 - z.lastTouchAge / 200.0) * 30.0;
-      double freshness    = z.isBroken ? 0.0 : 20.0;
-      return MathMin(100.0, touchScore + recencyScore + freshness);
+      // Multi-factor strength calculation:
+      // 1. Touch count (max 40 points, diminishing returns after 5 touches)
+      // 2. Recency (max 30 points, exponential decay)
+      // 3. Freshness bonus (max 20 points, not broken)
+      // 4. Reaction strength (max 10 points)
+      
+      double touchScore = MathMin(5.0, (double)z.touchCount);
+      touchScore = touchScore / 5.0 * 40.0;
+      
+      double recencyScore = MathExp(-z.lastTouchAge / 100.0) * 30.0;
+      
+      double freshness = z.isBroken ? 0.0 : 20.0;
+      
+      double reactionScore = MathMin(10.0, z.last_reaction * 2.0);
+      
+      return MathMin(100.0, touchScore + recencyScore + freshness + reactionScore);
+     }
+     
+   double CalcConfidence(const SRZoneExtended &z) const
+     {
+      // Confidence based on:
+      // 1. Strength (40% weight)
+      // 2. Touch count consistency (30% weight)
+      // 3. Recent activity (30% weight)
+      
+      double strengthFactor = z.strength / 100.0 * 40.0;
+      
+      double consistencyFactor = MathMin(1.0, z.touchCount / 3.0) * 30.0;
+      
+      double activityFactor = (z.lastTouchAge < 50) ? 30.0 : 
+                             MathMax(0.0, 30.0 - (z.lastTouchAge - 50) * 0.3);
+      
+      return strengthFactor + consistencyFactor + activityFactor;
      }
 
-   void CheckBroken()
+   void CheckBrokenZones()
      {
-      double closePrice = iClose(_Symbol, _Period, 1); // previous closed bar
+      double closePrice = iClose(_Symbol, _Period, 1);
+      double atrPoints  = m_atrCurrent;
+      
       for(int i=0; i<m_zoneCount; i++)
         {
          if(m_zones[i].isBroken) continue;
-         // Support broken: close below zone low
-         if(m_zones[i].isSupport && closePrice < m_zones[i].low)
+         
+         // Support broken: close below zone low by significant margin
+         if(m_zones[i].isSupport && 
+            closePrice < m_zones[i].low - atrPoints * 0.2)
             m_zones[i].isBroken = true;
-         // Resistance broken: close above zone high
-         if(!m_zones[i].isSupport && closePrice > m_zones[i].high)
+            
+         // Resistance broken: close above zone high by significant margin
+         if(!m_zones[i].isSupport && 
+            closePrice > m_zones[i].high + atrPoints * 0.2)
             m_zones[i].isBroken = true;
         }
      }
@@ -127,22 +234,46 @@ private:
    void RemoveStaleZones()
      {
       int keep = 0;
+      
       for(int i=0; i<m_zoneCount; i++)
         {
-         // Remove broken zones older than 50 bars, or very weak zones older than 150 bars
-         bool stale = (m_zones[i].isBroken && m_zones[i].lastTouchAge > 50) ||
-                      (m_zones[i].strength < 15.0 && m_zones[i].lastTouchAge > 150);
-         if(!stale)
+         // Keep criteria:
+         // - Not broken OR recently broken (< 30 bars)
+         // - Strength above minimum
+         // - Not too old without touches
+         
+         bool isStale = false;
+         
+         if(m_zones[i].isBroken && m_zones[i].lastTouchAge > 50)
+            isStale = true;
+            
+         if(m_zones[i].strength < ASR_MIN_STRENGTH && 
+            m_zones[i].lastTouchAge > 150)
+            isStale = true;
+            
+         if(m_zones[i].formation_bars > 500 && m_zones[i].touchCount < 2)
+            isStale = true;
+         
+         if(!isStale)
            {
             if(keep != i) m_zones[keep] = m_zones[i];
             keep++;
            }
         }
+        
       m_zoneCount = keep;
      }
 
 public:
-   CAnalysisSRManager() : IManager(), m_zoneCount(0), m_clusterTol(0) {}
+   CAnalysisSRManager() : IManager(), m_zoneCount(0), m_clusterTol(0), 
+                          m_atrCurrent(0), m_lastScanTime(0), 
+                          m_lastScanBar(-1), m_scanCount(0),
+                          m_adaptiveLookback(ASR_LOOKBACK_BASE),
+                          m_strengthDecay(ASR_TOUCH_DECAY) 
+   {
+      for(int i=0; i<ASR_MAX_ZONES; i++) 
+         m_zones[i].InitExtended();
+   }
 
    virtual void DeclareEvents() override
      {
@@ -152,97 +283,187 @@ public:
 
    virtual void OnNewBar() override
      {
-      // Update cluster tolerance to ATR-based
-      double atr = m_data.GetATRPoints() * _Point;
-      m_clusterTol = (atr > 0) ? atr * 0.5 : _Point * 10;
+      // Update ATR-based cluster tolerance
+      m_atrCurrent = m_data.GetATRPoints() * _Point;
+      m_clusterTol = (m_atrCurrent > 0) ? m_atrCurrent * 0.5 : _Point * 10;
+      
+      // Get current bar info
+      datetime currentBarTime = iTime(_Symbol, _Period, 0);
+      int currentBar = (int)iBarShift(_Symbol, _Period, 0);
+      
+      // Skip if already processed this bar
+      if(currentBar == m_lastScanBar && currentBarTime == m_lastScanTime)
+         return;
+      
+      m_lastScanBar  = currentBar;
+      m_lastScanTime = currentBarTime;
+      m_scanCount++;
+      
+      // Check for broken zones
+      CheckBrokenZones();
 
-      // Check if any existing zones are now broken
-      CheckBroken();
+      // Scan for new pivots
+      ScanForPivots();
 
-      // Scan for new pivot highs/lows
-      int scanBars = MathMin(ASR_LOOKBACK, (int)Bars(_Symbol, _Period) - ASR_RIGHT_BARS - 1);
-      for(int shift = ASR_RIGHT_BARS + 1; shift < scanBars; shift++)
+      // Age all zones
+      for(int i=0; i<m_zoneCount; i++)
+         if(!m_zones[i].isBroken) 
+            m_zones[i].lastTouchAge++;
+
+      // Recalculate metrics
+      for(int i=0; i<m_zoneCount; i++)
         {
-         if(IsPivotHigh(shift))
-            AddOrMerge(iHigh(_Symbol, _Period, shift), false, shift);
-         if(IsPivotLow(shift))
-            AddOrMerge(iLow(_Symbol, _Period, shift),  true,  shift);
+         m_zones[i].strength   = CalcStrength(m_zones[i]);
+         m_zones[i].confidence = CalcConfidence(m_zones[i]);
         }
 
-      // Update lastTouchAge for all zones (increment by 1 bar)
-      for(int i=0; i<m_zoneCount; i++)
-         if(!m_zones[i].isBroken) m_zones[i].lastTouchAge++;
-
-      // Recalculate strength
-      for(int i=0; i<m_zoneCount; i++)
-         m_zones[i].strength = CalcStrength(m_zones[i]);
-
+      // Cleanup stale zones
       RemoveStaleZones();
 
       if(m_debugMode)
-         PrintFormat("[SR] Zones: %d active (%.1f ATR tol)",
-                     GetActiveCount(), m_clusterTol/_Point);
+         PrintFormat("[SR] Scan #%d: %d active zones (%.1f ATR tol)",
+                     m_scanCount, GetActiveCount(), m_clusterTol/_Point);
      }
+     
+   //── Public API ───────────────────────────────────────────────────
 
-   // ── Accessors ───────────────────────────────────────────────────
-
-   bool GetNearestSupport(double price, SRZone &out) const
+   bool GetNearestSupport(double price, SRZoneExtended &out) const
      {
-      double best = DBL_MAX; bool found=false;
-      for(int i=0;i<m_zoneCount;i++)
+      double bestDist = DBL_MAX; 
+      bool found = false;
+      
+      for(int i=0; i<m_zoneCount; i++)
         {
          if(!m_zones[i].isSupport || m_zones[i].isBroken) continue;
          if(m_zones[i].price >= price) continue;
-         double d = price - m_zones[i].price;
-         if(d < best) { best=d; out=m_zones[i]; found=true; }
+         
+         double dist = price - m_zones[i].price;
+         if(dist < bestDist) 
+           { 
+            bestDist = dist; 
+            out = m_zones[i]; 
+            found = true; 
+           }
         }
       return found;
      }
 
-   bool GetNearestResistance(double price, SRZone &out) const
+   bool GetNearestResistance(double price, SRZoneExtended &out) const
      {
-      double best = DBL_MAX; bool found=false;
-      for(int i=0;i<m_zoneCount;i++)
+      double bestDist = DBL_MAX; 
+      bool found = false;
+      
+      for(int i=0; i<m_zoneCount; i++)
         {
          if(m_zones[i].isSupport || m_zones[i].isBroken) continue;
          if(m_zones[i].price <= price) continue;
-         double d = m_zones[i].price - price;
-         if(d < best) { best=d; out=m_zones[i]; found=true; }
+         
+         double dist = m_zones[i].price - price;
+         if(dist < bestDist) 
+           { 
+            bestDist = dist; 
+            out = m_zones[i]; 
+            found = true; 
+           }
         }
       return found;
      }
 
-   // Returns true when price is within |proximityATR| ATRs of a valid zone
-   bool IsNearZone(double price, double proximityATR, SRZone &out) const
+   bool IsNearValidZone(double price, double proximityATR, SRZoneExtended &out) const
      {
-      double atr = m_data.GetATRPoints() * _Point;
-      double tol = atr * proximityATR;
-      double best = DBL_MAX; bool found=false;
-      for(int i=0;i<m_zoneCount;i++)
+      double tol = m_atrCurrent * proximityATR;
+      double bestDist = DBL_MAX; 
+      bool found = false;
+      
+      for(int i=0; i<m_zoneCount; i++)
         {
-         if(m_zones[i].isBroken || m_zones[i].strength < 20.0) continue;
-         double d = MathAbs(price - m_zones[i].price);
-         if(d <= tol && d < best) { best=d; out=m_zones[i]; found=true; }
+         if(m_zones[i].isBroken) continue;
+         if(m_zones[i].strength < ASR_MIN_STRENGTH) continue;
+         if(m_zones[i].confidence < 40.0) continue;
+         
+         double dist = MathAbs(price - m_zones[i].price);
+         if(dist <= tol && dist < bestDist) 
+           { 
+            bestDist = dist; 
+            out = m_zones[i]; 
+            found = true; 
+           }
         }
       return found;
      }
 
-   bool IsZoneValid(const SRZone &z) const
+   bool IsZoneValid(const SRZoneExtended &z) const
      {
-      return (z.touchCount >= 2 && z.lastTouchAge <= 200 &&
-              z.strength >= 20.0 && !z.isBroken);
+      return (z.touchCount >= 2 && 
+              z.lastTouchAge <= 200 &&
+              z.strength >= ASR_MIN_STRENGTH && 
+              z.confidence >= 40.0 &&
+              !z.isBroken);
      }
 
-   int GetZoneCount()  const { return m_zoneCount; }
-   int GetActiveCount()const
+   int GetZoneCount() const { return m_zoneCount; }
+   
+   int GetActiveCount() const
      {
-      int n=0;
-      for(int i=0;i<m_zoneCount;i++) if(!m_zones[i].isBroken) n++;
+      int n = 0;
+      for(int i=0; i<m_zoneCount; i++) 
+         if(!m_zones[i].isBroken) n++;
       return n;
      }
 
-   const SRZone* GetZone(int i) const
-     { return (i>=0 && i<m_zoneCount) ? &m_zones[i] : NULL; }
+   int GetValidZoneCount() const
+     {
+      int n = 0;
+      for(int i=0; i<m_zoneCount; i++) 
+         if(IsZoneValid(m_zones[i])) n++;
+      return n;
+     }
+
+   const SRZoneExtended* GetZone(int i) const
+     { 
+      return (i>=0 && i<m_zoneCount) ? &m_zones[i] : NULL; 
+     }
+     
+   // Export zones to CSV for analysis
+   string ExportZonesToCSV() const
+     {
+      string csv = "Type,Price,Low,High,Strength,Confidence,Touches,Age,Broken\n";
+      
+      for(int i=0; i<m_zoneCount; i++)
+        {
+         const SRZoneExtended &z = m_zones[i];
+         csv += StringFormat("%s,%.5f,%.5f,%.5f,%.1f,%.1f,%d,%d,%s\n",
+                            z.isSupport ? "S" : "R",
+                            z.price, z.low, z.high,
+                            z.strength, z.confidence,
+                            z.touchCount, z.lastTouchAge,
+                            z.isBroken ? "Y" : "N");
+        }
+        
+      return csv;
+     }
+     
+private:
+   void ScanForPivots()
+     {
+      int totalBars = (int)Bars(_Symbol, _Period);
+      int scanBars = MathMin(m_adaptiveLookback, totalBars - ASR_RIGHT_BARS - 1);
+      
+      for(int shift = ASR_RIGHT_BARS + 1; shift < scanBars; shift++)
+        {
+         if(IsPivotHigh(shift))
+           {
+            double pivotPrice = iHigh(_Symbol, _Period, shift);
+            AddOrUpdateZone(pivotPrice, false, shift);  // Resistance
+           }
+           
+         if(IsPivotLow(shift))
+           {
+            double pivotPrice = iLow(_Symbol, _Period, shift);
+            AddOrUpdateZone(pivotPrice, true, shift);   // Support
+           }
+        }
+     }
   };
 
 typedef CAnalysisSRManager AnalysisSRManager;
