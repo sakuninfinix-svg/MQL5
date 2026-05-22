@@ -463,6 +463,27 @@ public:
       int idx = (m_head - 1 - i + JOURNAL_BUF_SIZE) % JOURNAL_BUF_SIZE;
       return &m_buf[idx];
      }
+   
+   //+----------------------------------------------------------------+
+   //| Logging helpers for centralized logging                        |
+   //+----------------------------------------------------------------+
+   void LogInfo(const string msg) const
+     {
+      PrintFormat("[PASR][INFO] %s", msg);
+     }
+   
+   void LogWarn(const string msg) const
+     {
+      PrintFormat("[PASR][WARN] %s", msg);
+     }
+   
+   void LogError(const string msg, const int errCode = 0) const
+     {
+      if(errCode != 0)
+         PrintFormat("[PASR][ERROR] %s | Code: %d", msg, errCode);
+      else
+         PrintFormat("[PASR][ERROR] %s", msg);
+     }
   };
 
 #endif // __INFRA_JOURNAL_MANAGER_MQH__

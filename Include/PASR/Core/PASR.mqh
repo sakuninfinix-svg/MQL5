@@ -10,6 +10,7 @@
 //|     L0   Config     → Types, Validator, Manager (MUST be first)  |
 //|     L1   Core       → IManager, EventBus, Events                 |
 //|     L1.5 Globals    → extern EA inputs (one decl point)          |
+//|     L1.6 Pipeline   → PipelineTypes, PipelineEngine              |
 //|     L2   Infra      → DataManager                                |
 //|     L3   Data       → MarketRegime, ZoneManager stubs,           |
 //|                        SRManager stub                            |
@@ -27,6 +28,10 @@
 //|     L9   QA / Tools  → (PASR_QA_BUILD define only)              |
 //|                                                                  |
 //|   CHANGE LOG:                                                    |
+//|   v2.18 (2026-05-21) — Pipeline Architecture added:              |
+//|     + L1.6 PipelineTypes.mqh + PipelineEngine.mqh                |
+//|     + Staged execution replaces monolithic OnTimer()             |
+//|     + Profiling-aware pipeline with early-exit                   |
 //|   v2.17 (2026-05-21) — Phase 3+4 includes:                      |
 //|     + L3.5 Analysis/SRManager.mqh + Analysis/ZoneManager.mqh    |
 //|     + L5c  Signal/RegimeFilter.mqh + Signal/RegimeSignalSource   |
@@ -57,7 +62,11 @@
 // WARNING: Globals.mqh uses extern declarations.
 // It MUST be included EXACTLY ONCE per compilation unit.
 // Do NOT include Globals.mqh from any other header.
-#include "../Globals.mqh"
+#include "Globals.mqh"
+
+// ─── L1.6: Pipeline Architecture (NEW v2.18) ──────────────────────────
+#include "PipelineTypes.mqh"
+#include "PipelineEngine.mqh"
 
 // ─── L2: Infra — Production DataManager ──────────────────────────────
 #include "../Infra/DataManager.mqh"

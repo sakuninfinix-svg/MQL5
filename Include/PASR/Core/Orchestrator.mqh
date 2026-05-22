@@ -96,10 +96,15 @@ private:
    CEventBus              *m_bus;
    StrategyConfig          m_cfg;
    CConfigManager         *m_cfgMgr;
+   
+   // ── Pipeline Engine (NEW v2.18) ────────────────────────────────
+   CPipelineEngine        *m_pipeline;
+   PipelineContext         m_pipeline_ctx;
 
    datetime   m_lastBarTime;
    bool       m_debugMode;
    bool       m_initialised;
+   bool       m_profiling_enabled;
 
    // ── Bar detection ──────────────────────────────────────────────
    bool BarChanged()
@@ -168,6 +173,9 @@ private:
    // ── Cleanup ────────────────────────────────────────────────────
    void FreeAll()
      {
+      // Pipeline engine first (non-owning refs, safe to delete before managers)
+      if(m_pipeline) { delete m_pipeline; m_pipeline = NULL; }
+      
       // signal source plugins before managers that hold non-owning ptrs
       if(m_srcRegime)  { delete m_srcRegime;  m_srcRegime=NULL;  }
       if(m_srcPattern) { delete m_srcPattern; m_srcPattern=NULL; }
@@ -249,12 +257,27 @@ public:
         m_srcPattern(NULL), m_srcSR(NULL),
         m_srcAI(NULL), m_srcRegime(NULL),
         m_bus(NULL), m_cfgMgr(NULL),
-        m_lastBarTime(0), m_debugMode(false), m_initialised(false)
-     {}
+        m_pipeline(NULL),
+        m_lastBarTime(0), m_debugMode(false), 
+        m_initialised(false), m_profiling_enabled(true)
+     {
+      // Initialize pipeline context
+      m_pipeline_ctx.Reset();
+     }
 
    ~COrchestrator() { FreeAll(); }
 
-   void SetDebugMode(bool on) { m_debugMode = on; }
+   void SetDebugMode(bool on) 
+     { 
+      m_debugMode = on; 
+      if(m_pipeline != NULL) m_pipeline->SetDebugMode(on);
+     }
+   
+   void SetProfilingEnabled(bool on)
+     {
+      m_profiling_enabled = on;
+      if(m_pipeline != NULL) m_pipeline->EnableProfiling(on);
+     }
 
    //+----------------------------------------------------------------+
    //| Init — Phase 4 complete wiring                                 |
@@ -340,8 +363,29 @@ public:
       m_dash.SetSignalManager(m_signal);
       m_dash.SetRegimeFilter (m_regime);  // Phase 4 NEW
 
+      // ── L8: Pipeline Engine — Initialize and inject managers ────
+      m_pipeline = new CPipelineEngine();
+      if(m_pipeline == NULL)
+        {
+         Print("[Orchestrator] Pipeline engine alloc FAILED");
+         FreeAll();
+         return INIT_FAILED;
+        }
+      
+      // Inject all manager dependencies into pipeline
+      CJournalManager *journal = NULL;  // Get from DataManager or create standalone
+      m_pipeline->InjectManagers(
+         m_data, m_sr, m_zone, m_pattern, m_signal,
+         m_ai, m_regime, m_risk, m_exec, m_recovery,
+         m_dash, journal, m_bus
+      );
+      m_pipeline->SetDebugMode(m_debugMode);
+      m_pipeline->EnableProfiling(m_profiling_enabled);
+
       m_initialised = true;
       PrintSummary();
+      Print("[Orchestrator] Pipeline Engine v2.18 initialized");
+      PrintFormat("  Profiling: %s", m_profiling_enabled ? "ENABLED" : "DISABLED");
       return INIT_SUCCEEDED;
      }
 
@@ -370,8 +414,9 @@ public:
          // Drain analysis (SR, Pattern, Regime, Signal) before entry attempt
          DrainQueue();
 
-         // Attempt trade entry
-         ProcessNewBar();
+         // Attempt trade entry (legacy fallback if pipeline not ready)
+         if(m_pipeline == NULL || !m_profiling_enabled)
+            ProcessNewBar();
         }
 
       // Final drain: trailing stop + dashboard updates
@@ -379,14 +424,37 @@ public:
      }
 
    //+----------------------------------------------------------------+
-   //| OnTimer                                                        |
+   //| OnTimer — Pipeline-based staged execution (v2.18)              |
    //+----------------------------------------------------------------+
    void OnTimer()
      {
       if(!m_initialised) return;
-      PASREvent ev; ev.id=EVENT_ID_TIMER; ev.priority=1;
-      m_bus.Push(ev);
-      DrainQueue();
+      
+      // Use pipeline engine for staged execution with profiling
+      if(m_pipeline != NULL && m_profiling_enabled)
+        {
+         // Reset context for this cycle
+         m_pipeline_ctx.Reset();
+         m_pipeline_ctx.new_bar = BarChanged();
+         
+         // Execute full pipeline with profiling
+         ENUM_STAGE_RESULT result = m_pipeline->ExecutePipeline(m_pipeline_ctx);
+         
+         // Log early-exit reasons in debug mode
+         if(m_debugMode && result != STAGE_OK)
+           {
+            PrintFormat("[Orchestrator] Pipeline exited at stage: %s - %s",
+                        EnumToString((ENUM_PIPELINE_STAGE)m_pipeline_ctx.exit_reason),
+                        m_pipeline_ctx.exit_message);
+           }
+        }
+      else
+        {
+         // Legacy fallback: simple event push
+         PASREvent ev; ev.id=EVENT_ID_TIMER; ev.priority=1;
+         m_bus.Push(ev);
+         DrainQueue();
+        }
      }
 
    //+----------------------------------------------------------------+
