@@ -23,6 +23,10 @@ enum ENUM_EVENT_ID
    EVENT_ID_RECOVERY         = 9,
    EVENT_ID_RISK_LIMIT       = 10,
    EVENT_ID_SESSION          = 11,
+   // System & Sanity Events (New v13.01)
+   EVENT_ID_SYSTEM_INFO      = 12,
+   EVENT_ID_SYSTEM_WARNING   = 13,
+   EVENT_ID_SYSTEM_CRITICAL  = 14,
    // AI-specific
    EVENT_AI_PREDICTION_READY = 20,
    EVENT_AI_TRAIN_STEP       = 21,
