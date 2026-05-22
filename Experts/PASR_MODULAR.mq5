@@ -459,13 +459,7 @@ int OnInit()
                InpMaxDrawdownPct, InpMaxTradesPerDay, InpMinRR);
 
    //--- [11] Execution Manager (Institutional)
-   #ifdef INST_MODE
-   g_exec.Init(InpMagic, InpComment,
-               InpMaxSlippage, InpRetryAttempts, InpAsyncMode);
-   #else
-   g_exec.Init(InpMagic, InpComment,
-               InpSLATRMult, InpTP1RR, InpTP2RR);
-   #endif
+   g_exec.Init(m_data, m_bus);
 
    //--- [12] Position Manager (Institutional)
    g_pos.Init(InpMagic,
@@ -978,7 +972,6 @@ void OnTimer()
    // Institutional SL calculation: Structural vs ATR-based
    double slDistance = 0.0;
    
-   #ifdef INST_MODE
    if(InpStructSL)
      {
       // Use market structure (Swing High/Low) + buffer
@@ -992,11 +985,6 @@ void OnTimer()
    // Volatility adjustment for position sizing
    double volFactor = InpVolatilityAdj ? (1.0 / MathMax(1.0, atr / g_risk.GetTargetATR())) : 1.0;
    double lotSize = g_risk.CalcLotSize(_Symbol, slDistance, volFactor);
-   
-   #else
-   // Legacy Retail Mode
-   double lotSize = g_risk.CalcLotSize(_Symbol, atr * InpSLATRMult, ep.lotMultiplier);
-   #endif
    
    // Apply volatility regime position sizing
    if(InpUseAdvFeatures && g_featEngine.IsInitialized())
