@@ -29,8 +29,8 @@
 #define __INFRA_JOURNAL_MANAGER_MQH__
 
 #include "AdaptiveConfig.mqh"
-#include "../AI/AITypes.mqh"
-#include "../AI/AIFeatureBuilder.mqh"
+#include "../Signal/AI/AITypes.mqh"
+#include "../Signal/AI/AIFeatureBuilder.mqh"
 #include "../Trade/TradePlan.mqh"
 
 #define JOURNAL_BUF_SIZE   500

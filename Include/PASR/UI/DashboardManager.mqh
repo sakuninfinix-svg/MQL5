@@ -41,7 +41,7 @@
 #define __UI_DASHBOARD_MANAGER_MQH__
 
 #include "../Infra/JournalManager.mqh"
-#include "../AI/AITypes.mqh"
+#include "../Signal/AI/AITypes.mqh"
 #include "../Trade/TradePlan.mqh"
 
 //--- HUD geometry
