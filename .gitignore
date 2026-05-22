@@ -1,1 +1,44 @@
-Nothing should be ignored based on the provided file changes. The modified file 'Include/PASR/Signal/AI/AICalibrationBridge.mqh' appears to be a source code file that should be tracked in version control. No build artifacts, dependencies, or temporary files were detected in the changes.
+# Compiled and binary files
+*.pyc
+*.class
+*.o
+*.exe
+*.dll
+*.so
+*.a
+*.obj
+*.out
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+dist/
+build/
+target/
+.gradle/
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# System/Environment files
+.DS_Store
+Thumbs.db
+.env
+.env.local
+*.env.*
+
+# Logs and coverage
+*.log
+coverage/
+htmlcov/
+.coverage
+
+# Build artifacts
+julia-*/
+zig*/
