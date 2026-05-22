@@ -19,7 +19,7 @@ L10: Data/MarketManager     ← spread, session, conditions
 L11: Data/SRManager         ← S/R level calculation
 L12: Analysis/PatternManager <- candlestick pattern recognition
 L13: Signal/SignalManager   ← entry/exit signal orchestration
-L14: AI/AIManager           ← ML inference & regime enhancement
+L14: AI/CAIOrchestrator     ← ML inference & regime enhancement (26-dim, v4.02)
 L15: Trade/ExecutionManager ← CTrade wrapper, SL/TP management
 L16: Trade/RecoveryManager  ← error recovery, GV state cleanup
 L17: UI/DashboardManager    ← chart overlay dashboard
@@ -98,5 +98,5 @@ GVSet("TRADE_STATE", 1.0);
    StrategyConfig cfg;
    m_data.GetConfigCache(cfg);
    ```
-2. **AIManager backprop** — jalan synchronous di tick thread. Defer ke EventBus deferred queue.
+2. **CAIOrchestrator training** — deferred ke EventBus queue (tidak blocking tick thread).
 3. **DashboardManager** — tambah throttle 1Hz sebelum rebuild string.
