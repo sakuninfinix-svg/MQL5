@@ -15,7 +15,7 @@
 #define OOP_ARCHITECTURE  // Enable OOP divide & conquer architecture
 #define INST_MODE         // Enable Institutional Mode features
 
-//--- NEW CORE MODULES v9.00
+//--- OOP CORE MODULES (Institutional Architecture)
 #include <PASR/Core/PASR_Executor.mqh>
 #include <PASR/Core/PASR_SymbolManager.mqh>
 
@@ -69,6 +69,7 @@ input double   InpMaxDrawdownPct  = 10.0;   // Global Drawdown Halt (%)
 input bool     InpVolatilityAdj   = true;   // Adjust Size by ATR Volatility
 input int      InpPyramidLevels   = 3;      // Scale-in Tranches (0=Disabled)
 input double   InpPyramidSpacing  = 0.5;    // Tranche Distance (ATR Multiplier)
+input int      InpMaxTradesPerDay = 20;     // Max Trades Per Day (Circuit Breaker)
 
 //--- [MARKET STRUCTURE] ← v10.00: Structural Stops & Targets
 sinput group "=== MARKET STRUCTURE LOGIC ==="
@@ -78,6 +79,13 @@ input bool     InpStructTrail     = true;   // Trail based on Market Structure
 input bool     InpUseChandelier   = true;   // Chandelier Exit for Runners
 input double   InpChanATRMult     = 3.0;    // Chandelier ATR Multiplier
 input int      InpChanPeriod      = 22;     // Chandelier Lookback
+
+//--- [SUPPORT/RESISTANCE] ← Zone Detection Parameters
+sinput group "=== SUPPORT/RESISTANCE DETECTION ==="
+input int      InpSRLookback      = 50;     // SR Lookback Bars
+input int      InpSRMinTouches    = 2;      // Minimum Touches to Validate SR
+input double   InpSRMergeATR      = 0.5;    // Merge Zones within N ATR
+input int      InpSRMaxZones      = 10;     // Maximum SR Zones to Track
 
 //--- [MULTI-SYMBOL] ← Scalable Portfolio Execution
 sinput group "=== MULTI-SYMBOL SCANNER ==="
@@ -158,18 +166,18 @@ input bool     InpTestPoolExhaust = false;  // Test EventPool exhaustion fallbac
 //--- [GENERAL]
 sinput group "=== GENERAL ==="
 input ulong    InpMagic           = 20260521; // Magic number
-input string   InpComment        = "PASR_v4";  // Order comment
+input string   InpComment        = "PASR_v10";  // Order comment
 sinput bool    InpJournalEnabled  = true;    // Enable CSV journal
 sinput bool    InpDebugLog        = false;   // Verbose debug logging
 
 //+------------------------------------------------------------------+
-//|  MODULE INSTANCES — OOP DIVIDE & CONQUER ARCHITECTURE            |
+//|  MODULE INSTANCES — INSTITUTIONAL ARCHITECTURE                   |
 //+------------------------------------------------------------------+
-//--- NEW CORE MODULES v9.00 (Divide & Conquer)
+//--- OOP CORE MODULES (Institutional Architecture)
 CExecutor            g_executor;         // Async order executor
 CSymbolManager       g_symMgr;           // Multi-symbol manager
 
-//--- Legacy modules (kept for backward compatibility)
+//--- Legacy modules (institutional grade components)
 CEventBus            g_bus;
 CDataManager         g_data;
 CStateManager        g_state;
@@ -208,7 +216,7 @@ datetime             g_lastChaosTime  = 0;
 #endif
 
 //+------------------------------------------------------------------+
-//|  RUNTIME STATE — OOP DIVIDE & CONQUER ARCHITECTURE               |
+//|  RUNTIME STATE — INSTITUTIONAL ARCHITECTURE                      |
 //+------------------------------------------------------------------+
 //--- Bar processing state (OnTimer path)
 datetime          g_lastBarTime   = 0;
@@ -221,10 +229,8 @@ int               g_lastEnsModel  = 0;
 ENUM_MARKET_REGIME  g_regime      = REGIME_RANGING;
 ENUM_TRADING_SESSION g_session    = SESSION_OFF;
 DashContext       g_dashCtx;
-
-//--- Global State
-ENUM_TRADING_SESSION g_session    = SESSION_OFF;
-DashContext       g_dashCtx;
+datetime          g_posOpenTime   = 0;
+ulong             g_openTicket    = 0;
 
 //--- Performance metrics
 #ifdef PERF_METRICS
@@ -235,7 +241,7 @@ datetime          g_lastTickTime  = 0;       // For tick rate calculation
 #endif
 
 //+------------------------------------------------------------------+
-//|  HELPERS — OOP DIVIDE & CONQUER                                  |
+//|  HELPERS — INSTITUTIONAL ARCHITECTURE                            |
 //+------------------------------------------------------------------+
 void DebugPrint(string msg)
   { if(InpDebugLog) Print("[PASR_DBG] ", msg); }
@@ -360,7 +366,7 @@ void QATestCircuitBreaker(ENUM_RISK_CB_TYPE cb_type)
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   Print("[PASR] v9.00-oop-divide-conquer booting — magic:", InpMagic);
+   Print("[PASR] v10.00 Institutional booting — magic:", InpMagic);
    
 #ifdef QA_BUILD
    if(InpEnableChaos)
@@ -574,7 +580,7 @@ void OnDeinit(const int reason)
    //--- Print scanner statistics
    g_scanner.PrintStats();
    
-   //--- Print NEW OOP module statistics (v9.00)
+   //--- Print OOP module statistics (Institutional Architecture)
    int exec_done, exec_failed, exec_retries;
    double exec_latency;
    g_executor.GetStatistics(exec_done, exec_failed, exec_retries, exec_latency);
@@ -605,14 +611,8 @@ void OnDeinit(const int reason)
   }
 
 //+------------------------------------------------------------------+
-//|  OnTick — OOP DIVIDE & CONQUER PATH (<0.3ms)                     |
+//|  OnTick — INSTITUTIONAL LOW-LATENCY PATH (<0.3ms)                |
 //|  ONLY critical real-time operations:                             |
-//|  • Spread guard                                                  |
-//|  • SymbolManager tick update                                     |
-//|  • Executor queue processing                                     |
-//|  • Position management (BE, trailing, partial)                   |
-//|  • Recovery monitoring                                           |
-//|  • Event queue processing                                        |
 //+------------------------------------------------------------------+
 void OnTick()
   {
@@ -1030,11 +1030,11 @@ void OnTimer()
       return;
      }
 
-   //--- [BAR PATH 17] Execute trade (with smart retry logic)
-   // Smart retry with exponential backoff
+   //--- [BAR PATH 17] Execute trade (Institutional Execution Engine)
+   // Institutional mode: Smart retry with exponential backoff
    bool executed = false;
    int retry_count = 0;
-   const int MAX_RETRIES = 3;
+   const int MAX_RETRIES = InpRetryAttempts;
    const int INITIAL_DELAY_MS = 100;
    
    while(!executed && retry_count < MAX_RETRIES)
@@ -1046,26 +1046,22 @@ void OnTimer()
       else
         {
          retry_count++;
-         int delay_ms = INITIAL_DELAY_MS * (int)MathPow(2, retry_count - 1);
-         DebugPrint(StringFormat("Trade failed, retry %d/%d in %dms", 
-                                 retry_count, MAX_RETRIES, delay_ms));
-         Sleep(delay_ms);
+         if(retry_count < MAX_RETRIES)
+           {
+            int delay_ms = INITIAL_DELAY_MS * (int)MathPow(2, retry_count - 1);
+            DebugPrint(StringFormat("Trade failed, retry %d/%d in %dms", 
+                                    retry_count, MAX_RETRIES, delay_ms));
+            Sleep(delay_ms);
+           }
         }
      }
    
    if(!executed)
      {
       DebugPrint(StringFormat("Execution failed after %d retries: %d", 
-                              MAX_RETRIES, GetLastError()));
+                              retry_count, GetLastError()));
       return;
      }
-   #else
-   if(!g_exec.OpenTrade(plan))
-     {
-      DebugPrint(StringFormat("Execution failed: %d", GetLastError()));
-      return;
-     }
-   #endif
 
    g_activePlan   = plan;
    g_hasPlan      = true;
@@ -1167,5 +1163,5 @@ double OnTester()
   }
 
 //+------------------------------------------------------------------+
-//| END OF PASR_MODULAR.mq5 v9.00 — OOP Divide & Conquer             |
+//| END OF PASR_MODULAR.mq5 v10.00 — Institutional Grade             |
 //+------------------------------------------------------------------+

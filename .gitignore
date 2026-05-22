@@ -1,28 +1,37 @@
 ```
-# Compiled and build artifacts
-*.pyc
-__pycache__/
-*.o
-*.obj
-*.exe
+# Compiled files
+*.mq5
+*.ex5
+*.mq4
+*.ex4
+
+# Build artifacts
 *.dll
 *.so
-*.class
-*.out
+*.dylib
+*.obj
+*.o
 
 # Dependencies
 node_modules/
 venv/
 .venv/
-.env
-.env.local
-*.env.*
-
-# Build directories
+__pycache__/
+*.egg-info/
 dist/
 build/
 target/
-.gradle/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.env.*
 
 # Editors
 .vscode/
@@ -30,23 +39,36 @@ target/
 *.swp
 *.swo
 
-# System files
-.DS_Store
-Thumbs.db
-
-# Logs and temp files
-*.log
-*.tmp
-
-# Coverage
+# Coverage reports
 coverage/
 htmlcov/
 .coverage
 
-# Python specific
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg-info/
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
 ```
