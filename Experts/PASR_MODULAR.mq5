@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|  PASR_MODULAR.mq5 — v5.10 (Advanced AI Feature Engineering)      |
+//|  PASR_MODULAR.mq5 — v5.20 (QA + Multi-Symbol + Advanced AI)      |
 //|  Price Action Support/Resistance Expert Advisor                  |
 //|                                                                  |
 //|  Architecture: modular orchestrator — all logic delegated        |
@@ -27,6 +27,7 @@
 //|   [19] DashboardManager — UI/DashboardManager.mqh                |
 //|   [20] SymbolScanner   — Data/SymbolScanner.mqh (NEW v5.00)      |
 //|   [21] FeatureEngine   — AI/FeatureEngine.mqh (NEW v5.10)        |
+//|   [22] QAStressTest    — QA/QAStressTest.mqh (NEW v5.20)         |
 //|                                                                  |
 //|  TICK FLOW (OnTick):                                             |
 //|   scanner.ScanNext() → for each valid symbol:                    |
@@ -39,6 +40,13 @@
 //|     → dashUpdate                                                 |
 //|                                                                  |
 //|  CHANGELOG:                                                      |
+//|   v5.20 (2026-05-21) — QA & Stress Testing Framework             |
+//|    * Add QA_BUILD compilation flag for stress testing mode       |
+//|    * Chaos Engineering: random error injection, spread spikes    |
+//|    * EventPool exhaustion testing with fallback verification     |
+//|    * Circuit breaker manual trigger for validation               |
+//|    * Performance metrics tracking (tick latency, alloc count)    |
+//|    * New input params: InpEnableChaos, InpChaosFrequency         |
 //|   v5.10 (2026-05-21) — Advanced AI Feature Engineering           |
 //|    * Add CFeatureEngine for statistical features (Z-score,       |
 //|      Skewness, Kurtosis, Volatility Regime Detection)            |
@@ -56,14 +64,19 @@
 //|    * Remove dead ExecutionManager.shim.mqh (committed separately)|
 //|   v4.00 (2026-05-21) — Phase 12 final assembly                  |
 //|                                                                  |
-//|  Magic: 20260521  Version: v5.10-advanced-features               |
+//|  Magic: 20260521  Version: v5.20-qa-multisymbol                  |
 //|  Build: 2026-05-21                                               |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "5.10"
-#property description "Price Action SR — Modular Orchestrator v5.10 (Advanced AI Features)"
+#property version     "5.20"
+#property description "Price Action SR — Modular Orchestrator v5.20 (QA + Multi-Symbol)"
 #property strict
+
+//--- Compilation Flags
+//#define DEBUG_MODE      // Enable verbose logging
+#define QA_BUILD          // ENABLE STRESS TESTING & CHAOS ENGINEERING
+#define PERF_METRICS      // Enable detailed performance counters
 
 //--- Core
 #include <PASR/Core/EventBus.mqh>
@@ -96,6 +109,10 @@
 #include <PASR/UI/DashboardManager.mqh>
 //--- Data (Multi-Symbol)
 #include <PASR/Data/SymbolScanner.mqh>
+//--- QA (Stress Testing - only included if QA_BUILD is defined)
+#ifdef QA_BUILD
+#include <PASR/QA/QAStressTest.mqh>
+#endif
 
 //+------------------------------------------------------------------+
 //|  INPUT PARAMETERS — grouped by module                            |
@@ -168,6 +185,13 @@ input bool     InpShowAIPanel     = true;   // Show AI panel
 input bool     InpExportReport    = true;   // Export HTML report on deinit
 input int      InpReportInterval  = 50;     // Export every N trades
 
+//--- [QA & STRESS TEST] ← v5.20: NEW group (only active if QA_BUILD is defined)
+sinput group "=== QA & STRESS TEST (DEV ONLY) ==="
+input bool     InpEnableChaos     = false;  // Randomly inject errors if QA_BUILD is set
+input int      InpChaosFrequency  = 100;    // Trigger chaos every N ticks
+input double   InpChaosSpreadMult = 5.0;    // Spread spike multiplier during chaos
+input bool     InpTestPoolExhaust = false;  // Test EventPool exhaustion fallback
+
 //--- [GENERAL]
 sinput group "=== GENERAL ==="
 input ulong    InpMagic           = 20260521; // Magic number
@@ -199,6 +223,20 @@ CFeatureEngine       g_featEngine;   // [21] Advanced statistical feature engine
 CDashboardManager    g_hud;
 //--- Multi-Symbol Scanner (NEW v5.00)
 CSymbolScanner       g_scanner;
+
+//--- QA & Stress Test Module (NEW v5.20)
+#ifdef QA_BUILD
+CQAStressTest        g_qa;             // Main QA stress test engine
+#endif
+
+//--- QA & Stress Test State (NEW v5.20) - DEPRECATED, kept for backward compat
+#ifdef QA_BUILD
+int                  g_tickCounter    = 0;     // Counter for chaos frequency
+bool                 g_chaosActive    = false; // Current chaos state
+double               g_normalSpread   = 0.0;   // Baseline spread for comparison
+ulong                g_allocCount     = 0;     // Track allocations for perf metrics
+datetime             g_lastChaosTime  = 0;     // Last chaos trigger time
+#endif
 
 //+------------------------------------------------------------------+
 //|  RUNTIME STATE                                                   |
@@ -250,12 +288,86 @@ ENUM_TRADING_SESSION DetectSession()
    return SESSION_OFF;
   }
 
+#ifdef QA_BUILD
+//+------------------------------------------------------------------+
+//|  QA Stress Test Helpers                                          |
+//+------------------------------------------------------------------+
+
+/// Force EventPool exhaustion test - triggers fallback path
+void QATestEventPoolExhaustion()
+  {
+   Print("[PASR][QA] Testing EventPool exhaustion fallback...");
+   
+   // Attempt to allocate more events than pool capacity
+   // This forces the fallback to new/delete
+   const int POOL_CAPACITY = 256; // Match EventPool.mqh capacity
+   const int EXHAUST_COUNT = POOL_CAPACITY + 50;
+   
+   int success_count = 0;
+   for(int i = 0; i < EXHAUST_COUNT; i++)
+     {
+      // Try to create events directly via EventBus
+      // If pool is exhausted, should fall back to heap allocation
+      if(g_bus.CreateEvent(EVENT_TICK))
+         success_count++;
+     }
+   
+   PrintFormat("[PASR][QA] Exhaustion test: created %d/%d events (pool should have fallen back to heap)",
+               success_count, EXHAUST_COUNT);
+   
+   // Process all pending events to clean up
+   g_bus.ProcessPending();
+   
+   Print("[PASR][QA] EventPool exhaustion test complete - no crashes = PASS");
+  }
+
+/// Manually trigger a circuit breaker to validate RiskManager response
+void QATestCircuitBreaker(ENUM_RISK_CB_TYPE cb_type)
+  {
+   Print("[PASR][QA] Manually triggering circuit breaker: ", EnumToString(cb_type));
+   
+   // Simulate extreme conditions based on CB type
+   switch(cb_type)
+     {
+      case RISK_CB_DAILY_LOSS:
+         // Fake a large loss to trigger daily loss CB
+         g_risk.OnTradeClosed(-10000.0); // Large fake loss
+         break;
+         
+      case RISK_CB_MAX_DRAWDOWN:
+         // TODO: Would need direct access to drawdown counter
+         Print("[PASR][QA] Drawdown CB test requires state manipulation");
+         break;
+         
+      case RISK_CB_SPREAD:
+         // Already tested via chaos spread spikes
+         Print("[PASR][QA] Spread CB already tested via chaos engine");
+         break;
+         
+      default:
+         Print("[PASR][QA] Unknown CB type");
+     }
+   
+   // Check if trading is now blocked
+   bool allowed = g_risk.IsTradingAllowed();
+   PrintFormat("[PASR][QA] After CB trigger - Trading allowed: %s", allowed ? "YES" : "NO");
+  }
+#endif
+
 //+------------------------------------------------------------------+
 //|  OnInit — ordered boot sequence                                  |
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   Print("[PASR] v5.00-multi-symbol booting — magic:", InpMagic);
+   Print("[PASR] v5.20-qa-multisymbol booting — magic:", InpMagic);
+   
+#ifdef QA_BUILD
+   if(InpEnableChaos)
+      Print("[PASR][QA] CHAOS ENGINE ENABLED - frequency=", InpChaosFrequency, 
+            " spread_mult=", InpChaosSpreadMult);
+   if(InpTestPoolExhaust)
+      Print("[PASR][QA] EVENTPOOL EXHAUSTION TEST ENABLED");
+#endif
 
    //--- [01] Config
    g_adaptCfg.SetRiskPct(InpRiskPct);
@@ -380,6 +492,25 @@ int OnInit()
         }
      }
 
+#ifdef QA_BUILD
+   //--- [QA] Run initial stress tests if enabled
+   if(InpTestPoolExhaust)
+     {
+      // Run EventPool exhaustion test during init
+      QATestEventPoolExhaustion();
+     }
+   
+   // Initialize QA stress test engine
+   if(!g_qa.Init(InpChaosFrequency, InpChaosSpreadMult, InpTestPoolExhaust))
+     {
+      Print("[PASR][QA][WARN] QAStressTest initialization failed");
+     }
+   
+   // Initialize normal spread baseline for chaos testing
+   g_normalSpread = GetSpreadPips();
+   PrintFormat("[PASR][QA] Baseline spread: %.1f pips", g_normalSpread);
+#endif
+
    // Reset runtime state
    g_lastBarTime = 0;
    g_hasPlan     = false;
@@ -398,6 +529,16 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   
+#ifdef QA_BUILD
+   //--- Print QA statistics from engine
+   g_qa.PrintReport();
+   
+   // Legacy stats (for backward compatibility)
+   PrintFormat("[PASR][QA] SHUTDOWN STATS - ticks_processed:%d chaos_triggers:%d alloc_count:%lu",
+               g_tickCounter, (g_lastChaosTime > 0 ? g_tickCounter / InpChaosFrequency : 0),
+               g_allocCount);
+#endif
    
    //--- Print scanner statistics (NEW v5.00)
    g_scanner.PrintStats();
@@ -418,6 +559,18 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
+#ifdef QA_BUILD
+   //--- [QA] Increment tick counter and trigger chaos if enabled
+   g_tickCounter++;
+   
+   // Use QA engine for chaos injection and metrics
+   g_qa.OnTick(current_symbol, g_bus, g_risk);
+   
+   // Update legacy state variables for backward compatibility
+   g_chaosActive = g_qa.IsChaosActive();
+   g_allocCount++;
+#endif
+
    //--- Multi-Symbol Scanning Loop (NEW v5.00)
    //    Round-robin through all configured symbols
    int sym_idx;

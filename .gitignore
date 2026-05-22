@@ -1,51 +1,49 @@
-```
-# Compiled/binary files
-*.mq5
-*.ex5
-*.obj
+# Compiled and build artifacts
+*.pyc
+__pycache__/
 *.o
+*.obj
+*.exe
 *.dll
 *.so
 *.a
-*.lib
-*.exe
+*.out
 
 # Dependencies
 node_modules/
 venv/
 .venv/
-__pycache__/
-*.egg-info/
+.env
+.env.local
+.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+
+# Build directories
 dist/
 build/
 target/
 .gradle/
-.mypy_cache/
-.pytest_cache/
 
-# Editors/IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
+# Python specific
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
 
-# System files
-.DS_Store
-Thumbs.db
-.env
-.env.local
-*.env.*
-
-# Logs
-*.log
-
-# Coverage
+# Coverage reports
 coverage/
 htmlcov/
 .coverage
 
-# Compressed files
+# Compression files
 *.zip
 *.gz
 *.tar
@@ -68,4 +66,3 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```
