@@ -1,98 +1,41 @@
 ```
-# Compiled and build artifacts
-*.pyc
-__pycache__/
-*.o
-*.obj
-*.exe
-*.dll
-*.so
-*.a
-*.out
-*.class
+# Compiled and binary files
+*.mqh~
+*.mqo
+*.ex4
+*.ex5
+
+# Build artifacts
+*.compiled
+*.build/
+build/
 
 # Dependencies
-node_modules/
-venv/
-.venv/
-.env
-.env.local
-.env.*
-
-# Build directories
-dist/
-build/
-target/
-.gradle/
-
-# Python specific
-*.pyc
-__pycache__/
-*.pyo
-*.pyd
-.Python
-*.so
-.Python
-env/
-venv/
-ENV/
-.venv/
-.env/
-.env.local
-.env.*
-.env~local
-.env~*
-.env.*
-.env.local.*
-.env.*.local
+Include/PASR/lib/
+Include/PASR/dependencies/
 
 # Logs and temp files
 *.log
 *.tmp
-*.swp
-*.swo
+*.temp
 
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
-
-# Editor specific
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# MyPy cache
-.mypy_cache/
-# PyTest cache
-.pytest_cache/
+# Environment
+.env
+.env.local
+*.env.*
 
-# Compressed files
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
+# Coverage and testing
+coverage/
+htmlcov/
+.coverage
+
+# OS files
+.DS_Store
+Thumbs.db
 ```
