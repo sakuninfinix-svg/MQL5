@@ -1,12 +1,12 @@
 //+------------------------------------------------------------------+
 //|  PASR_MODULAR.mq5                                                |
 //|  Expert Advisor: PASR (Price Action Support Resistance)          |
-//|  Version: 10.00 — Institutional Grade                            |
+//|  Version: 11.00 — Pure Institutional Architecture                |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "10.00"
-#property description "PASR Model - Institutional Multi-Strategy System"
+#property version     "11.00"
+#property description "PASR Model - Pure Institutional Multi-Strategy System"
 #property strict
 
 //--- Compilation Flags
@@ -18,6 +18,7 @@
 //--- OOP CORE MODULES (Institutional Architecture)
 #include <PASR/Core/PASR_Executor.mqh>
 #include <PASR/Core/PASR_SymbolManager.mqh>
+#include <PASR/Core/PASR.Types.mqh>
 
 //--- Core
 #include <PASR/Core/Config/Manager.mqh>
@@ -37,7 +38,6 @@
 //--- Trade
 #include <PASR/Trade/RiskManager.mqh>
 #include <PASR/Trade/TradePlan.mqh>
-#include <PASR/Trade/ExecutionManager.mqh>
 #include <PASR/Trade/PositionManager.mqh>
 #include <PASR/Trade/ExitEngine.mqh>
 #include <PASR/Trade/CorrelationManager.mqh>
@@ -171,13 +171,13 @@ sinput bool    InpJournalEnabled  = true;    // Enable CSV journal
 sinput bool    InpDebugLog        = false;   // Verbose debug logging
 
 //+------------------------------------------------------------------+
-//|  MODULE INSTANCES — INSTITUTIONAL ARCHITECTURE                   |
+//|  MODULE INSTANCES — PURE INSTITUTIONAL ARCHITECTURE              |
 //+------------------------------------------------------------------+
-//--- OOP CORE MODULES (Institutional Architecture)
-CExecutor            g_executor;         // Async order executor
+//--- OOP CORE MODULES (Primary Execution Engine)
+CExecutor            g_executor;         // Async order executor (SOLE execution engine)
 CSymbolManager       g_symMgr;           // Multi-symbol manager
 
-//--- Legacy modules (institutional grade components)
+//--- Legacy modules (institutional grade components - NO execution logic)
 CEventBus            g_bus;
 CDataManager         g_data;
 CStateManager        g_state;
@@ -188,7 +188,7 @@ CSRManager           g_sr;
 CPatternManager      g_pattern;
 CSignalManager       g_signal;
 CRiskManager         g_risk;
-CExecutionManager    g_exec;            // Legacy - will be replaced by g_executor
+// NOTE: g_exec (CExecutionManager) REMOVED - all execution via g_executor
 CPositionManager     g_pos;
 CExitEngine          g_exit;            
 CCorrelationManager  g_corr;            
@@ -206,39 +206,11 @@ CSymbolScanner       g_scanner;
 CQAStressTest        g_qa;             
 #endif
 
-//--- QA State
-#ifdef QA_BUILD
-int                  g_tickCounter    = 0;
-bool                 g_chaosActive    = false;
-double               g_normalSpread   = 0.0;
-ulong                g_allocCount     = 0;
-datetime             g_lastChaosTime  = 0;
-#endif
+//--- Global Trading Context (Single Source of Truth)
+STradingContext      g_ctx;              // Encapsulated runtime state
 
-//+------------------------------------------------------------------+
-//|  RUNTIME STATE — INSTITUTIONAL ARCHITECTURE                      |
-//+------------------------------------------------------------------+
-//--- Bar processing state (OnTimer path)
-datetime          g_lastBarTime   = 0;
-TradePlan         g_activePlan;
-bool              g_hasPlan       = false;
-FeatureVector     g_lastFV;
-double            g_lastAIScore   = 0;
-double            g_lastDrift     = 0;
-int               g_lastEnsModel  = 0;
-ENUM_MARKET_REGIME  g_regime      = REGIME_RANGING;
-ENUM_TRADING_SESSION g_session    = SESSION_OFF;
-DashContext       g_dashCtx;
-datetime          g_posOpenTime   = 0;
-ulong             g_openTicket    = 0;
-
-//--- Performance metrics
-#ifdef PERF_METRICS
-ulong             g_tickCount     = 0;       // Total ticks processed
-ulong             g_barCount      = 0;       // Total bars processed
-ulong             g_signalCount   = 0;       // Signals generated
-datetime          g_lastTickTime  = 0;       // For tick rate calculation
-#endif
+//--- QA State (now encapsulated in g_ctx when QA_BUILD is defined)
+// Legacy globals removed - use g_ctx for all state access
 
 //+------------------------------------------------------------------+
 //|  HELPERS — INSTITUTIONAL ARCHITECTURE                            |
@@ -362,11 +334,11 @@ void QATestCircuitBreaker(ENUM_RISK_CB_TYPE cb_type)
 #endif
 
 //+------------------------------------------------------------------+
-//|  OnInit — ordered boot sequence                                  |
+//|  OnInit — ordered boot sequence with fail-fast phases            |
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   Print("[PASR] v10.00 Institutional booting — magic:", InpMagic);
+   Print("[PASR] v11.00 Pure Institutional booting — magic:", InpMagic);
    
 #ifdef QA_BUILD
    if(InpEnableChaos)
@@ -374,45 +346,48 @@ int OnInit()
             " spread_mult=", InpChaosSpreadMult);
 #endif
 
+   //--- Reset global trading context
+   g_ctx.Reset();
+   
+   SInitResult initResult;
+   
    //+------------------------------------------------------------------+
-   //|  PHASE 1: NEW OOP CORE MODULES (Divide & Conquer)                |
+   //|  PHASE 1: CORE SYSTEM (Timer, Handles, Global State)             |
    //+------------------------------------------------------------------+
+   initResult.phase = INIT_PHASE_CORE;
    
    //--- [CORE-01] Initialize Executor with async mode
    g_executor.Initialize(true, 20);  // async=true, max_queue=20
-   Print("[INIT] CExecutor initialized (async mode, queue=20)");
+   Print("[INIT][PHASE1] CExecutor initialized (async mode, queue=20)");
    
    //--- [CORE-02] Initialize SymbolManager with correlation control
    if(ArraySize(InpSymbols) > 0)
      {
       g_symMgr.Initialize(InpSymbols, ArraySize(InpSymbols), 
                           InpCorrThreshold, InpUseCorrelation);
-      Print("[INIT] CSymbolManager initialized with ", ArraySize(InpSymbols), " symbols");
+      Print("[INIT][PHASE1] CSymbolManager initialized with ", ArraySize(InpSymbols), " symbols");
      }
    
-   //+------------------------------------------------------------------+
-   //|  PHASE 2: LEGACY MODULES (backward compatibility)                |
-   //+------------------------------------------------------------------+
-   
-   //--- [01] Config
-   g_adaptCfg.SetRiskPct(InpRiskPct);
-   g_adaptCfg.SetMaxDailyLossPct(InpMaxDailyLossPct);
-   g_adaptCfg.SetMaxDrawdownPct(InpMaxDrawdownPct);
-   g_adaptCfg.SetMinRR(InpMinRR);
-
-   //--- [02] EventBus
+   //--- [CORE-03] EventBus initialization
    g_bus.Init();
-
-   //--- [Scanner] SymbolScanner (legacy, kept for compatibility)
+   
+   //--- Set timer for bar processing heartbeat
+   EventSetTimer(1);
+   
+   //+------------------------------------------------------------------+
+   //|  PHASE 2: MARKET DATA (Symbol Manager, Data Feed Validation)     |
+   //+------------------------------------------------------------------+
+   initResult.phase = INIT_PHASE_MARKETDATA;
+   
+   //--- [Scanner] SymbolScanner initialization
    int sym_count = ArraySize(InpSymbols);
    if(sym_count > 0)
      {
       if(!g_scanner.Init(InpSymbols, sym_count))
         {
-         Alert("[PASR] SymbolScanner init failed - falling back to single symbol");
-         string single_sym[];
-         ArrayPushBack(single_sym, _Symbol);
-         g_scanner.Init(single_sym, 1);
+         initResult.Fail(INIT_PHASE_MARKETDATA, "SymbolScanner", "Init failed");
+         Alert(initResult.ToString());
+         return INIT_FAILED;
         }
       
       SymbolFilterCriteria filter;
@@ -423,9 +398,160 @@ int OnInit()
       filter.session_end_hour  = InpSessionEnd;
       
       g_scanner.SetFilter(filter);
-      Print("[PASR] Scanner configured for ", sym_count, " symbols");
+      Print("[INIT][PHASE2] Scanner configured for ", sym_count, " symbols");
      }
    else
+     {
+      string single_sym[];
+      ArrayPushBack(single_sym, _Symbol);
+      if(!g_scanner.Init(single_sym, 1))
+        {
+         initResult.Fail(INIT_PHASE_MARKETDATA, "SymbolScanner", "Single symbol init failed");
+         Alert(initResult.ToString());
+         return INIT_FAILED;
+        }
+     }
+   
+   //--- [DataManager] Initialize data feed
+   if(!g_data.Init(_Symbol, PERIOD_CURRENT))
+     {
+      initResult.Fail(INIT_PHASE_MARKETDATA, "DataManager", "Init failed");
+      Alert(initResult.ToString());
+      return INIT_FAILED;
+     }
+   
+   //+------------------------------------------------------------------+
+   //|  PHASE 3: STRATEGY ENGINE (SR, Pattern, AI Logic)                |
+   //+------------------------------------------------------------------+
+   initResult.phase = INIT_PHASE_STRATEGY;
+   
+   //--- [StateManager] Initialize persistent state
+   g_state.Init(InpMagic);
+   
+   //--- [JournalManager] Setup logging
+   g_journal.SetCSVEnabled(InpJournalEnabled);
+   g_journal.SetCSVPrefix("PASR_Journal");
+   
+   //--- [PerformanceReport] Link to journal
+   g_report.SetJournal(GetPointer(g_journal));
+   
+   //--- [SRManager] Support/Resistance detection
+   if(!g_sr.Init(_Symbol, PERIOD_CURRENT,
+                 InpSRLookback, InpSRMinTouches,
+                 InpSRMergeATR, InpSRMaxZones))
+     {
+      initResult.Fail(INIT_PHASE_STRATEGY, "SRManager", "Init failed");
+      Alert(initResult.ToString());
+      return INIT_FAILED;
+     }
+   
+   //--- [PatternManager] Candlestick pattern recognition
+   g_pattern.Init(_Symbol, PERIOD_CURRENT);
+   
+   //--- [SignalManager] Signal generation engine
+   g_signal.Init(_Symbol, PERIOD_CURRENT,
+                 InpMinConfluence, InpUseTrend, InpUsePatterns,
+                 GetPointer(g_sr), GetPointer(g_pattern));
+   
+   //--- [AI Feature Builder] ML feature extraction
+   g_featBuilder.Init(_Symbol, PERIOD_CURRENT);
+   
+   //--- [AI Stack] Inference, Ensemble, Calibration
+   g_aiInfer.Init();
+   g_ensemble.Init();
+   if(InpLoadWeights) g_ensemble.LoadWeights();
+   
+   //--- [Calibration Bridge] AI score calibration
+   g_calibBridge.SetJournal(GetPointer(g_journal));
+   g_calibBridge.SetHighThresh(InpAIHighThresh);
+   g_calibBridge.SetVetoThresh(InpAIVetoThresh);
+   
+   //--- [FeatureEngine] Advanced statistical features
+   if(InpUseAdvFeatures)
+     {
+      if(!g_featEngine.Init(_Symbol, PERIOD_CURRENT, InpFeatureWindow))
+        {
+         Print("[PASR][WARN] FeatureEngine init failed - using basic features only");
+        }
+      else
+        {
+         Print("[INIT][PHASE3] FeatureEngine initialized with window=", InpFeatureWindow);
+        }
+     }
+   
+   //+------------------------------------------------------------------+
+   //|  PHASE 4: EXECUTION LAYER (Executor Queue, Risk Parameters)      |
+   //+------------------------------------------------------------------+
+   initResult.phase = INIT_PHASE_EXECUTION;
+   
+   //--- [RiskManager] Capital protection circuit breakers
+   g_risk.Init(InpMagic, InpRiskPct, InpMaxDailyLossPct,
+               InpMaxDrawdownPct, InpMaxTradesPerDay, InpMinRR);
+   
+   //--- [PositionManager] Active trade management
+   g_pos.Init(InpMagic,
+               InpUseBE,      InpBEActivateRR,
+               InpUsePartial, InpPartialPct,
+               InpUseTrailing,InpTrailATRMult);
+   
+   //--- [ExitEngine] Exit signal detection
+   g_exit.Init();
+   
+   //--- [CorrelationManager] Portfolio risk control
+   if(InpUseCorrelation)
+     {
+      g_corr.Initialize();
+      Print("[INIT][PHASE4] Correlation risk enabled (threshold=", InpCorrThreshold, ", window=", InpCorrWindow, ")");
+     }
+   
+   //--- [RecoveryManager] Fakeout protection engine
+   g_recovery.Init(GetPointer(g_data), GetPointer(g_bus));
+   g_recovery.SetTrailingThrottle(200);  // throttle trailing to 200ms
+   
+   //--- [Dashboard] On-chart HUD
+   if(InpShowDash)
+     {
+      g_hud.Init(GetPointer(g_journal));
+      ZeroMemory(g_ctx.dash_ctx);
+     }
+   
+#ifdef QA_BUILD
+   //--- [QA] Run initial stress tests if enabled
+   if(InpTestPoolExhaust)
+     {
+      QATestEventPoolExhaustion();
+     }
+   
+   // Initialize QA stress test engine
+   if(!g_qa.Init(InpChaosFrequency, InpChaosSpreadMult, InpTestPoolExhaust))
+     {
+      Print("[PASR][QA][WARN] QAStressTest initialization failed");
+     }
+   
+   // Initialize normal spread baseline for chaos testing
+   g_ctx.normal_spread = GetSpreadPips();
+   PrintFormat("[INIT][PHASE4] Baseline spread: %.1f pips", g_ctx.normal_spread);
+#endif
+   
+   //+------------------------------------------------------------------+
+   //|  INITIALIZATION COMPLETE - Mark context as ready                 |
+   //+------------------------------------------------------------------+
+   g_ctx.SetInitialized(true);
+   g_ctx.last_bar_time = 0;
+   g_ctx.has_plan      = false;
+   g_ctx.regime        = REGIME_RANGING;
+   g_ctx.session       = DetectSession();
+   
+   Print("[PASR] Boot complete — Pure Institutional Architecture ready");
+   Print("[PASR] CExecutor: async mode, queue=20, smart retry enabled");
+   Print("[PASR] CSymbolManager: ", ArraySize(InpSymbols), " symbols, correlation=", InpUseCorrelation ? "ON" : "OFF");
+   Print("[PASR] State encapsulation: g_ctx (STradingContext) is single source of truth");
+   
+   initResult.phase = INIT_PHASE_COMPLETE;
+   initResult.success = true;
+   
+   return INIT_SUCCEEDED;
+  }
      {
       string single_sym[];
       ArrayPushBack(single_sym, _Symbol);
