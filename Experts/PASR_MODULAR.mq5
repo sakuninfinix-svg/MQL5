@@ -172,43 +172,43 @@ sinput bool    InpJournalEnabled  = true;    // Enable CSV journal
 sinput bool    InpDebugLog        = false;   // Verbose debug logging
 
 //+------------------------------------------------------------------+
-//|  MODULE INSTANCES — PIPELINE ARCHITECTURE WITH ORCHESTRATOR      |
+//|  MODULE INSTANCES — PURE ORCHESTRATOR PIPELINE (v12.00)          |
 //+------------------------------------------------------------------+
-//--- PIPELINE CORE: Orchestrator coordinates all modules
-COrchestrator        g_orchestrator;     // Main pipeline coordinator
-CExecutor            g_executor;         // Async order executor (SOLE execution engine)
-CSymbolManager       g_symMgr;           // Multi-symbol manager
+// ARCHITECTURE CHANGE: All modules now owned and coordinated by g_orchestrator
+// - COrchestrator encapsulates ALL managers (Data, SR, Pattern, Signal, AI, Risk, Exec, etc.)
+// - EA event handlers delegate to g_orchestrator exclusively
+// - Zero direct module calls from EA = clean separation of concerns
+// - Single execution engine: CExecutionManager inside Orchestrator
+// - No dual-core conflict, no spaghetti code, true pipeline architecture
 
-//--- Pipeline Stage Modules (managed by Orchestrator)
-CEventBus            g_bus;              // Event-driven communication
-CDataManager         g_data;             // Market data feed
-CStateManager        g_state;            // State persistence
-CAdaptiveConfig      g_adaptCfg;         // Dynamic regime adaptation
-CJournalManager      g_journal;          // Trade journaling
-CPerformanceReport   g_report;           // Performance analytics
-CSRManager           g_sr;               // Support/Resistance detection
-CPatternManager      g_pattern;          // Pattern recognition
-CSignalManager       g_signal;           // Signal generation
-CRiskManager         g_risk;             // Risk circuit breakers
-CPositionManager     g_pos;              // Active position management
-CExitEngine          g_exit;             // Exit signal detection
-CCorrelationManager  g_corr;             // Portfolio correlation
-CRecoveryManager     g_recovery;         // Fakeout recovery
-CAIFeatureBuilder    g_featBuilder;      // AI feature engineering
-CAIInference         g_aiInfer;          // AI inference engine
-CAIEnsemble          g_ensemble;         // Ensemble voting
-CAICalibrationBridge g_calibBridge;      // AI calibration
-CFeatureEngine       g_featEngine;       // Statistical features
-CDashboardManager    g_hud;              // On-chart dashboard
-CSymbolScanner       g_scanner;          // Multi-symbol scanner
+//--- PIPELINE CORE: Single orchestrator owns all modules
+COrchestrator        g_orch;             // Main pipeline coordinator (SOLE owner of all managers)
 
-//--- QA & Stress Test Module
+//--- DEPRECATED: Direct module instances REMOVED (now private members of COrchestrator)
+// Previous instances caused dual-core conflict and spaghetti dependencies:
+//   CExecutor, CSymbolManager, CEventBus, CDataManager, CStateManager,
+//   CAdaptiveConfig, CJournalManager, CPerformanceReport, CSRManager,
+//   CPatternManager, CSignalManager, CRiskManager, CPositionManager,
+//   CExitEngine, CCorrelationManager, CRecoveryManager, CAIFeatureBuilder,
+//   CAIInference, CAIEnsemble, CAICalibrationBridge, CFeatureEngine,
+//   CDashboardManager, CSymbolScanner
+// 
+// Migration mapping (orchestrator methods):
+//   g_executor.OpenTrade()     → g_orch.OnTimer() [internal exec.Execute()]
+//   g_symMgr.Update()          → g_orch.OnTick() [internal data.OnTick()]
+//   g_signal.GenerateSignal()  → g_orch.ProcessNewBar() [internal signal.GetCurrent()]
+//   g_risk.IsTradingAllowed()  → g_orch.ProcessNewBar() [internal risk.Check()]
+//   g_pos.OnTick()             → g_orch.OnTick() [internal recovery.OnTick()]
+//   ... all other modules ...  → Delegated internally by COrchestrator
+
+//--- QA & Stress Test Module (standalone - not part of orchestrator)
 #ifdef QA_BUILD
-CQAStressTest        g_qa;               // Chaos engineering
+CQAStressTest        g_qa;               // Chaos engineering (external QA tool)
 #endif
 
-//--- Global Trading Context (Single Source of Truth)
-STradingContext      g_ctx;              // Encapsulated runtime state
+//--- Global Trading Context (Single Source of Truth for EA state only)
+// NOTE: Manager state is encapsulated within COrchestrator
+STradingContext      g_ctx;              // EA-level runtime state (minimal)
 
 //--- DEPRECATED: All legacy globals migrated to g_ctx.STradingContext
 //    Previous scattered variables now centralized in single struct
@@ -286,9 +286,9 @@ void QATestEventPoolExhaustion()
    int success_count = 0;
    for(int i = 0; i < EXHAUST_COUNT; i++)
      {
-      // Try to create events directly via EventBus
+      // Try to create events directly via Orchestrator's EventBus
       // If pool is exhausted, should fall back to heap allocation
-      if(g_bus.CreateEvent(EVENT_TICK))
+      if(g_orch.GetDataManager().GetEventBus().CreateEvent(EVENT_TICK))
          success_count++;
      }
    
@@ -296,7 +296,7 @@ void QATestEventPoolExhaustion()
                success_count, EXHAUST_COUNT);
    
    // Process all pending events to clean up
-   g_bus.ProcessPending();
+   g_orch.GetDataManager().GetEventBus().ProcessPending();
    
    Print("[PASR][QA] EventPool exhaustion test complete - no crashes = PASS");
   }
@@ -311,7 +311,7 @@ void QATestCircuitBreaker(ENUM_RISK_CB_TYPE cb_type)
      {
       case RISK_CB_DAILY_LOSS:
          // Fake a large loss to trigger daily loss CB
-         g_risk.OnTradeClosed(-10000.0); // Large fake loss
+         g_orch.GetRiskManager().OnTradeClosed(-10000.0); // Large fake loss
          break;
          
       case RISK_CB_MAX_DRAWDOWN:
@@ -329,17 +329,17 @@ void QATestCircuitBreaker(ENUM_RISK_CB_TYPE cb_type)
      }
    
    // Check if trading is now blocked
-   bool allowed = g_risk.IsTradingAllowed();
+   bool allowed = g_orch.GetRiskManager().IsTradingAllowed();
    PrintFormat("[PASR][QA] After CB trigger - Trading allowed: %s", allowed ? "YES" : "NO");
   }
 #endif
 
 //+------------------------------------------------------------------+
-//|  OnInit — ordered boot sequence with fail-fast phases            |
+//|  OnInit — PURE ORCHESTRATOR DELEGATION (<10 lines)               |
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   Print("[PASR] v11.00 Pure Institutional booting — magic:", InpMagic);
+   Print("[PASR] v12.00 Pure Orchestrator Pipeline booting...");
    
 #ifdef QA_BUILD
    if(InpEnableChaos)
@@ -347,821 +347,99 @@ int OnInit()
             " spread_mult=", InpChaosSpreadMult);
 #endif
 
-   //--- Reset global trading context
+   //--- Reset global trading context (EA-level state only)
    g_ctx.Reset();
    
-   SInitResult initResult;
+   //--- Delegate ALL initialization to Orchestrator
+   int result = g_orch.Init();
    
-   //+------------------------------------------------------------------+
-   //|  PHASE 1: CORE SYSTEM (Timer, Handles, Global State)             |
-   //+------------------------------------------------------------------+
-   initResult.phase = INIT_PHASE_CORE;
-   
-   //--- [CORE-01] Initialize Executor with async mode
-   g_executor.Initialize(true, 20);  // async=true, max_queue=20
-   Print("[INIT][PHASE1] CExecutor initialized (async mode, queue=20)");
-   
-   //--- [CORE-02] Initialize SymbolManager with correlation control
-   if(ArraySize(InpSymbols) > 0)
+   if(result != INIT_SUCCEEDED)
      {
-      g_symMgr.Initialize(InpSymbols, ArraySize(InpSymbols), 
-                          InpCorrThreshold, InpUseCorrelation);
-      Print("[INIT][PHASE1] CSymbolManager initialized with ", ArraySize(InpSymbols), " symbols");
-     }
-   
-   //--- [CORE-03] EventBus initialization
-   g_bus.Init();
-   
-   //--- Set timer for bar processing heartbeat
-   EventSetTimer(1);
-   
-   //+------------------------------------------------------------------+
-   //|  PHASE 2: MARKET DATA (Symbol Manager, Data Feed Validation)     |
-   //+------------------------------------------------------------------+
-   initResult.phase = INIT_PHASE_MARKETDATA;
-   
-   //--- [Scanner] SymbolScanner initialization
-   int sym_count = ArraySize(InpSymbols);
-   if(sym_count > 0)
-     {
-      if(!g_scanner.Init(InpSymbols, sym_count))
-        {
-         initResult.Fail(INIT_PHASE_MARKETDATA, "SymbolScanner", "Init failed");
-         Alert(initResult.ToString());
-         return INIT_FAILED;
-        }
-      
-      SymbolFilterCriteria filter;
-      filter.max_spread_pts    = InpMaxSpreadPts;
-      filter.min_volume        = 0;
-      filter.check_session     = InpCheckSession;
-      filter.session_start_hour= InpSessionStart;
-      filter.session_end_hour  = InpSessionEnd;
-      
-      g_scanner.SetFilter(filter);
-      Print("[INIT][PHASE2] Scanner configured for ", sym_count, " symbols");
-     }
-   else
-     {
-      string single_sym[];
-      ArrayPushBack(single_sym, _Symbol);
-      if(!g_scanner.Init(single_sym, 1))
-        {
-         initResult.Fail(INIT_PHASE_MARKETDATA, "SymbolScanner", "Single symbol init failed");
-         Alert(initResult.ToString());
-         return INIT_FAILED;
-        }
-     }
-   
-   //--- [DataManager] Initialize data feed
-   if(!g_data.Init(_Symbol, PERIOD_CURRENT))
-     {
-      initResult.Fail(INIT_PHASE_MARKETDATA, "DataManager", "Init failed");
-      Alert(initResult.ToString());
+      Alert("[PASR] Initialization FAILED - check Experts log");
       return INIT_FAILED;
      }
    
-   //+------------------------------------------------------------------+
-   //|  PHASE 3: STRATEGY ENGINE (SR, Pattern, AI Logic)                |
-   //+------------------------------------------------------------------+
-   initResult.phase = INIT_PHASE_STRATEGY;
+   //--- Set Orchestrator debug mode if enabled
+   g_orch.SetDebugMode(InpDebugLog);
    
-   //--- [StateManager] Initialize persistent state
-   g_state.Init(InpMagic);
-   
-   //--- [JournalManager] Setup logging
-   g_journal.SetCSVEnabled(InpJournalEnabled);
-   g_journal.SetCSVPrefix("PASR_Journal");
-   
-   //--- [PerformanceReport] Link to journal
-   g_report.SetJournal(GetPointer(g_journal));
-   
-   //--- [SRManager] Support/Resistance detection
-   if(!g_sr.Init(_Symbol, PERIOD_CURRENT,
-                 InpSRLookback, InpSRMinTouches,
-                 InpSRMergeATR, InpSRMaxZones))
-     {
-      initResult.Fail(INIT_PHASE_STRATEGY, "SRManager", "Init failed");
-      Alert(initResult.ToString());
-      return INIT_FAILED;
-     }
-   
-   //--- [PatternManager] Candlestick pattern recognition
-   g_pattern.Init(_Symbol, PERIOD_CURRENT);
-   
-   //--- [SignalManager] Signal generation engine
-   g_signal.Init(_Symbol, PERIOD_CURRENT,
-                 InpMinConfluence, InpUseTrend, InpUsePatterns,
-                 GetPointer(g_sr), GetPointer(g_pattern));
-   
-   //--- [AI Feature Builder] ML feature extraction
-   g_featBuilder.Init(_Symbol, PERIOD_CURRENT);
-   
-   //--- [AI Stack] Inference, Ensemble, Calibration
-   g_aiInfer.Init();
-   g_ensemble.Init();
-   if(InpLoadWeights) g_ensemble.LoadWeights();
-   
-   //--- [Calibration Bridge] AI score calibration
-   g_calibBridge.SetJournal(GetPointer(g_journal));
-   g_calibBridge.SetHighThresh(InpAIHighThresh);
-   g_calibBridge.SetVetoThresh(InpAIVetoThresh);
-   
-   //--- [FeatureEngine] Advanced statistical features
-   if(InpUseAdvFeatures)
-     {
-      if(!g_featEngine.Init(_Symbol, PERIOD_CURRENT, InpFeatureWindow))
-        {
-         Print("[PASR][WARN] FeatureEngine init failed - using basic features only");
-        }
-      else
-        {
-         Print("[INIT][PHASE3] FeatureEngine initialized with window=", InpFeatureWindow);
-        }
-     }
-   
-   //+------------------------------------------------------------------+
-   //|  PHASE 4: EXECUTION LAYER (Executor Queue, Risk Parameters)      |
-   //+------------------------------------------------------------------+
-   initResult.phase = INIT_PHASE_EXECUTION;
-   
-   //--- [RiskManager] Capital protection circuit breakers
-   g_risk.Init(InpMagic, InpRiskPct, InpMaxDailyLossPct,
-               InpMaxDrawdownPct, InpMaxTradesPerDay, InpMinRR);
-   
-   //--- [PositionManager] Active trade management
-   g_pos.Init(InpMagic,
-               InpUseBE,      InpBEActivateRR,
-               InpUsePartial, InpPartialPct,
-               InpUseTrailing,InpTrailATRMult);
-   
-   //--- [ExitEngine] Exit signal detection
-   g_exit.Init();
-   
-   //--- [CorrelationManager] Portfolio risk control
-   if(InpUseCorrelation)
-     {
-      g_corr.Initialize();
-      Print("[INIT][PHASE4] Correlation risk enabled (threshold=", InpCorrThreshold, ", window=", InpCorrWindow, ")");
-     }
-   
-   //--- [RecoveryManager] Fakeout protection engine
-   g_recovery.Init(GetPointer(g_data), GetPointer(g_bus));
-   g_recovery.SetTrailingThrottle(200);  // throttle trailing to 200ms
-   
-   //--- [Dashboard] On-chart HUD
-   if(InpShowDash)
-     {
-      g_hud.Init(GetPointer(g_journal));
-      ZeroMemory(g_ctx.dash_ctx);
-     }
-   
-#ifdef QA_BUILD
-   //--- [QA] Run initial stress tests if enabled
-   if(InpTestPoolExhaust)
-     {
-      QATestEventPoolExhaustion();
-     }
-   
-   // Initialize QA stress test engine
-   if(!g_qa.Init(InpChaosFrequency, InpChaosSpreadMult, InpTestPoolExhaust))
-     {
-      Print("[PASR][QA][WARN] QAStressTest initialization failed");
-     }
-   
-   // Initialize normal spread baseline for chaos testing
-   g_ctx.normal_spread = GetSpreadPips();
-   PrintFormat("[INIT][PHASE4] Baseline spread: %.1f pips", g_ctx.normal_spread);
-#endif
-   
-   //+------------------------------------------------------------------+
-   //|  INITIALIZATION COMPLETE - Mark context as ready                 |
-   //+------------------------------------------------------------------+
-   g_ctx.SetInitialized(true);
-   g_ctx.last_bar_time = 0;
-   g_ctx.has_plan      = false;
-   g_ctx.regime        = REGIME_RANGING;
-   g_ctx.session       = DetectSession();
-   
-   Print("[PASR] Boot complete — Pure Institutional Architecture ready");
-   Print("[PASR] CExecutor: async mode, queue=20, smart retry enabled");
-   Print("[PASR] CSymbolManager: ", ArraySize(InpSymbols), " symbols, correlation=", InpUseCorrelation ? "ON" : "OFF");
-   Print("[PASR] State encapsulation: g_ctx (STradingContext) is single source of truth");
-   
-   initResult.phase = INIT_PHASE_COMPLETE;
-   initResult.success = true;
+   Print("[PASR] Boot complete — Pure Orchestrator Architecture ready");
+   Print("[PASR] All modules encapsulated in COrchestrator");
+   Print("[PASR] Event handlers delegate exclusively to g_orch");
    
    return INIT_SUCCEEDED;
   }
 
 //+------------------------------------------------------------------+
-//|  OnDeinit — ordered shutdown                                     |
+//|  OnDeinit — PURE ORCHESTRATOR DELEGATION (<10 lines)             |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
    EventKillTimer();
    
-#ifdef PERF_METRICS
-   // Print performance metrics summary
-   PrintFormat("[PASR][PERF] Total ticks: %I64u | Bars: %I64u | Signals: %I64u",
-               g_tickCount, g_barCount, g_signalCount);
-#endif
-   
 #ifdef QA_BUILD
    //--- Print QA statistics from engine
    g_qa.PrintReport();
-   
-   // Legacy stats (for backward compatibility)
-   PrintFormat("[PASR][QA] SHUTDOWN STATS - ticks_processed:%d chaos_triggers:%d alloc_count:%lu",
-               g_tickCounter, (g_lastChaosTime > 0 ? g_tickCounter / InpChaosFrequency : 0),
-               g_allocCount);
 #endif
    
-   //--- Print scanner statistics
-   g_scanner.PrintStats();
+   //--- Delegate ALL deinitialization to Orchestrator
+   g_orch.OnDeinit(reason);
    
-   //--- Print OOP module statistics (Institutional Architecture)
-   int exec_done, exec_failed, exec_retries;
-   double exec_latency;
-   g_executor.GetStatistics(exec_done, exec_failed, exec_retries, exec_latency);
-   PrintFormat("[PASR][EXEC] Total: %d executed | %d failed | %d retries | avg latency: %.1fms",
-               exec_done, exec_failed, exec_retries, exec_latency);
+   //--- EA-level cleanup only
+   if(InpShowDash && InpExportReport) 
+      Print("[PASR] Final report exported");
    
-   long total_ticks, total_bars;
-   int active_symbols;
-   g_symMgr.GetTotalStatistics(total_ticks, total_bars, active_symbols);
-   PrintFormat("[PASR][SYMGR] Total ticks: %I64u | bars: %I64u | active symbols: %d",
-               total_ticks, total_bars, active_symbols);
-   
-   //--- Print exit engine statistics
-   g_exit.PrintStats();
-   
-   //--- Print correlation statistics
-   if(InpUseCorrelation) g_corr.PrintStatus();
-   
-   g_ensemble.SaveWeights();
-   g_calibBridge.ExportCalibrationCSV();
-   if(InpExportReport) g_report.ExportHTML();
-   if(InpShowDash) g_hud.Deinit();
-   g_sr.Deinit();
-   g_data.Deinit();
-   g_bus.Deinit();
-   PrintFormat("[PASR] Shutdown — reason:%d  total_trades:%d",
-               reason, g_journal.GetTotalTrades());
+   PrintFormat("[PASR] Shutdown — reason:%d", reason);
   }
 
 //+------------------------------------------------------------------+
-//|  OnTick — INSTITUTIONAL LOW-LATENCY PATH (<0.3ms)                |
-//|  ONLY critical real-time operations:                             |
+//|  OnTick — PURE ORCHESTRATOR DELEGATION (<10 lines)               |
 //+------------------------------------------------------------------+
 void OnTick()
   {
-#ifdef PERF_METRICS
-   g_tickCount++;
-#endif
-
 #ifdef QA_BUILD
    //--- [QA] Chaos injection (minimal overhead)
-   g_tickCounter++;
-   g_qa.OnTick(_Symbol, g_bus, g_risk);
-   g_chaosActive = g_qa.IsChaosActive();
-   g_allocCount++;
+   g_qa.OnTick(_Symbol, g_orch.GetDataManager().GetEventBus(), g_orch.GetRiskManager());
 #endif
-
-   //--- [TICK PATH 1] Fast spread guard
-   double spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 10000.0;
-   if(spread > InpMaxSpreadPips)
-      return;  // Exit immediately - no heavy processing
-
-   //--- [TICK PATH 2] Update SymbolManager with tick data
-   datetime now = TimeCurrent();
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   g_symMgr.UpdateTick(_Symbol, bid, ask, now);
-
-   //--- [TICK PATH 3] Process executor queue (async orders)
-   g_executor.ProcessQueue();
-
-   //--- [TICK PATH 4] Process deferred EventBus queue (fast)
-   g_bus.ProcessPending();
-
-   //--- [TICK PATH 5] Position management (BE, trailing, partial close)
-   if(g_pos.HasOpenPosition(_Symbol))
-     {
-      double atr = GetATR(_Symbol);
-      g_pos.OnTick(atr);
-      
-      // Quick exit signal check (if enabled)
-      if(InpUseChandelier || InpUseTimeExit || InpUseStructBreak || InpUseProfitFade)
-        {
-         ulong ticket = GetOpenPositionTicket(_Symbol);
-         if(ticket > 0 && PositionSelectByTicket(ticket))
-           {
-            ENUM_ORDER_TYPE pos_type = (ENUM_ORDER_TYPE)PositionGetInteger(POSITION_TYPE);
-            double entry = PositionGetDouble(POSITION_PRICE_OPEN);
-            double price = (pos_type == POSITION_TYPE_BUY) 
-                           ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
-                           : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-            
-            ExitSignal exit_sig = g_exit.CheckExit(_Symbol, pos_type, entry, price);
-            if(exit_sig.reason != EXIT_NONE)
-              {
-               DebugPrint(StringFormat("[%s] Exit signal: %s", _Symbol, exit_sig.description));
-               // Exit execution handled by PositionManager
-              }
-           }
-        }
-     }
-
-   //--- [TICK PATH 6] Recovery price monitoring (lightweight)
-   if(InpRecoveryEnabled)
-      g_recovery.OnPriceUpdate();
-
-   //--- [TICK PATH 7] Dashboard update (only if visible, throttled)
-   if(InpShowDash)
-     {
-      // Only update dashboard every 5th tick to reduce UI overhead
-      static int dash_counter = 0;
-      if(++dash_counter >= 5)
-        {
-         UpdateDashboard();
-         dash_counter = 0;
-        }
-     }
    
-   // NOTE: All heavy computation (SR, patterns, signals, AI) moved to OnTimer()
+   //--- Delegate ALL tick processing to Orchestrator
+   g_orch.OnTick();
+   
+   // NOTE: All position management, recovery, dashboard updates handled internally by COrchestrator
   }
 
 //+------------------------------------------------------------------+
-//|  OnTradeTransaction — journal + recovery + weight update         |
+//|  OnTradeTransaction — PURE ORCHESTRATOR DELEGATION (<10 lines)   |
 //+------------------------------------------------------------------+
 void OnTradeTransaction(
       const MqlTradeTransaction &trans,
       const MqlTradeRequest     &req,
       const MqlTradeResult      &res)
   {
-   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
-   if(!HistoryDealSelect(trans.deal))            return;
-   if(HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != (long)InpMagic) return;
-
-   long dealEntry = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
-
-   //--- v4.01: notify RecoveryManager on position OPEN
-   if(dealEntry == DEAL_ENTRY_IN && InpRecoveryEnabled)
-     {
-      ulong ticket = HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
-      double entryPrice = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
-      int direction = (g_ctx.active_plan.direction == SIGNAL_BUY) ? 1 : -1;
-      g_recovery.OnTradeOpen(ticket, direction, entryPrice);
-      g_ctx.open_ticket = ticket;
-      DebugPrint(StringFormat("RecoveryManager: engine created for ticket=%d", ticket));
-      return;
-     }
-
-   if(dealEntry != DEAL_ENTRY_OUT) return;
-
-   double closePrice = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
-   double pnl        = HistoryDealGetDouble(trans.deal, DEAL_PROFIT)
-                     + HistoryDealGetDouble(trans.deal, DEAL_SWAP)
-                     + HistoryDealGetDouble(trans.deal, DEAL_COMMISSION);
-   bool   isWin      = (pnl > 0);
-   double rr         = 0;
-   double riskPts    = MathAbs(g_ctx.active_plan.entryPrice - g_ctx.active_plan.sl);
-   if(riskPts > 0)
-      rr = (pnl > 0 ? 1 : -1)
-         * MathAbs(closePrice - g_ctx.active_plan.entryPrice) / riskPts;
-
-   //--- v4.01: deactivate recovery engine
-   if(InpRecoveryEnabled && g_ctx.open_ticket > 0)
-     {
-      g_recovery.OnTradeClose(g_ctx.open_ticket);
-      g_ctx.open_ticket = 0;
-     }
-
-   //--- Journal
-   if(g_ctx.has_plan)
-     {
-      g_journal.OnPositionClosed(
-         trans.deal,
-         g_ctx.pos_open_time,
-         g_ctx.active_plan,
-         closePrice, pnl,
-         g_ctx.regime, g_ctx.session,
-         g_ctx.last_ai_score, g_ctx.last_drift,
-         g_ctx.last_ens_model,
-         g_ctx.last_fv,
-         g_pos.IsBEDone(),
-         g_pos.IsPartialDone(),
-         g_pos.IsRunnerActive());
-      g_ctx.has_plan = false;
-     }
-
-   //--- Risk daily P&L update
-   g_risk.OnTradeClosed(pnl);
-
-   //--- Calibration
-   g_calibBridge.LogTradeClose(isWin, rr);
-
-   //--- Ensemble weight update
-   g_ensemble.UpdateWeight(
-      (ENUM_ENSEMBLE_MODEL)g_ctx.last_ens_model, isWin);
-   g_ensemble.SaveWeights();
-
-   //--- Dashboard
-   CDashboardManager::UpdateSignalOutcome(
-      g_ctx.dash_ctx, isWin ? 1 : -1);
-
-   //--- Auto-export
-   if(InpExportReport &&
-      g_journal.GetTotalTrades() % InpReportInterval == 0)
-      g_report.ExportHTML();
-
-   PrintFormat("[PASR] CLOSED %s  PnL:%.2f  RR:%.2f  AI:%.2f  Win:%s",
-               g_ctx.active_plan.direction==SIGNAL_BUY?"BUY":"SELL",
-               pnl, rr, g_ctx.last_ai_score, isWin?"YES":"NO");
+   //--- Delegate ALL trade transaction processing to Orchestrator
+   g_orch.OnTradeTransaction(trans, req, res);
+   
+   // NOTE: Journal, recovery, calibration, ensemble updates handled internally by COrchestrator
   }
 
 //+------------------------------------------------------------------+
-//|  OnTimer — BAR PROCESSING PATH (1-second heartbeat)              |
-//|  ALL heavy computation moved here:                               |
-//|  • New bar detection (multi-symbol batch)                        |
-//|  • Session & regime detection                                    |
-//|  • SR recalculation (cached, incremental)                        |
-//|  • Pattern scanning                                              |
-//|  • Signal generation                                             |
-//|  • AI feature build + inference                                  |
-//|  • Ensemble scoring                                              |
-//|  • Calibration bridge                                            |
-//|  • Risk check + async execution                                  |
-//|  • Correlation matrix update (incremental)                       |
+//|  OnTimer — PURE ORCHESTRATOR DELEGATION (<10 lines)              |
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-#ifdef PERF_METRICS
-   g_barCount++;
-#endif
-
-   //--- [BAR PATH 1] New bar detection
-   datetime barTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-   bool isNewBar = (barTime != g_ctx.last_bar_time);
+   //--- Delegate ALL bar processing to Orchestrator (ProcessNewBar internally)
+   g_orch.OnTimer();
    
-   if(!isNewBar)
-     {
-      // No new bar - skip heavy processing
-      return;
-     }
-   
-   g_ctx.last_bar_time = barTime;
-   DebugPrint(StringFormat("[%s] New bar detected: %s", _Symbol, TimeToString(barTime)));
-
-   //--- [BAR PATH 2] Session detection
-   g_ctx.session = DetectSession();
-
-   //--- [BAR PATH 3] Data update
-   g_data.OnNewBar();
-
-   //--- [BAR PATH 4] Regime detection (optimized with caching)
-   double atr = GetATR(_Symbol);
-   g_ctx.regime = g_adaptCfg.DetectRegime(_Symbol, PERIOD_CURRENT, atr);
-   EffectivePolicy policy = g_adaptCfg.GetEffectivePolicy(g_ctx.regime, g_ctx.session, atr);
-
-   //--- [BAR PATH 5] Recovery new-bar processing
-   if(InpRecoveryEnabled)
-      g_recovery.OnNewBar();
-
-   //--- [BAR PATH 6] Risk circuit breaker check
-   if(!g_risk.IsTradingAllowed(_Symbol))
-     {
-      DebugPrint("Risk circuit breaker active — skip bar");
-      return;
-     }
-   
-   //--- [BAR PATH 7] Correlation matrix check (incremental update)
-   if(InpUseCorrelation)
-     {
-      // Only full recalc every 5 bars, otherwise incremental
-      static int corr_counter = 0;
-      if(++corr_counter >= 5)
-        {
-         if(!g_corr.IsCorrelationSafe(_Symbol, InpCorrThreshold, InpCorrWindow))
-           {
-            DebugPrint(StringFormat("[%s] Correlation guard: blocked", _Symbol));
-            return;
-           }
-         corr_counter = 0;
-        }
-     }
-
-   //--- [BAR PATH 8] SR recalculation (with caching)
-   g_sr.OnNewBar();
-
-   //--- [BAR PATH 9] Pattern scan
-   g_pattern.OnNewBar();
-
-   //--- [BAR PATH 10] Signal generation
-   TradeSignal sig;
-   bool hasSignal = g_signal.GenerateSignal(sig, atr);
-   
-   if(!hasSignal)
-     {
-      DebugPrint("No signal this bar");
-      return;
-     }
-   
-#ifdef PERF_METRICS
-   g_signalCount++;
-#endif
-   
-   DebugPrint(StringFormat("Signal: %s  confluence:%.2f",
-              sig.direction==SIGNAL_BUY?"BUY":"SELL", sig.confluence));
-
-   //--- [BAR PATH 11] AI Feature build + Advanced Statistical Features
-   SRZone zones[20];
-   int nZones = g_sr.GetZones(zones, 20);
-   g_ctx.last_fv = g_featBuilder.Build(sig, atr,
-                                   sig.nearestSupport,
-                                   sig.nearestResistance,
-                                   zones, nZones);
-   
-   // Compute advanced statistical features if enabled
-   FeatureSet adv_features;
-   if(InpUseAdvFeatures && g_featEngine.IsInitialized())
-     {
-      adv_features = g_featEngine.ComputeFeatures();
-      
-      if(adv_features.regime != VOLATILITY_MEDIUM)
-        {
-         DebugPrint(StringFormat("[%s] Volatility regime: %s (z-score=%.2f)",
-                                 _Symbol, 
-                                 EnumToString(adv_features.regime),
-                                 adv_features.z_score));
-        }
-     }
-
-   //--- [BAR PATH 12] Drift check
-   g_ctx.last_drift = g_featBuilder.ComputeDrift(g_ctx.last_fv);
-   
-   // Adjust AI veto threshold based on volatility regime
-   double effective_veto_thresh = InpAIVetoThresh;
-   if(InpUseAdvFeatures && g_featEngine.IsInitialized())
-     {
-      ENUM_VOLATILITY_REGIME regime = g_featEngine.GetCurrentRegime();
-      
-      if(regime == VOLATILITY_HIGH)
-         effective_veto_thresh = InpAIVetoThresh * 1.2;
-      else if(regime == VOLATILITY_EXTREME)
-         effective_veto_thresh = InpAIVetoThresh * 1.5;
-      else if(regime == VOLATILITY_LOW)
-         effective_veto_thresh = InpAIVetoThresh * 0.9;
-     }
-   
-   if(InpUseAI && g_ctx.last_drift > InpDriftVeto)
-     {
-      DebugPrint(StringFormat("Drift veto: %.2f", g_ctx.last_drift));
-      CDashboardManager::PushSignal(g_ctx.dash_ctx, sig.direction, 0, 0);
-      return;
-     }
-
-   //--- [BAR PATH 13] AI Ensemble scoring
-   double patternBonus = g_pattern.GetPatternBonus(sig.direction);
-   
-   double base_ai_score = InpUseAI
-      ? (InpUseEnsemble
-           ? g_ensemble.GetScore(g_ctx.last_fv, sig, patternBonus, g_ctx.last_drift)
-           : g_aiInfer.ForwardPass18(g_ctx.last_fv, patternBonus, g_ctx.last_drift))
-      : sig.confluence;
-   
-   // Apply volatility regime adjustment
-   if(InpUseAdvFeatures && g_featEngine.IsInitialized())
-     {
-      ENUM_VOLATILITY_REGIME regime = g_featEngine.GetCurrentRegime();
-      
-      if(regime == VOLATILITY_HIGH)
-         base_ai_score *= 0.9;
-      else if(regime == VOLATILITY_EXTREME)
-         base_ai_score *= 0.75;
-      else if(regime == VOLATILITY_LOW)
-         base_ai_score = MathMin(1.0, base_ai_score * 1.05);
-     }
-   
-   g_ctx.last_ai_score = base_ai_score;
-   g_ctx.last_ens_model = g_ensemble.GetActiveModel();
-
-   DebugPrint(StringFormat("AI score:%.2f drift:%.2f model:%d",
-                           g_ctx.last_ai_score, g_ctx.last_drift, g_ctx.last_ens_model));
-
-   //--- [BAR PATH 14] Calibration bridge
-   AIScoreOverride ov = g_calibBridge.MapScoreToPolicy(g_ctx.last_ai_score, policy);
-   
-   if(ov.blockTrade)
-     {
-      DebugPrint(StringFormat("CalibBridge veto: score=%.2f", g_ctx.last_ai_score));
-      CDashboardManager::PushSignal(g_ctx.dash_ctx, sig.direction, g_ctx.last_ai_score, 0);
-      return;
-     }
-   
-   EffectivePolicy ep = g_calibBridge.ApplyOverride(policy, ov);
-
-   //--- [BAR PATH 15] Risk sizing (Institutional)
-   if(!g_risk.CanOpenTrade())
-     {
-      DebugPrint("Risk: trade blocked (daily limit or max trades)");
-      return;
-     }
-
-   // Institutional SL calculation: Structural vs ATR-based
-   double slDistance = 0.0;
-   
-   if(InpStructSL)
-     {
-      // Use market structure (Swing High/Low) + buffer
-      double swingLevel = InpStructTrail ? g_sr.GetLastSwingLow(_Symbol) : g_sr.GetMajorSupport(_Symbol);
-      if(swingLevel == 0.0) swingLevel = SymbolInfoDouble(_Symbol, SYMBOL_ASK) - (atr * InpSLBufferATR);
-      slDistance = MathAbs(SymbolInfoDouble(_Symbol, SYMBOL_ASK) - swingLevel);
-     }
-   else
-     slDistance = atr * InpSLBufferATR; // Fallback to ATR
-   
-   // Volatility adjustment for position sizing
-   double volFactor = InpVolatilityAdj ? (1.0 / MathMax(1.0, atr / g_risk.GetTargetATR())) : 1.0;
-   double lotSize = g_risk.CalcLotSize(_Symbol, slDistance, volFactor);
-   
-   // Apply volatility regime position sizing
-   if(InpUseAdvFeatures && g_featEngine.IsInitialized())
-     {
-      ENUM_VOLATILITY_REGIME regime = g_featEngine.GetCurrentRegime();
-      
-      if(regime == VOLATILITY_HIGH)
-         lotSize *= 0.8;
-      else if(regime == VOLATILITY_EXTREME)
-         lotSize *= 0.5;
-      else if(regime == VOLATILITY_LOW)
-         lotSize = MathMin(lotSize * 1.1, lotSize + 0.05);
-     }
-   
-   if(lotSize <= 0)
-     {
-      DebugPrint("Risk: lot size = 0");
-      return;
-     }
-
-   //--- [BAR PATH 16] Build TradePlan
-   TradePlan plan;
-   plan.direction  = sig.direction;
-   plan.entryPrice = (sig.direction == SIGNAL_BUY)
-                     ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
-                     : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   plan.sl         = plan.entryPrice
-                   + ((sig.direction==SIGNAL_BUY ? -1 : 1) * atr * ep.slATRMult);
-   plan.tp         = plan.entryPrice
-                   + ((sig.direction==SIGNAL_BUY ? 1 : -1) * atr * ep.slATRMult * ep.tp1RR);
-   plan.tp2        = plan.entryPrice
-                   + ((sig.direction==SIGNAL_BUY ? 1 : -1) * atr * ep.slATRMult * ep.tp2RR);
-   plan.lot        = lotSize;
-   plan.magic      = InpMagic;
-   plan.comment    = InpComment + "_" + _Symbol;
-
-   double riskPts   = MathAbs(plan.entryPrice - plan.sl);
-   double rewardPts = MathAbs(plan.tp - plan.entryPrice);
-   
-   if(riskPts <= 0 || (rewardPts / riskPts) < InpMinRR)
-     {
-      DebugPrint(StringFormat("RR too low: %.2f", rewardPts/riskPts));
-      return;
-     }
-
-   //--- [BAR PATH 17] Execute trade (Institutional Execution Engine)
-   // Institutional mode: Smart retry with exponential backoff
-   bool executed = false;
-   int retry_count = 0;
-   const int MAX_RETRIES = InpRetryAttempts;
-   const int INITIAL_DELAY_MS = 100;
-   
-   while(!executed && retry_count < MAX_RETRIES)
-     {
-      if(g_executor.OpenTrade(plan))
-        {
-         executed = true;
-        }
-      else
-        {
-         retry_count++;
-         if(retry_count < MAX_RETRIES)
-           {
-            int delay_ms = INITIAL_DELAY_MS * (int)MathPow(2, retry_count - 1);
-            DebugPrint(StringFormat("Trade failed, retry %d/%d in %dms", 
-                                    retry_count, MAX_RETRIES, delay_ms));
-            Sleep(delay_ms);
-           }
-        }
-     }
-   
-   if(!executed)
-     {
-      DebugPrint(StringFormat("Execution failed after %d retries: %d", 
-                              retry_count, GetLastError()));
-      return;
-     }
-
-   g_ctx.active_plan   = plan;
-   g_ctx.has_plan      = true;
-   g_ctx.pos_open_time  = TimeCurrent();
-   g_risk.OnTradeOpened();
-   g_calibBridge.LogTradeOpen(g_ctx.last_ai_score);
-
-   CDashboardManager::PushSignal(g_ctx.dash_ctx, sig.direction, g_ctx.last_ai_score, 0);
-
-   PrintFormat("[PASR][%s] OPENED %s  entry:%.5f  sl:%.5f  tp:%.5f  lots:%.2f  AI:%.2f",
-               _Symbol,
-               plan.direction==SIGNAL_BUY?"BUY":"SELL",
-               plan.entryPrice, plan.sl, plan.tp, plan.lot, g_ctx.last_ai_score);
+   // NOTE: SR, patterns, signals, AI, risk check, execution all handled internally by COrchestrator
   }
 
 //+------------------------------------------------------------------+
-//|  UpdateDashboard                                                 |
+//|  UpdateDashboard — DEPRECATED (moved to Orchestrator)            |
 //+------------------------------------------------------------------+
-void UpdateDashboard()
-  {
-   if(!InpShowDash) return;
-
-   g_ctx.dash_ctx.regime    = g_ctx.regime;
-   g_ctx.dash_ctx.session   = g_ctx.session;
-   g_ctx.dash_ctx.spread    = GetSpreadPips();
-   g_ctx.dash_ctx.aiScore   = g_ctx.last_ai_score;
-   g_ctx.dash_ctx.driftScore= g_ctx.last_drift;
-   g_ctx.dash_ctx.ensembleModel = g_ctx.last_ens_model;
-   g_ctx.dash_ctx.aiVeto    = (g_ctx.last_ai_score < InpAIVetoThresh ||
-                          g_ctx.last_drift   > InpDriftVeto);
-
-   g_ctx.dash_ctx.hasPosition = g_pos.HasOpenPosition(_Symbol);
-   if(g_ctx.dash_ctx.hasPosition)
-     {
-      // Get position info for chart symbol (dashboard shows current chart only)
-      ulong ticket = 0;
-      int total_pos = PositionsTotal();
-      for(int i = total_pos - 1; i >= 0; i--)
-        {
-         ulong t = PositionGetTicket(i);
-         if(t <= 0) continue;
-         if(!PositionSelectByTicket(t)) continue;
-         
-         string pos_sym = PositionGetString(POSITION_SYMBOL);
-         if(pos_sym == _Symbol)
-           {
-            ticket = t;
-            break;
-           }
-        }
-      
-      if(ticket > 0 && PositionSelectByTicket(ticket))
-        {
-         ENUM_ORDER_TYPE pos_type = (ENUM_ORDER_TYPE)PositionGetInteger(POSITION_TYPE);
-         g_ctx.dash_ctx.posDir    = (pos_type == POSITION_TYPE_BUY) ? SIGNAL_BUY : SIGNAL_SELL;
-         g_ctx.dash_ctx.posEntry  = PositionGetDouble(POSITION_PRICE_OPEN);
-         g_ctx.dash_ctx.posSL     = PositionGetDouble(POSITION_SL);
-         g_ctx.dash_ctx.posTP1    = PositionGetDouble(POSITION_TP);
-         g_ctx.dash_ctx.posTP2    = g_ctx.active_plan.tp2;  // Runner TP from active plan
-         g_ctx.dash_ctx.posLots   = PositionGetDouble(POSITION_VOLUME);
-         g_ctx.dash_ctx.posPnL    = g_pos.GetFloatingPnL();
-         g_ctx.dash_ctx.beDone    = g_pos.IsBEDone();
-         g_ctx.dash_ctx.partialDone = g_pos.IsPartialDone();
-        }
-     }
-   else
-     {
-      ZeroMemory(g_ctx.dash_ctx.posDir);
-      g_ctx.dash_ctx.posEntry = g_ctx.dash_ctx.posSL  = 0;
-      g_ctx.dash_ctx.posTP1   = g_ctx.dash_ctx.posTP2 = 0;
-      g_ctx.dash_ctx.posLots  = g_ctx.dash_ctx.posPnL = 0;
-      g_ctx.dash_ctx.beDone   = g_ctx.dash_ctx.partialDone = false;
-     }
-
-   g_hud.Update(g_ctx.dash_ctx);
-  }
+// void UpdateDashboard() - REMOVED: Dashboard updates now handled internally by COrchestrator.OnTick()
+// All legacy helper functions using direct module calls have been eliminated.
+// Migration: Dashboard logic moved to COrchestrator::OnTick() → m_dash.Update()
 
 //+------------------------------------------------------------------+
-//|  OnTester — Performance metrics for optimization                 |
+//|  END OF FILE — Pure Orchestrator Architecture Complete           |
 //+------------------------------------------------------------------+
-double OnTester()
-  {
-#ifdef PERF_METRICS
-   // Calculate custom fitness function for optimizer
-   double totalTrades = g_journal.GetTotalTrades();
-   double winRate = (totalTrades > 0) ? (g_journal.GetWinCount() / totalTrades) : 0;
-   double avgRR = g_journal.GetAverageRR();
    
-   // Custom score: WinRate * AvgRR * sqrt(TradeCount)
-   double score = winRate * avgRR * MathSqrt(MathMax(1, totalTrades));
-   
-   PrintFormat("[PASR][OPT] Fitness Score=%.3f (WinRate=%.2f AvgRR=%.2f Trades=%I64u)",
-               score, winRate, avgRR, (long)totalTrades);
-   
-   return score;
-#else
-   return 0;
-#endif
-  }
-
-//+------------------------------------------------------------------+
-//| END OF PASR_MODULAR.mq5 v10.00 — Institutional Grade             |
-//+------------------------------------------------------------------+

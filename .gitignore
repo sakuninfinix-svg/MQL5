@@ -1,1 +1,41 @@
+```
+# Compiled files
 *.mq5
+*.ex5
+*.mq4
+*.ex4
+
+# Build artifacts
+*.obj
+*.o
+*.out
+
+# Dependencies
+lib/
+Libraries/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# MT4/MT5 specific
+tester/
+Profiles/
+config/
+*.hst
+*.fxt
+*.csv
+*.report
+*.tdf
+*.tpl
+*.xml
+```
