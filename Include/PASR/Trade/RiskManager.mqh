@@ -343,6 +343,7 @@ public:
    
    // ── Convenience method for backward compatibility (NEW v5.30)
    //     Returns true if trading is allowed (circuit breaker not triggered)
+   //     Overload for multi-symbol support (NEW v6.10)
    bool   IsTradingAllowed()  const 
           { 
            // Quick check: if circuit is broken, trading is not allowed
@@ -351,6 +352,16 @@ public:
            // Full check: use Check() with no SL to verify all gates
            RiskCheckResult result = Check(0);
            return result.allowed;
+          }
+   
+   // ── Multi-symbol overload (NEW v6.10)
+   //     Currently ignores symbol parameter (global risk checks only)
+   //     Future versions may implement per-symbol risk counters
+   bool   IsTradingAllowed(const string symbol)  const 
+          { 
+           // Symbol parameter accepted for API compatibility
+           // Risk checks are currently global (account-wide)
+           return IsTradingAllowed();
           }
    
    int    GetOpenTrades()     const { return m_openTrades;    }
