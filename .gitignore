@@ -1,9 +1,9 @@
-```
 # Compiled and build artifacts
 *.pyc
 __pycache__/
 *.o
 *.obj
+*.class
 *.dll
 *.so
 *.a
@@ -28,20 +28,16 @@ venv/
 .vscode/
 .idea/
 
-# System files
-.DS_Store
-Thumbs.db
-
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
 # Build directories
 dist/
 build/
 target/
 .gradle/
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
 # Python specific
 *.pyc
@@ -50,13 +46,8 @@ __pycache__/
 *.pyd
 .Python
 *.so
-.Python
-*.egg-info/
-.eggs/
-.mypy_cache/
-.pytest_cache/
 
-# Compressed files
+# Compression files
 *.zip
 *.gz
 *.tar
@@ -79,4 +70,12 @@ __pycache__/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```
+
+# System files
+.DS_Store
+Thumbs.db
+*.tmp
+
+# Cache directories
+.mypy_cache/
+.pytest_cache/
