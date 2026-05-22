@@ -1,21 +1,37 @@
 ```
-# Compiled and binary files
-*.mqh
+# Compiled files
 *.mq5
+*.ex5
+*.o
+*.obj
+*.dll
+*.so
+*.a
+
+# Build directories
+MQL4/
+MQL5/
+tester/
+testers/
+logs/
+Log/
 
 # Dependencies
-Include/PASR/Core/PASR.Types.mqh
+lib/
+Libraries/
+Include/
 
-# Logs and temp files
-*.log
-*.tmp
-
-# Editors
+# Editor/IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*.tmp
 
-# Environment
-.env
-.env.local
-*.env.*
+# System
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
 ```
