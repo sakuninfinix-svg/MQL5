@@ -12,8 +12,7 @@
 //|     L1.5 Globals    → extern EA inputs (one decl point)          |
 //|     L1.6 Pipeline   → PipelineTypes, PipelineEngine              |
 //|     L2   Infra      → DataManager                                |
-//|     L3   Data       → MarketRegime, ZoneManager stubs,           |
-//|                        SRManager stub                            |
+//|     L3   Data       → MarketRegime, ZoneStruct, SRManager stubs,  |
 //|     L3.5 Analysis   → SRManager (full swing pivot), ZoneManager  |
 //|                        (full S/D impulse-base)   [Phase 3]       |
 //|     L4   Pattern    → PatternManager                             |
@@ -79,8 +78,8 @@
 // ─── L3: Data — Canonical data structures and base classes ─────────────
 // MarketRegime: enum + RegimeSnapshot struct + CMarketRegime stub
 #include "../Data/MarketRegime.mqh"
-// ZoneManager: SDZone struct + CZoneManager stub
-#include "../Data/ZoneManager.mqh"
+// ZoneStruct: SDZone struct (shared data structure)
+#include "../Data/ZoneStruct.mqh"
 // SRManager: SRZone struct + CSRManager stub
 #include "../Data/SRManager.mqh"
 
@@ -89,7 +88,7 @@
 // Note: Includes ../Data/SRManager.mqh internally for SRZone struct
 #include "../Analysis/SRManager.mqh"
 // CAnalysisZoneManager: Supply/Demand impulse-base zone detection
-// Note: Includes ../Data/ZoneManager.mqh internally for SDZone struct
+// Note: Uses SDZone struct from ../Data/ZoneStruct.mqh
 #include "../Analysis/ZoneManager.mqh"
 
 // ─── L4: Analysis — Pattern recognition ──────────────────────────────
