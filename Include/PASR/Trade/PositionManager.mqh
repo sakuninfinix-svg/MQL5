@@ -371,6 +371,40 @@ public:
    void SetBEBuffer(double pts)          { m_beBufferPts     = pts;  }
 
    int  GetRegistryCount() const { return m_count; }
+   
+   // Check if symbol has any open position in registry
+   bool HasOpenPosition(const string symbol) const
+     {
+      for(int i = 0; i < m_count; i++)
+        {
+         if(!m_registry[i].active) continue;
+         
+         // Get position symbol from ticket
+         if(!PositionSelectByTicket(m_registry[i].ticket)) continue;
+         
+         string posSymbol = PositionGetString(POSITION_SYMBOL);
+         if(posSymbol == symbol) return true;
+        }
+      return false;
+     }
+   
+   // Check if symbol has open position of specific type
+   bool HasOpenPosition(const string symbol, ENUM_POSITION_TYPE type) const
+     {
+      for(int i = 0; i < m_count; i++)
+        {
+         if(!m_registry[i].active) continue;
+         
+         if(!PositionSelectByTicket(m_registry[i].ticket)) continue;
+         
+         string posSymbol = PositionGetString(POSITION_SYMBOL);
+         if(posSymbol != symbol) continue;
+         
+         ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+         if(posType == type) return true;
+        }
+      return false;
+     }
   };
 
 typedef CPositionManager PositionManager;

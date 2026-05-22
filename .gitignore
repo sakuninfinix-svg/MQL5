@@ -1,32 +1,25 @@
 ```
 # Compiled files
-*.mq5
+*.mqe
 *.ex5
-*.mq4
 *.ex4
+*.os
+*.hcc
+*.dcc
+*.map
 
-# Build artifacts
-*.dll
-*.so
-*.dylib
-*.exe
-
-# Dependencies
-lib/
-libs/
-
-# Logs and temp files
-*.log
-*.tmp
-*.temp
+# Build directories
+MQL5/Files/
+MQL5/Logs/
+MQL5/Terminal/
 
 # Editor/IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
+*.tmp
 
-# System files
-.DS_Store
-Thumbs.db
+# Logs
+*.log
 ```
