@@ -1,3 +1,4 @@
+```
 # Compiled and build artifacts
 *.pyc
 __pycache__/
@@ -16,32 +17,24 @@ venv/
 .venv/
 .env
 .env.local
-*.env.*
+.env.*
 
-# Logs and temp files
+# Build directories
+dist/
+build/
+target/
 *.log
 *.tmp
 *.swp
-*.swo
 
 # Editors
 .vscode/
 .idea/
 
-# Build and distribution
-dist/
-build/
-target/
-.gradle/
-.mypy_cache/
-.pytest_cache/
+# Coverage reports
 coverage/
 htmlcov/
 .coverage
-
-# System files
-.DS_Store
-Thumbs.db
 
 # Compressed files
 *.zip
@@ -66,3 +59,16 @@ Thumbs.db
 *.tar.bz2
 *.tar.xz
 *.tar.zst
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Caching
+.mypy_cache/
+.pytest_cache/
+.gradle/
+
+# Images (do not ignore)
+# *.png, *.jpg, *.jpeg, *.bmp, *.gif, *.webm - kept in repository
+```
