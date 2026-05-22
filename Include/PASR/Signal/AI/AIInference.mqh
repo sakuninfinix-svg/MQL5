@@ -32,7 +32,7 @@
 #include "AITypes.mqh"
 #include "AIFeatureBuilder.mqh"
 #include "../Core/IManager.mqh"
-#include "../Data/MarketRegime.mqh"
+#include "../Data/RegimeTypes.mqh"
 
 class AIInference
   {

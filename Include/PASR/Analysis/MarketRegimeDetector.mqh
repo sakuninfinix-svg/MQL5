@@ -2,7 +2,8 @@
 //|                                  MarketRegimeDetector.mqh        |
 //|                        Copyright 2024, PASR Architecture         |
 //|                                                                  |
-//| OPTIMIZED v2.00:                                                 |
+//| OPTIMIZED v2.01:                                                 |
+//| - Uses centralized EMarketRegime from RegimeTypes.mqh            |
 //| - Enhanced regime detection with multi-factor analysis           |
 //| - Added crash detection and emergency handling                   |
 //| - Improved parameter adjustment logic                            |
@@ -10,23 +11,13 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, PASR Architecture"
 #property link      "https://pasr.quant"
-#property version   "2.00"
-#property description "Detects market regime (Trending/Ranging/Volatile) with multi-factor analysis (v2.00)"
+#property version   "2.01"
+#property description "Detects market regime (Trending/Ranging/Volatile) with multi-factor analysis (v2.01)"
 
 #include "../Infra/DataManager.mqh"
+#include "../Data/RegimeTypes.mqh"
 
-//+------------------------------------------------------------------+
-//| Market Regime Enumeration - Unified                              |
-//+------------------------------------------------------------------+
-enum EMarketRegime
-{
-   REGIME_UNKNOWN       = 0,  // Insufficient data
-   REGIME_LOW_VOL       = 1,  // Sideways, tight range
-   REGIME_TRENDING_UP   = 2,  // Strong bullish
-   REGIME_TRENDING_DOWN = 3,  // Strong bearish
-   REGIME_HIGH_VOL      = 4,  // Chaotic, news events
-   REGIME_CRASH         = 5   // Extreme move - emergency
-};
+// Remove duplicate enum - use EMarketRegime from RegimeTypes.mqh
 
 //+------------------------------------------------------------------+
 //| Dynamic Parameters Structure                                     |
@@ -209,14 +200,15 @@ public:
    EMarketRegime GetCurrentRegime() const { return m_current_regime; }
    string GetRegimeName(EMarketRegime regime) const
    {
+      // Use centralized mapping from RegimeTypes.mqh logic
       switch(regime)
       {
-         case REGIME_LOW_VOL:       return "LOW_VOL";
-         case REGIME_TRENDING_UP:   return "TREND_UP";
-         case REGIME_TRENDING_DOWN: return "TREND_DOWN";
-         case REGIME_HIGH_VOL:      return "HIGH_VOL";
-         case REGIME_CRASH:         return "CRASH";
-         default:                   return "UNKNOWN";
+         case REGIME_RANGE:       return "RANGE";        // was LOW_VOL
+         case REGIME_TREND_UP:    return "TREND_UP";     // was TRENDING_UP
+         case REGIME_TREND_DOWN:  return "TREND_DOWN";   // was TRENDING_DOWN
+         case REGIME_VOLATILE:    return "VOLATILE";     // was HIGH_VOL
+         case REGIME_CRASH:       return "CRASH";
+         default:                 return "UNKNOWN";
       }
    }
    
@@ -252,7 +244,7 @@ private:
       // Priority 2: High volatility (chaotic market)
       if(volRatio > m_vol_high_thresh)
       {
-         return REGIME_HIGH_VOL;
+         return REGIME_VOLATILE;
       }
       
       // Priority 3: Trending market (strong ADX)
@@ -261,24 +253,24 @@ private:
          // Determine trend direction using DI differential
          if(momScore > 5.0)  // DI+ significantly above DI-
          {
-            return REGIME_TRENDING_UP;
+            return REGIME_TREND_UP;
          }
          else if(momScore < -5.0)  // DI- significantly above DI+
          {
-            return REGIME_TRENDING_DOWN;
+            return REGIME_TREND_DOWN;
          }
          // ADX high but no clear direction = high volatility
-         return REGIME_HIGH_VOL;
+         return REGIME_VOLATILE;
       }
       
       // Priority 4: Low volatility (quiet market)
       if(volRatio < m_vol_low_thresh)
       {
-         return REGIME_LOW_VOL;
+         return REGIME_RANGE;
       }
       
       // Default: Normal/range-bound market
-      return REGIME_LOW_VOL;
+      return REGIME_RANGE;
    }
    
    //--- Apply parameter adjustments based on regime
@@ -286,16 +278,16 @@ private:
    {
       switch(m_current_regime)
       {
-         case REGIME_TRENDING_UP:
-         case REGIME_TRENDING_DOWN:
-            AdjustParamsForTrend(m_current_regime == REGIME_TRENDING_UP);
+         case REGIME_TREND_UP:
+         case REGIME_TREND_DOWN:
+            AdjustParamsForTrend(m_current_regime == REGIME_TREND_UP);
             break;
             
-         case REGIME_HIGH_VOL:
+         case REGIME_VOLATILE:
             AdjustParamsForHighVol();
             break;
             
-         case REGIME_LOW_VOL:
+         case REGIME_RANGE:
             AdjustParamsForLowVol();
             break;
             
