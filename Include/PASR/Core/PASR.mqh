@@ -97,7 +97,7 @@
 // ─── L5b: AI — Neural net inference + AISignalSource plugin ──────────────
 // AISignalSource bridges AIManager confidence score → ISignalSource interface
 #include "../Signal/AI/AISignalSource.mqh"
-#include "../AI/AIManager.mqh"
+#include "../Signal/AI/AIManager.mqh"
 
 // ─── L5c: Regime filter + source plugin (Phase 4) ──────────────────────
 // CRegimeFilter: ADX + ATR percentile + Bollinger Width regime detection
