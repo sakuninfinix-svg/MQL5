@@ -32,6 +32,12 @@ enum ENUM_EVENT_ID
    EVENT_AI_TRAIN_STEP       = 21,
    // Signal-specific
    EVENT_SIGNAL_GENERATED    = 30,
+   // Pipeline & Execution (Fase 3-4)
+   EVENT_ID_PIPELINE_STAGE_COMPLETE = 40,
+   EVENT_ID_ORDER_EXECUTED          = 41,
+   EVENT_ID_ORDER_REQUEST           = 42,
+   EVENT_ID_LATENCY_SIMULATION      = 43,
+   EVENT_ID_REQUOTE_SIMULATED       = 44,
    // Deferred / async
    EVENT_ID_DEFERRED         = 99
   };

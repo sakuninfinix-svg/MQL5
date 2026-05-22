@@ -31,6 +31,9 @@
 //|    L6a ExecutionManager                                          |
 //|    L6b RecoveryManager                                           |
 //|    L7  DashboardManager + inject deps (Risk+Signal+Regime)       |
+//|    L7b SanityManager                      [Phase 5 NEW]          |
+//|    L7c TelemetryRecorder                  [Phase 3 NEW]          |
+//|    L7d LatencySimulator (QA only)         [Phase 4 NEW]          |
 //|                                                                  |
 //|  SIGNAL SOURCE WIRING (all sources + weights):                   |
 //|    PatternSignalSource  w=1.2  VOTER  — price action patterns    |
@@ -40,7 +43,15 @@
 //|      (set w=-1.0 to use VETO mode: VOLATILE blocks all signals)  |
 //|                                                                  |
 //|  CHANGE LOG:                                                     |
-//|  v2.10 (2026-05-21) — Phase 4 wiring:                           |
+//|  v3.02 (2026-05-22) — Phase 3+4 Telemetry + Latency Sim:        |
+//|    + CTelemetryRecorder allocated + init (L7c)                   |
+//|    + CLatencySimulator (QA build only) allocated (L7d)           |
+//|    + CSV export for pipeline latency, slippage, signal metrics   |
+//|    + Backtest latency simulation with requote modeling           |
+//|  v3.01 (2026-05-21) — Phase 5 Circuit Breaker:                  |
+//|    + CSanityManager allocated + init (L7b)                       |
+//|    + Data validation: stale tick, wide spread, price gap         |
+//|  v3.00 (2026-05-21) — Phase 4 wiring:                           |
 //|    + CRegimeFilter allocated + init (L5c)                        |
 //|    + CRegimeSignalSource registered as MULT (w=0.0)              |
 //|      Regime TRENDING → x1.3 score boost                         |
@@ -51,7 +62,8 @@
 //|    + DashboardManager.SetRegimeFilter() call added               |
 //|    + FreeAll(): m_regime + m_srcRegime added                     |
 //|    + PrintSummary(): all managers listed with version            |
-//|  v2.00 (2026-05-21) — Phase 3 complete wiring                   |
+//|  v2.10 (2026-05-21) — Phase 3 complete wiring                   |
+//|  v2.00 (2026-05-21) — Pipeline Architecture                     |
 //|  v1.01 (2026-05-21) — FIX #1/#2/#4                              |
 //+------------------------------------------------------------------+
 
@@ -86,6 +98,10 @@ private:
    CRecoveryManager       *m_recovery;
    CDashboardManager      *m_dash;
    CSanityManager         *m_sanity;    // Phase 5 NEW: Circuit Breaker
+   CTelemetryRecorder     *m_telemetry; // Phase 3 NEW: Metrics Export
+   
+   // ── QA Managers (testing only) ──────────────────────────────────
+   CLatencySimulator      *m_latency_sim; // Phase 4 NEW: Latency Simulation
 
    // ── Signal source plugins (owned) ──────────────────────────────
    PatternSignalSource    *m_srcPattern;
@@ -146,7 +162,7 @@ private:
    void PrintSummary()
      {
       Print("╔══════════════════════════════════════════════════╗");
-      PrintFormat("║  PASR EA v3.01 — %s  %s", _Symbol,
+      PrintFormat("║  PASR EA v3.02 — %s  %s", _Symbol,
                   EnumToString((ENUM_TIMEFRAMES)_Period));
       Print("╠══════════════════════════════════════════════════╣");
       Print("║  Managers:");
@@ -169,6 +185,10 @@ private:
       PrintFormat("║    RecoveryManager        : OK");
       PrintFormat("║    DashboardManager v3    : OK");
       PrintFormat("║    SanityManager   [P5]   : OK  CircuitBreaker=ACTIVE");
+      PrintFormat("║    TelemetryRec  [P3]   : OK  CSV Export=ENABLED");
+      #ifdef PASR_QA_BUILD
+      PrintFormat("║    LatencySim    [P4/QA]: OK  Backtest=ACTIVE");
+      #endif
       Print("╚══════════════════════════════════════════════════╝");
      }
 
@@ -177,6 +197,11 @@ private:
      {
       // Pipeline engine first (non-owning refs, safe to delete before managers)
       if(m_pipeline) { delete m_pipeline; m_pipeline = NULL; }
+      
+      // QA Managers first (testing only)
+      #ifdef PASR_QA_BUILD
+      if(m_latency_sim) { delete m_latency_sim; m_latency_sim = NULL; }
+      #endif
       
       // signal source plugins before managers that hold non-owning ptrs
       if(m_srcRegime)  { delete m_srcRegime;  m_srcRegime=NULL;  }
@@ -196,6 +221,7 @@ private:
       if(m_sr)       { delete m_sr;       m_sr=NULL;       }
       if(m_data)     { delete m_data;     m_data=NULL;     }
       if(m_sanity)   { delete m_sanity;   m_sanity=NULL;   }  // Phase 5 NEW
+      if(m_telemetry){ delete m_telemetry; m_telemetry=NULL; } // Phase 3 NEW
       if(m_cfgMgr)   { delete m_cfgMgr;   m_cfgMgr=NULL;   }
       if(m_bus)      { delete m_bus;      m_bus=NULL;      };
      }
@@ -379,6 +405,16 @@ public:
       sanityCfg.reset_timeout_sec  = 60;
       m_sanity->Initialize(sanityCfg);
 
+      // ── L7c: TelemetryRecorder (Metrics Export) ── Phase 3 NEW ──
+      m_telemetry = new CTelemetryRecorder();
+      if(!InitManager(m_telemetry, "CTelemetryRecorder")) { FreeAll(); return INIT_FAILED; }
+
+      // ── L7d: LatencySimulator (QA Only) ── Phase 4 NEW ───────────
+      #ifdef PASR_QA_BUILD
+      m_latency_sim = new CLatencySimulator();
+      if(!InitManager(m_latency_sim, "CLatencySimulator")) { FreeAll(); return INIT_FAILED; }
+      #endif
+
       // ── L8: Pipeline Engine — Initialize and inject managers ────
       m_pipeline = new CPipelineEngine();
       if(m_pipeline == NULL)
@@ -393,15 +429,19 @@ public:
       m_pipeline->InjectManagers(
          m_data, m_sr, m_zone, m_pattern, m_signal,
          m_ai, m_regime, m_risk, m_exec, m_recovery,
-         m_dash, journal, m_bus, m_sanity
+         m_dash, journal, m_bus, m_sanity, m_telemetry
       );
       m_pipeline->SetDebugMode(m_debugMode);
       m_pipeline->EnableProfiling(m_profiling_enabled);
 
       m_initialised = true;
       PrintSummary();
-      Print("[Orchestrator] Pipeline Engine v2.18 initialized");
+      Print("[Orchestrator] Pipeline Engine v3.00 initialized");
       PrintFormat("  Profiling: %s", m_profiling_enabled ? "ENABLED" : "DISABLED");
+      PrintFormat("  Telemetry: %s", "ACTIVE - CSV Export Enabled");
+      #ifdef PASR_QA_BUILD
+      PrintFormat("  LatencySim: %s", "ACTIVE (Backtest Mode Only)");
+      #endif
       return INIT_SUCCEEDED;
      }
 

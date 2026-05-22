@@ -125,6 +125,11 @@
 // Circuit Breaker: auto-pause trading on anomalous market conditions
 #include "../Infra/SanityManager.mqh"
 
+// ─── L5g: Telemetry Recorder (Phase 3 - Metrics Export) ───────────────
+// Centralized logging of pipeline latency, execution slippage, signal metrics
+// Exports to CSV for post-trade analysis
+#include "../Infra/TelemetryRecorder.mqh"
+
 // ─── L6: Trade — Execution, Recovery, Trade plan ──────────────────────
 #include "../Trade/TradePlan.mqh"
 #include "../Trade/ExecutionManager.mqh"
@@ -141,6 +146,7 @@
 #ifdef PASR_QA_BUILD
    #include "../QA/Audit.mqh"
    #include "../QA/Test.mqh"
+   #include "../QA/LatencySimulator.mqh"  // Fase 4: Latency Simulation
    #include "../Infra/Optimizations/Optimizations.mqh"
    #include "../Infra/Optimizations/BatchProcessor.mqh"
    #include "../Infra/Optimizations/MemoryPool.mqh"
