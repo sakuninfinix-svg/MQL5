@@ -15,9 +15,7 @@
 
 #include "../Core/IManager.mqh"
 #include "../Analysis/MarketRegimeDetector.mqh"
-
-// Re-use SRZone struct from Data/SRManager.mqh
-#include "../Data/SRManager.mqh"
+#include "../Data/SRStruct.mqh"
 
 //+------------------------------------------------------------------+
 //| Configuration constants                                          |
