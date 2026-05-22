@@ -658,11 +658,42 @@ void OnTick()
       //--- [C] Process deferred EventBus queue
       g_bus.ProcessPending();
 
-      //--- [D] Position management (BE, partial, trailing)
+      //--- [D] Position management (BE, partial, trailing) + ExitEngine (NEW v6.10)
       //        + recovery price-tick monitoring
       double atrC = GetATR();
       if(g_pos.HasOpenPosition())
+        {
          g_pos.OnTick(atrC);
+         // Check for smart exit signals (Chandelier, Time-Based, Structure Break)
+         // Note: ExitEngine requires position type and prices for proper exit calculation
+         if(InpUseChandelier || InpUseTimeExit || InpUseStructBreak || InpUseProfitFade)
+           {
+            // Get current position info
+            ulong ticket = PositionGetTicket(0); // Get first open position
+            if(ticket > 0)
+              {
+               if(PositionSelectByTicket(ticket))
+                 {
+                  ENUM_ORDER_TYPE pos_type = (ENUM_ORDER_TYPE)PositionGetInteger(POSITION_TYPE);
+                  double entry_price = PositionGetDouble(POSITION_PRICE_OPEN);
+                  double current_price = (pos_type == POSITION_TYPE_BUY) 
+                                         ? SymbolInfoDouble(current_symbol, SYMBOL_BID)
+                                         : SymbolInfoDouble(current_symbol, SYMBOL_ASK);
+                  
+                  ExitSignal exit_sig = g_exit.CheckExit(current_symbol, pos_type, entry_price, current_price);
+                  
+                  if(exit_sig.reason != EXIT_NONE)
+                    {
+                     DebugPrint(StringFormat("[%s] Exit signal: %s (Reason: %s)", 
+                                            current_symbol, 
+                                            exit_sig.description,
+                                            EnumToString(exit_sig.reason)));
+                     // Exit will be handled by PositionManager or ExecutionManager
+                    }
+                 }
+              }
+           }
+        }
       if(InpRecoveryEnabled)
          g_recovery.OnPriceUpdate();
 
@@ -693,10 +724,19 @@ void OnTick()
       if(InpRecoveryEnabled)
          g_recovery.OnNewBar();
 
-      //--- [I] Risk daily reset check
-      if(!g_risk.IsTradingAllowed())
+      //--- [I] Risk daily reset check + Correlation Check (NEW v6.10)
+      if(!g_risk.IsTradingAllowed(current_symbol))
         {
          DebugPrint("Risk circuit breaker active — skip bar");
+         if(InpShowDash) UpdateDashboard();
+         continue;
+        }
+      
+      //--- [I2] Correlation Matrix Check (NEW v6.10)
+      // Block entry if current symbol has high correlation with existing positions
+      if(InpUseCorrelation && !g_corr.IsCorrelationSafe(current_symbol, InpCorrThreshold, InpCorrWindow))
+        {
+         DebugPrint(StringFormat("[%s] Correlation guard: blocked due to high correlation with existing positions", current_symbol));
          if(InpShowDash) UpdateDashboard();
          continue;
         }
