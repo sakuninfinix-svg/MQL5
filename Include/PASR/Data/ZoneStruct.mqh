@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                            Data/ZoneStruct.mqh   |
 //|  Shared SDZone structure for Supply/Demand zone detection        |
-//|  Used by both Data/ZoneManager.mqh and Analysis/ZoneManager.mqh  |
+//|  Used by Analysis/ZoneManager.mqh and other components           |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __DATA_ZONE_STRUCT_MQH__

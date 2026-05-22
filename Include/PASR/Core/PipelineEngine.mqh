@@ -27,6 +27,7 @@
 
 #include "PipelineTypes.mqh"
 #include "../Infra/DataManager.mqh"
+#include "../Data/ZoneStruct.mqh"      // SDZone struct definition
 #include "../Analysis/SRManager.mqh"
 #include "../Analysis/ZoneManager.mqh"
 #include "../Analysis/PatternManager.mqh"
