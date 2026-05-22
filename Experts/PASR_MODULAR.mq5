@@ -1,12 +1,12 @@
 //+------------------------------------------------------------------+
 //|  PASR_MODULAR.mq5                                                |
 //|  Expert Advisor: PASR (Price Action Support Resistance)          |
-//|  Version: 11.00 — Pure Institutional Architecture                |
+//|  Version: 12.00 — Pipeline Architecture with Orchestrator        |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "11.00"
-#property description "PASR Model - Pure Institutional Multi-Strategy System"
+#property version     "12.00"
+#property description "PASR Model - Pipeline Architecture with Dynamic Orchestration"
 #property strict
 
 //--- Compilation Flags
@@ -19,6 +19,7 @@
 #include <PASR/Core/PASR_Executor.mqh>
 #include <PASR/Core/PASR_SymbolManager.mqh>
 #include <PASR/Core/PASR.Types.mqh>
+#include <PASR/Core/Orchestrator.mqh>
 
 //--- Core
 #include <PASR/Core/Config/Manager.mqh>
@@ -171,59 +172,46 @@ sinput bool    InpJournalEnabled  = true;    // Enable CSV journal
 sinput bool    InpDebugLog        = false;   // Verbose debug logging
 
 //+------------------------------------------------------------------+
-//|  MODULE INSTANCES — PURE INSTITUTIONAL ARCHITECTURE              |
+//|  MODULE INSTANCES — PIPELINE ARCHITECTURE WITH ORCHESTRATOR      |
 //+------------------------------------------------------------------+
-//--- OOP CORE MODULES (Primary Execution Engine)
+//--- PIPELINE CORE: Orchestrator coordinates all modules
+COrchestrator        g_orchestrator;     // Main pipeline coordinator
 CExecutor            g_executor;         // Async order executor (SOLE execution engine)
 CSymbolManager       g_symMgr;           // Multi-symbol manager
 
-//--- Legacy modules (institutional grade components - NO execution logic)
-CEventBus            g_bus;
-CDataManager         g_data;
-CStateManager        g_state;
-CAdaptiveConfig      g_adaptCfg;
-CJournalManager      g_journal;
-CPerformanceReport   g_report;
-CSRManager           g_sr;
-CPatternManager      g_pattern;
-CSignalManager       g_signal;
-CRiskManager         g_risk;
-// NOTE: g_exec (CExecutionManager) REMOVED - all execution via g_executor
-CPositionManager     g_pos;
-CExitEngine          g_exit;            
-CCorrelationManager  g_corr;            
-CRecoveryManager     g_recovery;        
-CAIFeatureBuilder    g_featBuilder;
-CAIInference         g_aiInfer;
-CAIEnsemble          g_ensemble;
-CAICalibrationBridge g_calibBridge;
-CFeatureEngine       g_featEngine;      
-CDashboardManager    g_hud;
-CSymbolScanner       g_scanner;         
+//--- Pipeline Stage Modules (managed by Orchestrator)
+CEventBus            g_bus;              // Event-driven communication
+CDataManager         g_data;             // Market data feed
+CStateManager        g_state;            // State persistence
+CAdaptiveConfig      g_adaptCfg;         // Dynamic regime adaptation
+CJournalManager      g_journal;          // Trade journaling
+CPerformanceReport   g_report;           // Performance analytics
+CSRManager           g_sr;               // Support/Resistance detection
+CPatternManager      g_pattern;          // Pattern recognition
+CSignalManager       g_signal;           // Signal generation
+CRiskManager         g_risk;             // Risk circuit breakers
+CPositionManager     g_pos;              // Active position management
+CExitEngine          g_exit;             // Exit signal detection
+CCorrelationManager  g_corr;             // Portfolio correlation
+CRecoveryManager     g_recovery;         // Fakeout recovery
+CAIFeatureBuilder    g_featBuilder;      // AI feature engineering
+CAIInference         g_aiInfer;          // AI inference engine
+CAIEnsemble          g_ensemble;         // Ensemble voting
+CAICalibrationBridge g_calibBridge;      // AI calibration
+CFeatureEngine       g_featEngine;       // Statistical features
+CDashboardManager    g_hud;              // On-chart dashboard
+CSymbolScanner       g_scanner;          // Multi-symbol scanner
 
 //--- QA & Stress Test Module
 #ifdef QA_BUILD
-CQAStressTest        g_qa;             
+CQAStressTest        g_qa;               // Chaos engineering
 #endif
 
 //--- Global Trading Context (Single Source of Truth)
 STradingContext      g_ctx;              // Encapsulated runtime state
 
-//--- LEGACY GLOBALS REMOVED - All state now in g_ctx:
-//    g_ctx.last_bar_time     → g_ctx.last_bar_time
-//    g_ctx.active_plan      → g_ctx.active_plan
-//    g_ctx.has_plan         → g_ctx.has_plan
-//    g_ctx.pos_open_time     → g_ctx.pos_open_time
-//    g_ctx.open_ticket      → g_ctx.open_ticket
-//    g_ctx.last_fv          → g_ctx.last_fv
-//    g_ctx.last_ai_score     → g_ctx.last_ai_score
-//    g_ctx.last_drift       → g_ctx.last_drift
-//    g_ctx.last_ens_model    → g_ctx.last_ens_model
-//    g_ctx.regime          → g_ctx.regime
-//    g_ctx.session         → g_ctx.session
-//    g_ctx.dash_ctx         → g_ctx.dash_ctx
-//    g_ctx.current_spread   → g_ctx.current_spread
-//    g_currentATR      → g_ctx.current_atr
+//--- DEPRECATED: All legacy globals migrated to g_ctx.STradingContext
+//    Previous scattered variables now centralized in single struct
 
 //+------------------------------------------------------------------+
 //|  HELPERS — INSTITUTIONAL ARCHITECTURE                            |
