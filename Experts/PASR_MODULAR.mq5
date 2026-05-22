@@ -1,18 +1,19 @@
 //+------------------------------------------------------------------+
 //|  PASR_MODULAR.mq5                                                |
 //|  Expert Advisor: PASR (Price Action Support Resistance)          |
-//|  Version: 9.00                                                   |
+//|  Version: 10.00 — Institutional Grade                            |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "9.00"
-#property description "PASR Model - Price Action Support Resistance"
+#property version     "10.00"
+#property description "PASR Model - Institutional Multi-Strategy System"
 #property strict
 
 //--- Compilation Flags
 #define QA_BUILD          // Enable stress testing & chaos engineering
 #define PERF_METRICS      // Enable performance counters
 #define OOP_ARCHITECTURE  // Enable OOP divide & conquer architecture
+#define INST_MODE         // Enable Institutional Mode features
 
 //--- NEW CORE MODULES v9.00
 #include <PASR/Core/PASR_Executor.mqh>
@@ -57,96 +58,100 @@
 #endif
 
 //+------------------------------------------------------------------+
-//|  INPUT PARAMETERS — grouped by module                            |
+//|  INPUT PARAMETERS — Institutional Configuration                  |
 //+------------------------------------------------------------------+
 
-//--- [MULTI-SYMBOL] ← v5.00: new group
+//--- [INSTITUTIONAL RISK] ← v10.00: Core Capital Protection
+sinput group "=== INSTITUTIONAL RISK MANAGEMENT ==="
+input double   InpRiskPct         = 1.0;    // Risk per Trade (% of Equity)
+input double   InpMaxDailyLossPct = 3.0;    // Daily Loss Circuit Breaker (%)
+input double   InpMaxDrawdownPct  = 10.0;   // Global Drawdown Halt (%)
+input bool     InpVolatilityAdj   = true;   // Adjust Size by ATR Volatility
+input int      InpPyramidLevels   = 3;      // Scale-in Tranches (0=Disabled)
+input double   InpPyramidSpacing  = 0.5;    // Tranche Distance (ATR Multiplier)
+
+//--- [MARKET STRUCTURE] ← v10.00: Structural Stops & Targets
+sinput group "=== MARKET STRUCTURE LOGIC ==="
+input bool     InpStructSL        = true;   // Use Swing High/Low for SL
+input double   InpSLBufferATR     = 1.5;    // Buffer for Structural SL (ATR)
+input bool     InpStructTrail     = true;   // Trail based on Market Structure
+input bool     InpUseChandelier   = true;   // Chandelier Exit for Runners
+input double   InpChanATRMult     = 3.0;    // Chandelier ATR Multiplier
+input int      InpChanPeriod      = 22;     // Chandelier Lookback
+
+//--- [MULTI-SYMBOL] ← Scalable Portfolio Execution
 sinput group "=== MULTI-SYMBOL SCANNER ==="
-input string   InpSymbols[]       = {"EURUSD", "GBPUSD", "USDJPY"}; // Symbol list
-input double   InpMaxSpreadPts    = 30.0;   // Max spread in points
-input bool     InpCheckSession    = false;  // Check trading session
-input int      InpSessionStart    = 0;      // Session start hour (UTC)
-input int      InpSessionEnd      = 24;     // Session end hour (UTC)
+input string   InpSymbols[]       = {"EURUSD", "GBPUSD", "USDJPY"}; // Symbol List
+input double   InpMaxSpreadPts    = 30.0;   // Max Spread in Points
+input bool     InpCheckSession    = false;  // Check Trading Session
+input int      InpSessionStart    = 0;      // Session Start Hour (UTC)
+input int      InpSessionEnd      = 24;     // Session End Hour (UTC)
 
-//--- [CORRELATION] ← v6.10: new group
+//--- [CORRELATION] ← Portfolio Risk Control
 sinput group "=== CORRELATION RISK ==="
-input bool     InpUseCorrelation  = true;   // Enable correlation check
-input double   InpCorrThreshold   = 0.80;   // Max allowed correlation
-input int      InpCorrWindow      = 20;     // Correlation lookback bars
+input bool     InpUseCorrelation  = true;   // Enable Correlation Check
+input double   InpCorrThreshold   = 0.80;   // Max Allowed Correlation
+input int      InpCorrWindow      = 20;     // Correlation Lookback Bars
 
-//--- [EXIT ENGINE] ← v6.10: new group
-sinput group "=== SMART EXIT LOGIC ==="
-input bool     InpUseChandelier   = true;   // Use Chandelier trailing stop
-input double   InpChanATRMult     = 3.0;    // Chandelier ATR multiplier
-input int      InpChanPeriod      = 22;     // Chandelier lookback period
-input bool     InpUseTimeExit     = false;  // Exit if no profit after N bars
-input int      InpTimeExitBars    = 10;     // Time exit threshold
-input bool     InpUseStructBreak  = true;   // Exit on structure break
-input bool     InpUseProfitFade   = true;   // Exit on momentum fade
-
-//--- [RISK]
-sinput group "=== RISK MANAGEMENT ==="
-input double   InpRiskPct         = 1.0;    // Risk per trade (%)
-input double   InpMaxDailyLossPct = 3.0;    // Max daily loss (%)
-input double   InpMaxDrawdownPct  = 10.0;   // Circuit-breaker DD (%)
-input int      InpMaxTradesPerDay = 5;      // Max trades/day
-input double   InpMinRR           = 1.5;    // Minimum R:R to trade
-
-//--- [SR]
-sinput group "=== SUPPORT / RESISTANCE ==="
-input int      InpSRLookback      = 200;    // SR lookback bars
-input int      InpSRMinTouches    = 2;      // Min touches for zone
-input double   InpSRMergeATR      = 0.5;    // Merge threshold (ATR multiplier)
-input int      InpSRMaxZones      = 20;     // Max active zones
-
-//--- [SIGNAL]
+//--- [SIGNAL & CONFLUENCE] ← High-Probability Setup Filter
 sinput group "=== SIGNAL ENGINE ==="
-input double   InpMinConfluence   = 0.60;   // Min signal confluence
-input double   InpMaxSpreadPips   = 2.0;    // Max allowed spread (pips)
-input bool     InpUsePatterns     = true;   // Use candlestick patterns
-input bool     InpUseTrend        = true;   // Use trend filter
+input double   InpMinConfluence   = 0.60;   // Min Signal Confluence Score
+input double   InpMaxSpreadPips   = 2.0;    // Max Allowed Spread (Pips)
+input bool     InpUsePatterns     = true;   // Use Candlestick Patterns
+input bool     InpUseTrend        = true;   // Use Trend Filter
+input int      InpMinBarsConfirm  = 2;      // Minimum Confirmation Bars
 
-//--- [TRADE]
+//--- [EXECUTION] ← Low-Latency Order Management
 sinput group "=== TRADE EXECUTION ==="
-input double   InpSLATRMult       = 1.5;    // SL = N * ATR
-input double   InpTP1RR           = 1.5;    // TP1 R:R
-input double   InpTP2RR           = 3.0;    // TP2 R:R (runner)
-input bool     InpUseBE           = true;   // Enable break-even
-input double   InpBEActivateRR    = 1.0;    // BE activates at R:R
-input bool     InpUsePartial      = true;   // Enable partial close
-input double   InpPartialPct      = 50.0;   // Partial close %
-input bool     InpUseTrailing     = true;   // Enable trailing stop
+input int      InpMaxSlippage     = 15;     // Max Slippage (Points)
+input int      InpRetryAttempts   = 3;      // Smart Retry Count
+input bool     InpAsyncMode       = true;   // Asynchronous Processing
+input double   InpMinRR           = 1.5;    // Minimum R:R to Trade
+input double   InpTP1RR           = 1.5;    // TP1 R:R (Partial)
+input double   InpTP2RR           = 3.0;    // TP2 R:R (Runner)
+
+//--- [POSITION MANAGEMENT] ← Active Trade Handling
+sinput group "=== POSITION MANAGEMENT ==="
+input bool     InpUseBE           = true;   // Enable Break-Even
+input double   InpBEActivateRR    = 1.0;    // BE Activates at R:R
+input bool     InpUsePartial      = true;   // Enable Partial Close
+input double   InpPartialPct      = 50.0;   // Partial Close %
+input bool     InpUseTrailing     = true;   // Enable Trailing Stop
 input double   InpTrailATRMult    = 1.0;    // Trail = N * ATR
+input bool     InpUseTimeExit     = false;  // Exit if No Profit after N Bars
+input int      InpTimeExitBars    = 10;     // Time Exit Threshold
+input bool     InpUseStructBreak  = true;   // Exit on Structure Break
+input bool     InpUseProfitFade   = true;   // Exit on Momentum Fade
 
-//--- [RECOVERY]  ← v4.01: new group
+//--- [RECOVERY] ← Fakeout Protection
 sinput group "=== RECOVERY ENGINE ==="
-input bool     InpRecoveryEnabled = true;   // Enable fakeout recovery
-input int      InpMaxRecovAttempts= 3;      // Max recovery attempts per trade
-input int      InpRecovCooldown   = 3;      // Recovery cooldown (bars)
-input int      InpMaxTradeDays    = 5;      // Force-close after N days (0=off)
+input bool     InpRecoveryEnabled = true;   // Enable Fakeout Recovery
+input int      InpMaxRecovAttempts= 3;      // Max Recovery Attempts per Trade
+input int      InpRecovCooldown   = 3;      // Recovery Cooldown (Bars)
+input int      InpMaxTradeDays    = 5;      // Force-Close after N Days (0=Off)
 
-//--- [AI]
+//--- [AI] ← Machine Learning Filtering
 sinput group "=== AI ENGINE ==="
-input bool     InpUseAI           = true;   // Enable AI scoring
-input double   InpAIVetoThresh    = 0.40;   // AI veto below score
-input double   InpDriftVeto       = 0.60;   // Drift veto above
-input double   InpAIHighThresh    = 0.80;   // High-confidence threshold
-input bool     InpUseEnsemble     = true;   // Use ensemble voting
-input bool     InpLoadWeights     = true;   // Load saved ensemble weights
-input int      InpFeatureWindow   = 20;     // Feature engine rolling window
-input bool     InpUseAdvFeatures  = true;   // Use advanced statistical features
+input bool     InpUseAI           = true;   // Enable AI Scoring
+input double   InpAIVetoThresh    = 0.40;   // AI Veto Below Score
+input double   InpDriftVeto       = 0.60;   // Drift Veto Above
+input double   InpAIHighThresh    = 0.80;   // High-Confidence Threshold
+input bool     InpUseEnsemble     = true;   // Use Ensemble Voting
+input bool     InpLoadWeights     = true;   // Load Saved Ensemble Weights
+input int      InpFeatureWindow   = 20;     // Feature Engine Rolling Window
+input bool     InpUseAdvFeatures  = true;   // Use Advanced Statistical Features
 
-//--- [DASHBOARD]
+//--- [DASHBOARD] ← Monitoring & Reporting
 sinput group "=== DASHBOARD ==="
-input bool     InpShowDash        = true;   // Show on-chart HUD
-input bool     InpShowAIPanel     = true;   // Show AI panel
-input bool     InpExportReport    = true;   // Export HTML report on deinit
-input int      InpReportInterval  = 50;     // Export every N trades
+input bool     InpShowDash        = true;   // Show On-Chart HUD
+input bool     InpShowAIPanel     = true;   // Show AI Panel
+input bool     InpExportReport    = true;   // Export HTML Report on Deinit
+input int      InpReportInterval  = 50;     // Export Every N Trades
 
-//--- [QA & STRESS TEST] ← v5.20: NEW group (only active if QA_BUILD is defined)
+//--- [QA & STRESS TEST] ← Institutional Validation
 sinput group "=== QA & STRESS TEST (DEV ONLY) ==="
-input bool     InpEnableChaos     = false;  // Randomly inject errors if QA_BUILD is set
-input int      InpChaosFrequency  = 100;    // Trigger chaos every N ticks
+input bool     InpEnableChaos     = false;  // Randomly Inject Errors if QA_BUILD
+input int      InpChaosFrequency  = 100;    // Trigger Chaos Every N Ticks
 input double   InpChaosSpreadMult = 5.0;    // Spread spike multiplier during chaos
 input bool     InpTestPoolExhaust = false;  // Test EventPool exhaustion fallback
 
@@ -453,11 +458,16 @@ int OnInit()
    g_risk.Init(InpMagic, InpRiskPct, InpMaxDailyLossPct,
                InpMaxDrawdownPct, InpMaxTradesPerDay, InpMinRR);
 
-   //--- [11] Execution Manager
+   //--- [11] Execution Manager (Institutional)
+   #ifdef INST_MODE
+   g_exec.Init(InpMagic, InpComment,
+               InpMaxSlippage, InpRetryAttempts, InpAsyncMode);
+   #else
    g_exec.Init(InpMagic, InpComment,
                InpSLATRMult, InpTP1RR, InpTP2RR);
+   #endif
 
-   //--- [12] Position Manager
+   //--- [12] Position Manager (Institutional)
    g_pos.Init(InpMagic,
                InpUseBE,      InpBEActivateRR,
                InpUsePartial, InpPartialPct,
@@ -958,14 +968,35 @@ void OnTimer()
    
    EffectivePolicy ep = g_calibBridge.ApplyOverride(policy, ov);
 
-   //--- [BAR PATH 15] Risk sizing
+   //--- [BAR PATH 15] Risk sizing (Institutional)
    if(!g_risk.CanOpenTrade())
      {
       DebugPrint("Risk: trade blocked (daily limit or max trades)");
       return;
      }
 
+   // Institutional SL calculation: Structural vs ATR-based
+   double slDistance = 0.0;
+   
+   #ifdef INST_MODE
+   if(InpStructSL)
+     {
+      // Use market structure (Swing High/Low) + buffer
+      double swingLevel = InpStructTrail ? g_sr.GetLastSwingLow(_Symbol) : g_sr.GetMajorSupport(_Symbol);
+      if(swingLevel == 0.0) swingLevel = SymbolInfoDouble(_Symbol, SYMBOL_ASK) - (atr * InpSLBufferATR);
+      slDistance = MathAbs(SymbolInfoDouble(_Symbol, SYMBOL_ASK) - swingLevel);
+     }
+   else
+     slDistance = atr * InpSLBufferATR; // Fallback to ATR
+   
+   // Volatility adjustment for position sizing
+   double volFactor = InpVolatilityAdj ? (1.0 / MathMax(1.0, atr / g_risk.GetTargetATR())) : 1.0;
+   double lotSize = g_risk.CalcLotSize(_Symbol, slDistance, volFactor);
+   
+   #else
+   // Legacy Retail Mode
    double lotSize = g_risk.CalcLotSize(_Symbol, atr * InpSLATRMult, ep.lotMultiplier);
+   #endif
    
    // Apply volatility regime position sizing
    if(InpUseAdvFeatures && g_featEngine.IsInitialized())

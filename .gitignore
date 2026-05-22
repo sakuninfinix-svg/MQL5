@@ -4,24 +4,37 @@
 *.ex5
 *.mq4
 *.ex4
-*.obj
 *.o
+*.obj
+*.dll
+*.so
+*.a
+*.lib
+*.exe
+*.out
 
 # Dependencies
 lib/
+Libraries/
 include/
+Include/
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
+*.swo
 
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Environment
-.env
-.env.local
-*.env.*
+# Build outputs
+MQL5/
+MQL4/
+Tester/
+History/
+Logs/
 ```
