@@ -1,24 +1,7 @@
 //+------------------------------------------------------------------+
-//|  PASR_MODULAR.mq5 — v9.00                                        |
-//|  Price Action Support/Resistance Expert Advisor                  |
-//|                                                                  |
-//|  Model: PASR (Price Action Support Resistance)                   |
-//|  Architecture: OOP Divide & Conquer with Async Execution         |
-//|                                                                  |
-//|  Core Modules:                                                   |
-//|   - CExecutor        : Async order execution & retry logic       |
-//|   - CSymbolManager   : Multi-symbol load balancing               |
-//|   - Config, EventBus : Core configuration & event handling       |
-//|   - DataManager      : Historical data management                |
-//|   - SRDetector       : Support/Resistance detection              |
-//|   - PatternDetector  : Candlestick pattern recognition           |
-//|   - SignalGenerator  : Trading signal generation                 |
-//|   - RiskManager      : Position sizing & risk control            |
-//|   - PositionManager  : Trade management (BE, Trailing)           |
-//|   - RecoveryModule   : Drawdown recovery system                  |
-//|   - AI Module        : Adaptive learning & optimization          |
-//|                                                                  |
-//|  Magic: 20260521  Version: 9.00                                  |
+//|  PASR_MODULAR.mq5                                                |
+//|  Expert Advisor: PASR (Price Action Support Resistance)          |
+//|  Version: 9.00                                                   |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
@@ -27,7 +10,6 @@
 #property strict
 
 //--- Compilation Flags
-//#define DEBUG_MODE      // Enable verbose logging
 #define QA_BUILD          // Enable stress testing & chaos engineering
 #define PERF_METRICS      // Enable performance counters
 #define OOP_ARCHITECTURE  // Enable OOP divide & conquer architecture
@@ -37,8 +19,8 @@
 #include <PASR/Core/PASR_SymbolManager.mqh>
 
 //--- Core
+#include <PASR/Core/Config/Manager.mqh>
 #include <PASR/Core/EventBus.mqh>
-#include <PASR/Core/Config.mqh>
 //--- Infra
 #include <PASR/Infra/DataManager.mqh>
 #include <PASR/Infra/StateManager.mqh>
@@ -1166,5 +1148,5 @@ double OnTester()
   }
 
 //+------------------------------------------------------------------+
-//| END OF PASR_MODULAR.mq5 v8.00 — Adaptive Multi-Symbol            |
+//| END OF PASR_MODULAR.mq5 v9.00 — OOP Divide & Conquer             |
 //+------------------------------------------------------------------+

@@ -1,31 +1,24 @@
 ```
-# Compiled and binary files
+# Compiled and build artifacts
 *.mq5
 *.ex5
 *.mq4
 *.ex4
+*.obj
+*.o
 
 # Dependencies
 lib/
-Libraries/
+include/
 
-# Build outputs
-tester/
-testers/
-Profiles/
-profiles/
-Templates/
-templates/
 # Logs and temp files
 *.log
 *.tmp
-*.bak
+*.swp
 
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
 # Environment
 .env
