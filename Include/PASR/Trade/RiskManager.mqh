@@ -340,6 +340,19 @@ public:
 
    // ── Status accessors
    bool   IsCircuitBroken()   const { return m_circuitBroken; }
+   
+   // ── Convenience method for backward compatibility (NEW v5.30)
+   //     Returns true if trading is allowed (circuit breaker not triggered)
+   bool   IsTradingAllowed()  const 
+          { 
+           // Quick check: if circuit is broken, trading is not allowed
+           if(m_circuitBroken) return false;
+           
+           // Full check: use Check() with no SL to verify all gates
+           RiskCheckResult result = Check(0);
+           return result.allowed;
+          }
+   
    int    GetOpenTrades()     const { return m_openTrades;    }
    int    GetConsecLoss()     const { return m_consecLoss;    }
    double GetDailyLoss()      const { return m_dailyLoss;     }

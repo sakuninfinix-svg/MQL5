@@ -1,68 +1,35 @@
-# Compiled and build artifacts
-*.pyc
-__pycache__/
-*.o
-*.obj
-*.exe
-*.dll
-*.so
-*.a
-*.out
+```
+# Compiled files
+*.mq5
+*.mqh
+*.ex5
+*.ex4
 
 # Dependencies
-node_modules/
-venv/
-.venv/
-.env
-.env.local
-.env.*
+lib/
+Libraries/
 
-# Logs and temp files
-*.log
+# Build artifacts
+tester/
+testers/
+History/
+history/
+Profiles/
+profiles/
+
+# Temporary files
 *.tmp
-*.swp
+*.temp
+*.log
 
-# Editors
+# Editor files
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Build directories
-dist/
-build/
-target/
-.gradle/
-
-# Python specific
-*.pyc
-__pycache__/
-*.pyo
-*.pyd
-
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
-
-# Compression files
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
+# Environment
+.env
+.env.local
+*.env.*
+```
