@@ -1,12 +1,12 @@
+```
 # Compiled and binary files
 *.pyc
-*.class
 *.o
+*.obj
 *.exe
 *.dll
 *.so
 *.a
-*.obj
 *.out
 
 # Dependencies
@@ -19,26 +19,49 @@ build/
 target/
 .gradle/
 
-# Editor/IDE files
+# Editors/IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*.tmp
 
-# System/Environment files
+# System/Environment
 .DS_Store
 Thumbs.db
 .env
 .env.local
 *.env.*
 
-# Logs and coverage
+# Logs and temp files
 *.log
+*.tmp
+
+# Coverage
 coverage/
 htmlcov/
 .coverage
 
-# Build artifacts
-julia-*/
-zig*/
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+```
