@@ -13,22 +13,34 @@
 //+------------------------------------------------------------------+
 #include "../../Data/RegimeTypes.mqh" // Untuk EMarketRegime
 //+------------------------------------------------------------------+
-// Enum Jenis Pola Candlestick Utama
-enum EPatternType
+// Enum Jenis Pola Candlestick Utama (Unified untuk PatternManager)
+// Compatible dengan SPatternVote di PatternManager.mqh
+enum ENUM_PATTERN_TYPE
   {
-   PATTERN_NONE          = 0,  // Tidak ada pola
-   PATTERN_PINBAR_BULL   = 1,  // Pinbar Bullish (Hammer)
-   PATTERN_PINBAR_BEAR   = 2,  // Pinbar Bearish (Shooting Star)
-   PATTERN_ENGULF_BULL   = 3,  // Bullish Engulfing
-   PATTERN_ENGULF_BEAR   = 4,  // Bearish Engulfing
-   PATTERN_INSIDE_BAR    = 5,  // Inside Bar
-   PATTERN_OUTSIDE_BAR   = 6,  // Outside Bar
-   PATTERN_DOJI          = 7,  // Doji
-   PATTERN_HARAMI_BULL   = 8,  // Bullish Harami
-   PATTERN_HARAMI_BEAR   = 9,  // Bearish Harami
-   PATTERN_MORNING_STAR  = 10, // Morning Star (3 candle)
-   PATTERN_EVENING_STAR  = 11  // Evening Star (3 candle)
+   PATTERN_NONE                = 0,  // Tidak ada pola
+   PATTERN_PINBAR              = 1,  // Pinbar (reversal - direction determined by context)
+   PATTERN_ENGULFING           = 2,  // Engulfing (reversal)
+   PATTERN_INSIDE_BAR          = 3,  // Inside Bar (continuation/breakout)
+   PATTERN_INSIDE_BAR_BREAKOUT = 4,  // Inside Bar Breakout
+   PATTERN_FAKEY               = 5,  // Fakey (false breakout trap)
+   PATTERN_BOTTOM              = 6,  // Tweezer Bottom/Top
+   PATTERN_DOJI                = 7,  // Doji (indecision)
+   PATTERN_HARAMI              = 8,  // Harami (reversal)
+   PATTERN_OUTSIDE_BAR         = 9,  // Outside Bar (volatility expansion)
+   PATTERN_MORNING_STAR        = 10, // Morning Star (3-candle reversal)
+   PATTERN_EVENING_STAR        = 11  // Evening Star (3-candle reversal)
   };
+
+// Alias untuk backward compatibility dengan EPatternType
+typedef ENUM_PATTERN_TYPE EPatternType;
+
+// Alias konstanta untuk backward compatibility
+#define PATTERN_PINBAR_BULL   PATTERN_PINBAR
+#define PATTERN_PINBAR_BEAR   PATTERN_PINBAR
+#define PATTERN_ENGULF_BULL   PATTERN_ENGULFING
+#define PATTERN_ENGULF_BEAR   PATTERN_ENGULFING
+#define PATTERN_HARAMI_BULL   PATTERN_HARAMI
+#define PATTERN_HARAMI_BEAR   PATTERN_HARAMI
 //+------------------------------------------------------------------+
 // Struktur Data Sinyal Pola
 struct SPatternSignal
@@ -55,27 +67,29 @@ struct SPatternSignal
      {
       switch(type)
         {
-         case PATTERN_PINBAR_BULL:  return "Pinbar Bull";
-         case PATTERN_PINBAR_BEAR:  return "Pinbar Bear";
-         case PATTERN_ENGULF_BULL:  return "Engulf Bull";
-         case PATTERN_ENGULF_BEAR:  return "Engulf Bear";
-         case PATTERN_INSIDE_BAR:   return "Inside Bar";
-         case PATTERN_OUTSIDE_BAR:  return "Outside Bar";
-         case PATTERN_DOJI:         return "Doji";
-         case PATTERN_HARAMI_BULL:  return "Harami Bull";
-         case PATTERN_HARAMI_BEAR:  return "Harami Bear";
-         case PATTERN_MORNING_STAR: return "Morning Star";
-         case PATTERN_EVENING_STAR: return "Evening Star";
-         default:                   return "None";
+         case PATTERN_PINBAR:              return "Pinbar";
+         case PATTERN_ENGULFING:           return "Engulfing";
+         case PATTERN_INSIDE_BAR:          return "Inside Bar";
+         case PATTERN_INSIDE_BAR_BREAKOUT: return "Inside Bar Breakout";
+         case PATTERN_FAKEY:               return "Fakey";
+         case PATTERN_BOTTOM:              return "Tweezer";
+         case PATTERN_DOJI:                return "Doji";
+         case PATTERN_HARAMI:              return "Harami";
+         case PATTERN_OUTSIDE_BAR:         return "Outside Bar";
+         case PATTERN_MORNING_STAR:        return "Morning Star";
+         case PATTERN_EVENING_STAR:        return "Evening Star";
+         default:                          return "None";
         }
      }
      
+   // Note: Direction sekarang ditentukan oleh context (dir parameter di PatternManager)
+   // Method ini tetap ada untuk backward compatibility
    string Direction() const
      {
-      if(type == PATTERN_PINBAR_BULL || type == PATTERN_ENGULF_BULL || 
-         type == PATTERN_HARAMI_BULL || type == PATTERN_MORNING_STAR) return "BULLISH";
-      if(type == PATTERN_PINBAR_BEAR || type == PATTERN_ENGULF_BEAR || 
-         type == PATTERN_HARAMI_BEAR || type == PATTERN_EVENING_STAR) return "BEARISH";
+      // Untuk pola reversal tradisional
+      if(type == PATTERN_MORNING_STAR) return "BULLISH";
+      if(type == PATTERN_EVENING_STAR) return "BEARISH";
+      // Pola lain memerlukan konteks direction dari hasil deteksi
       return "NEUTRAL";
      }
   };

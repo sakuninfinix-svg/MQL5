@@ -12,6 +12,7 @@
 #include "../Core/IManager.mqh"
 #include "../Data/RegimeTypes.mqh"
 #include "../Analysis/MarketRegimeDetector.mqh"
+#include "PatternTypes.mqh"  // ENUM_PATTERN_TYPE definition
 #include <Arrays/ArrayObj.mqh>
 
 //+------------------------------------------------------------------+

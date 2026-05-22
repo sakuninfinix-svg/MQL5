@@ -4,12 +4,12 @@
 __pycache__/
 *.o
 *.obj
-*.class
 *.exe
 *.dll
 *.so
 *.a
 *.out
+*.class
 
 # Dependencies
 node_modules/
@@ -23,18 +23,54 @@ venv/
 dist/
 build/
 target/
+.gradle/
+
+# Python specific
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+.env/
+.env.local
+.env.*
+.env~local
+.env~*
+.env.*
+.env.local.*
+.env.*.local
+
+# Logs and temp files
 *.log
 *.tmp
 *.swp
+*.swo
 
-# Editors
-.vscode/
-.idea/
+# OS generated files
+.DS_Store
+Thumbs.db
 
 # Coverage reports
 coverage/
 htmlcov/
 .coverage
+
+# Editor specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# MyPy cache
+.mypy_cache/
+# PyTest cache
+.pytest_cache/
 
 # Compressed files
 *.zip
@@ -59,16 +95,4 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Caching
-.mypy_cache/
-.pytest_cache/
-.gradle/
-
-# Images (do not ignore)
-# *.png, *.jpg, *.jpeg, *.bmp, *.gif, *.webm - kept in repository
 ```
