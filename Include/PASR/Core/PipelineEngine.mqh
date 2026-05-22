@@ -26,7 +26,25 @@
 #define __CORE_PIPELINE_ENGINE_MQH__
 
 #include "PipelineTypes.mqh"
-// Note: JournalManager included via forward declaration to avoid circular deps
+#include "../Infra/DataManager.mqh"
+#include "../Analysis/SRManager.mqh"
+#include "../Analysis/ZoneManager.mqh"
+#include "../Analysis/PatternManager.mqh"
+#include "../Signal/SignalManager.mqh"
+#include "../AI/AIManager.mqh"
+#include "../Analysis/RegimeFilter.mqh"
+#include "../Risk/RiskManager.mqh"
+#include "../Trade/ExecutionManager.mqh"
+#include "../Trade/RecoveryManager.mqh"
+#include "../UI/DashboardManager.mqh"
+#include "../Infra/JournalManager.mqh"
+#include "EventBus.mqh"
+#include "../Infra/SanityManager.mqh"       // Phase 1
+#include "../Infra/TelemetryRecorder.mqh"   // Phase 3
+#include "../Risk/AdaptiveParameterManager.mqh" // Phase 5
+#include "../Analysis/MarketRegimeDetector.mqh" // Phase 5
+#include "LatencyOptimizer.mqh"             // Phase 6
+#include "AsyncOrderManager.mqh"            // Phase 6
 
 // Forward declarations for manager classes (avoid circular dependencies)
 class CDataManager;
@@ -64,7 +82,12 @@ private:
    CDashboardManager      *m_dash;
    CJournalManager        *m_journal;
    CEventBus              *m_bus;
-   CAdaptiveParameterManager *m_adaptive;  // Phase 5 NEW
+   CSanityManager         *m_sanity;     // Phase 1: Circuit Breaker
+   CTelemetryRecorder     *m_telemetry;  // Phase 3: Metrics Export
+   CAdaptiveParameterManager *m_adaptive;  // Phase 5: Dynamic Params
+   CMarketRegimeDetector  *m_regime_det; // Phase 5: Regime Detection
+   CLatencyOptimizer      *m_optimizer;  // Phase 6: Low Latency
+   CAsyncOrderManager     *m_async_orders; // Phase 6: Async Execution
    
    // Profiling state
    PipelineReport         m_report;
@@ -430,7 +453,8 @@ public:
       : m_data(NULL), m_sr(NULL), m_zone(NULL), m_pattern(NULL),
         m_signal(NULL), m_ai(NULL), m_regime(NULL), m_risk(NULL),
         m_exec(NULL), m_recovery(NULL), m_dash(NULL), m_journal(NULL),
-        m_bus(NULL), m_adaptive(NULL),
+        m_bus(NULL), m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL),
+        m_regime_det(NULL), m_optimizer(NULL), m_async_orders(NULL),
         m_profiling_enabled(true), m_debug_mode(false)
      {
       m_report.Reset();
@@ -455,7 +479,12 @@ public:
                        CDashboardManager *dash,
                        CJournalManager *journal,
                        CEventBus *bus,
-                       CAdaptiveParameterManager *adaptive = NULL)  // Phase 5 NEW
+                       CSanityManager *sanity = NULL,
+                       CTelemetryRecorder *telemetry = NULL,
+                       CAdaptiveParameterManager *adaptive = NULL,
+                       CMarketRegimeDetector *regime_det = NULL,
+                       CLatencyOptimizer *optimizer = NULL,
+                       CAsyncOrderManager *async_orders = NULL)
      {
       m_data = data;
       m_sr = sr;
@@ -470,7 +499,12 @@ public:
       m_dash = dash;
       m_journal = journal;
       m_bus = bus;
-      m_adaptive = adaptive;  // Phase 5 NEW
+      m_sanity = sanity;
+      m_telemetry = telemetry;
+      m_adaptive = adaptive;
+      m_regime_det = regime_det;
+      m_optimizer = optimizer;
+      m_async_orders = async_orders;
      }
    
    // Execute full pipeline

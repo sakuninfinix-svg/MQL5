@@ -1,1 +1,47 @@
-Nothing should be ignored based on the provided file changes, as they consist only of source code files (.mqh files) without any build artifacts, dependencies, or temporary files.
+```
+# MetaTrader/MT4/MT5 specific
+*.ex4
+*.ex5
+*.mqh
+*.mq4
+*.mq5
+tester/
+terminal/
+config/
+Logs/
+
+# Dependencies
+Include/PASR/*/node_modules/
+Include/PASR/*/venv/
+Include/PASR/*/.venv/
+Include/PASR/*/lib/
+Include/PASR/*/libs/
+
+# Build artifacts
+Include/PASR/*/build/
+Include/PASR/*/dist/
+Include/PASR/*/target/
+Include/PASR/*/__pycache__/
+Include/PASR/*/.mypy_cache/
+Include/PASR/*/.pytest_cache/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# OS specific
+.DS_Store
+Thumbs.db
+```
