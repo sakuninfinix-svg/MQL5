@@ -294,21 +294,25 @@ DashContext       g_dashCtx;
 void DebugPrint(string msg)
   { if(InpDebugLog) Print("[PASR_DBG] ", msg); }
 
-double GetATR(int period = 14)
+double GetATR(const string symbol, int period = 14)
   {
    double atr[];
    ArraySetAsSeries(atr, true);
-   int h = iATR(_Symbol, PERIOD_CURRENT, period);
+   int h = iATR(symbol, PERIOD_CURRENT, period);
    if(h == INVALID_HANDLE) return 0;
    CopyBuffer(h, 0, 0, 1, atr);
    IndicatorRelease(h);
    return (ArraySize(atr) > 0) ? atr[0] : 0;
   }
 
-double GetSpreadPips()
+double GetSpreadPips(const string symbol = NULL)
   {
-   long sp = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   return sp * _Point * 10000.0;
+   string sym = (symbol == NULL || symbol == "") ? _Symbol : symbol;
+   long sp = SymbolInfoInteger(sym, SYMBOL_SPREAD);
+   double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+   int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+   double pip_size = (digits == 3 || digits == 5) ? point * 10 : point;
+   return sp * pip_size;
   }
 
 ENUM_TRADING_SESSION DetectSession()
@@ -660,7 +664,7 @@ void OnTick()
 
       //--- [D] Position management (BE, partial, trailing) + ExitEngine (NEW v6.10)
       //        + recovery price-tick monitoring
-      double atrC = GetATR();
+      double atrC = GetATR(current_symbol);
       if(g_pos.HasOpenPosition(current_symbol))
         {
          g_pos.OnTick(atrC);
@@ -728,7 +732,7 @@ void OnTick()
       g_data.OnNewBar();
 
       //--- [H] Regime detection
-      double atr = GetATR();
+      double atr = GetATR(current_symbol);
       g_regime = g_adaptCfg.DetectRegime(current_symbol, PERIOD_CURRENT, atr);
       EffectivePolicy policy = g_adaptCfg.GetEffectivePolicy(
                                  g_regime, g_session, atr);
