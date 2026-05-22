@@ -50,7 +50,7 @@ struct EvalContext
    double emaDistNorm;
    double sessionNorm;
 
-   // V3.02: Advanced statistical features from FeatureEngine
+   // V3.02: Advanced statistical features (computed inline by AIFeatureBuilder)
    double zScore;            // Price Z-score (standardized position)
    double skewness;          // Return distribution asymmetry
    double kurtosis;          // Tail risk measure
