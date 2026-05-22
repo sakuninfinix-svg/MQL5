@@ -92,17 +92,23 @@ private:
    CPatternManager        *m_pattern;
    CSignalManager         *m_signal;
    AIManager              *m_ai;
-   CRegimeFilter          *m_regime;    // Phase 4 NEW
+   CMarketRegimeDetector  *m_regime_det; // Phase 5: Market Regime Detection
+   CRegimeFilter          *m_regime;     // Phase 4: Legacy Regime Filter
    CRiskManager           *m_risk;
    CExecutionManager      *m_exec;
    CRecoveryManager       *m_recovery;
    CDashboardManager      *m_dash;
-   CSanityManager         *m_sanity;    // Phase 5 NEW: Circuit Breaker
-   CTelemetryRecorder     *m_telemetry; // Phase 3 NEW: Metrics Export
-   CAdaptiveParameterManager *m_adaptive; // Phase 5 NEW: Dynamic Parameters
+   CSanityManager         *m_sanity;     // Phase 1: Circuit Breaker
+   CTelemetryRecorder     *m_telemetry;  // Phase 3: Metrics Export
+   CAdaptiveParameterManager *m_adaptive; // Phase 5: Dynamic Parameters
+   
+   // ── Phase 6: Low Latency Components ─────────────────────────────
+   CLatencyOptimizer      *m_optimizer;  // Ultra-low latency engine
+   CAsyncOrderManager     *m_async_orders; // Async order execution
+   CHighFreqTimer         *m_hf_timer;   // High-frequency polling
    
    // ── QA Managers (testing only) ──────────────────────────────────
-   CLatencySimulator      *m_latency_sim; // Phase 4 NEW: Latency Simulation
+   CLatencySimulator      *m_latency_sim; // Phase 4: Latency Simulation
 
    // ── Signal source plugins (owned) ──────────────────────────────
    PatternSignalSource    *m_srcPattern;
@@ -200,6 +206,11 @@ private:
       // Pipeline engine first (non-owning refs, safe to delete before managers)
       if(m_pipeline) { delete m_pipeline; m_pipeline = NULL; }
       
+      // Phase 6: Low Latency Components
+      if(m_hf_timer)    { delete m_hf_timer;    m_hf_timer=NULL;    }
+      if(m_async_orders){ delete m_async_orders;m_async_orders=NULL;}
+      if(m_optimizer)   { delete m_optimizer;   m_optimizer=NULL;   }
+      
       // QA Managers first (testing only)
       #ifdef PASR_QA_BUILD
       if(m_latency_sim) { delete m_latency_sim; m_latency_sim = NULL; }
@@ -215,6 +226,7 @@ private:
       if(m_recovery) { delete m_recovery; m_recovery=NULL; }
       if(m_exec)     { delete m_exec;     m_exec=NULL;     }
       if(m_risk)     { delete m_risk;     m_risk=NULL;     }
+      if(m_regime_det){ delete m_regime_det; m_regime_det=NULL; } // Phase 5 NEW
       if(m_regime)   { delete m_regime;   m_regime=NULL;   }
       if(m_ai)       { delete m_ai;       m_ai=NULL;       }
       if(m_signal)   { delete m_signal;   m_signal=NULL;   }
@@ -222,7 +234,7 @@ private:
       if(m_zone)     { delete m_zone;     m_zone=NULL;     }
       if(m_sr)       { delete m_sr;       m_sr=NULL;       }
       if(m_data)     { delete m_data;     m_data=NULL;     }
-      if(m_sanity)   { delete m_sanity;   m_sanity=NULL;   }  // Phase 5 NEW
+      if(m_sanity)   { delete m_sanity;   m_sanity=NULL;   }  // Phase 1 NEW
       if(m_telemetry){ delete m_telemetry; m_telemetry=NULL; } // Phase 3 NEW
       if(m_adaptive) { delete m_adaptive; m_adaptive=NULL; }  // Phase 5 NEW
       if(m_cfgMgr)   { delete m_cfgMgr;   m_cfgMgr=NULL;   }
@@ -284,13 +296,14 @@ public:
    COrchestrator()
       : m_data(NULL), m_sr(NULL), m_zone(NULL),
         m_pattern(NULL), m_signal(NULL), m_ai(NULL),
-        m_regime(NULL), m_risk(NULL),
+        m_regime_det(NULL), m_regime(NULL), m_risk(NULL),
         m_exec(NULL), m_recovery(NULL), m_dash(NULL),
+        m_optimizer(NULL), m_async_orders(NULL), m_hf_timer(NULL),
         m_srcPattern(NULL), m_srcSR(NULL),
         m_srcAI(NULL), m_srcRegime(NULL),
         m_bus(NULL), m_cfgMgr(NULL),
         m_pipeline(NULL),
-        m_adaptive(NULL),
+        m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL),
         m_lastBarTime(0), m_debugMode(false), 
         m_initialised(false), m_profiling_enabled(true)
      {
@@ -422,6 +435,24 @@ public:
                              m_cfg.Risk.TakeProfitPoints, 
                              m_cfg.Risk.MaxRiskPercent);
 
+      // ── L7e: MarketRegimeDetector (Phase 5) ───────────────────────
+      m_regime_det = new CMarketRegimeDetector();
+      if(!InitManager(m_regime_det, "CMarketRegimeDetector")) { FreeAll(); return INIT_FAILED; }
+      m_regime_det->Initialize(_Symbol, _Period);
+      
+      // ── L7f: Phase 6 Low Latency Components ───────────────────────
+      m_optimizer = new CLatencyOptimizer();
+      if(!InitManager(m_optimizer, "CLatencyOptimizer")) { FreeAll(); return INIT_FAILED; }
+      m_optimizer->Initialize(100); // 100 order buffer slots
+      
+      m_async_orders = new CAsyncOrderManager();
+      if(!InitManager(m_async_orders, "CAsyncOrderManager")) { FreeAll(); return INIT_FAILED; }
+      m_async_orders->Initialize(m_optimizer, m_exec);
+      
+      m_hf_timer = new CHighFreqTimer();
+      if(!InitManager(m_hf_timer, "CHighFreqTimer")) { FreeAll(); return INIT_FAILED; }
+      m_hf_timer->Start(10); // 10ms polling interval for low latency
+
       // ── L7d: LatencySimulator (QA Only) ── Phase 4 NEW ───────────
       #ifdef PASR_QA_BUILD
       m_latency_sim = new CLatencySimulator();
@@ -442,7 +473,8 @@ public:
       m_pipeline->InjectManagers(
          m_data, m_sr, m_zone, m_pattern, m_signal,
          m_ai, m_regime, m_risk, m_exec, m_recovery,
-         m_dash, journal, m_bus, m_sanity, m_telemetry, m_adaptive
+         m_dash, journal, m_bus, m_sanity, m_telemetry, m_adaptive,
+         m_regime_det, m_optimizer, m_async_orders
       );
       m_pipeline->SetDebugMode(m_debugMode);
       m_pipeline->EnableProfiling(m_profiling_enabled);
