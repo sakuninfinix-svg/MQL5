@@ -103,12 +103,12 @@
 // MIGRATED v2.00 (2026-05-22): AIManager deprecated, using CAIOrchestrator (26-dim)
 // AISignalSource bridges CAIOrchestrator inference score → ISignalSource interface
 #include "../Signal/AI/AITypes.mqh"           // Core types & constants (AI_FEATURE_DIM=26)
-#include "../Signal/AI/FeatureEngine.mqh"     // Advanced statistical features (Z-score, skew, kurtosis)
-#include "../Signal/AI/AIFeatureBuilder.mqh"  // 26-dim feature engineering
+#include "../Signal/AI/AIFeatureBuilder.mqh"  // 26-dim feature engineering (includes Z-score, skew, kurtosis)
 #include "../Signal/AI/AIInference.mqh"       // Expert routing + forward pass
 #include "../Signal/AI/AIOrchestrator.mqh"    // CAIOrchestrator: model mgmt + inference
 #include "../Signal/AI/AISignalSource.mqh"    // Bridge: CAIOrchestrator → SignalManager
 // AIManager.mqh REMOVED (was deprecated 8-dim legacy system)
+// FeatureEngine.mqh REMOVED (dead code - functionality merged into AIFeatureBuilder)
 
 // ─── L5c: Regime filter + source plugin (Phase 4) ──────────────────────
 // CRegimeFilter: ADX + ATR percentile + Bollinger Width regime detection
