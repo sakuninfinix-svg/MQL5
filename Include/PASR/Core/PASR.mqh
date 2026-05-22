@@ -77,7 +77,7 @@
 
 // ─── L3: Data — Canonical data structures and base classes ─────────────
 // MarketRegime: enum + RegimeSnapshot struct + CMarketRegime stub
-#include "../Data/MarketRegime.mqh"
+#include "../Data/RegimeTypes.mqh"
 // SRStruct: SRZone struct definition
 #include "../Data/SRStruct.mqh"
 

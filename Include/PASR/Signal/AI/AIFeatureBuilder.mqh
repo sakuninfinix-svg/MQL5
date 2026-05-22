@@ -52,7 +52,7 @@
 
 #include "AITypes.mqh"
 #include "../Core/IManager.mqh"
-#include "../Data/MarketRegime.mqh"
+#include "../Data/RegimeTypes.mqh"
 
 // Confirm dim matches AITypes.mqh
 #ifndef AI_FEATURE_DIM
