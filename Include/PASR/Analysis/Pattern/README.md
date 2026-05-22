@@ -1,136 +1,200 @@
-//+------------------------------------------------------------------+
-//| Include/PASR/Analysis/Pattern/README.md                          |
-//|                                                                  |
-//| Pattern Recognition Module Documentation                         |
-//|                                                                  |
-//+------------------------------------------------------------------+
+# Pattern Module - Institutional Grade Architecture v2.0
 
-## 📁 Struktur File
+## 📁 Struktur Folder Baru
 
 ```
-/Include/PASR/Analysis/Pattern/
-├── PatternTypes.mqh        # ENUM_PATTERN_TYPE dan struktur data
-├── CandleUtils.mqh         # [BARU] Utility fungsi candlestick
-├── Evaluators.mqh          # [BARU] Class evaluator untuk setiap pattern
-├── FakeoutDetector.mqh     # [BARU] Deteksi false breakout & liquidity grab
-├── ScoreEngine.mqh         # [BARU] Engine scoring terpusat
-├── PatternManager.mqh      # Manager utama (menggunakan semua modul di atas)
-└── README.md               # Dokumentasi ini
+Pattern/
+├── PatternTypes.mqh              # ENUM definitions & type aliases
+├── PatternManager.mqh            # Main orchestrator (legacy compatibility)
+├── CandleUtils.mqh               # Candle analysis utilities
+├── Evaluators.mqh                # Legacy evaluators (deprecated)
+├── FakeoutDetector.mqh           # Fakeout detection
+├── ScoreEngine.mqh               # Scoring engine
+├── Config/
+│   └── PatternConfig.mqh         # Dynamic parameter management
+├── Context/
+│   └── PatternContext.mqh        # Rich context enrichment
+├── Strategies/
+│   ├── IPatternStrategy.mqh      # Abstract strategy interface
+│   ├── PinbarStrategy.mqh        # Pinbar detection strategy
+│   ├── EngulfingStrategy.mqh     # Engulfing detection strategy
+│   └── PatternStrategyFactory.mqh # Strategy factory & pool
+└── README.md                     # This file
 ```
 
-## 📊 ENUM_PATTERN_TYPE Values
+## 🎯 Peningkatan Arsitektur
 
-| Enum Value | Name | Description |
-|------------|------|-------------|
-| 0 | PATTERN_NONE | Tidak ada pola |
-| 1 | PATTERN_PINBAR | Pinbar (reversal) |
-| 2 | PATTERN_ENGULFING | Engulfing (reversal) |
-| 3 | PATTERN_INSIDE_BAR | Inside Bar |
-| 4 | PATTERN_INSIDE_BAR_BREAKOUT | Inside Bar Breakout |
-| 5 | PATTERN_FAKEY | Fakey (false breakout) |
-| 6 | PATTERN_BOTTOM | Tweezer Bottom/Top |
-| 7 | PATTERN_DOJI | Doji (indecision) |
-| 8 | PATTERN_HARAMI | Harami (reversal) |
-| 9 | PATTERN_OUTSIDE_BAR | Outside Bar |
-| 10 | PATTERN_MORNING_STAR | Morning Star (3-candle) |
-| 11 | PATTERN_EVENING_STAR | Evening Star (3-candle) |
+### 1. **Strategic Pattern Detection**
+- Menggunakan **Strategy Pattern** untuk deteksi yang modular
+- Setiap pattern memiliki strategi terpisah yang dapat di-customize
+- Mudah menambahkan pattern baru tanpa mengubah kode existing
 
-## 🔧 Usage
+### 2. **Dynamic Configuration**
+```cpp
+CPatternConfigManager config;
+config.Init();
+config.SetRegime(REGIME_TRENDING_STRONG);  // Auto-adjust parameters
 
-```mql5
-#include <PASR/Analysis/Pattern/PatternManager.mqh>
-#include <PASR/Analysis/Pattern/PatternTypes.mqh>
-#include <PASR/Analysis/Pattern/CandleUtils.mqh>
-#include <PASR/Analysis/Pattern/Evaluators.mqh>
-#include <PASR/Analysis/Pattern/FakeoutDetector.mqh>
-#include <PASR/Analysis/Pattern/ScoreEngine.mqh>
+SPinbarParams params = config.GetPinbarParams();
+params.minTailRatio = 0.7;  // Override if needed
 ```
 
-## 🏗️ Architecture Notes (v2.01)
+### 3. **Context Enrichment**
+- **Market Context**: Regime, volatility, trend strength, session
+- **Location Context**: S/R confluence, Fibonacci, psychological levels
+- **MTF Context**: Multi-timeframe alignment
+- **Volume Context**: Volume spikes, divergences, momentum
 
-### New Modules Added:
+```cpp
+CPatternContext context;
+context.Init();
 
-1. **CandleUtils.mqh** - Utility functions for candlestick analysis
-   - Basic OHLC accessors with bounds checking
-   - Derived metrics (range, body, wicks)
-   - Pattern helpers (IsInsideBar, IsOutsideBar, IsDoji)
-   - ATR normalization utilities
-   - Multi-candle comparison functions
+SMarketContext marketCtx;
+marketCtx.regime = REGIME_TRENDING_STRONG;
+marketCtx.atr = 0.0050;
+context.SetMarketContext(marketCtx);
 
-2. **Evaluators.mqh** - Object-oriented pattern evaluators
-   - Base class `CPatternEvaluator` with common scoring logic
-   - Specific evaluators: `CPinbarEvaluator`, `CEngulfingEvaluator`, `CTweezerEvaluator`, `CFakeyEvaluator`, `CInsideBarEvaluator`
-   - Regime-aware weighting built-in
-   - Rejection and follow-through strength modifiers
+SLocationContext locCtx;
+locCtx.nearSupport = true;
+locCtx.srStrength = 85.0;
+context.SetLocationContext(locCtx);
 
-3. **FakeoutDetector.mqh** - Advanced false breakout detection
-   - Liquidity Grab patterns
-   - False Breakout at Support/Resistance
-   - Wyckoff Spring/Upthrust patterns
-   - Configurable strength thresholds
+double totalScore = context.GetTotalContextScore();  // 0-100
+```
 
-4. **ScoreEngine.mqh** - Unified scoring system
-   - Multi-component scoring (pattern, rejection, momentum, location, regime, volume, confluence)
-   - Normalized 0-10 scale with letter grades (A+ to F)
-   - Configurable weights for each component
-   - Signal strength classifiers (Strong/Moderate/Weak)
+### 4. **Template Method Pattern**
+Base strategy menyediakan workflow standar:
+1. CheckPatternShape() → Validasi bentuk pattern
+2. CheckPatternLocation() → Validasi lokasi
+3. CheckPatternSize() → Validasi ukuran vs volatilitas
+4. EvaluatePatternStrength() → Hitung raw score
+5. ApplyContextAdjustment() → Adjust dengan context
+6. ValidatePattern() → Final validation
+7. GetRiskLevels() → Set SL/TP
 
-### Core Principles:
-- ENUM_PATTERN_TYPE unified enum replaces separate BULL/BEAR enums
-- Direction determined by context (dir parameter in votes)
-- Regime-aware weighting via CalculateRegimeWeight()
-- Confluence scoring with multi-pattern aggregation
-- Backward compatibility aliases provided
+## 📊 Usage Example
 
-## 📝 Migration Note (v2.01)
+```cpp
+#include "Pattern/Strategies/PatternStrategyFactory.mqh"
+#include "Pattern/Context/PatternContext.mqh"
+#include "Pattern/Config/PatternConfig.mqh"
 
-- Old EPatternType now typedef'd to ENUM_PATTERN_TYPE
-- PATTERN_PINBAR_BULL/BEAR aliases map to PATTERN_PINBAR
-- Direction now in SPatternResult.direction (1 or -1)
-- New modular architecture allows swapping evaluators
-- ScoreEngine provides consistent scoring across all patterns
+// Initialize
+CPatternConfigManager config;
+config.Init();
+config.SetRegime(regimeDetector.GetCurrentRegime());
 
-## 🎯 Example Usage
+CPatternStrategyFactory factory;
+factory.Init(&config);
 
-```mql5
-// Initialize components
-CPatternManager patternMgr;
-CScoreEngine scoreEngine;
-CFakeoutDetector fakeoutDetector;
+// Build context
+CPatternContext context;
+context.Init();
+// ... populate context ...
 
-patternMgr.Initialize();
-scoreEngine.SetMinValidScore(1.6);
-fakeoutDetector.SetMinStrength(0.6);
+// Detect patterns at current bar
+CArrayObj *patterns = factory.DetectAllPatterns(0, context);
 
-// Detect patterns
-SPatternResult result;
-if(patternMgr.Detect(rates, shift, atrPoints, regime, result))
+// Process results
+for(int i = 0; i < patterns.Total(); i++)
 {
-   if(result.found)
+   SPatternResult *result = (SPatternResult*)patterns.At(i);
+   if(result.IsValid())
    {
-      // Calculate detailed score
-      SScoreComponents components;
-      components.patternScore = scoreEngine.CalculatePatternScore(result.type, result.confluenceScore);
-      components.rejectionScore = scoreEngine.CalculateRejectionScore(rates, shift, result.direction);
-      components.momentumScore = scoreEngine.CalculateMomentumScore(rates, shift, result.direction);
+      Print(result.ToString());
       
-      SFinalScore final = scoreEngine.Calculate(components);
+      // Get position size modifier
+      double sizeMod = context.GetPositionSizeModifier();
+      double lots = baseLots * sizeMod;
       
-      if(final.isValid && final.grade >= "B")
+      // Execute trade
+      if(result.finalScore >= 75.0 && sizeMod > 0.5)
       {
-         // High quality signal - consider trading
+         Trade(result.direction, result.entryPrice, 
+               result.stopLoss, result.takeProfit, lots);
       }
    }
 }
-
-// Check for fakeouts
-SFakeoutResult fakeout;
-if(fakeoutDetector.Detect(rates, shift, fakeout))
-{
-   if(fakeout.isFakeout && fakeout.strength >= 0.7)
-   {
-      // Strong fakeout signal detected
-   }
-}
 ```
 
+## 🔧 Migration Guide
+
+### Dari Legacy PatternManager
+
+**Old:**
+```cpp
+PatternManager pm;
+pm.Detect(shift);
+```
+
+**New:**
+```cpp
+CPatternContext context;
+// ... build context ...
+CArrayObj *results = factory.DetectAllPatterns(shift, context);
+```
+
+### Parameter Customization
+
+**Old:** Hardcoded values di Evaluators.mqh
+
+**New:**
+```cpp
+SPinbarParams params = config.GetPinbarParams();
+params.minTailRatio = 0.75;        // Custom threshold
+params.requireSRConfluence = true; // Require S/R
+params.regimeMultiplier = 1.2;     // Adjust for regime
+
+strategy.SetParameters(params);
+```
+
+## 📈 Scoring System
+
+### Raw Score Components
+- **Shape Quality**: 0-40 points
+- **Size Appropriateness**: 0-20 points  
+- **Location Strength**: 0-25 points
+- **Prior Context**: 0-15 points
+
+### Context Adjustments
+- **S/R Confluence**: +0-20%
+- **MTF Alignment**: +0-15%
+- **Volume Confirmation**: +0-10%
+- **Regime Bonus/Penalty**: ±10%
+
+### Final Grading
+- **A+** (90-100): Exceptional setup, full size
+- **A** (80-89): High quality, 75-100% size
+- **B** (70-79): Good setup, 50-75% size
+- **C** (60-69): Marginal, 25-50% size
+- **D** (50-59): Weak, consider skipping
+- **F** (<50): Reject
+
+## 🚀 Future Enhancements
+
+1. **Inside Bar Strategy** - Belum diimplementasi
+2. **Fakey Strategy** - Belum diimplementasi  
+3. **Double/Triple Top-Bottom** - Pattern recognition
+4. **Harmonic Patterns** - Gartley, Bat, Butterfly
+5. **Machine Learning Integration** - AI-based pattern scoring
+6. **Backtest Framework** - Built-in pattern performance tracking
+
+## ⚠️ Breaking Changes
+
+- `Evaluators.mqh` sekarang deprecated, gunakan Strategies
+- Pattern detection sekarang memerlukan CPatternContext
+- Parameters sekarang dinamis berdasarkan regime
+- Score sekarang 0-100 scale (bukan arbitrary units)
+
+## 📝 Best Practices
+
+1. **Always use context**: Jangan detect pattern tanpa context
+2. **Respect regime**: Parameters auto-adjust, jangan override kecuali perlu
+3. **Check MTF alignment**: Higher TF alignment significantly improves win rate
+4. **Volume confirmation**: Avoid patterns on low volume
+5. **Location matters**: Patterns at S/R perform much better
+6. **Size appropriately**: Use GetPositionSizeModifier() untuk dynamic sizing
+
+## 📞 Support
+
+Untuk pertanyaan atau issue, silakan buat ticket di repository PASR Framework.

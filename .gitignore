@@ -1,23 +1,25 @@
 ```
 # Compiled and binary files
-*.mqh~
 *.mqo
 *.ex4
 *.ex5
 
-# Build artifacts
-*.compiled
-*.build/
-build/
-
-# Dependencies
-Include/PASR/lib/
-Include/PASR/dependencies/
+# Dependencies and build artifacts
+include/
+lib/
+libs/
+objects/
 
 # Logs and temp files
 *.log
 *.tmp
-*.temp
+*.bak
+*.backup
+
+# Environment
+.env
+.env.local
+*.env.*
 
 # Editors
 .vscode/
@@ -25,17 +27,12 @@ Include/PASR/dependencies/
 *.swp
 *.swo
 
-# Environment
-.env
-.env.local
-*.env.*
-
 # Coverage and testing
 coverage/
 htmlcov/
 .coverage
 
-# OS files
+# OS specific
 .DS_Store
 Thumbs.db
 ```
