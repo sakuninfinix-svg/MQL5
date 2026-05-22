@@ -130,6 +130,10 @@
 // Exports to CSV for post-trade analysis
 #include "../Infra/TelemetryRecorder.mqh"
 
+// ─── L5h: Adaptive Parameter Manager (Phase 5 - Dynamic Params) ────────
+// Dynamic SL/TP/Risk adjustment based on market regime (ATR/ADX)
+#include "../Analysis/AdaptiveParameterManager.mqh"
+
 // ─── L6: Trade — Execution, Recovery, Trade plan ──────────────────────
 #include "../Trade/TradePlan.mqh"
 #include "../Trade/ExecutionManager.mqh"

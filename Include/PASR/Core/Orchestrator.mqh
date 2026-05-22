@@ -99,6 +99,7 @@ private:
    CDashboardManager      *m_dash;
    CSanityManager         *m_sanity;    // Phase 5 NEW: Circuit Breaker
    CTelemetryRecorder     *m_telemetry; // Phase 3 NEW: Metrics Export
+   CAdaptiveParameterManager *m_adaptive; // Phase 5 NEW: Dynamic Parameters
    
    // ── QA Managers (testing only) ──────────────────────────────────
    CLatencySimulator      *m_latency_sim; // Phase 4 NEW: Latency Simulation
@@ -186,6 +187,7 @@ private:
       PrintFormat("║    DashboardManager v3    : OK");
       PrintFormat("║    SanityManager   [P5]   : OK  CircuitBreaker=ACTIVE");
       PrintFormat("║    TelemetryRec  [P3]   : OK  CSV Export=ENABLED");
+      PrintFormat("║    AdaptiveParams[P5]   : OK  DynamicSL/TP=ACTIVE");
       #ifdef PASR_QA_BUILD
       PrintFormat("║    LatencySim    [P4/QA]: OK  Backtest=ACTIVE");
       #endif
@@ -222,6 +224,7 @@ private:
       if(m_data)     { delete m_data;     m_data=NULL;     }
       if(m_sanity)   { delete m_sanity;   m_sanity=NULL;   }  // Phase 5 NEW
       if(m_telemetry){ delete m_telemetry; m_telemetry=NULL; } // Phase 3 NEW
+      if(m_adaptive) { delete m_adaptive; m_adaptive=NULL; }  // Phase 5 NEW
       if(m_cfgMgr)   { delete m_cfgMgr;   m_cfgMgr=NULL;   }
       if(m_bus)      { delete m_bus;      m_bus=NULL;      };
      }
@@ -287,6 +290,7 @@ public:
         m_srcAI(NULL), m_srcRegime(NULL),
         m_bus(NULL), m_cfgMgr(NULL),
         m_pipeline(NULL),
+        m_adaptive(NULL),
         m_lastBarTime(0), m_debugMode(false), 
         m_initialised(false), m_profiling_enabled(true)
      {
@@ -409,6 +413,15 @@ public:
       m_telemetry = new CTelemetryRecorder();
       if(!InitManager(m_telemetry, "CTelemetryRecorder")) { FreeAll(); return INIT_FAILED; }
 
+      // ── L7e: AdaptiveParameterManager (Dynamic Params) ── Phase 5 NEW ──
+      m_adaptive = new CAdaptiveParameterManager();
+      if(!InitManager(m_adaptive, "CAdaptiveParameterManager")) { FreeAll(); return INIT_FAILED; }
+      // Initialize with base parameters from config
+      m_adaptive->Initialize(m_data, m_bus, 
+                             m_cfg.Risk.StopLossPoints, 
+                             m_cfg.Risk.TakeProfitPoints, 
+                             m_cfg.Risk.MaxRiskPercent);
+
       // ── L7d: LatencySimulator (QA Only) ── Phase 4 NEW ───────────
       #ifdef PASR_QA_BUILD
       m_latency_sim = new CLatencySimulator();
@@ -429,7 +442,7 @@ public:
       m_pipeline->InjectManagers(
          m_data, m_sr, m_zone, m_pattern, m_signal,
          m_ai, m_regime, m_risk, m_exec, m_recovery,
-         m_dash, journal, m_bus, m_sanity, m_telemetry
+         m_dash, journal, m_bus, m_sanity, m_telemetry, m_adaptive
       );
       m_pipeline->SetDebugMode(m_debugMode);
       m_pipeline->EnableProfiling(m_profiling_enabled);

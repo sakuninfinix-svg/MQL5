@@ -42,6 +42,7 @@ class CRecoveryManager;
 class CDashboardManager;
 class CEventBus;
 class CJournalManager;  // Forward declared (no include needed)
+class CAdaptiveParameterManager;  // Phase 5 NEW: Adaptive Dynamic Parameters
 
 //+------------------------------------------------------------------+
 //| CPipelineEngine — Staged execution with profiling                |
@@ -63,6 +64,7 @@ private:
    CDashboardManager      *m_dash;
    CJournalManager        *m_journal;
    CEventBus              *m_bus;
+   CAdaptiveParameterManager *m_adaptive;  // Phase 5 NEW
    
    // Profiling state
    PipelineReport         m_report;
@@ -281,6 +283,39 @@ private:
       return STAGE_OK;
      }
    
+   ENUM_STAGE_RESULT Stage_AdaptiveParams(PipelineContext &ctx)
+     {
+      m_current_stage.Start();
+      
+      // Adaptive parameters update (non-blocking, skip if not ready)
+      if(CheckPointer(m_adaptive) == POINTER_INVALID)
+        {
+         m_current_stage.Stop();
+         m_current_stage.skipped = true;
+         return STAGE_SKIP;
+        }
+      
+      // Update dynamic parameters based on market regime
+      m_adaptive->UpdateParameters();
+      
+      // Apply adaptive SL/TP to current trade plan if exists
+      if(ctx.plan.valid && ctx.plan.slPoints > 0)
+        {
+         double adaptiveSL = m_adaptive->GetStopLoss();
+         double adaptiveTP = m_adaptive->GetTakeProfit();
+         
+         // Override plan with adaptive values if different from base
+         if(adaptiveSL > 0 && MathAbs(adaptiveSL - ctx.plan.slPoints) > _Point)
+            ctx.plan.slPoints = adaptiveSL;
+            
+         if(adaptiveTP > 0 && MathAbs(adaptiveTP - ctx.plan.tpPoints) > _Point)
+            ctx.plan.tpPoints = adaptiveTP;
+        }
+      
+      m_current_stage.Stop();
+      return STAGE_OK;
+     }
+   
    ENUM_STAGE_RESULT Stage_Execution(PipelineContext &ctx)
      {
       m_current_stage.Start();
@@ -395,7 +430,7 @@ public:
       : m_data(NULL), m_sr(NULL), m_zone(NULL), m_pattern(NULL),
         m_signal(NULL), m_ai(NULL), m_regime(NULL), m_risk(NULL),
         m_exec(NULL), m_recovery(NULL), m_dash(NULL), m_journal(NULL),
-        m_bus(NULL),
+        m_bus(NULL), m_adaptive(NULL),
         m_profiling_enabled(true), m_debug_mode(false)
      {
       m_report.Reset();
@@ -419,7 +454,8 @@ public:
                        CRecoveryManager *recovery,
                        CDashboardManager *dash,
                        CJournalManager *journal,
-                       CEventBus *bus)
+                       CEventBus *bus,
+                       CAdaptiveParameterManager *adaptive = NULL)  // Phase 5 NEW
      {
       m_data = data;
       m_sr = sr;
@@ -434,6 +470,7 @@ public:
       m_dash = dash;
       m_journal = journal;
       m_bus = bus;
+      m_adaptive = adaptive;  // Phase 5 NEW
      }
    
    // Execute full pipeline

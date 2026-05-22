@@ -38,6 +38,8 @@ enum ENUM_EVENT_ID
    EVENT_ID_ORDER_REQUEST           = 42,
    EVENT_ID_LATENCY_SIMULATION      = 43,
    EVENT_ID_REQUOTE_SIMULATED       = 44,
+   // Adaptive Parameters (Fase 5)
+   EVENT_ID_ADAPTIVE_UPDATE         = 45,
    // Deferred / async
    EVENT_ID_DEFERRED         = 99
   };
