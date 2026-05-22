@@ -14,7 +14,7 @@ L5: Globals                 ← GVKey(), helpers, CPerfTimer
 L6: Data/DataManager        ← indicator + symbol data cache
 L7: Core/Config/Manager     ← loads+validates StrategyConfig
 L8: Data/MarketRegime       ← trend/range/volatile regime
-L9: Data/ZoneManager        ← supply/demand zone detection
+L9: Analysis/ZoneManager    ← supply/demand zone detection (v2.01)
 L10: Data/MarketManager     ← spread, session, conditions
 L11: Data/SRManager         ← S/R level calculation
 L12: Analysis/PatternManager <- candlestick pattern recognition
