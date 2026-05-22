@@ -157,6 +157,7 @@ private:
    // Inference throttle — minimum seconds between inference calls
    datetime          m_lastInferenceTime;
    int               m_inferenceIntervalSec;
+   double            m_lastInferenceScore;  // Cache last score for signal integration
 
    // Deferred training — flag set by TriggerRetraining(), consumed in OnNewBar()
    // INVARIANT: actual training (blocking I/O) NEVER runs on the tick thread.
@@ -410,6 +411,7 @@ public:
         {
          m_consecutiveFailures = 0;
          m_lastInferenceTime   = now;
+         m_lastInferenceScore  = result.prediction;  // Cache for AISignalSource
         }
       return result;
      }
@@ -445,6 +447,9 @@ public:
    int               GetActiveModel()   const { return m_activeModelIndex; }
    int               GetModelCount()    const { return ArraySize(m_models); }
    bool              IsTrainPending()   const { return m_trainPending; }
+   
+   // Get last inference score for signal integration (used by AISignalSource)
+   double            GetLastInferenceScore() const { return m_lastInferenceScore; }
 
    void              SetInferenceInterval(int sec)
      { m_inferenceIntervalSec = MathMax(1, sec); }
