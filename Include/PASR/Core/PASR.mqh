@@ -78,12 +78,12 @@
 // ─── L3: Data — Canonical data structures and base classes ─────────────
 // MarketRegime: enum + RegimeSnapshot struct + CMarketRegime stub
 #include "../Data/MarketRegime.mqh"
-// SRManager: SRZone struct + CSRManager stub
-#include "../Data/SRManager.mqh"
+// SRStruct: SRZone struct definition
+#include "../Data/SRStruct.mqh"
 
 // ─── L3.5: Analysis — Full implementations (Phase 3) ──────────────────
 // CAnalysisSRManager: swing pivot fractal + zone clustering + strength scoring
-// Note: Includes ../Data/SRManager.mqh internally for SRZone struct
+// Note: Uses SRZone struct from ../Data/SRStruct.mqh
 #include "../Analysis/SRManager.mqh"
 // CAnalysisZoneManager: Supply/Demand impulse-base zone detection
 // Note: SDZone struct is defined inline within ZoneManager.mqh

@@ -38,7 +38,7 @@
 #include "ISignalSource.mqh"
 #include "SignalFilter.mqh"
 #include "../Analysis/Pattern/PatternManager.mqh"
-#include "../Data/SRManager.mqh"
+#include "../Data/SRStruct.mqh"
 #include "../Data/MarketRegime.mqh"
 
 #define SIGNAL_MAX_SOURCES 12   // raised from 8 to accommodate all Phase 3+4 sources
