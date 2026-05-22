@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|  PASR_MODULAR.mq5 — v5.20 (QA + Multi-Symbol + Advanced AI)      |
+//|  PASR_MODULAR.mq5 — v5.30 (Full Multi-Symbol Trading + API Fix)  |
 //|  Price Action Support/Resistance Expert Advisor                  |
 //|                                                                  |
 //|  Architecture: modular orchestrator — all logic delegated        |
@@ -40,6 +40,12 @@
 //|     → dashUpdate                                                 |
 //|                                                                  |
 //|  CHANGELOG:                                                      |
+//|   v5.30 (2026-05-21) — Full Multi-Symbol Trading + API Fix       |
+//|    * Add IsTradingAllowed() method to CRiskManager               |
+//|    * Refactor managers to accept symbol parameter for multi-symbol|
+//|    * Full trading support on all scanned symbols (not just chart)|
+//|    * Symbol-aware ATR, SR, Pattern, Signal calculations          |
+//|    * Magic number isolation per symbol enforced                  |
 //|   v5.20 (2026-05-21) — QA & Stress Testing Framework             |
 //|    * Add QA_BUILD compilation flag for stress testing mode       |
 //|    * Chaos Engineering: random error injection, spread spikes    |
@@ -64,13 +70,13 @@
 //|    * Remove dead ExecutionManager.shim.mqh (committed separately)|
 //|   v4.00 (2026-05-21) — Phase 12 final assembly                  |
 //|                                                                  |
-//|  Magic: 20260521  Version: v5.20-qa-multisymbol                  |
+//|  Magic: 20260521  Version: v5.30-full-multisymbol                |
 //|  Build: 2026-05-21                                               |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "5.20"
-#property description "Price Action SR — Modular Orchestrator v5.20 (QA + Multi-Symbol)"
+#property version     "5.30"
+#property description "Price Action SR — Modular Orchestrator v5.30 (Full Multi-Symbol)"
 #property strict
 
 //--- Compilation Flags
