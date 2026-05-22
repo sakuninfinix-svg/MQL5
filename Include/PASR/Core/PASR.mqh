@@ -22,12 +22,17 @@
 //|     L5c  RegimeFilter → CRegimeFilter + RegimeSignalSource [P4]  |
 //|     L5d  SRSignalSource + PatternSignalSource     [Phase 3]      |
 //|     L5e  RiskManager (full ATR lot + circuit breaker) [Phase 4]  |
+//|     L5f  Sanity      → SanityManager (Circuit Breaker) [Phase 5] |
 //|     L6   Trade      → TradePlan, ExecutionManager, RecoveryMgr   |
 //|     L7   UI         → DashboardManager                           |
 //|     L8   Orchestrator → COrchestrator (wires all managers)       |
 //|     L9   QA / Tools  → (PASR_QA_BUILD define only)              |
 //|                                                                  |
 //|   CHANGE LOG:                                                    |
+//|   v3.01 (2026-05-21) — Phase 5 Circuit Breaker:                  |
+//|     + L5f Infra/SanityManager.mqh added                          |
+//|     + Data validation: stale tick, wide spread, price gap        |
+//|     + Auto-pause trading on anomalous market conditions          |
 //|   v2.18 (2026-05-21) — Pipeline Architecture added:              |
 //|     + L1.6 PipelineTypes.mqh + PipelineEngine.mqh                |
 //|     + Staged execution replaces monolithic OnTimer()             |
@@ -114,6 +119,11 @@
 // ─── L5e: Risk Manager (Phase 4) ─────────────────────────────────────
 // Full ATR fixed-fractional lot sizing + 6-gate pre-trade circuit breaker
 #include "../Trade/RiskManager.mqh"
+
+// ─── L5f: Sanity Manager (Phase 5) ──────────────────────────────────
+// Data validation: stale tick, wide spread, price gap detection
+// Circuit Breaker: auto-pause trading on anomalous market conditions
+#include "../Infra/SanityManager.mqh"
 
 // ─── L6: Trade — Execution, Recovery, Trade plan ──────────────────────
 #include "../Trade/TradePlan.mqh"

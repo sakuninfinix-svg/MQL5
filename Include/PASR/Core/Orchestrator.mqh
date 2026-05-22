@@ -85,6 +85,7 @@ private:
    CExecutionManager      *m_exec;
    CRecoveryManager       *m_recovery;
    CDashboardManager      *m_dash;
+   CSanityManager         *m_sanity;    // Phase 5 NEW: Circuit Breaker
 
    // ── Signal source plugins (owned) ──────────────────────────────
    PatternSignalSource    *m_srcPattern;
@@ -145,7 +146,7 @@ private:
    void PrintSummary()
      {
       Print("╔══════════════════════════════════════════════════╗");
-      PrintFormat("║  PASR EA v3.00 — %s  %s", _Symbol,
+      PrintFormat("║  PASR EA v3.01 — %s  %s", _Symbol,
                   EnumToString((ENUM_TIMEFRAMES)_Period));
       Print("╠══════════════════════════════════════════════════╣");
       Print("║  Managers:");
@@ -167,6 +168,7 @@ private:
       PrintFormat("║    ExecutionManager       : OK");
       PrintFormat("║    RecoveryManager        : OK");
       PrintFormat("║    DashboardManager v3    : OK");
+      PrintFormat("║    SanityManager   [P5]   : OK  CircuitBreaker=ACTIVE");
       Print("╚══════════════════════════════════════════════════╝");
      }
 
@@ -193,8 +195,9 @@ private:
       if(m_zone)     { delete m_zone;     m_zone=NULL;     }
       if(m_sr)       { delete m_sr;       m_sr=NULL;       }
       if(m_data)     { delete m_data;     m_data=NULL;     }
+      if(m_sanity)   { delete m_sanity;   m_sanity=NULL;   }  // Phase 5 NEW
       if(m_cfgMgr)   { delete m_cfgMgr;   m_cfgMgr=NULL;   }
-      if(m_bus)      { delete m_bus;      m_bus=NULL;      }
+      if(m_bus)      { delete m_bus;      m_bus=NULL;      };
      }
 
    // ── Core trading logic (called once per new bar) ────────────────
@@ -363,6 +366,19 @@ public:
       m_dash.SetSignalManager(m_signal);
       m_dash.SetRegimeFilter (m_regime);  // Phase 4 NEW
 
+      // ── L7b: SanityManager (Circuit Breaker) ── Phase 5 NEW ─────
+      m_sanity = new CSanityManager();
+      if(!InitManager(m_sanity, "CSanityManager")) { FreeAll(); return INIT_FAILED; }
+      
+      // Initialize Sanity Manager with config and event bus
+      SSanityConfig sanityCfg;
+      sanityCfg.max_stale_ticks    = 5;
+      sanityCfg.max_spread_points  = 20;
+      sanityCfg.max_price_gap_pct  = 0.5;
+      sanityCfg.trip_threshold     = 3;
+      sanityCfg.reset_timeout_sec  = 60;
+      m_sanity->Initialize(sanityCfg, m_bus);
+
       // ── L8: Pipeline Engine — Initialize and inject managers ────
       m_pipeline = new CPipelineEngine();
       if(m_pipeline == NULL)
@@ -377,7 +393,7 @@ public:
       m_pipeline->InjectManagers(
          m_data, m_sr, m_zone, m_pattern, m_signal,
          m_ai, m_regime, m_risk, m_exec, m_recovery,
-         m_dash, journal, m_bus
+         m_dash, journal, m_bus, m_sanity
       );
       m_pipeline->SetDebugMode(m_debugMode);
       m_pipeline->EnableProfiling(m_profiling_enabled);
@@ -395,6 +411,19 @@ public:
    void OnTick()
      {
       if(!m_initialised) return;
+
+      // ── PHASE 5: Circuit Breaker Check FIRST ────────────────────
+      MqlTick latestTick;
+      if(!SymbolInfoTick(_Symbol, latestTick)) return;
+      
+      // Validate tick data through Sanity Manager
+      if(m_sanity != NULL && !m_sanity->ValidateTick(latestTick))
+        {
+         // Data is unsafe - skip processing but still update dashboard
+         if(m_debugMode)
+            Print("[OnTick] BLOCKED by Circuit Breaker: ", m_sanity->GetStateString());
+         return;
+        }
 
       // Every tick: update price + fire PRICE_UPDATE
       m_data.OnTick();
