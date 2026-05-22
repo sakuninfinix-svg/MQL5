@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                              PASR.BatchProcessor.mqh |
+//|                           Infra/Optimizations/BatchProcessor.mqh |
 //|                                 Advanced Batch Processing Engine |
 //|                              Copyright © 2024 PASR Framework |
 //+------------------------------------------------------------------+
@@ -8,7 +8,7 @@
 #property version   "1.00"
 #property description "OPT-018: High-performance batch processing with deduplication"
 
-#include "PASR.Optimizations.mqh"
+#include "Optimizations.mqh"
 
 //+------------------------------------------------------------------+
 //| Batch Configuration Constants                                    |

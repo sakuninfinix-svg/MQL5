@@ -1,44 +1,71 @@
 ```
-# Compiled/binary files
-*.mqh~
-*.mq5~
-*.ex5
-*.gsc
-*.os
-*.cache
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.out
 
-# Dependencies and build artifacts
-lib/
-Libraries/
-include/
-Include/
-MQL5/Libraries/
+# Dependencies
+.venv/
+venv/
+node_modules/
+.julia/
+zig*/
+target/
+.gradle/
 
 # Logs and temp files
 *.log
 *.tmp
-*.temp
-*.bak
-*.backup
-
-# Editor/IDE files
-.vscode/
-.idea/
 *.swp
 *.swo
 
-# System files
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# OS specific
 .DS_Store
 Thumbs.db
 
-# Coverage and testing
+# Coverage
 coverage/
 htmlcov/
 .coverage
-*.coverage
 
-# Environment files
-.env
-.env.local
-.env.*
+# Build and distribution
+dist/
+build/
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
 ```

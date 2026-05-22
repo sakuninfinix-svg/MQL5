@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                                  PASR.Branchless.mqh |
+//|                              Infra/Optimizations/Branchless.mqh  |
 //|                                   Branchless Programming Utilities |
 //|                              Copyright © 2024 PASR Framework |
 //+------------------------------------------------------------------+
@@ -8,7 +8,7 @@
 #property version   "1.00"
 #property description "OPT-020: Branchless programming for CPU pipeline optimization"
 
-#include "PASR.Optimizations.mqh"
+#include "Optimizations.mqh"
 
 //+------------------------------------------------------------------+
 //| Branchless Min/Max/Abs Operations                                |

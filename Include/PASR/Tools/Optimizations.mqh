@@ -1,8 +1,8 @@
 //+------------------------------------------------------------------+
-//| Tools/Optimizations.mqh — canonical forward to PASR.Optimizations|
+//| Tools/Optimizations.mqh — canonical forward to Infra/Optimizations |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __TOOLS_OPTIMIZATIONS_MQH__
 #define __TOOLS_OPTIMIZATIONS_MQH__
-#include "../PASR.Optimizations.mqh"
+#include "../Infra/Optimizations/Optimizations.mqh"
 #endif

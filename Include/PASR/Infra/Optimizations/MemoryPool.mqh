@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                                  PASR.MemoryPool.mqh |
+//|                              Infra/Optimizations/MemoryPool.mqh  |
 //|                                     Generic Object Pooling System |
 //|                              Copyright © 2024 PASR Framework |
 //+------------------------------------------------------------------+
@@ -8,7 +8,7 @@
 #property version   "1.00"
 #property description "OPT-019: Zero-allocation object pooling for hot objects"
 
-#include "PASR.Optimizations.mqh"
+#include "Optimizations.mqh"
 
 //+------------------------------------------------------------------+
 //| Pool Configuration Constants                                     |
