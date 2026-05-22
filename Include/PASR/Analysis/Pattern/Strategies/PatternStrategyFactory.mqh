@@ -11,6 +11,10 @@
 #include "IPatternStrategy.mqh"
 #include "PinbarStrategy.mqh"
 #include "EngulfingStrategy.mqh"
+#include "InsideBarStrategy.mqh"
+#include "FakeyStrategy.mqh"
+#include "HaramiStrategy.mqh"
+#include "DojiStrategy.mqh"
 #include "../Config/PatternConfig.mqh"
 
 //+------------------------------------------------------------------+
