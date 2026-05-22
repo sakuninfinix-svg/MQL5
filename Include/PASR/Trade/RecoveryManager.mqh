@@ -33,7 +33,7 @@
 #include "../Core/IManager.mqh"
 // FIX #3: was ../Infra/DataManager.mqh — now uses canonical Data/ alias layer
 #include "../Data/DataManager.mqh"
-#include "../Pattern/PatternManager.mqh"
+#include "../Analysis/Pattern/PatternManager.mqh"
 #include "../Data/MarketRegime.mqh"
 #include "RecoveryEngine.mqh"   // Phase 6: extracted types
 

@@ -75,7 +75,7 @@
 #include "../Analysis/ZoneManager.mqh"
 
 // ─── L4: Analysis — Pattern recognition ──────────────────────────────
-#include "../Pattern/PatternManager.mqh"
+#include "../Analysis/Pattern/PatternManager.mqh"
 
 // ─── L5a: Signal — Manager + ISignalSource interface ───────────────────
 // ISignalSource.mqh is included by SignalManager.mqh internally
