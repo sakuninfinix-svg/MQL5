@@ -7,7 +7,7 @@ __pycache__/
 *.exe
 *.dll
 *.so
-*.class
+*.a
 *.out
 
 # Dependencies
@@ -16,43 +16,36 @@ venv/
 .venv/
 .env
 .env.local
-.env.*
+*.env.*
 
-# Build directories
-dist/
-build/
-target/
-*.egg-info/
-
-# Editors and IDEs
-.vscode/
-.idea/
+# Logs and temp files
+*.log
+*.tmp
 *.swp
 *.swo
-*.tmp
+
+# Editors
+.vscode/
+.idea/
 
 # System files
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log
 
 # Coverage
 coverage/
 htmlcov/
 .coverage
 
+# Build directories
+dist/
+build/
+target/
+.gradle/
+
 # Python specific
-*.pyc
-__pycache__/
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg
-*.egg-info/
-.eggs/
+.mypy_cache/
+.pytest_cache/
 
 # Compressed files
 *.zip
