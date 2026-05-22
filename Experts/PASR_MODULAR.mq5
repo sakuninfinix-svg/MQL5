@@ -209,8 +209,21 @@ CQAStressTest        g_qa;
 //--- Global Trading Context (Single Source of Truth)
 STradingContext      g_ctx;              // Encapsulated runtime state
 
-//--- QA State (now encapsulated in g_ctx when QA_BUILD is defined)
-// Legacy globals removed - use g_ctx for all state access
+//--- LEGACY GLOBALS REMOVED - All state now in g_ctx:
+//    g_ctx.last_bar_time     → g_ctx.last_bar_time
+//    g_ctx.active_plan      → g_ctx.active_plan
+//    g_ctx.has_plan         → g_ctx.has_plan
+//    g_ctx.pos_open_time     → g_ctx.pos_open_time
+//    g_ctx.open_ticket      → g_ctx.open_ticket
+//    g_ctx.last_fv          → g_ctx.last_fv
+//    g_ctx.last_ai_score     → g_ctx.last_ai_score
+//    g_ctx.last_drift       → g_ctx.last_drift
+//    g_ctx.last_ens_model    → g_ctx.last_ens_model
+//    g_ctx.regime          → g_ctx.regime
+//    g_ctx.session         → g_ctx.session
+//    g_ctx.dash_ctx         → g_ctx.dash_ctx
+//    g_ctx.current_spread   → g_ctx.current_spread
+//    g_currentATR      → g_ctx.current_atr
 
 //+------------------------------------------------------------------+
 //|  HELPERS — INSTITUTIONAL ARCHITECTURE                            |
@@ -710,9 +723,9 @@ void OnTradeTransaction(
      {
       ulong ticket = HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
       double entryPrice = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
-      int direction = (g_activePlan.direction == SIGNAL_BUY) ? 1 : -1;
+      int direction = (g_ctx.active_plan.direction == SIGNAL_BUY) ? 1 : -1;
       g_recovery.OnTradeOpen(ticket, direction, entryPrice);
-      g_openTicket = ticket;
+      g_ctx.open_ticket = ticket;
       DebugPrint(StringFormat("RecoveryManager: engine created for ticket=%d", ticket));
       return;
      }
@@ -725,34 +738,34 @@ void OnTradeTransaction(
                      + HistoryDealGetDouble(trans.deal, DEAL_COMMISSION);
    bool   isWin      = (pnl > 0);
    double rr         = 0;
-   double riskPts    = MathAbs(g_activePlan.entryPrice - g_activePlan.sl);
+   double riskPts    = MathAbs(g_ctx.active_plan.entryPrice - g_ctx.active_plan.sl);
    if(riskPts > 0)
       rr = (pnl > 0 ? 1 : -1)
-         * MathAbs(closePrice - g_activePlan.entryPrice) / riskPts;
+         * MathAbs(closePrice - g_ctx.active_plan.entryPrice) / riskPts;
 
    //--- v4.01: deactivate recovery engine
-   if(InpRecoveryEnabled && g_openTicket > 0)
+   if(InpRecoveryEnabled && g_ctx.open_ticket > 0)
      {
-      g_recovery.OnTradeClose(g_openTicket);
-      g_openTicket = 0;
+      g_recovery.OnTradeClose(g_ctx.open_ticket);
+      g_ctx.open_ticket = 0;
      }
 
    //--- Journal
-   if(g_hasPlan)
+   if(g_ctx.has_plan)
      {
       g_journal.OnPositionClosed(
          trans.deal,
-         g_posOpenTime,
-         g_activePlan,
+         g_ctx.pos_open_time,
+         g_ctx.active_plan,
          closePrice, pnl,
-         g_regime, g_session,
-         g_lastAIScore, g_lastDrift,
-         g_lastEnsModel,
-         g_lastFV,
+         g_ctx.regime, g_ctx.session,
+         g_ctx.last_ai_score, g_ctx.last_drift,
+         g_ctx.last_ens_model,
+         g_ctx.last_fv,
          g_pos.IsBEDone(),
          g_pos.IsPartialDone(),
          g_pos.IsRunnerActive());
-      g_hasPlan = false;
+      g_ctx.has_plan = false;
      }
 
    //--- Risk daily P&L update
@@ -763,12 +776,12 @@ void OnTradeTransaction(
 
    //--- Ensemble weight update
    g_ensemble.UpdateWeight(
-      (ENUM_ENSEMBLE_MODEL)g_lastEnsModel, isWin);
+      (ENUM_ENSEMBLE_MODEL)g_ctx.last_ens_model, isWin);
    g_ensemble.SaveWeights();
 
    //--- Dashboard
    CDashboardManager::UpdateSignalOutcome(
-      g_dashCtx, isWin ? 1 : -1);
+      g_ctx.dash_ctx, isWin ? 1 : -1);
 
    //--- Auto-export
    if(InpExportReport &&
@@ -776,8 +789,8 @@ void OnTradeTransaction(
       g_report.ExportHTML();
 
    PrintFormat("[PASR] CLOSED %s  PnL:%.2f  RR:%.2f  AI:%.2f  Win:%s",
-               g_activePlan.direction==SIGNAL_BUY?"BUY":"SELL",
-               pnl, rr, g_lastAIScore, isWin?"YES":"NO");
+               g_ctx.active_plan.direction==SIGNAL_BUY?"BUY":"SELL",
+               pnl, rr, g_ctx.last_ai_score, isWin?"YES":"NO");
   }
 
 //+------------------------------------------------------------------+
@@ -802,7 +815,7 @@ void OnTimer()
 
    //--- [BAR PATH 1] New bar detection
    datetime barTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-   bool isNewBar = (barTime != g_lastBarTime);
+   bool isNewBar = (barTime != g_ctx.last_bar_time);
    
    if(!isNewBar)
      {
@@ -810,19 +823,19 @@ void OnTimer()
       return;
      }
    
-   g_lastBarTime = barTime;
+   g_ctx.last_bar_time = barTime;
    DebugPrint(StringFormat("[%s] New bar detected: %s", _Symbol, TimeToString(barTime)));
 
    //--- [BAR PATH 2] Session detection
-   g_session = DetectSession();
+   g_ctx.session = DetectSession();
 
    //--- [BAR PATH 3] Data update
    g_data.OnNewBar();
 
    //--- [BAR PATH 4] Regime detection (optimized with caching)
    double atr = GetATR(_Symbol);
-   g_regime = g_adaptCfg.DetectRegime(_Symbol, PERIOD_CURRENT, atr);
-   EffectivePolicy policy = g_adaptCfg.GetEffectivePolicy(g_regime, g_session, atr);
+   g_ctx.regime = g_adaptCfg.DetectRegime(_Symbol, PERIOD_CURRENT, atr);
+   EffectivePolicy policy = g_adaptCfg.GetEffectivePolicy(g_ctx.regime, g_ctx.session, atr);
 
    //--- [BAR PATH 5] Recovery new-bar processing
    if(InpRecoveryEnabled)
@@ -877,7 +890,7 @@ void OnTimer()
    //--- [BAR PATH 11] AI Feature build + Advanced Statistical Features
    SRZone zones[20];
    int nZones = g_sr.GetZones(zones, 20);
-   g_lastFV = g_featBuilder.Build(sig, atr,
+   g_ctx.last_fv = g_featBuilder.Build(sig, atr,
                                    sig.nearestSupport,
                                    sig.nearestResistance,
                                    zones, nZones);
@@ -898,7 +911,7 @@ void OnTimer()
      }
 
    //--- [BAR PATH 12] Drift check
-   g_lastDrift = g_featBuilder.ComputeDrift(g_lastFV);
+   g_ctx.last_drift = g_featBuilder.ComputeDrift(g_ctx.last_fv);
    
    // Adjust AI veto threshold based on volatility regime
    double effective_veto_thresh = InpAIVetoThresh;
@@ -914,10 +927,10 @@ void OnTimer()
          effective_veto_thresh = InpAIVetoThresh * 0.9;
      }
    
-   if(InpUseAI && g_lastDrift > InpDriftVeto)
+   if(InpUseAI && g_ctx.last_drift > InpDriftVeto)
      {
-      DebugPrint(StringFormat("Drift veto: %.2f", g_lastDrift));
-      CDashboardManager::PushSignal(g_dashCtx, sig.direction, 0, 0);
+      DebugPrint(StringFormat("Drift veto: %.2f", g_ctx.last_drift));
+      CDashboardManager::PushSignal(g_ctx.dash_ctx, sig.direction, 0, 0);
       return;
      }
 
@@ -926,8 +939,8 @@ void OnTimer()
    
    double base_ai_score = InpUseAI
       ? (InpUseEnsemble
-           ? g_ensemble.GetScore(g_lastFV, sig, patternBonus, g_lastDrift)
-           : g_aiInfer.ForwardPass18(g_lastFV, patternBonus, g_lastDrift))
+           ? g_ensemble.GetScore(g_ctx.last_fv, sig, patternBonus, g_ctx.last_drift)
+           : g_aiInfer.ForwardPass18(g_ctx.last_fv, patternBonus, g_ctx.last_drift))
       : sig.confluence;
    
    // Apply volatility regime adjustment
@@ -943,19 +956,19 @@ void OnTimer()
          base_ai_score = MathMin(1.0, base_ai_score * 1.05);
      }
    
-   g_lastAIScore = base_ai_score;
-   g_lastEnsModel = g_ensemble.GetActiveModel();
+   g_ctx.last_ai_score = base_ai_score;
+   g_ctx.last_ens_model = g_ensemble.GetActiveModel();
 
    DebugPrint(StringFormat("AI score:%.2f drift:%.2f model:%d",
-                           g_lastAIScore, g_lastDrift, g_lastEnsModel));
+                           g_ctx.last_ai_score, g_ctx.last_drift, g_ctx.last_ens_model));
 
    //--- [BAR PATH 14] Calibration bridge
-   AIScoreOverride ov = g_calibBridge.MapScoreToPolicy(g_lastAIScore, policy);
+   AIScoreOverride ov = g_calibBridge.MapScoreToPolicy(g_ctx.last_ai_score, policy);
    
    if(ov.blockTrade)
      {
-      DebugPrint(StringFormat("CalibBridge veto: score=%.2f", g_lastAIScore));
-      CDashboardManager::PushSignal(g_dashCtx, sig.direction, g_lastAIScore, 0);
+      DebugPrint(StringFormat("CalibBridge veto: score=%.2f", g_ctx.last_ai_score));
+      CDashboardManager::PushSignal(g_ctx.dash_ctx, sig.direction, g_ctx.last_ai_score, 0);
       return;
      }
    
@@ -1038,7 +1051,7 @@ void OnTimer()
    
    while(!executed && retry_count < MAX_RETRIES)
      {
-      if(g_exec.OpenTrade(plan))
+      if(g_executor.OpenTrade(plan))
         {
          executed = true;
         }
@@ -1062,18 +1075,18 @@ void OnTimer()
       return;
      }
 
-   g_activePlan   = plan;
-   g_hasPlan      = true;
-   g_posOpenTime  = TimeCurrent();
+   g_ctx.active_plan   = plan;
+   g_ctx.has_plan      = true;
+   g_ctx.pos_open_time  = TimeCurrent();
    g_risk.OnTradeOpened();
-   g_calibBridge.LogTradeOpen(g_lastAIScore);
+   g_calibBridge.LogTradeOpen(g_ctx.last_ai_score);
 
-   CDashboardManager::PushSignal(g_dashCtx, sig.direction, g_lastAIScore, 0);
+   CDashboardManager::PushSignal(g_ctx.dash_ctx, sig.direction, g_ctx.last_ai_score, 0);
 
    PrintFormat("[PASR][%s] OPENED %s  entry:%.5f  sl:%.5f  tp:%.5f  lots:%.2f  AI:%.2f",
                _Symbol,
                plan.direction==SIGNAL_BUY?"BUY":"SELL",
-               plan.entryPrice, plan.sl, plan.tp, plan.lot, g_lastAIScore);
+               plan.entryPrice, plan.sl, plan.tp, plan.lot, g_ctx.last_ai_score);
   }
 
 //+------------------------------------------------------------------+
@@ -1083,17 +1096,17 @@ void UpdateDashboard()
   {
    if(!InpShowDash) return;
 
-   g_dashCtx.regime    = g_regime;
-   g_dashCtx.session   = g_session;
-   g_dashCtx.spread    = GetSpreadPips();
-   g_dashCtx.aiScore   = g_lastAIScore;
-   g_dashCtx.driftScore= g_lastDrift;
-   g_dashCtx.ensembleModel = g_lastEnsModel;
-   g_dashCtx.aiVeto    = (g_lastAIScore < InpAIVetoThresh ||
-                          g_lastDrift   > InpDriftVeto);
+   g_ctx.dash_ctx.regime    = g_ctx.regime;
+   g_ctx.dash_ctx.session   = g_ctx.session;
+   g_ctx.dash_ctx.spread    = GetSpreadPips();
+   g_ctx.dash_ctx.aiScore   = g_ctx.last_ai_score;
+   g_ctx.dash_ctx.driftScore= g_ctx.last_drift;
+   g_ctx.dash_ctx.ensembleModel = g_ctx.last_ens_model;
+   g_ctx.dash_ctx.aiVeto    = (g_ctx.last_ai_score < InpAIVetoThresh ||
+                          g_ctx.last_drift   > InpDriftVeto);
 
-   g_dashCtx.hasPosition = g_pos.HasOpenPosition(_Symbol);
-   if(g_dashCtx.hasPosition)
+   g_ctx.dash_ctx.hasPosition = g_pos.HasOpenPosition(_Symbol);
+   if(g_ctx.dash_ctx.hasPosition)
      {
       // Get position info for chart symbol (dashboard shows current chart only)
       ulong ticket = 0;
@@ -1115,27 +1128,27 @@ void UpdateDashboard()
       if(ticket > 0 && PositionSelectByTicket(ticket))
         {
          ENUM_ORDER_TYPE pos_type = (ENUM_ORDER_TYPE)PositionGetInteger(POSITION_TYPE);
-         g_dashCtx.posDir    = (pos_type == POSITION_TYPE_BUY) ? SIGNAL_BUY : SIGNAL_SELL;
-         g_dashCtx.posEntry  = PositionGetDouble(POSITION_PRICE_OPEN);
-         g_dashCtx.posSL     = PositionGetDouble(POSITION_SL);
-         g_dashCtx.posTP1    = PositionGetDouble(POSITION_TP);
-         g_dashCtx.posTP2    = g_activePlan.tp2;  // Runner TP from active plan
-         g_dashCtx.posLots   = PositionGetDouble(POSITION_VOLUME);
-         g_dashCtx.posPnL    = g_pos.GetFloatingPnL();
-         g_dashCtx.beDone    = g_pos.IsBEDone();
-         g_dashCtx.partialDone = g_pos.IsPartialDone();
+         g_ctx.dash_ctx.posDir    = (pos_type == POSITION_TYPE_BUY) ? SIGNAL_BUY : SIGNAL_SELL;
+         g_ctx.dash_ctx.posEntry  = PositionGetDouble(POSITION_PRICE_OPEN);
+         g_ctx.dash_ctx.posSL     = PositionGetDouble(POSITION_SL);
+         g_ctx.dash_ctx.posTP1    = PositionGetDouble(POSITION_TP);
+         g_ctx.dash_ctx.posTP2    = g_ctx.active_plan.tp2;  // Runner TP from active plan
+         g_ctx.dash_ctx.posLots   = PositionGetDouble(POSITION_VOLUME);
+         g_ctx.dash_ctx.posPnL    = g_pos.GetFloatingPnL();
+         g_ctx.dash_ctx.beDone    = g_pos.IsBEDone();
+         g_ctx.dash_ctx.partialDone = g_pos.IsPartialDone();
         }
      }
    else
      {
-      ZeroMemory(g_dashCtx.posDir);
-      g_dashCtx.posEntry = g_dashCtx.posSL  = 0;
-      g_dashCtx.posTP1   = g_dashCtx.posTP2 = 0;
-      g_dashCtx.posLots  = g_dashCtx.posPnL = 0;
-      g_dashCtx.beDone   = g_dashCtx.partialDone = false;
+      ZeroMemory(g_ctx.dash_ctx.posDir);
+      g_ctx.dash_ctx.posEntry = g_ctx.dash_ctx.posSL  = 0;
+      g_ctx.dash_ctx.posTP1   = g_ctx.dash_ctx.posTP2 = 0;
+      g_ctx.dash_ctx.posLots  = g_ctx.dash_ctx.posPnL = 0;
+      g_ctx.dash_ctx.beDone   = g_ctx.dash_ctx.partialDone = false;
      }
 
-   g_hud.Update(g_dashCtx);
+   g_hud.Update(g_ctx.dash_ctx);
   }
 
 //+------------------------------------------------------------------+
