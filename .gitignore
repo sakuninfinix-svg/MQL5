@@ -1,1 +1,74 @@
-Nothing should be ignored based on the provided file changes. The modified files are source code files (.mqh) which should not be added to .gitignore.
+```mqh
+# MQL4/MT4 specific build artifacts
+*.ex4
+*.ex5
+*.mqh.bak
+*.mq4.bak
+*.mq5.bak
+
+# MT4/MT5 terminal files
+tester/
+logs/
+history/
+profiles/
+config/
+
+# Editor backups
+*.bak
+*.tmp
+*~
+.swp
+.swo
+
+# Environment specific
+.env
+.env.local
+.env.*
+
+# IDE specific
+.vscode/
+.idea/
+*.userprefs
+*.suo
+*.user
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build outputs
+build/
+dist/
+target/
+out/
+
+# Dependency caches
+node_modules/
+__pycache__/
+*.egg-info/
+.Python
+venv/
+.venv/
+
+# Logs
+*.log
+*.elog
+*.gmon
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+```

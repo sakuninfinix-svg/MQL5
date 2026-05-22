@@ -260,7 +260,7 @@ public:
             case EVENT_ID_CONFIG_RELOAD:        mgr.OnConfigReload(); break;
             case EVENT_ID_RECOVERY_OPPORTUNITY: /* handled by RecoveryManager */  break;
             case EVENT_ID_EMERGENCY_STOP:       /* handled by ExecutionManager */ break;
-            case EVENT_ID_AI_TRAIN:             /* handled by AIManager */        break;
+            case EVENT_ID_AI_TRAIN:             /* handled by CAIOrchestrator */        break;
             default:                            break;
            }
         }

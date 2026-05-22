@@ -18,7 +18,7 @@
 //|                        (full S/D impulse-base)   [Phase 3]       |
 //|     L4   Pattern    → PatternManager                             |
 //|     L5a  Signal     → SignalManager v3.00 (weighted-vote + veto) |
-//|     L5b  AI         → AIManager + AISignalSource                 |
+//|     L5b  AI         → CAIOrchestrator + AISignalSource (26-dim)  |
 //|     L5c  RegimeFilter → CRegimeFilter + RegimeSignalSource [P4]  |
 //|     L5d  SRSignalSource + PatternSignalSource     [Phase 3]      |
 //|     L5e  RiskManager (full ATR lot + circuit breaker) [Phase 4]  |

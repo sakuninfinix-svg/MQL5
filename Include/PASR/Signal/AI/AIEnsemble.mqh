@@ -5,7 +5,7 @@
 //| DESIGN:                                                          |
 //|   3 independent AIModelState instances, each with own Platt     |
 //|   calibration. Weights auto-adjust via online win-rate EMA      |
-//|   updated by AIManager after each trade closes.                 |
+//|   updated by CAIOrchestrator after each trade closes.           |
 //|                                                                  |
 //|   Ensemble output = weighted avg of 3 calibrated sub-scores.    |
 //|   When score spread > 0.30 (low agreement) → score reduced 20%. |
@@ -85,7 +85,7 @@ public:
 
    void SetWeightsFile(string f) { m_weightsFile = f; }
 
-   // Provide model states from AIManager (non-owning pointers-by-value copy)
+   // Provide model states from CAIOrchestrator (non-owning pointers-by-value copy)
    void SetModel(ENUM_ENSEMBLE_MODEL idx, const AIModelState &mdl)
      {
       m_models[(int)idx] = mdl;
@@ -170,7 +170,7 @@ public:
 
    //+----------------------------------------------------------------+
    //| UpdateWeight — online EMA update after trade close             |
-   //| Call from AIManager.OnTradeClosed(expert, isWin)               |
+   //| Call from CAIOrchestrator.OnTradeClosed(expert, isWin)         |
    //+----------------------------------------------------------------+
    void UpdateWeight(ENUM_ENSEMBLE_MODEL model, bool isWin)
      {

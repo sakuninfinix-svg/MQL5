@@ -62,8 +62,8 @@ private:
                          (void*)orch.GetZoneManager());
       m_assert.IsNotNull("S01_signal_manager_not_null",
                          (void*)orch.GetSignalManager());
-      m_assert.IsNotNull("S01_ai_manager_not_null",
-                         (void*)orch.GetAIManager());
+      m_assert.IsNotNull("S01_ai_orchestrator_not_null",
+                         (void*)orch.GetAIOrchestrator());
       m_assert.IsNotNull("S01_regime_filter_not_null",
                          (void*)orch.GetRegimeFilter());
       m_assert.IsNotNull("S01_risk_manager_not_null",
