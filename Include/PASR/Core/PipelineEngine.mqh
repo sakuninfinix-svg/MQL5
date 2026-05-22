@@ -31,7 +31,6 @@
 #include "../Analysis/ZoneManager.mqh"
 #include "../Analysis/PatternManager.mqh"
 #include "../Signal/SignalManager.mqh"
-#include "../AI/AIManager.mqh"
 #include "../Analysis/RegimeFilter.mqh"
 #include "../Risk/RiskManager.mqh"
 #include "../Trade/ExecutionManager.mqh"
@@ -47,6 +46,7 @@
 #include "AsyncOrderManager.mqh"            // Phase 6
 #include "../Infra/HealthMonitor.mqh"       // Phase 7: Self-Healing
 #include "../Infra/SnapshotManager.mqh"     // Phase 7: State Persistence
+#include "../Signal/AI/AIOrchestrator.mqh"  // Phase 7: 26-dim AI System
 
 // Forward declarations for manager classes (avoid circular dependencies)
 class CDataManager;
@@ -54,7 +54,7 @@ class CAnalysisSRManager;
 class CAnalysisZoneManager;
 class CPatternManager;
 class CSignalManager;
-class AIManager;
+class CAIOrchestrator;  // Updated: 26-dim AI system
 class CRegimeFilter;
 class CRiskManager;
 class CExecutionManager;
@@ -76,7 +76,7 @@ private:
    CAnalysisZoneManager   *m_zone;
    CPatternManager        *m_pattern;
    CSignalManager         *m_signal;
-   AIManager              *m_ai;
+   CAIOrchestrator        *m_ai_orch;  // Phase 7: 26-dim AI system
    CRegimeFilter          *m_regime;
    CRiskManager           *m_risk;
    CExecutionManager      *m_exec;
@@ -245,20 +245,20 @@ private:
      {
       m_current_stage.Start();
       
-      if(CheckPointer(m_ai) == POINTER_INVALID)
+      if(CheckPointer(m_ai_orch) == POINTER_INVALID)
         {
          m_current_stage.Stop();
          m_current_stage.skipped = true;
          return STAGE_SKIP;
         }
       
-      // Get AI score
-      float features[AI_INPUT_DIM];
-      if(m_ai->BuildFeaturesPublic(features))
+      // Get AI score from CAIOrchestrator (26-dim system)
+      float features[AI_FEATURE_DIM];
+      if(m_ai_orch->BuildFeaturesPublic(features))
         {
-         ctx.ai_score = m_ai->Predict(features);
-         ctx.drift_score = m_ai->GetDriftScore();
-         ctx.ai_veto = (ctx.ai_score < 0.4 || ctx.drift_score > 0.6);
+         ctx.ai_score = m_ai_orch->Predict(features);
+         ctx.drift_score = m_ai_orch->GetDriftScore();
+         ctx.ai_veto = (ctx.ai_score < 0.4f || ctx.drift_score > 0.6f);
          
          if(ctx.ai_veto)
            {
@@ -269,8 +269,8 @@ private:
         }
       else
         {
-         ctx.ai_score = 0.5;  // Neutral
-         ctx.drift_score = 0.0;
+         ctx.ai_score = 0.5f;  // Neutral
+         ctx.drift_score = 0.0f;
          ctx.ai_veto = false;
         }
       
@@ -453,7 +453,7 @@ private:
 public:
    CPipelineEngine()
       : m_data(NULL), m_sr(NULL), m_zone(NULL), m_pattern(NULL),
-        m_signal(NULL), m_ai(NULL), m_regime(NULL), m_risk(NULL),
+        m_signal(NULL), m_ai_orch(NULL), m_regime(NULL), m_risk(NULL),
         m_exec(NULL), m_recovery(NULL), m_dash(NULL), m_journal(NULL),
         m_bus(NULL), m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL),
         m_regime_det(NULL), m_optimizer(NULL), m_async_orders(NULL),
@@ -473,7 +473,7 @@ public:
                        CAnalysisZoneManager *zone,
                        CPatternManager *pattern,
                        CSignalManager *signal,
-                       AIManager *ai,
+                       CAIOrchestrator *ai_orch,
                        CRegimeFilter *regime,
                        CRiskManager *risk,
                        CExecutionManager *exec,
@@ -495,7 +495,7 @@ public:
       m_zone = zone;
       m_pattern = pattern;
       m_signal = signal;
-      m_ai = ai;
+      m_ai_orch = ai_orch;
       m_regime = regime;
       m_risk = risk;
       m_exec = exec;

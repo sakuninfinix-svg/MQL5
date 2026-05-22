@@ -189,7 +189,7 @@ private:
       PrintFormat("║        SRSignalSource      w=1.5 VOTER");
       PrintFormat("║        AISignalSource      w=0.8 VOTER");
       PrintFormat("║        RegimeSignalSource  w=0.0 MULT");
-      PrintFormat("║    AIManager              : OK");
+      PrintFormat("║    CAIOrchestrator [P7]   : OK  (26-dim AI system)");
       PrintFormat("║    RegimeFilter    [P4]   : OK");
       PrintFormat("║    RiskManager     [P4]   : OK  magic=%d", m_cfg.MagicNumber);
       PrintFormat("║    ExecutionManager       : OK");
@@ -299,7 +299,7 @@ private:
 public:
    COrchestrator()
       : m_data(NULL), m_sr(NULL), m_zone(NULL),
-        m_pattern(NULL), m_signal(NULL), m_ai(NULL),
+        m_pattern(NULL), m_signal(NULL), m_ai_orch(NULL),
         m_regime_det(NULL), m_regime(NULL), m_risk(NULL),
         m_exec(NULL), m_recovery(NULL), m_dash(NULL),
         m_optimizer(NULL), m_async_orders(NULL), m_hf_timer(NULL),
@@ -372,11 +372,11 @@ public:
       m_signal.RegisterSource(m_srcPattern, 1.2); // VOTER: PA pattern
       m_signal.RegisterSource(m_srcSR,      1.5); // VOTER: SR confluence
 
-      // ── L5b: AI + AISignalSource ────────────────────────────────
-      m_ai = new AIManager();
-      if(!InitManager(m_ai, "AIManager")) { FreeAll(); return INIT_FAILED; }
+      // ── L5b: CAIOrchestrator (26-dim AI) + AISignalSource ────────────────
+      m_ai_orch = new CAIOrchestrator();
+      if(!InitManager(m_ai_orch, "CAIOrchestrator")) { FreeAll(); return INIT_FAILED; }
 
-      m_srcAI = new AISignalSource(m_ai, 0.6, 0.8);
+      m_srcAI = new AISignalSource(m_ai_orch, 0.6, 0.8);
       m_signal.RegisterSource(m_srcAI, 0.8);      // VOTER: AI (learning weight)
 
       // ── L5c: RegimeFilter + RegimeSignalSource ── Phase 4 NEW ───
@@ -494,7 +494,7 @@ public:
       CJournalManager *journal = NULL;  // Get from DataManager or create standalone
       m_pipeline->InjectManagers(
          m_data, m_sr, m_zone, m_pattern, m_signal,
-         m_ai, m_regime, m_risk, m_exec, m_recovery,
+         m_ai_orch, m_regime, m_risk, m_exec, m_recovery,
          m_dash, journal, m_bus, m_sanity, m_telemetry, m_adaptive,
          m_regime_det, m_optimizer, m_async_orders, m_health, m_snapshot
       );
@@ -653,17 +653,17 @@ public:
          m_recovery.OnTradeClose((ulong)pos);
          m_risk.OnTradeClosed();
 
-         // AI backpropagation on result
-         if(m_ai != NULL)
+         // AI backpropagation on result (26-dim system)
+         if(m_ai_orch != NULL)
            {
             float label = (profit >= 0.0) ? 1.0f : 0.0f;
-            float features[AI_INPUT_DIM];
-            if(m_ai.BuildFeaturesPublic(features))
-               m_ai.OnTradeResult(features, label);
+            float features[AI_FEATURE_DIM];
+            if(m_ai_orch->BuildFeaturesPublic(features))
+               m_ai_orch->OnTradeResult(features, label);
             else
               {
                ArrayInitialize(features, 0.0f);
-               m_ai.OnTradeResult(features, label, 0.1f);
+               m_ai_orch->OnTradeResult(features, label, 0.1f);
               }
            }
 
@@ -702,7 +702,7 @@ public:
       // Phase 7: Shutdown health monitor
       if(m_health != NULL) m_health->Shutdown();
       
-      if(m_ai   != NULL) m_ai.Deinit();
+      if(m_ai_orch != NULL) m_ai_orch->Deinit();
       if(m_dash != NULL) m_dash.Destroy();  // removes chart objects before FreeAll
       FreeAll();
       PrintFormat("[Orchestrator] Deinit reason=%d", reason);
@@ -713,7 +713,7 @@ public:
    CAnalysisSRManager   *GetSRManager()       const { return m_sr;       }
    CAnalysisZoneManager *GetZoneManager()     const { return m_zone;     }
    CSignalManager       *GetSignalManager()   const { return m_signal;   }
-   AIManager            *GetAIManager()       const { return m_ai;       }
+   CAIOrchestrator      *GetAIOrchestrator()  const { return m_ai_orch;  }
    CRegimeFilter        *GetRegimeFilter()    const { return m_regime;   }
    CRiskManager         *GetRiskManager()     const { return m_risk;     }
    CExecutionManager    *GetExecManager()     const { return m_exec;     }
