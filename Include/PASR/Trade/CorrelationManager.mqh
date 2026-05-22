@@ -73,6 +73,7 @@ public:
    
    // Core functionality
    bool              IsCorrelationSafe(const string symbol, const string& open_symbols[], int open_count);
+   bool              IsCorrelationSafe(const string symbol, double threshold, int window);  // Overload for EA integration
    double            GetCorrelation(const string symbol1, const string symbol2);
    void              UpdateMatrix(const string& symbols[], int count);
    
@@ -194,6 +195,66 @@ bool CCorrelationManager::IsCorrelationSafe(
          m_block_count++;
          PrintFormat("[CORR] BLOCKED: %s vs %s correlation %.2f exceeds threshold %.2f",
                      symbol, open_symbols[i], corr, CORR_HIGH_THRESHOLD);
+         return false;
+      }
+   }
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Overloaded version for simpler EA integration                   |
+//| Checks correlation with all currently open positions            |
+//| Parameters: symbol = symbol to check, threshold = max corr,     |
+//|             window = lookback (unused, kept for API compat)     |
+//+------------------------------------------------------------------+
+bool CCorrelationManager::IsCorrelationSafe(const string symbol, double threshold, int window)
+{
+   if(!m_initialized) return true;
+   
+   // Get all open positions and their symbols
+   string open_symbols[];
+   int open_count = 0;
+   ulong current_magic = 0;  // Will be set from first position found
+   
+   int total_positions = PositionsTotal();
+   for(int i = total_positions - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket <= 0) continue;
+      
+      if(!PositionSelectByTicket(ticket)) continue;
+      
+      string pos_symbol = PositionGetString(POSITION_SYMBOL);
+      ulong magic = PositionGetInteger(POSITION_MAGIC);
+      
+      // Only count positions with non-zero magic (our EA's positions)
+      if(magic > 0 && (current_magic == 0 || magic == current_magic))
+      {
+         if(current_magic == 0) current_magic = magic;
+         
+         ArrayResize(open_symbols, open_count + 1);
+         open_symbols[open_count] = pos_symbol;
+         open_count++;
+      }
+   }
+   
+   // Use the main correlation check logic
+   if(open_count == 0) return true;
+   
+   double check_threshold = (threshold > 0) ? threshold : CORR_HIGH_THRESHOLD;
+   
+   for(int i = 0; i < open_count; i++)
+   {
+      if(open_symbols[i] == symbol) continue;
+      
+      double corr = GetCorrelation(symbol, open_symbols[i]);
+      
+      if(MathAbs(corr) >= check_threshold)
+      {
+         m_block_count++;
+         PrintFormat("[CORR] BLOCKED: %s vs %s correlation %.2f exceeds threshold %.2f",
+                     symbol, open_symbols[i], corr, check_threshold);
          return false;
       }
    }

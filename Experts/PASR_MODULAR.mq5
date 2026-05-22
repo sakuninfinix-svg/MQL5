@@ -661,23 +661,36 @@ void OnTick()
       //--- [D] Position management (BE, partial, trailing) + ExitEngine (NEW v6.10)
       //        + recovery price-tick monitoring
       double atrC = GetATR();
-      if(g_pos.HasOpenPosition())
+      if(g_pos.HasOpenPosition(current_symbol))
         {
          g_pos.OnTick(atrC);
          // Check for smart exit signals (Chandelier, Time-Based, Structure Break)
          // Note: ExitEngine requires position type and prices for proper exit calculation
          if(InpUseChandelier || InpUseTimeExit || InpUseStructBreak || InpUseProfitFade)
            {
-            // Get current position info
-            ulong ticket = PositionGetTicket(0); // Get first open position
-            if(ticket > 0)
+            // Get current position info for this symbol
+            ulong ticket = 0;
+            int total_pos = PositionsTotal();
+            for(int i = total_pos - 1; i >= 0; i--)
               {
-               if(PositionSelectByTicket(ticket))
+               ulong t = PositionGetTicket(i);
+               if(t <= 0) continue;
+               if(!PositionSelectByTicket(t)) continue;
+               
+               string pos_sym = PositionGetString(POSITION_SYMBOL);
+               if(pos_sym == current_symbol)
                  {
-                  ENUM_ORDER_TYPE pos_type = (ENUM_ORDER_TYPE)PositionGetInteger(POSITION_TYPE);
-                  double entry_price = PositionGetDouble(POSITION_PRICE_OPEN);
-                  double current_price = (pos_type == POSITION_TYPE_BUY) 
-                                         ? SymbolInfoDouble(current_symbol, SYMBOL_BID)
+                  ticket = t;
+                  break;
+                 }
+              }
+            
+            if(ticket > 0 && PositionSelectByTicket(ticket))
+              {
+               ENUM_ORDER_TYPE pos_type = (ENUM_ORDER_TYPE)PositionGetInteger(POSITION_TYPE);
+               double entry_price = PositionGetDouble(POSITION_PRICE_OPEN);
+               double current_price = (pos_type == POSITION_TYPE_BUY) 
+                                      ? SymbolInfoDouble(current_symbol, SYMBOL_BID)
                                          : SymbolInfoDouble(current_symbol, SYMBOL_ASK);
                   
                   ExitSignal exit_sig = g_exit.CheckExit(current_symbol, pos_type, entry_price, current_price);
@@ -1071,18 +1084,39 @@ void UpdateDashboard()
    g_dashCtx.aiVeto    = (g_lastAIScore < InpAIVetoThresh ||
                           g_lastDrift   > InpDriftVeto);
 
-   g_dashCtx.hasPosition = g_pos.HasOpenPosition();
+   g_dashCtx.hasPosition = g_pos.HasOpenPosition(_Symbol);
    if(g_dashCtx.hasPosition)
      {
-      g_dashCtx.posDir    = g_activePlan.direction;
-      g_dashCtx.posEntry  = g_activePlan.entryPrice;
-      g_dashCtx.posSL     = g_activePlan.sl;
-      g_dashCtx.posTP1    = g_activePlan.tp;
-      g_dashCtx.posTP2    = g_activePlan.tp2;
-      g_dashCtx.posLots   = g_activePlan.lot;
-      g_dashCtx.posPnL    = g_pos.GetFloatingPnL();
-      g_dashCtx.beDone    = g_pos.IsBEDone();
-      g_dashCtx.partialDone = g_pos.IsPartialDone();
+      // Get position info for chart symbol (dashboard shows current chart only)
+      ulong ticket = 0;
+      int total_pos = PositionsTotal();
+      for(int i = total_pos - 1; i >= 0; i--)
+        {
+         ulong t = PositionGetTicket(i);
+         if(t <= 0) continue;
+         if(!PositionSelectByTicket(t)) continue;
+         
+         string pos_sym = PositionGetString(POSITION_SYMBOL);
+         if(pos_sym == _Symbol)
+           {
+            ticket = t;
+            break;
+           }
+        }
+      
+      if(ticket > 0 && PositionSelectByTicket(ticket))
+        {
+         ENUM_ORDER_TYPE pos_type = (ENUM_ORDER_TYPE)PositionGetInteger(POSITION_TYPE);
+         g_dashCtx.posDir    = (pos_type == POSITION_TYPE_BUY) ? SIGNAL_BUY : SIGNAL_SELL;
+         g_dashCtx.posEntry  = PositionGetDouble(POSITION_PRICE_OPEN);
+         g_dashCtx.posSL     = PositionGetDouble(POSITION_SL);
+         g_dashCtx.posTP1    = PositionGetDouble(POSITION_TP);
+         g_dashCtx.posTP2    = g_activePlan.tp2;  // Runner TP from active plan
+         g_dashCtx.posLots   = PositionGetDouble(POSITION_VOLUME);
+         g_dashCtx.posPnL    = g_pos.GetFloatingPnL();
+         g_dashCtx.beDone    = g_pos.IsBEDone();
+         g_dashCtx.partialDone = g_pos.IsPartialDone();
+        }
      }
    else
      {
