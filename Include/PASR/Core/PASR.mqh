@@ -11,8 +11,8 @@
 //|     L1   Core       → IManager, EventBus, Events                 |
 //|     L1.5 Globals    → extern EA inputs (one decl point)          |
 //|     L2   Infra      → DataManager                                |
-//|     L3   Data       → MarketManager, ZoneManager stubs,          |
-//|                        SRManager stub, MarketRegime              |
+//|     L3   Data       → MarketRegime, ZoneManager stubs,           |
+//|                        SRManager stub                            |
 //|     L3.5 Analysis   → SRManager (full swing pivot), ZoneManager  |
 //|                        (full S/D impulse-base)   [Phase 3]       |
 //|     L4   Pattern    → PatternManager                             |
@@ -62,16 +62,20 @@
 // ─── L2: Infra — Production DataManager ──────────────────────────────
 #include "../Infra/DataManager.mqh"
 
-// ─── L3: Data — Forward stubs (backward-compat canonical named imports) ───
-#include "../Data/MarketManager.mqh"
-#include "../Data/ZoneManager.mqh"
-#include "../Data/SRManager.mqh"
+// ─── L3: Data — Canonical data structures and base classes ─────────────
+// MarketRegime: enum + RegimeSnapshot struct + CMarketRegime stub
 #include "../Data/MarketRegime.mqh"
+// ZoneManager: SDZone struct + CZoneManager stub
+#include "../Data/ZoneManager.mqh"
+// SRManager: SRZone struct + CSRManager stub
+#include "../Data/SRManager.mqh"
 
 // ─── L3.5: Analysis — Full implementations (Phase 3) ──────────────────
 // CAnalysisSRManager: swing pivot fractal + zone clustering + strength scoring
+// Note: Includes ../Data/SRManager.mqh internally for SRZone struct
 #include "../Analysis/SRManager.mqh"
 // CAnalysisZoneManager: Supply/Demand impulse-base zone detection
+// Note: Includes ../Data/ZoneManager.mqh internally for SDZone struct
 #include "../Analysis/ZoneManager.mqh"
 
 // ─── L4: Analysis — Pattern recognition ──────────────────────────────
