@@ -2,7 +2,7 @@
 //|                                      Data/MarketRegime.mqh       |
 //|  FIX #9 (2026-05-21): removed stale forward to ../12.MarketRegime|
 //|  Self-contained stub with compilable CMarketRegime class.       |
-//|  RecoveryManager and AIManager depend on this file.             |
+//|  RecoveryManager and CAIOrchestrator depend on this file.        |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __DATA_MARKET_REGIME_MQH__
