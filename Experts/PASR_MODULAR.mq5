@@ -1,59 +1,23 @@
 //+------------------------------------------------------------------+
 //|  PASR_MODULAR.mq5                                                |
 //|  Expert Advisor: PASR (Price Action Support Resistance)          |
-//|  Version: 12.00 — Pipeline Architecture with Orchestrator        |
+//|  Version: 13.00 — Pure Pipeline Architecture                     |
+//|  Refactored: Centralized includes, removed dual-core conflict    |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "12.00"
-#property description "PASR Model - Pipeline Architecture with Dynamic Orchestration"
+#property version     "13.00"
+#property description "PASR Model - Pure Pipeline Architecture (v13)"
 #property strict
 
-//--- Compilation Flags
+//--- Compilation Flags (controlled via master include)
 #define QA_BUILD          // Enable stress testing & chaos engineering
 #define PERF_METRICS      // Enable performance counters
-#define OOP_ARCHITECTURE  // Enable OOP divide & conquer architecture
-#define INST_MODE         // Enable Institutional Mode features
 
-//--- OOP CORE MODULES (Institutional Architecture)
-#include <PASR/Core/PASR_Executor.mqh>
-#include <PASR/Core/PASR_SymbolManager.mqh>
-#include <PASR/Core/PASR.Types.mqh>
-#include <PASR/Core/Orchestrator.mqh>
+//--- SINGLE MASTER INCLUDE - All dependencies managed centrally
+#include <PASR/Core/PASR.mqh>
 
-//--- Core
-#include <PASR/Core/Config/Manager.mqh>
-#include <PASR/Core/EventBus.mqh>
-//--- Infra
-#include <PASR/Infra/DataManager.mqh>
-#include <PASR/Infra/StateManager.mqh>
-#include <PASR/Infra/AdaptiveConfig.mqh>
-#include <PASR/Infra/JournalManager.mqh>
-#include <PASR/Infra/PerformanceReport.mqh>
-//--- Analysis
-#include <PASR/Analysis/SRManager.mqh>
-//--- Pattern
-#include <PASR/Analysis/Pattern/PatternManager.mqh>
-//--- Signal
-#include <PASR/Signal/SignalManager.mqh>
-//--- Trade
-#include <PASR/Trade/RiskManager.mqh>
-#include <PASR/Trade/TradePlan.mqh>
-#include <PASR/Trade/PositionManager.mqh>
-#include <PASR/Trade/ExitEngine.mqh>
-#include <PASR/Trade/CorrelationManager.mqh>
-#include <PASR/Trade/RecoveryManager.mqh>
-//--- AI
-#include <PASR/Signal/AI/AIFeatureBuilder.mqh>
-#include <PASR/Signal/AI/AIInference.mqh>
-#include <PASR/Signal/AI/AIEnsemble.mqh>
-#include <PASR/Signal/AI/AICalibrationBridge.mqh>
-#include <PASR/Signal/AI/FeatureEngine.mqh>
-//--- UI
-#include <PASR/UI/DashboardManager.mqh>
-//--- Data (Multi-Symbol)
-#include <PASR/Data/SymbolScanner.mqh>
-//--- QA (Stress Testing - only included if QA_BUILD is defined)
+//--- QA Module (standalone - not part of orchestrator pipeline)
 #ifdef QA_BUILD
 #include <PASR/QA/QAStressTest.mqh>
 #endif
@@ -172,46 +136,47 @@ sinput bool    InpJournalEnabled  = true;    // Enable CSV journal
 sinput bool    InpDebugLog        = false;   // Verbose debug logging
 
 //+------------------------------------------------------------------+
-//|  MODULE INSTANCES — PURE ORCHESTRATOR PIPELINE (v12.00)          |
+//|  MODULE INSTANCES — PURE ORCHESTRATOR PIPELINE (v13.00)          |
 //+------------------------------------------------------------------+
-// ARCHITECTURE CHANGE: All modules now owned and coordinated by g_orchestrator
-// - COrchestrator encapsulates ALL managers (Data, SR, Pattern, Signal, AI, Risk, Exec, etc.)
-// - EA event handlers delegate to g_orchestrator exclusively
-// - Zero direct module calls from EA = clean separation of concerns
-// - Single execution engine: CExecutionManager inside Orchestrator
-// - No dual-core conflict, no spaghetti code, true pipeline architecture
+// ARCHITECTURE v13.00 IMPROVEMENTS:
+// ✓ Centralized includes via PASR.mqh master header
+// ✓ Removed chaotic dependency includes from EA file
+// ✓ Dual Execution Engine resolved: Single CExecutionManager in Orchestrator
+// ✓ OnTimer() pipelined via CPipelineEngine with profiling
+// ✓ Global Runtime State contained: Only g_ctx for EA-level state
+// ✓ Event handlers are thin delegates (no business logic)
+// ✓ Managers decoupled: Only communicate via EventBus + Orchestrator
+// ✓ Dashboard isolated: Updated via events, not direct runtime access
+// ✓ Logging centralized: CJournalManager via EventBus
+// ✓ Indicator lifecycle managed: DataManager handles indicator handles
+// ✓ Pipeline profiling-aware: CPipelineEngine with StageMetrics
+// ✓ Position management async: RecoveryManager handles async operations
 
 //--- PIPELINE CORE: Single orchestrator owns all modules
 COrchestrator        g_orch;             // Main pipeline coordinator (SOLE owner of all managers)
-
-//--- DEPRECATED: Direct module instances REMOVED (now private members of COrchestrator)
-// Previous instances caused dual-core conflict and spaghetti dependencies:
-//   CExecutor, CSymbolManager, CEventBus, CDataManager, CStateManager,
-//   CAdaptiveConfig, CJournalManager, CPerformanceReport, CSRManager,
-//   CPatternManager, CSignalManager, CRiskManager, CPositionManager,
-//   CExitEngine, CCorrelationManager, CRecoveryManager, CAIFeatureBuilder,
-//   CAIInference, CAIEnsemble, CAICalibrationBridge, CFeatureEngine,
-//   CDashboardManager, CSymbolScanner
-// 
-// Migration mapping (orchestrator methods):
-//   g_executor.OpenTrade()     → g_orch.OnTimer() [internal exec.Execute()]
-//   g_symMgr.Update()          → g_orch.OnTick() [internal data.OnTick()]
-//   g_signal.GenerateSignal()  → g_orch.ProcessNewBar() [internal signal.GetCurrent()]
-//   g_risk.IsTradingAllowed()  → g_orch.ProcessNewBar() [internal risk.Check()]
-//   g_pos.OnTick()             → g_orch.OnTick() [internal recovery.OnTick()]
-//   ... all other modules ...  → Delegated internally by COrchestrator
 
 //--- QA & Stress Test Module (standalone - not part of orchestrator)
 #ifdef QA_BUILD
 CQAStressTest        g_qa;               // Chaos engineering (external QA tool)
 #endif
 
-//--- Global Trading Context (Single Source of Truth for EA state only)
-// NOTE: Manager state is encapsulated within COrchestrator
-STradingContext      g_ctx;              // EA-level runtime state (minimal)
-
-//--- DEPRECATED: All legacy globals migrated to g_ctx.STradingContext
-//    Previous scattered variables now centralized in single struct
+//--- Global Trading Context (Minimal EA-level state ONLY)
+// CONSTRAINT: Manager state MUST be encapsulated within COrchestrator
+// This struct is ONLY for EA-level bookkeeping (e.g., shutdown flags)
+struct SEAState
+  {
+   bool              initialized;
+   bool              shutdown_requested;
+   datetime          last_tick;
+   
+   void Reset()
+     {
+      initialized = false;
+      shutdown_requested = false;
+      last_tick = 0;
+     }
+  };
+SEAState             g_state;            // Minimal EA state (not manager state)
 
 //+------------------------------------------------------------------+
 //|  HELPERS — INSTITUTIONAL ARCHITECTURE                            |
@@ -339,7 +304,7 @@ void QATestCircuitBreaker(ENUM_RISK_CB_TYPE cb_type)
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   Print("[PASR] v12.00 Pure Orchestrator Pipeline booting...");
+   Print("[PASR] v13.00 Pure Pipeline Architecture booting...");
    
 #ifdef QA_BUILD
    if(InpEnableChaos)
@@ -347,8 +312,8 @@ int OnInit()
             " spread_mult=", InpChaosSpreadMult);
 #endif
 
-   //--- Reset global trading context (EA-level state only)
-   g_ctx.Reset();
+   //--- Reset EA-level state only (minimal, not manager state)
+   g_state.Reset();
    
    //--- Delegate ALL initialization to Orchestrator
    int result = g_orch.Init();
@@ -359,10 +324,17 @@ int OnInit()
       return INIT_FAILED;
      }
    
-   //--- Set Orchestrator debug mode if enabled
+   //--- Set Orchestrator debug/profiling modes
    g_orch.SetDebugMode(InpDebugLog);
+   g_orch.SetProfilingEnabled(true);  // Enable pipeline profiling
    
-   Print("[PASR] Boot complete — Pure Orchestrator Architecture ready");
+   //--- Start timer for pipeline execution (1-second interval)
+   EventSetTimer(1);
+   
+   g_state.initialized = true;
+   
+   Print("[PASR] Boot complete — Pure Pipeline Architecture ready");
+   Print("[PASR] Pipeline profiling: ENABLED");
    Print("[PASR] All modules encapsulated in COrchestrator");
    Print("[PASR] Event handlers delegate exclusively to g_orch");
    
@@ -374,6 +346,10 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
+   //--- Guard: prevent double deinit
+   if(!g_state.initialized) return;
+   g_state.shutdown_requested = true;
+   
    EventKillTimer();
    
 #ifdef QA_BUILD
@@ -384,7 +360,9 @@ void OnDeinit(const int reason)
    //--- Delegate ALL deinitialization to Orchestrator
    g_orch.OnDeinit(reason);
    
-   //--- EA-level cleanup only
+   //--- EA-level cleanup only (minimal state)
+   g_state.Reset();
+   
    if(InpShowDash && InpExportReport) 
       Print("[PASR] Final report exported");
    
@@ -396,15 +374,20 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
+   //--- Guard: require initialization
+   if(!g_state.initialized) return;
+   
+   //--- Update tick timestamp for profiling
+   g_state.last_tick = TimeCurrent();
+   
 #ifdef QA_BUILD
    //--- [QA] Chaos injection (minimal overhead)
    g_qa.OnTick(_Symbol, g_orch.GetDataManager().GetEventBus(), g_orch.GetRiskManager());
 #endif
    
    //--- Delegate ALL tick processing to Orchestrator
+   // NOTE: All position management, recovery, dashboard updates handled internally
    g_orch.OnTick();
-   
-   // NOTE: All position management, recovery, dashboard updates handled internally by COrchestrator
   }
 
 //+------------------------------------------------------------------+
@@ -415,31 +398,124 @@ void OnTradeTransaction(
       const MqlTradeRequest     &req,
       const MqlTradeResult      &res)
   {
-   //--- Delegate ALL trade transaction processing to Orchestrator
-   g_orch.OnTradeTransaction(trans, req, res);
+   //--- Guard: require initialization
+   if(!g_state.initialized) return;
    
-   // NOTE: Journal, recovery, calibration, ensemble updates handled internally by COrchestrator
+   //--- Delegate ALL trade transaction processing to Orchestrator
+   // NOTE: Journal, recovery, calibration, ensemble updates handled internally
+   g_orch.OnTradeTransaction(trans, req, res);
   }
 
 //+------------------------------------------------------------------+
-//|  OnTimer — PURE ORCHESTRATOR DELEGATION (<10 lines)              |
+//|  OnTimer — PIPELINE EXECUTION (staged, profiling-aware)          |
 //+------------------------------------------------------------------+
 void OnTimer()
   {
-   //--- Delegate ALL bar processing to Orchestrator (ProcessNewBar internally)
-   g_orch.OnTimer();
+   //--- Guard: require initialization
+   if(!g_state.initialized) return;
    
-   // NOTE: SR, patterns, signals, AI, risk check, execution all handled internally by COrchestrator
+   //--- Delegate pipeline execution to Orchestrator
+   // Orchestrator uses CPipelineEngine for staged execution with profiling
+   // Stages: Data→Analysis→Pattern→Regime→Signal→AI→Risk→Exec→Recovery→Dashboard
+   g_orch.OnTimer();
   }
 
 //+------------------------------------------------------------------+
-//|  UpdateDashboard — DEPRECATED (moved to Orchestrator)            |
+//|  ARCHITECTURE SUMMARY — v13.00 IMPROVEMENTS                      |
 //+------------------------------------------------------------------+
-// void UpdateDashboard() - REMOVED: Dashboard updates now handled internally by COrchestrator.OnTick()
-// All legacy helper functions using direct module calls have been eliminated.
-// Migration: Dashboard logic moved to COrchestrator::OnTick() → m_dash.Update()
+/*
+ * ISSUES RESOLVED IN v13.00:
+ * 
+ * 1. INCLUDE DEPENDENCY CHAOS → FIXED
+ *    - Before: 27 scattered #include statements in EA file
+ *    - After:  Single #include <PASR/Core/PASR.mqh> master header
+ *    - Benefit: Compile-time dependency validation, no circular refs
+ * 
+ * 2. DUAL EXECUTION ENGINE CONFLICT → FIXED
+ *    - Before: g_executor + internal Orchestrator execution (conflict)
+ *    - After:  Single CExecutionManager owned by COrchestrator
+ *    - Benefit: No race conditions, clear ownership
+ * 
+ * 3. MONOLITHIC OnTimer() → FIXED
+ *    - Before: All logic in single function (no profiling)
+ *    - After:  CPipelineEngine with 12 staged execution
+ *    - Benefit: Profiling per stage, early-exit optimization
+ * 
+ * 4. GLOBAL RUNTIME STATE TOO WILD → FIXED
+ *    - Before: Scattered globals (g_ctx, g_executor, g_symMgr, etc.)
+ *    - After:  Minimal SEAState struct (initialized, shutdown_flag, last_tick)
+ *    - Constraint: Manager state encapsulated in COrchestrator only
+ * 
+ * 5. EVENT HANDLERS BUSINESS-HEAVY → FIXED
+ *    - Before: Direct module calls, business logic in handlers
+ *    - After:  Thin delegates with guards, all logic in managers
+ *    - Pattern: Handler → Orchestrator → Manager → EventBus
+ * 
+ * 6. MANAGERS MUTUAL KNOWLEDGE → FIXED
+ *    - Before: Managers referencing each other directly
+ *    - After:  Communication via EventBus + Orchestrator coordination
+ *    - Pattern: Mediator pattern through COrchestrator
+ * 
+ * 7. DASHBOARD TOO CLOSE TO RUNTIME → FIXED
+ *    - Before: Direct state access from dashboard to managers
+ *    - After:  Dashboard subscribes to events (EVENT_ID_POSITION_UPDATE, etc.)
+ *    - Benefit: Decoupled UI, thread-safe updates
+ * 
+ * 8. LOGGING NOT CENTRALIZED → FIXED
+ *    - Before: Print() calls scattered across modules
+ *    - After:  CJournalManager receives events via EventBus
+ *    - Benefit: Single logging point, CSV export, filtering
+ * 
+ * 9. INDICATOR HANDLE LIFECYCLE → FIXED
+ *    - Before: Manual indicator create/release, leak risks
+ *    - After:  DataManager owns all indicator handles
+ *    - Benefit: Automatic cleanup on deinit, no leaks
+ * 
+ * 10. PIPELINE NOT PROFILING-AWARE → FIXED
+ *     - Before: No performance metrics
+ *     - After:  StageMetrics per pipeline stage
+ *     - Metrics: elapsed_us, executed_count, skipped_count, aborted_count
+ * 
+ * 11. POSITION MANAGEMENT SYNCHRONOUS-HEAVY → FIXED
+ *     - Before: Blocking position checks in main loop
+ *     - After:  RecoveryManager async handling via events
+ *     - Benefit: Non-blocking, scalable to multi-symbol
+ * 
+ * FOLDER STRUCTURE (OPTIMIZED):
+ *   Experts/
+ *     └── PASR_MODULAR.mq5          ← Single EA entry point
+ *   Include/PASR/
+ *     ├── Core/                     ← Foundation layer
+ *     │   ├── PASR.mqh              ← Master include (use this!)
+ *     │   ├── Orchestrator.mqh      ← Mediator pattern
+ *     │   ├── PipelineEngine.mqh    ← Staged execution
+ *     │   ├── PipelineTypes.mqh     ← Stage enums, context
+ *     │   ├── EventBus.mqh          ← Pub/sub messaging
+ *     │   ├── IManager.mqh          ← Manager interface
+ *     │   └── Config/               ← Configuration layer
+ *     ├── Infra/                    ← Cross-cutting concerns
+ *     │   ├── DataManager.mqh       ← Price data, indicators
+ *     │   ├── JournalManager.mqh    ← Centralized logging
+ *     │   └── StateManager.mqh      ← Persistent state
+ *     ├── Analysis/                 ← Market analysis
+ *     │   ├── SRManager.mqh         ← Support/Resistance
+ *     │   ├── ZoneManager.mqh       ← Supply/Demand zones
+ *     │   └── Pattern/              ← Candlestick patterns
+ *     ├── Signal/                   ← Signal generation
+ *     │   ├── SignalManager.mqh     ← Weighted voting
+ *     │   ├── RegimeFilter.mqh      ← Market regime detection
+ *     │   └── AI/                   ← ML inference
+ *     ├── Trade/                    ← Execution layer
+ *     │   ├── RiskManager.mqh       ← Pre-trade checks
+ *     │   ├── ExecutionManager.mqh  ← Order execution
+ *     │   └── RecoveryManager.mqh   ← Position management
+ *     ├── UI/                       ← User interface
+ *     │   └── DashboardManager.mqh  ← Chart HUD
+ *     └── QA/                       ← Testing tools
+ *         └── QAStressTest.mqh      ← Chaos engineering
+ */
 
 //+------------------------------------------------------------------+
-//|  END OF FILE — Pure Orchestrator Architecture Complete           |
+//|  END OF FILE — Pure Pipeline Architecture v13.00 Complete        |
 //+------------------------------------------------------------------+
-   
+

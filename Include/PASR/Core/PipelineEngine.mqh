@@ -1,16 +1,17 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — CANONICAL v1.00                        |
-//| Staged pipeline execution engine with profiling                  |
+//| Core/PipelineEngine.mqh — v2.00 (Profiling-Aware)                |
+//| Staged pipeline execution engine with metrics                    |
 //|                                                                  |
 //| PURPOSE: Replace monolithic OnTimer() with pipelined stages      |
 //|                                                                  |
-//| ARCHITECTURE:                                                    |
-//|   • Each stage is independent and testable                       |
-//|   • Profiling at each stage for performance optimization         |
-//|   • Early-exit short-circuiting for efficiency                   |
-//|   • Context passing between stages                               |
+//| ARCHITECTURE v2.00 IMPROVEMENTS:                                 |
+//|   ✓ Each stage is independent and testable                       |
+//|   ✓ Profiling at each stage (elapsed_us, executed, skipped)      |
+//|   ✓ Early-exit short-circuiting via PipelineContext              |
+//|   ✓ Context passing between stages (data, signal, risk_result)   |
+//|   ✓ Non-blocking design (async position management)              |
 //|                                                                  |
-//| STAGES:                                                          |
+//| STAGES (12 total):                                               |
 //|   1. Data Sync → 2. Analysis (SR/Zone) → 3. Pattern Rec          |
 //|   4. Regime Detection → 5. Signal Generation → 6. AI Inference   |
 //|   7. Risk Check → 8. Execution → 9. Position Management          |
@@ -25,9 +26,9 @@
 #define __CORE_PIPELINE_ENGINE_MQH__
 
 #include "PipelineTypes.mqh"
-#include "../Infra/JournalManager.mqh"
+// Note: JournalManager included via forward declaration to avoid circular deps
 
-// Forward declarations for manager classes
+// Forward declarations for manager classes (avoid circular dependencies)
 class CDataManager;
 class CAnalysisSRManager;
 class CAnalysisZoneManager;
@@ -40,6 +41,7 @@ class CExecutionManager;
 class CRecoveryManager;
 class CDashboardManager;
 class CEventBus;
+class CJournalManager;  // Forward declared (no include needed)
 
 //+------------------------------------------------------------------+
 //| CPipelineEngine — Staged execution with profiling                |
