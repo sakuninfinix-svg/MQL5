@@ -45,6 +45,8 @@
 #include "../Analysis/MarketRegimeDetector.mqh" // Phase 5
 #include "LatencyOptimizer.mqh"             // Phase 6
 #include "AsyncOrderManager.mqh"            // Phase 6
+#include "../Infra/HealthMonitor.mqh"       // Phase 7: Self-Healing
+#include "../Infra/SnapshotManager.mqh"     // Phase 7: State Persistence
 
 // Forward declarations for manager classes (avoid circular dependencies)
 class CDataManager;
@@ -484,7 +486,9 @@ public:
                        CAdaptiveParameterManager *adaptive = NULL,
                        CMarketRegimeDetector *regime_det = NULL,
                        CLatencyOptimizer *optimizer = NULL,
-                       CAsyncOrderManager *async_orders = NULL)
+                       CAsyncOrderManager *async_orders = NULL,
+                       CHealthMonitor *health = NULL,
+                       CSnapshotManager *snapshot = NULL)
      {
       m_data = data;
       m_sr = sr;
@@ -505,6 +509,8 @@ public:
       m_regime_det = regime_det;
       m_optimizer = optimizer;
       m_async_orders = async_orders;
+      m_health = health;
+      m_snapshot = snapshot;
      }
    
    // Execute full pipeline

@@ -107,6 +107,10 @@ private:
    CAsyncOrderManager     *m_async_orders; // Async order execution
    CHighFreqTimer         *m_hf_timer;   // High-frequency polling
    
+   // ── Phase 7: Self-Healing Components ────────────────────────────
+   CHealthMonitor         *m_health;     // Health monitoring & recovery
+   CSnapshotManager       *m_snapshot;   // State persistence
+   
    // ── QA Managers (testing only) ──────────────────────────────────
    CLatencySimulator      *m_latency_sim; // Phase 4: Latency Simulation
 
@@ -453,6 +457,24 @@ public:
       if(!InitManager(m_hf_timer, "CHighFreqTimer")) { FreeAll(); return INIT_FAILED; }
       m_hf_timer->Start(10); // 10ms polling interval for low latency
 
+      // ── L7g: Phase 7 Self-Healing Components ──────────────────────
+      m_health = new CHealthMonitor();
+      if(m_health == NULL) { FreeAll(); return INIT_FAILED; }
+      if(!m_health->Initialize(m_bus)) { FreeAll(); return INIT_FAILED; }
+      
+      m_snapshot = new CSnapshotManager();
+      if(m_snapshot == NULL) { FreeAll(); return INIT_FAILED; }
+      string snapshotPath = "PASR\\Snapshots";
+      if(!m_snapshot->Initialize(snapshotPath)) { FreeAll(); return INIT_FAILED; }
+      
+      // Try to recover from previous snapshot
+      SystemStateSnapshot savedState;
+      if(m_snapshot->LoadLatestSnapshot(savedState))
+        {
+         Print("[Orchestrator] Recovered from snapshot. Uptime was: ", savedState.uptime_seconds, "s");
+         // TODO: Restore state variables from savedState
+        }
+
       // ── L7d: LatencySimulator (QA Only) ── Phase 4 NEW ───────────
       #ifdef PASR_QA_BUILD
       m_latency_sim = new CLatencySimulator();
@@ -474,7 +496,7 @@ public:
          m_data, m_sr, m_zone, m_pattern, m_signal,
          m_ai, m_regime, m_risk, m_exec, m_recovery,
          m_dash, journal, m_bus, m_sanity, m_telemetry, m_adaptive,
-         m_regime_det, m_optimizer, m_async_orders
+         m_regime_det, m_optimizer, m_async_orders, m_health, m_snapshot
       );
       m_pipeline->SetDebugMode(m_debugMode);
       m_pipeline->EnableProfiling(m_profiling_enabled);
@@ -543,6 +565,35 @@ public:
    void OnTimer()
      {
       if(!m_initialised) return;
+      
+      // Phase 7: Health Check FIRST
+      if(m_health != NULL)
+        {
+         m_health->OnTick_HealthCheck();
+         
+         // Send health event for telemetry
+         PASREvent evHealth;
+         evHealth.id = EVENT_ID_HEALTH_CHECK;
+         evHealth.priority = 1;
+         evHealth.data_i[0] = m_health->Status();
+         m_bus->Push(evHealth);
+        }
+      
+      // Phase 7: Periodic Snapshot Save (every 60 seconds via timer)
+      static datetime s_last_snapshot = 0;
+      datetime now = TimeCurrent();
+      if(now - s_last_snapshot >= 60 && m_snapshot != NULL)
+        {
+         double profit = 0.0; // Get from account
+         int trades = 0;      // Get from stats
+         int posCount = PositionsTotal();
+         double volume = 0.0;
+         int errors = 0;
+         
+         m_snapshot->UpdateState(true, profit, trades, posCount, volume, errors);
+         m_snapshot->SaveSnapshot();
+         s_last_snapshot = now;
+        }
       
       // Use pipeline engine for staged execution with profiling
       if(m_pipeline != NULL && m_profiling_enabled)
@@ -632,6 +683,25 @@ public:
      {
       if(!m_initialised) return;
       m_initialised = false;
+      
+      // Phase 7: Save snapshot before shutdown
+      if(m_snapshot != NULL)
+        {
+         // Update state before saving
+         double profit = 0.0; // Get from account or telemetry
+         int trades = 0;      // Get from telemetry
+         int posCount = PositionsTotal();
+         double volume = 0.0; // Calculate total volume
+         int errors = 0;      // Get from health monitor
+         
+         m_snapshot->UpdateState(true, profit, trades, posCount, volume, errors);
+         m_snapshot->SaveSnapshot();
+         m_snapshot->Shutdown();
+        }
+      
+      // Phase 7: Shutdown health monitor
+      if(m_health != NULL) m_health->Shutdown();
+      
       if(m_ai   != NULL) m_ai.Deinit();
       if(m_dash != NULL) m_dash.Destroy();  // removes chart objects before FreeAll
       FreeAll();

@@ -40,6 +40,12 @@ enum ENUM_EVENT_ID
    EVENT_ID_REQUOTE_SIMULATED       = 44,
    // Adaptive Parameters (Fase 5)
    EVENT_ID_ADAPTIVE_UPDATE         = 45,
+   // Phase 7: Self-Healing Events
+   EVENT_ID_SYSTEM_RECOVER          = 46,
+   EVENT_ID_SYSTEM_HALT             = 47,
+   EVENT_ID_HEALTH_CHECK            = 48,
+   EVENT_ID_SNAPSHOT_SAVE           = 49,
+   EVENT_ID_SNAPSHOT_LOAD           = 50,
    // Deferred / async
    EVENT_ID_DEFERRED         = 99
   };
