@@ -91,7 +91,7 @@ the old file becomes a 1-line shim:
 | 12.MarketRegime.mqh | Analysis/MarketRegime.mqh | ⏳ Pending |
 | 9.PatternManager.mqh | Analysis/Pattern/ | ✅ Done |
 | 5.SignalManager.mqh | Signal/SignalManager.mqh | ⏳ Pending |
-| 7.AIManager.mqh | Signal/AI/ (3 files) | ⏳ Pending |
+| 7.CAIOrchestrator.mqh | Signal/AI/ (14 files, 26-dim) | ✅ Done v4.02 |
 | 6.ExecutionManager.mqh | Trade/ExecutionManager.mqh | ⏳ Pending |
 | 8.RecoveryManager.mqh | Trade/RecoveryManager.mqh | ⏳ Pending |
 | 11.DashboardManager.mqh | UI/DashboardManager.mqh | ✅ Done |

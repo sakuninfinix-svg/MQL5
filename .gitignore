@@ -1,60 +1,58 @@
-```mqh
-# MQL4/MT4 specific build artifacts
-*.ex4
-*.ex5
-*.mqh.bak
-*.mq4.bak
-*.mq5.bak
+```
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.class
+*.out
 
-# MT4/MT5 terminal files
-tester/
-logs/
-history/
-profiles/
-config/
-
-# Editor backups
-*.bak
-*.tmp
-*~
-.swp
-.swo
-
-# Environment specific
+# Dependencies
+node_modules/
+venv/
+.venv/
 .env
 .env.local
 .env.*
 
-# IDE specific
+# Build directories
+dist/
+build/
+target/
+*.egg-info/
+
+# Editors and IDEs
 .vscode/
 .idea/
-*.userprefs
-*.suo
-*.user
+*.swp
+*.swo
+*.tmp
 
-# OS generated files
+# System files
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Build outputs
-build/
-dist/
-target/
-out/
-
-# Dependency caches
-node_modules/
-__pycache__/
-*.egg-info/
-.Python
-venv/
-.venv/
 
 # Logs
 *.log
-*.elog
-*.gmon
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Python specific
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+.eggs/
 
 # Compressed files
 *.zip
@@ -65,10 +63,18 @@ venv/
 *.xz
 *.7z
 *.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
 *.Z
 *.lz
 *.lzo
 *.tar.gz
 *.tar.bz2
 *.tar.xz
+*.tar.zst
 ```
