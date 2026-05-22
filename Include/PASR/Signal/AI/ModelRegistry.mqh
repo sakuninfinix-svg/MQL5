@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/ModelRegistry.mqh — v1.00                                      |
+//| AI/ModelRegistry.mqh — v1.01                                      |
 //| Model versioning: save, load, promote, compare model versions.  |
 //|                                                                  |
 //| PURPOSE:                                                         |
@@ -12,6 +12,7 @@
 //|   MQL5/Files/PASR_ModelReg_{magic}_{symbol}.bin                 |
 //|                                                                  |
 //| CHANGE LOG:                                                      |
+//|   v1.01 (2026-05-21) — Enhanced CRC + version check optimization |
 //|   v1.00 (2026-05-21) — Phase 8 initial                           |
 //+------------------------------------------------------------------+
 #property strict
@@ -19,7 +20,7 @@
 #define __AI_MODEL_REGISTRY_MQH__
 
 #define MODEL_REG_MAX     8
-#define MODEL_REG_VERSION 0x0100
+#define MODEL_REG_VERSION 0x0101  // v1.01
 
 struct ModelVersion
   {
@@ -54,15 +55,23 @@ private:
      { StringReplace(sym,"/","_");
        return StringFormat("PASR_ModelReg_%d_%s.bin", magic, sym); }
 
+   // Enhanced CRC with better mixing to avoid collisions
    uint ComputeCRC() const
-     { uint crc = 0xABCD1234;
-       crc ^= (uint)m_reg.count;
-       crc ^= (uint)m_reg.activeIdx;
-       for(int i=0;i<m_reg.count;i++)
-         { crc ^= (uint)(m_reg.models[i].winRate*10000);
-           crc ^= (uint)m_reg.models[i].totalTrades;
-           crc ^= (uint)m_reg.models[i].id; }
-       return crc; }
+     { 
+      uint crc = 0xCBF478AB;  // Improved seed
+      crc ^= (uint)m_reg.count * 31;
+      crc ^= (uint)m_reg.activeIdx * 37;
+      for(int i=0; i<m_reg.count; i++)
+        { 
+          crc ^= (uint)(m_reg.models[i].winRate * 10000) * 41;
+          crc ^= (uint)m_reg.models[i].totalTrades * 43;
+          crc ^= (uint)m_reg.models[i].id * 47;
+          crc ^= (uint)(m_reg.models[i].profitFactor * 1000) * 53;
+          // Rotate bits for better distribution
+          crc = (crc << 7) | (crc >> 25);
+        }
+      return crc; 
+     }
 
 public:
    CModelRegistry() : m_initialised(false) {}
@@ -76,20 +85,40 @@ public:
        return true; }
 
    bool Load()
-     { if(!m_initialised) return false;
-       if(!FileIsExist(m_filename, FILE_COMMON)) return true;
-       int fh = FileOpen(m_filename, FILE_READ|FILE_BIN|FILE_COMMON);
-       if(fh==INVALID_HANDLE) return false;
-       FileReadStruct(fh, m_reg); FileClose(fh);
-       if(m_reg.version != MODEL_REG_VERSION)
-         { m_reg.count=0; m_reg.activeIdx=-1; return false; }
-       uint expected = ComputeCRC();
-       if(m_reg.crc != expected)
-         { Print("[ModelReg] CRC mismatch — registry cleared");
-           m_reg.count=0; m_reg.activeIdx=-1; return false; }
-       PrintFormat("[ModelReg] Loaded: %d versions, active=%d",
-                   m_reg.count, m_reg.activeIdx);
-       return true; }
+     { 
+      if(!m_initialised) return false;
+      if(!FileIsExist(m_filename, FILE_COMMON)) return true;
+      
+      // Optimized: check version first before full read
+      int fh = FileOpen(m_filename, FILE_READ|FILE_BIN|FILE_COMMON);
+      if(fh==INVALID_HANDLE) return false;
+      
+      ushort fileVersion = (ushort)FileReadShort(fh);
+      if(fileVersion != MODEL_REG_VERSION)
+        { 
+          FileClose(fh);
+          PrintFormat("[ModelReg] Version mismatch: file=%X expected=%X — clearing",
+                      fileVersion, MODEL_REG_VERSION);
+          m_reg.count=0; m_reg.activeIdx=-1; 
+          return false; 
+        }
+      
+      // Reset handle and read full struct
+      FileSeek(fh, 0, SEEK_SET);
+      FileReadStruct(fh, m_reg); 
+      FileClose(fh);
+      
+      uint expected = ComputeCRC();
+      if(m_reg.crc != expected)
+        { 
+          Print("[ModelReg] CRC mismatch — registry cleared");
+          m_reg.count=0; m_reg.activeIdx=-1; 
+          return false; 
+        }
+      PrintFormat("[ModelReg] Loaded: %d versions, active=%d",
+                  m_reg.count, m_reg.activeIdx);
+      return true; 
+     }
 
    bool Save()
      { if(!m_initialised) return false;
