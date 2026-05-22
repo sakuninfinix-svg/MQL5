@@ -100,9 +100,15 @@
 #include "../Signal/SignalManager.mqh"
 
 // ─── L5b: AI — Neural net inference + AISignalSource plugin ──────────────
+// NOTE: AIManager (8-dim) is deprecated. Use CAIOrchestrator for 26-dim system.
 // AISignalSource bridges AIManager confidence score → ISignalSource interface
-#include "../Signal/AI/AISignalSource.mqh"
-#include "../Signal/AI/AIManager.mqh"
+#include "../Signal/AI/AITypes.mqh"           // Core types & constants (AI_FEATURE_DIM=26)
+#include "../Signal/AI/FeatureEngine.mqh"     // Advanced statistical features (Z-score, skew, kurtosis)
+#include "../Signal/AI/AIFeatureBuilder.mqh"  // 26-dim feature engineering
+#include "../Signal/AI/AIInference.mqh"       // Expert routing + forward pass
+#include "../Signal/AI/AIOrchestrator.mqh"    // CAIOrchestrator: model mgmt + inference
+#include "../Signal/AI/AISignalSource.mqh"    // Legacy bridge (AIManager → SignalManager)
+#include "../Signal/AI/AIManager.mqh"         // DEPRECATED: kept for backward compat only
 
 // ─── L5c: Regime filter + source plugin (Phase 4) ──────────────────────
 // CRegimeFilter: ADX + ATR percentile + Bollinger Width regime detection

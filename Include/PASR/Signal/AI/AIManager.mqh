@@ -2,9 +2,17 @@
 //|                                        AI/AIManager.mqh          |
 //|                           Copyright 2026, Agsicentre            |
 //|                                                                  |
-//|  PURPOSE: AI signal filter + deferred backpropagation manager.  |
+//|  PURPOSE: DEPRECATED - Legacy 8-dim AI system.                  |
+//|           USE CAIOrchestrator + AIFeatureBuilder (26-dim) instead|
+//|                                                                  |
+//|  STATUS: Kept for backward compatibility only.                  |
+//|          All new development should use AIInference +          |
+//|          AIFeatureBuilder with 26-dimensional features.         |
 //|                                                                  |
 //|  CHANGE LOG:                                                     |
+//|  v2.16 (2026-05-21) — DEPRECATION NOTICE:                       |
+//|    + Marked as deprecated in favor of 26-dim system             |
+//|    + Users should migrate to CAIOrchestrator                    |
 //|  v2.15 (2026-05-21) — FIX #4 + FIX #5:                         |
 //|    FIX #4: BuildFeaturesPublic() added as public accessor        |
 //|            Orchestrator.OnTradeTransaction() now passes real     |
@@ -23,24 +31,28 @@
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.15"
+#property version   "2.16"
 #property strict
 
 #ifndef __AI_AIMANAGER_MQH__
 #define __AI_AIMANAGER_MQH__
 
+#warning "AIManager is deprecated. Use CAIOrchestrator with 26-dim features instead."
+
 #include "../Core/IManager.mqh"
 #include "../Data/DataManager.mqh"   // FIX #5: was ../Infra/DataManager.mqh
 
 //+------------------------------------------------------------------+
-//| Network architecture constants                                   |
+//| Network architecture constants (LEGACY 8-DIM)                    |
+//| WARNING: This is the old 8-feature system.                       |
+//|          New system uses AI_FEATURE_DIM=26 from AITypes.mqh      |
 //+------------------------------------------------------------------+
 #define AI_INPUT_DIM   8
 #define AI_HIDDEN_DIM  16
 #define AI_OUTPUT_DIM  1
 
 //+------------------------------------------------------------------+
-//| Experience sample for replay buffer                              |
+//| Experience sample for replay buffer (LEGACY)                     |
 //+------------------------------------------------------------------+
 struct AIExperience
   {
@@ -393,6 +405,22 @@ public:
    int    GetTotalEpochs() const { return m_totalEpochs; }
    int    GetReplaySize()  const { return m_replaySize; }
    float  GetSignalScore() const { return m_lastScore; }
+   
+   // COMPATIBILITY METHODS for PipelineEngine (legacy API support)
+   // These are stub implementations to maintain compatibility with old code
+   // that calls Predict() and GetDriftScore(). New code should use CAIOrchestrator.
+   
+   // Legacy method: Predict score from features (uses ForwardPass internally)
+   double Predict(const float &features[])
+     {
+      // Convert float[] to internal format and run forward pass
+      // Note: This is a legacy compatibility shim
+      return (double)ForwardPass(features);
+     }
+   
+   // Legacy method: Get drift score (stub - returns 0.0 for backward compat)
+   // Real drift detection is in AIInference + FeatureEngine
+   double GetDriftScore() const { return 0.0; }
 
    virtual void OnConfigReload() override
      {
