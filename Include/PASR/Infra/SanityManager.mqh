@@ -11,6 +11,9 @@
 #include "../Core/IManager.mqh"
 #include "../Core/EventBus.mqh"
 #include "../Core/Config/Config.mqh"
+
+// Forward declaration
+class IDataManager;
 //+------------------------------------------------------------------+
 //| Enum: Status Sirkuit Breaker                                     |
 //+------------------------------------------------------------------+
@@ -67,10 +70,9 @@ public:
    ~CSanityManager() {}
 
    // IManager Interface Implementation
-   bool Init(CDataManager *data, CEventBus *bus) override
+   bool Init(IDataManager *data, CEventBus *bus) override
      {
-      // Sanity Manager doesn't need DataManager, only uses inherited m_bus
-      if(bus == NULL) return false;
+      if(!IManager::Init(data, bus)) return false;
       
       Print("[SANITY] Initialized with TripThreshold=", m_config.trip_threshold, 
             " ResetTimeout=", m_config.reset_timeout_sec, "s");
@@ -294,13 +296,13 @@ private:
 
    void NotifyStateChange(const string &msg)
      {
-      if(m_eventbus != NULL)
+      if(m_bus != NULL)
         {
-         SEventData evt;
-         evt.event_id = EVENT_ID_SYSTEM_INFO;
-         evt.source   = "SanityManager";
-         evt.message  = msg;
-         m_eventbus->Publish(evt);
+         PASREvent evt;
+         evt.id       = EVENT_ID_SYSTEM_INFO;
+         evt.priority = 50;
+         evt.tag      = "SanityManager";
+         m_bus.Push(evt);
         }
       Print("[SANITY STATE] ", msg);
      }

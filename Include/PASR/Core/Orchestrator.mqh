@@ -377,7 +377,7 @@ public:
       sanityCfg.max_price_gap_pct  = 0.5;
       sanityCfg.trip_threshold     = 3;
       sanityCfg.reset_timeout_sec  = 60;
-      m_sanity->Initialize(sanityCfg, m_bus);
+      m_sanity->Initialize(sanityCfg);
 
       // ── L8: Pipeline Engine — Initialize and inject managers ────
       m_pipeline = new CPipelineEngine();
