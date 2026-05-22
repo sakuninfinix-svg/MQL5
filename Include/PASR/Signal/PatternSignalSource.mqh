@@ -7,7 +7,7 @@
 #define __SIGNAL_PATTERN_SOURCE_MQH__
 
 #include "ISignalSource.mqh"
-#include "../Pattern/PatternManager.mqh"
+#include "../Analysis/Pattern/PatternManager.mqh"
 
 class PatternSignalSource : public ISignalSource
   {

@@ -1,25 +1,23 @@
 //+------------------------------------------------------------------+
 //| Include/PASR/Analysis/Pattern/_README.mqh                        |
 //|                                                                  |
-//| !! GHOST FOLDER — DEPRECATED !!                                  |
-//|                                                                  |
-//| This folder is a tombstone left from an earlier refactoring.     |
-//| It contains NO implementation files.                             |
+//| Pattern Recognition Module Documentation                         |
 //|                                                                  |
 //| CANONICAL PATTERN MODULE LOCATION:                               |
-//|   Include/PASR/Pattern/                                          |
-//|     - PatternManager.mqh   (10KB, full implementation)           |
+//|   Include/PASR/Analysis/Pattern/                                 |
+//|     - PatternManager.mqh   (full implementation)                 |
 //|     - PatternTypes.mqh     (enums + structs)                     |
-//|     - Evaluators.mqh       (22KB, all pattern evaluators)        |
+//|     - Evaluators.mqh       (all pattern evaluators)              |
 //|     - CandleUtils.mqh      (candle geometry helpers)             |
 //|     - FakeoutDetector.mqh  (fakeout/trap detection)              |
 //|     - ScoreEngine.mqh      (confluence scoring)                  |
 //|                                                                  |
-//| If you reached here via a #include path, update it to:           |
-//|   #include "../../Pattern/PatternManager.mqh"                    |
-//| or use the forward alias:                                         |
-//|   #include "../PatternManager.mqh"  (Analysis/ folder alias)     |
+//| Usage:                                                           |
+//|   #include <PASR/Analysis/Pattern/PatternManager.mqh>            |
 //|                                                                  |
-//| This folder will be removed in the next major cleanup.           |
+//| Migration Note (v6.10):                                          |
+//|   Moved from /Include/PASR/Pattern/ to                           |
+//|   /Include/PASR/Analysis/Pattern/ for better organization.       |
+//|   All includes updated automatically.                            |
 //+------------------------------------------------------------------+
-// (intentionally empty — tombstone only)
+// (documentation file only)

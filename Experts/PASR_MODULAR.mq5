@@ -104,7 +104,7 @@
 //--- Analysis
 #include <PASR/Analysis/SRManager.mqh>
 //--- Pattern
-#include <PASR/Pattern/PatternManager.mqh>
+#include <PASR/Analysis/Pattern/PatternManager.mqh>
 //--- Signal
 #include <PASR/Signal/SignalManager.mqh>
 //--- Trade

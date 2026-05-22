@@ -37,7 +37,7 @@
 #include "../Core/IManager.mqh"
 #include "ISignalSource.mqh"
 #include "SignalFilter.mqh"
-#include "../Pattern/PatternManager.mqh"
+#include "../Analysis/Pattern/PatternManager.mqh"
 #include "../Data/SRManager.mqh"
 #include "../Data/MarketRegime.mqh"
 
