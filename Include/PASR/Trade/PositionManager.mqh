@@ -1,15 +1,23 @@
 //+------------------------------------------------------------------+
-//| Trade/PositionManager.mqh — v2.00 (Pipeline Integrated)         |
+//| Trade/PositionManager.mqh — v3.00 (Pipeline Integrated)         |
 //| Open position scanner and cache manager for Stage_PositionMgmt  |
-//|                                                                   |
-//| CHANGELOG:                                                        |
-//|   v2.00 (2026-05-23) Sprint 5:                                   |
-//|     - Added ScanPositions(PipelineContext &ctx) method           |
-//|     - Fills ctx.positions_count and ctx.position_ticket          |
-//|     - Single MT5 PositionsTotal() call per pipeline cycle        |
-//|     - Magic number filter: only counts positions with InpMagic   |
-//|     - Replaces ad-hoc PositionGetTicket loop in pipeline         |
-//|   v1.xx — Standalone position query helpers                     |
+//|                                                                  |
+//| CHANGELOG:                                                       |
+//|   v3.00 (2026-05-24) Sprint 3A:                                 |
+//|     BUG-T09: Rewrite API to match IManager::Init(data,bus) /   |
+//|              Deinit() — old Initialize(bus) was not a true      |
+//|              override; m_data was never set (NULL crash risk).  |
+//|     BUG-T10: DeclareEvents() now uses AddEvent() pattern        |
+//|              instead of direct m_bus.Subscribe(). Removed       |
+//|              manual Unsubscribe in Shutdown(). Fixed event ID   |
+//|              from non-existent TRADE_CLOSED/OPENED to correct   |
+//|              EVENT_ID_POSITION_UPDATE. Double-subscribe removed. |
+//|   v2.00 (2026-05-23) Sprint 5:                                  |
+//|     - Added ScanPositions(PipelineContext &ctx)                 |
+//|     - Fills ctx.positions_count and ctx.position_ticket         |
+//|     - Single MT5 PositionsTotal() call per pipeline cycle       |
+//|     - Magic number filter: only counts positions with InpMagic  |
+//|     - Replaces ad-hoc PositionGetTicket loop in pipeline        |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __TRADE_POSITION_MANAGER_MQH__
@@ -25,7 +33,7 @@
 class CPositionManager : public IManager
   {
 private:
-   long              m_magic;          // EA magic number filter
+   long              m_magic;          // EA magic number filter (set from m_cfg)
    string            m_symbol;         // Symbol filter
 
    // Cache (filled by ScanPositions, valid for current pipeline cycle)
@@ -39,38 +47,60 @@ public:
        m_cached_count(0), m_cached_ticket(0), m_cache_time(0)
      {}
 
-   //--- IManager interface -------------------------------------------
-   virtual bool      Initialize(CEventBus *bus) override
+   virtual string HandlerName() const override { return "CPositionManager"; }
+
+   //--- BUG-T09 FIX: Properly override IManager::Init(data, bus).
+   //    Old Initialize(CEventBus*) was not a true virtual override —
+   //    IManager never called it, so m_data stayed NULL forever.
+   virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
-      m_bus = bus;
-      DeclareEvents();
+      if(!IManager::Init(data, bus)) return false;
+      // Populate filters from config (safe: IManager::Init guarantees m_data != NULL)
+      m_magic  = (long)m_cfg.MagicNumber;
+      m_symbol = _Symbol;
+      m_cached_count  = 0;
+      m_cached_ticket = 0;
+      m_cache_time    = 0;
+      Print("[PosMgr] v3.00 Init OK — magic=", m_magic, " sym=", m_symbol);
       return true;
      }
 
-   virtual void      DeclareEvents() override
+   //--- BUG-T09 FIX: Properly override IManager::Deinit().
+   //    IManager::Deinit() handles Unsubscribe from EventBus.
+   virtual void Deinit() override
      {
-      // Subscribe to position update events from EventBus
-      if(CheckPointer(m_bus) != POINTER_INVALID)
-         m_bus.Subscribe(GetPointer(this));
+      IManager::Deinit();
      }
 
-   virtual void      OnEvent(const PASREvent &ev) override
+   //--- BUG-T10 FIX: Use AddEvent() — not direct m_bus.Subscribe().
+   //    The old code called m_bus.Subscribe(GetPointer(this)) directly,
+   //    causing double-subscription (IManager::Init already subscribes).
+   //    Also fixed event IDs: EVENT_ID_TRADE_CLOSED / EVENT_ID_TRADE_OPENED
+   //    do not exist in ENUM_PASR_EVENT_ID. Correct ID is POSITION_UPDATE.
+   virtual void DeclareEvents() override
      {
-      // Invalidate cache on trade transaction
-      if(ev.id == EVENT_ID_TRADE_CLOSED || ev.id == EVENT_ID_TRADE_OPENED)
-         m_cached_count = -1; // Force rescan next ScanPositions call
+      AddEvent(EVENT_ID_POSITION_UPDATE); // Trade open/close notification
+      AddEvent(EVENT_ID_NEW_BAR);         // Bar-level cache validity check
      }
 
-   virtual string    HandlerName() const override
-     { return "CPositionManager"; }
-
-   virtual void      Shutdown() override
+   virtual void OnEvent(const PASREvent &ev) override
      {
-      if(CheckPointer(m_bus) != POINTER_INVALID)
-         m_bus.Unsubscribe(GetPointer(this));
+      switch(ev.id)
+        {
+         case EVENT_ID_POSITION_UPDATE:
+            // Invalidate cache — force rescan on next ScanPositions() call
+            m_cached_count = -1;
+            break;
+         case EVENT_ID_NEW_BAR:
+            // Optional: reset cache age on each new bar boundary
+            // (ScanPositions will repopulate on next pipeline cycle)
+            break;
+         default:
+            break;
+        }
      }
 
-   //--- Configuration ------------------------------------------------
+   //--- Configuration (manual override if needed, normally from Init) ---
    void              SetMagic(long magic)   { m_magic  = magic;  }
    void              SetSymbol(string sym)  { m_symbol = sym;    }
 
@@ -102,9 +132,10 @@ public:
      }
 
    //--- Accessors (read cached values without re-scanning) ----------
-   int               CachedCount()  const { return m_cached_count;  }
-   ulong             CachedTicket() const { return m_cached_ticket; }
-   bool              HasOpenPosition() const { return m_cached_count > 0; }
+   int               CachedCount()      const { return m_cached_count;  }
+   ulong             CachedTicket()     const { return m_cached_ticket; }
+   bool              HasOpenPosition()  const { return m_cached_count > 0; }
+   bool              CacheIsValid()     const { return m_cached_count >= 0; }
 
    //--- Per-position helpers (use after ScanPositions) --------------
    double            GetPositionProfit(ulong ticket) const
@@ -135,6 +166,12 @@ public:
      {
       if(!PositionSelectByTicket(ticket)) return WRONG_VALUE;
       return (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+     }
+
+   datetime          GetPositionOpenTime(ulong ticket) const
+     {
+      if(!PositionSelectByTicket(ticket)) return 0;
+      return (datetime)PositionGetInteger(POSITION_TIME);
      }
 
    //--- Batch query helpers ------------------------------------------

@@ -1,14 +1,18 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.01                                    |
+//| Trade/RiskManager.mqh — v2.02                                    |
 //| Copyright 2026, Agsicentre                                       |
 //|                                                                  |
 //| CHANGELOG:                                                       |
-//|   v2.01 (2026-05-24) — BUG-T06:                                 |
-//|     OnEvent(EVENT_ID_POSITION_UPDATE): only update dailyLoss     |
-//|     when ev.profit != 0.0 to prevent silent P&L corruption from  |
-//|     dispatchers that don't set the profit field (e.g.            |
-//|     RecoveryManager::CloseActivePosition dispatches with          |
-//|     profit=0). Added comment contract for dispatchers.           |
+//|   v2.02 (2026-05-24) Sprint 3B:                                 |
+//|     BUG-T13: OnTradeClosed() removed m_dailyLoss accumulation.  |
+//|     EventBus path (OnEvent POSITION_UPDATE) is the single        |
+//|     source of truth for dailyLoss. OnTradeClosed() keeps        |
+//|     openTrades, consecLoss, and circuit-breaker logic only.     |
+//|     Previously both paths accumulated — double-counting every   |
+//|     closed trade's P&L against the daily loss limit.            |
+//|   v2.01 (2026-05-24) — BUG-T06:                                |
+//|     OnEvent(POSITION_UPDATE): only update dailyLoss when         |
+//|     ev.profit != 0.0 to prevent silent P&L corruption.          |
 //|   v2.00 (2026-05-23) — BUG-015: Init() super-call guard.        |
 //+------------------------------------------------------------------+
 #property strict
@@ -108,7 +112,7 @@ public:
       m_lotStep      = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
       m_peakEquity   = AccountEquity();
       m_lastResetDay = (datetime)((long)TimeCurrent() - (long)TimeCurrent() % 86400);
-      PrintFormat("[Risk] v2.01 Init OK: risk=%.1f%% maxDD=%.1f%% daily=%.1f%% maxTrades=%d",
+      PrintFormat("[Risk] v2.02 Init OK: risk=%.1f%% maxDD=%.1f%% daily=%.1f%% maxTrades=%d",
                   m_riskPct, m_maxDDPct, m_dailyLossPct, m_maxOpenTrades);
       return true;
      }
@@ -116,24 +120,22 @@ public:
    virtual string HandlerName() const override { return "RiskManager"; }
 
    virtual void OnNewBar() override
-     { CheckDailyReset(); double eq=AccountEquity(); if(eq>m_peakEquity) m_peakEquity=eq; }
+     { CheckDailyReset(); double eq = AccountEquity(); if(eq > m_peakEquity) m_peakEquity = eq; }
 
    virtual void OnEvent(const PASREvent &ev) override
      {
       switch(ev.id)
         {
          case EVENT_ID_POSITION_UPDATE:
-            // BUG-T06 FIX: Only accumulate dailyLoss when profit field is
-            // explicitly set by the dispatcher. Dispatchers MUST set ev.profit
-            // to the realised P&L when dispatching POSITION_UPDATE after a close.
-            // ev.profit == 0.0 is treated as 'not set' (no-op for dailyLoss).
-            // This prevents RecoveryManager::CloseActivePosition() (which
-            // dispatches POSITION_UPDATE with profit=0) from zeroing out
-            // the daily P&L accumulation.
-            if(ev.profit != 0.0) m_dailyLoss += ev.profit;
+            // BUG-T06 FIX (v2.01): Only accumulate dailyLoss when profit field
+            // is explicitly set. Dispatchers MUST set ev.profit to realised P&L.
+            // BUG-T13 FIX (v2.02): This is now the SINGLE accumulation path.
+            // OnTradeClosed() no longer updates m_dailyLoss — see below.
+            if(ev.profit != 0.0)
+               m_dailyLoss += ev.profit;
             { double eq = AccountEquity(); if(eq > m_peakEquity) m_peakEquity = eq; }
             break;
-         case EVENT_ID_NEW_BAR:      OnNewBar();     break;
+         case EVENT_ID_NEW_BAR:       OnNewBar();    break;
          case EVENT_ID_CONFIG_RELOAD: ReadConfig();  break;
          default: break;
         }
@@ -142,77 +144,84 @@ public:
    RiskCheckResult Check(double slPoints = 0) const
      {
       RiskCheckResult r;
-      if(m_circuitBroken) { r.reason="CircuitBroken"; return r; }
+      if(m_circuitBroken) { r.reason = "CircuitBroken"; return r; }
       if(m_openTrades >= m_maxOpenTrades)
-        { r.reason=StringFormat("MaxTrades(%d/%d)",m_openTrades,m_maxOpenTrades); return r; }
+        { r.reason = StringFormat("MaxTrades(%d/%d)", m_openTrades, m_maxOpenTrades); return r; }
       double bal = AccountBalance();
-      if(bal>0 && m_dailyLossPct>0)
-        { double dlPct=(m_dailyLoss/bal)*100.0;
-          if(dlPct<=-m_dailyLossPct)
-            { r.reason=StringFormat("DailyLoss(%.1f%%>=%.1f%%)", -dlPct, m_dailyLossPct); return r; } }
-      if(m_peakEquity>0 && m_maxDDPct>0)
-        { double ddPct=(1.0-AccountEquity()/m_peakEquity)*100.0;
-          if(ddPct>=m_maxDDPct)
-            { r.reason=StringFormat("MaxDD(%.1f%%>=%.1f%%)", ddPct, m_maxDDPct); return r; } }
-      if(m_maxConsecLoss>0 && m_consecLoss>=m_maxConsecLoss)
-        { r.reason=StringFormat("ConsecLoss(%d>=%d)",m_consecLoss,m_maxConsecLoss); return r; }
+      if(bal > 0 && m_dailyLossPct > 0)
+        { double dlPct = (m_dailyLoss / bal) * 100.0;
+          if(dlPct <= -m_dailyLossPct)
+            { r.reason = StringFormat("DailyLoss(%.1f%%>=%.1f%%)", -dlPct, m_dailyLossPct); return r; } }
+      if(m_peakEquity > 0 && m_maxDDPct > 0)
+        { double ddPct = (1.0 - AccountEquity() / m_peakEquity) * 100.0;
+          if(ddPct >= m_maxDDPct)
+            { r.reason = StringFormat("MaxDD(%.1f%%>=%.1f%%)", ddPct, m_maxDDPct); return r; } }
+      if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
+        { r.reason = StringFormat("ConsecLoss(%d>=%d)", m_consecLoss, m_maxConsecLoss); return r; }
       if(!SpreadOK())
-        { double sp=(SymbolInfoDouble(_Symbol,SYMBOL_ASK)-SymbolInfoDouble(_Symbol,SYMBOL_BID))/_Point;
-          r.reason=StringFormat("SpreadTooWide(%.1f>%.1fpts)",sp,m_maxSpreadPts); return r; }
-      double lot=0;
-      if(slPoints>0)
-        { lot=CalcLot(slPoints);
-          if(lot<m_minLot) { r.reason=StringFormat("LotBelowMin(%.4f<%.4f)",lot,m_minLot); return r; }
-          double marginReq=0;
-          OrderCalcMargin(ORDER_TYPE_BUY,_Symbol,lot,SymbolInfoDouble(_Symbol,SYMBOL_ASK),marginReq);
-          if(marginReq>0 && AccountFreeMargin()<marginReq*1.2)
-            { r.reason=StringFormat("InsufficientMargin(free=%.2f req=%.2f)",AccountFreeMargin(),marginReq*1.2); return r; } }
-      r.allowed=true; r.suggestedLot=lot; r.reason="OK";
+        { double sp = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point;
+          r.reason = StringFormat("SpreadTooWide(%.1f>%.1fpts)", sp, m_maxSpreadPts); return r; }
+      double lot = 0;
+      if(slPoints > 0)
+        { lot = CalcLot(slPoints);
+          if(lot < m_minLot) { r.reason = StringFormat("LotBelowMin(%.4f<%.4f)", lot, m_minLot); return r; }
+          double marginReq = 0;
+          OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, lot, SymbolInfoDouble(_Symbol, SYMBOL_ASK), marginReq);
+          if(marginReq > 0 && AccountFreeMargin() < marginReq * 1.2)
+            { r.reason = StringFormat("InsufficientMargin(free=%.2f req=%.2f)", AccountFreeMargin(), marginReq * 1.2); return r; } }
+      r.allowed = true; r.suggestedLot = lot; r.reason = "OK";
       return r;
      }
 
    double CalcLot(double slPoints) const
      {
-      if(slPoints<=0) return m_minLot;
-      double balance=AccountBalance();
-      double riskAmount=balance*m_riskPct/100.0;
-      double tickValue=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_VALUE);
-      double tickSize =SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
-      if(tickValue<=0||tickSize<=0) return m_minLot;
-      double pointValue=tickValue/(tickSize/_Point);
-      if(pointValue<=0) return m_minLot;
-      return NormaliseLot(riskAmount/(slPoints*pointValue));
+      if(slPoints <= 0) return m_minLot;
+      double balance   = AccountBalance();
+      double riskAmount = balance * m_riskPct / 100.0;
+      double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+      double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      if(tickValue <= 0 || tickSize <= 0) return m_minLot;
+      double pointValue = tickValue / (tickSize / _Point);
+      if(pointValue <= 0) return m_minLot;
+      return NormaliseLot(riskAmount / (slPoints * pointValue));
      }
 
    void OnTradeOpened()
-     { m_openTrades++; if(m_debugMode) PrintFormat("[Risk] Opened. Open=%d",m_openTrades); }
+     { m_openTrades++;
+       if(m_debugMode) PrintFormat("[Risk] Opened. Open=%d", m_openTrades); }
 
-   void OnTradeClosed(double profit=0)
+   // BUG-T13 FIX: Removed m_dailyLoss += profit from here.
+   // OnEvent(EVENT_ID_POSITION_UPDATE) is now the single accumulation path.
+   // This method only handles: openTrades counter, consecLoss, circuit-breaker.
+   // IMPORTANT: callers dispatching POSITION_UPDATE after a close MUST set
+   // ev.profit to the realised P&L so OnEvent() can accumulate correctly.
+   void OnTradeClosed(double profit = 0)
      {
-      m_openTrades=MathMax(0,m_openTrades-1);
-      if(profit<0) m_consecLoss++; else m_consecLoss=0;
-      m_dailyLoss+=profit;
-      if(m_maxConsecLoss>0 && m_consecLoss>=m_maxConsecLoss)
-        { m_circuitBroken=true; PrintFormat("[Risk] CIRCUIT BREAKER: %d consec losses.",m_consecLoss); }
-      double bal=AccountBalance();
-      if(bal>0 && m_dailyLossPct>0)
-        if((-m_dailyLoss/bal*100.0)>=m_dailyLossPct)
-          { m_circuitBroken=true; Print("[Risk] CIRCUIT BREAKER: daily loss."); }
+      m_openTrades = MathMax(0, m_openTrades - 1);
+      if(profit < 0) m_consecLoss++; else m_consecLoss = 0;
+      // dailyLoss NOT accumulated here — EventBus path handles it (BUG-T13)
+      if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
+        { m_circuitBroken = true;
+          PrintFormat("[Risk] CIRCUIT BREAKER: %d consec losses.", m_consecLoss); }
+      double bal = AccountBalance();
+      if(bal > 0 && m_dailyLossPct > 0)
+         if((-m_dailyLoss / bal * 100.0) >= m_dailyLossPct)
+           { m_circuitBroken = true; Print("[Risk] CIRCUIT BREAKER: daily loss limit."); }
       if(m_debugMode)
          PrintFormat("[Risk] Closed profit=%.2f Open=%d consec=%d daily=%.2f",
-                     profit,m_openTrades,m_consecLoss,m_dailyLoss);
+                     profit, m_openTrades, m_consecLoss, m_dailyLoss);
      }
 
-   void ResetCircuit()   { m_circuitBroken=false; m_consecLoss=0; Print("[Risk] Circuit reset."); }
+   void ResetCircuit()  { m_circuitBroken = false; m_consecLoss = 0; Print("[Risk] Circuit reset."); }
 
-   bool   IsCircuitBroken()  const { return m_circuitBroken; }
-   int    GetOpenTrades()    const { return m_openTrades; }
-   int    GetConsecLoss()    const { return m_consecLoss; }
-   double GetDailyLoss()     const { return m_dailyLoss;  }
-   double GetDailyLossPct()  const
-     { double b=AccountBalance(); return (b>0) ? (-m_dailyLoss/b*100.0) : 0; }
-   double GetDrawdownPct()   const
-     { return (m_peakEquity>0) ? (1.0-AccountEquity()/m_peakEquity)*100.0 : 0; }
+   bool   IsCircuitBroken() const { return m_circuitBroken; }
+   int    GetOpenTrades()   const { return m_openTrades;    }
+   int    GetConsecLoss()   const { return m_consecLoss;    }
+   double GetDailyLoss()    const { return m_dailyLoss;     }
+   double GetDailyLossPct() const
+     { double b = AccountBalance(); return (b > 0) ? (-m_dailyLoss / b * 100.0) : 0; }
+   double GetDrawdownPct()  const
+     { return (m_peakEquity > 0) ? (1.0 - AccountEquity() / m_peakEquity) * 100.0 : 0; }
    bool IsTradingAllowed() const { return !m_circuitBroken && Check(0).allowed; }
    bool IsTradingAllowed(const string) const { return IsTradingAllowed(); }
   };

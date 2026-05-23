@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| ExitEngine.mqh                                             v2.00 |
+//| ExitEngine.mqh                                             v2.01 |
 //| Copyright (C) 2026, PASR Trading System                          |
 //| https://pasr.trading                                             |
 //|                                                                  |
@@ -9,7 +9,13 @@
 //| - Structure Break Exit (swing high/low break)                   |
 //| - Profit Fade Exit (momentum exhaustion)                        |
 //|                                                                  |
-//| CHANGELOG v2.00 (2026-05-24):                                   |
+//| CHANGELOG:                                                       |
+//|   v2.01 (2026-05-24) Sprint 3A:                                 |
+//|     BUG-T12: OnEvent(EMERGENCY_STOP) was re-dispatching the     |
+//|              same event → infinite loop until queue overflow.   |
+//|              Fix: log only. RecoveryManager handles EMERGENCY   |
+//|              independently. ExitEngine does not need to relay.  |
+//|   v2.00 (2026-05-24):                                           |
 //|   BUG-T01: #include .h → .mqh (compile error fix)              |
 //|   BUG-T02: IManager interface mismatch fixed. Now properly      |
 //|            integrated with Init()/Deinit()/OnEvent() pipeline.  |
@@ -21,7 +27,6 @@
 #define PASR_EXIT_ENGINE_MQH
 
 // BUG-T01 FIX: was #include <PASR/Core/IManager.h> — .h does not exist.
-// MQL5 only compiles .mqh include files.
 #include "../Core/IManager.mqh"
 #include "PositionManager.mqh"
 
@@ -32,8 +37,7 @@
 #define CHANDELIER_PERIOD            22     // Lookback for highest high / lowest low
 #define TIME_EXIT_BARS               10     // Exit if no profit after N bars
 #define PROFIT_FADE_THRESHOLD        70.0   // RSI overbought level (long exit)
-// BUG-T03 FIX: Dedicated short-fade threshold (was (1-0.70)*100=30 — too noisy).
-// Short fade triggers when RSI bounces ABOVE this level after oversold.
+// BUG-T03 FIX: Dedicated short-fade threshold
 #define PROFIT_FADE_SHORT_THRESHOLD  35.0   // RSI recovery level (short exit)
 #define STRUCTURE_BREAK_SENSITIVITY  1      // Swing points to confirm break
 
@@ -64,21 +68,18 @@ struct ExitSignal
 
    void Clear()
      {
-      reason        = EXIT_NONE;
-      trigger_price = 0.0;
-      current_profit= 0.0;
-      bars_held     = 0;
-      description   = "";
+      reason         = EXIT_NONE;
+      trigger_price  = 0.0;
+      current_profit = 0.0;
+      bars_held      = 0;
+      description    = "";
      }
   };
 
 //+------------------------------------------------------------------+
 //| CExitEngine                                                      |
-//| BUG-T02 FIX: Now properly extends IManager and implements the   |
+//| BUG-T02 FIX: Properly extends IManager and implements the       |
 //| pipeline interface (Init/Deinit/OnEvent/DeclareEvents).         |
-//| Previously declared Initialize()/Shutdown()/OnTick(string)/     |
-//| OnTimer()/OnTrade() which do NOT match IManager's virtual API.  |
-//| CExitEngine was orphaned from the EventBus and pipeline.        |
 //+------------------------------------------------------------------+
 class CExitEngine : public IManager
   {
@@ -95,7 +96,6 @@ private:
    int               m_hATR;
    int               m_hRSI;
 
-   //--- Initialize indicator handles once
    bool InitIndicators()
      {
       if(m_hATR == INVALID_HANDLE)
@@ -141,7 +141,6 @@ public:
 
    virtual string HandlerName() const override { return "ExitEngine"; }
 
-   // BUG-T02 FIX: Init() matches IManager::Init() signature.
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
@@ -151,22 +150,19 @@ public:
          return false;
         }
       m_initialized = true;
-      PrintFormat("[Exit] v2.00 Init OK — Chandelier ATR=%.1f Period=%d",
+      PrintFormat("[Exit] v2.01 Init OK — Chandelier ATR=%.1f Period=%d",
                   CHANDELIER_ATR_MULT, CHANDELIER_PERIOD);
       return true;
      }
 
-   // BUG-T02 FIX: Deinit() matches IManager::Deinit().
    virtual void Deinit() override
      {
       if(!m_initialized) return;
       CleanupIndicators();
       m_initialized = false;
-      }
+      IManager::Deinit();
+     }
 
-   // BUG-T02 FIX: DeclareEvents() — ExitEngine subscribes to price
-   // updates (for chandelier check each tick) and new bar
-   // (for structure break and time exit which are bar-level).
    virtual void DeclareEvents() override
      {
       AddEvent(EVENT_ID_PRICE_UPDATE);
@@ -174,31 +170,33 @@ public:
       AddEvent(EVENT_ID_EMERGENCY_STOP);
      }
 
-   // BUG-T02 FIX: OnEvent() routes events to correct handlers.
    virtual void OnEvent(const PASREvent &ev) override
      {
       switch(ev.id)
         {
          case EVENT_ID_PRICE_UPDATE: OnPriceUpdate(); break;
          case EVENT_ID_NEW_BAR:      OnNewBar();      break;
+
          case EVENT_ID_EMERGENCY_STOP:
-            // Emergency: signal all positions to close via ExitSignal dispatch
-            {
-             PASREvent fwd; fwd.id = EVENT_ID_EMERGENCY_STOP; fwd.priority = 99;
-             DispatchEvent(fwd);
-            }
+            // BUG-T12 FIX: Do NOT re-dispatch EVENT_ID_EMERGENCY_STOP.
+            // Previous code called DispatchEvent(fwd) with the same event ID,
+            // causing an infinite loop: ExitEngine receives → dispatches →
+            // EventBus pushes → DrainQueue → ExitEngine receives again...
+            // RecoveryManager handles EMERGENCY_STOP independently.
+            // ExitEngine only needs to log; actual position close is
+            // executed by Stage_PosMgmt + RecoveryManager.
+            if(m_debugMode)
+               Print("[Exit] EMERGENCY_STOP received — deferring to RecoveryManager.");
             break;
+
          default: break;
         }
      }
 
-   // OnPriceUpdate: chandelier check is tick-level
    virtual void OnPriceUpdate() override { /* Chandelier evaluated on-demand via CheckExit() */ }
+   virtual void OnNewBar()      override { /* Called externally via CheckExit() on bar close  */ }
 
-   // OnNewBar: structure break + time exit are bar-level
-   virtual void OnNewBar() override { /* Called externally via CheckExit() on bar close */ }
-
-   //--- Core exit logic (on-demand, called by Stage_PosMgmt)
+   //--- Core exit logic (on-demand, called by Stage_PosMgmt) --------
    ExitSignal CheckExit(const string symbol, ENUM_ORDER_TYPE position_type,
                         double entry_price, double current_price)
      {
@@ -274,13 +272,13 @@ public:
       if(pos_type == ORDER_TYPE_BUY)
         {
          double hh = highs[0];
-         for(int i=1; i<CHANDELIER_PERIOD; i++) if(highs[i]>hh) hh=highs[i];
+         for(int i = 1; i < CHANDELIER_PERIOD; i++) if(highs[i] > hh) hh = highs[i];
          return hh - (current_atr * CHANDELIER_ATR_MULT);
         }
       else
         {
          double ll = lows[0];
-         for(int i=1; i<CHANDELIER_PERIOD; i++) if(lows[i]<ll) ll=lows[i];
+         for(int i = 1; i < CHANDELIER_PERIOD; i++) if(lows[i] < ll) ll = lows[i];
          return ll + (current_atr * CHANDELIER_ATR_MULT);
         }
      }
@@ -303,16 +301,16 @@ public:
 
       if(pos_type == ORDER_TYPE_BUY)
         {
-         int cnt=0;
-         for(int i=0; i<STRUCTURE_BREAK_SENSITIVITY; i++)
-            if(lows[0] < lows[swing_bars+i]) cnt++;
+         int cnt = 0;
+         for(int i = 0; i < STRUCTURE_BREAK_SENSITIVITY; i++)
+            if(lows[0] < lows[swing_bars + i]) cnt++;
          return cnt >= STRUCTURE_BREAK_SENSITIVITY;
         }
       else
         {
-         int cnt=0;
-         for(int i=0; i<STRUCTURE_BREAK_SENSITIVITY; i++)
-            if(highs[0] > highs[swing_bars+i]) cnt++;
+         int cnt = 0;
+         for(int i = 0; i < STRUCTURE_BREAK_SENSITIVITY; i++)
+            if(highs[0] > highs[swing_bars + i]) cnt++;
          return cnt >= STRUCTURE_BREAK_SENSITIVITY;
         }
      }
@@ -325,8 +323,6 @@ public:
       if(pos_type == ORDER_TYPE_BUY)
          return (prv >= 70.0 && cur < PROFIT_FADE_THRESHOLD);
       else
-         // BUG-T03 FIX: was (1.0-0.70)*100 = 30 — too noisy.
-         // Short fade: RSI was oversold (<=30), now recovering above threshold.
          return (prv <= 30.0 && cur > PROFIT_FADE_SHORT_THRESHOLD);
      }
 
@@ -335,20 +331,15 @@ public:
      {
       if(entry_time == 0) return 0;
       int idx = iBarShift(_Symbol, PERIOD_CURRENT, entry_time);
-      // iBarShift returns -1 on error (e.g. history not loaded yet).
-      // Return 0 (not yet timed out) rather than INT_MAX which could
-      // trigger false time-based exits.
       return (idx < 0) ? 0 : idx;
      }
 
    // BUG-T04 FIX: PrintStats() no longer calls Shutdown().
-   // Shutdown() sets m_initialized=false which deinitializes the engine.
-   // Stats are now printed directly without side effects.
    void PrintStats()
      {
       ulong total = m_chandelier_exits + m_time_exits
                     + m_structure_exits + m_fade_exits;
-      PrintFormat("[Exit] === STATISTICS === Chandelier:%d Time:%d Structure:%d Fade:%d Total:%d",
+      PrintFormat("[Exit] === STATS === Chandelier:%d Time:%d Structure:%d Fade:%d Total:%d",
                   m_chandelier_exits, m_time_exits,
                   m_structure_exits,  m_fade_exits, total);
      }
