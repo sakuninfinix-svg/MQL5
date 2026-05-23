@@ -275,8 +275,9 @@ private:
      }
 
    //+------------------------------------------------------------------+
-   //| Stage 10: Execution (BUG-011 FIX)                               |
-   //| Order placement — ticket captured from exec result.             |
+   //| Stage 10: Execution (BUG-011 + BUG-DUP FIX)                       |
+   //| Order placement — ticket captured from exec result.               |
+   //| BUG-DUP FIX: Handle EXEC_PENDING status and flush retry queue.    |
    //+------------------------------------------------------------------+
    ENUM_STAGE_RESULT Stage_Execution(PipelineContext &ctx)
      {
@@ -284,6 +285,38 @@ private:
       if(ctx.signal.direction == SIGNAL_NONE) return STAGE_SKIP;
       if(!ctx.risk_result.allowed)            return STAGE_SKIP;
       m_stage_timer.Start();
+
+      // BUG-DUP FIX: First, flush any pending retry from previous tick
+      if(m_exec.HasPendingRetry())
+        {
+         ctx.exec_result = m_exec.FlushPendingRetry();
+         
+         if(ctx.exec_result.status == EXEC_PENDING)
+           {
+            // Still waiting for backoff window
+            if(m_debug_mode)
+               PrintFormat("[Pipeline] Execution retry still pending...");
+            if(m_profiling_enabled) m_stage_timer.Log("Stage10_Execution");
+            return STAGE_OK;
+           }
+         
+         // Retry completed (success or failure)
+         if(ctx.exec_result.status == EXEC_OK
+            && CheckPointer(m_recovery) != POINTER_INVALID)
+           {
+            TradePlan plan = ctx.plan;
+            int dir = (plan.direction == SIGNAL_BUY) ? 1 : -1;
+            m_recovery.OnTradeOpen(ctx.exec_result.ticket, dir, plan.entryPrice);
+           }
+         
+         if(m_debug_mode)
+            PrintFormat("[Pipeline] Execution retry completed: status=%d ticket=%I64u",
+                        ctx.exec_result.status, ctx.exec_result.ticket);
+         
+         if(m_profiling_enabled)
+            m_stage_timer.Log("Stage10_Execution");
+         return STAGE_OK;
+        }
 
       // Build trade plan from signal + risk result
       TradePlan plan;
@@ -305,6 +338,15 @@ private:
          ctx.exit_message = "Execution error: " + ctx.exec_result.error;
          if(m_profiling_enabled) m_stage_timer.Log("Stage10_Execution");
          return STAGE_ABORT;
+        }
+
+      // Handle EXEC_PENDING (retry deferred)
+      if(ctx.exec_result.status == EXEC_PENDING)
+        {
+         if(m_debug_mode)
+            PrintFormat("[Pipeline] Execution deferred for retry (ticket pending)");
+         if(m_profiling_enabled) m_stage_timer.Log("Stage10_Execution");
+         return STAGE_OK;  // Continue pipeline, retry will be flushed next tick
         }
 
       // BUG-011 FIX: was OnTradeOpen(0, ...) — ticket hardcoded to 0.
