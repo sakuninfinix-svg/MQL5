@@ -1,24 +1,20 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v2.01 (Profiling-Aware)                |
+//| Core/PipelineEngine.mqh — v2.02 (Sprint 9 — Full Field Alignment)|
 //| Staged pipeline execution engine with metrics                    |
-//|                                                                   |
+//|                                                                  |
 //| PURPOSE: Replace monolithic OnTimer() with pipelined stages       |
-//|                                                                   |
-//| CHANGELOG:                                                        |
-//|   v2.01 (2026-05-23) — BUG-006 + BUG-007 + BUG-011:             |
-//|     BUG-007: Fixed wrong include paths (RegimeFilter, RiskManager,|
-//|              AdaptiveParameterManager all had wrong subfolders)   |
-//|     BUG-006: Added m_health + m_snapshot member fields            |
-//|              InjectManagers() now stores them correctly            |
-//|     BUG-011: Stage_Execution() hardcoded ticket=0 fixed           |
-//|              Now uses ctx.exec_result.ticket                      |
-//|                                                                   |
-//| STAGES (14 total):                                                |
-//|   1. Data Sync  -> 2. Analysis SR  -> 3. Analysis Zone           |
-//|   4. Pattern Rec -> 5. Regime Det  -> 6. Signal Gen              |
-//|   7. AI Inference -> 8. Risk Check -> 9. Adaptive Params         |
-//|   10. Execution -> 11. Position Mgmt -> 12. Recovery             |
-//|   13. Dashboard -> 14. Journal                                   |
+//|                                                                  |
+//| CHANGELOG:                                                       |
+//|   v2.02 (2026-05-23) Sprint 9:                                   |
+//|     T1/T9:  ctx.exec_result.status == EXEC_OK (was STAGE_ABORT)  |
+//|     T2/T11: risk_result field refs unified (.suggestedLot/.reason)|
+//|     T3:     ctx.signal now SSignal struct; access .direction     |
+//|     T6:     ctx.ai_score/drift_score/ai_veto (scalar fields)     |
+//|     T8:     ctx.has_position / ctx.position_pnl                  |
+//|     T16:    PipelineReport.RecordCycle() call in ExecutePipeline  |
+//|     T18:    ctx.ShouldContinue() / ctx.Abort() / ctx.Skip()      |
+//|     T19:    DetectSession() call in Stage_RegimeDet               |
+//|   v2.01 (2026-05-23) — BUG-006 + BUG-007 + BUG-011              |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_PIPELINE_ENGINE_MQH__
@@ -27,28 +23,27 @@
 #include "PipelineTypes.mqh"
 #include "../Infra/DataManager.mqh"
 
-// BUG-007 FIX: Corrected include paths
-// ZoneManager defines SDZone struct inline
+// BUG-007 fixed paths
 #include "../Analysis/SRManager.mqh"
 #include "../Analysis/ZoneManager.mqh"
 #include "../Analysis/PatternManager.mqh"
 #include "../Signal/SignalManager.mqh"
-#include "../Signal/RegimeFilter.mqh"              // BUG-007: was ../Analysis/RegimeFilter.mqh
-#include "../Trade/RiskManager.mqh"               // BUG-007: was ../Risk/RiskManager.mqh
+#include "../Signal/RegimeFilter.mqh"
+#include "../Trade/RiskManager.mqh"
 #include "../Trade/ExecutionManager.mqh"
 #include "../Trade/RecoveryManager.mqh"
 #include "../UI/DashboardManager.mqh"
 #include "../Infra/JournalManager.mqh"
 #include "EventBus.mqh"
-#include "../Infra/SanityManager.mqh"              // Phase 1
-#include "../Infra/TelemetryRecorder.mqh"          // Phase 3
-#include "../Analysis/AdaptiveParameterManager.mqh" // BUG-007: was ../Risk/AdaptiveParameterManager.mqh
-#include "../Analysis/MarketRegimeDetector.mqh"    // Phase 5
-#include "LatencyOptimizer.mqh"                   // Phase 6
-#include "AsyncOrderManager.mqh"                  // Phase 6
-#include "../Infra/HealthMonitor.mqh"              // Phase 7: Self-Healing
-#include "../Infra/SnapshotManager.mqh"            // Phase 7: State Persistence
-#include "../Signal/AI/AIOrchestrator.mqh"         // Phase 7: 26-dim AI System
+#include "../Infra/SanityManager.mqh"
+#include "../Infra/TelemetryRecorder.mqh"
+#include "../Analysis/AdaptiveParameterManager.mqh"
+#include "../Analysis/MarketRegimeDetector.mqh"
+#include "LatencyOptimizer.mqh"
+#include "AsyncOrderManager.mqh"
+#include "../Infra/HealthMonitor.mqh"
+#include "../Infra/SnapshotManager.mqh"
+#include "../Signal/AI/AIOrchestrator.mqh"
 
 // Forward declarations
 class CDataManager;
@@ -65,8 +60,8 @@ class CDashboardManager;
 class CEventBus;
 class CJournalManager;
 class CAdaptiveParameterManager;
-class CHealthMonitor;    // Phase 7
-class CSnapshotManager;  // Phase 7
+class CHealthMonitor;
+class CSnapshotManager;
 
 //+------------------------------------------------------------------+
 //| CPipelineEngine — Staged execution with profiling                |
@@ -94,17 +89,33 @@ private:
    CMarketRegimeDetector     *m_regime_det;
    CLatencyOptimizer         *m_optimizer;
    CAsyncOrderManager        *m_async_orders;
-   // BUG-006 FIX: Added missing Phase 7 member fields
-   CHealthMonitor            *m_health;    // Phase 7: Self-Healing
-   CSnapshotManager          *m_snapshot;  // Phase 7: State Persistence
+   CHealthMonitor            *m_health;    // BUG-006 fixed
+   CSnapshotManager          *m_snapshot;  // BUG-006 fixed
 
    // Profiling state
-   PipelineReport  m_report;
-   StageMetrics    m_current_stage;
+   PipelineReport  m_report;            // T16: was undefined
+   StageMetrics    m_current_stage;     // T16: was undefined
    bool            m_profiling_enabled;
    bool            m_debug_mode;
 
-   // ── Individual Stage Implementations ───────────────────────────
+   //+-----------------------------------------------------------------+
+   //| Helper: push event and drain synchronously                      |
+   //+-----------------------------------------------------------------+
+   void PushAndDrain(int event_id, int priority)
+     {
+      if(CheckPointer(m_bus) == POINTER_INVALID) return;
+      PASREvent ev;
+      ev.id       = event_id;
+      ev.priority = priority;
+      m_bus->Push(ev);
+      PASREvent drain_ev;
+      while(m_bus->Pop(drain_ev))
+         m_bus->Dispatch(drain_ev);
+     }
+
+   // ────────────────────────────────────────────────────────────
+   //                    STAGE IMPLEMENTATIONS                        |
+   // ────────────────────────────────────────────────────────────
 
    ENUM_STAGE_RESULT Stage_DataSync(PipelineContext &ctx)
      {
@@ -116,18 +127,24 @@ private:
          ctx.Abort("Failed to get tick data");
          m_current_stage.Stop();
          m_current_stage.aborted = true;
-         return STAGE_ABORT;
+         return STAGE_ABORT;       // T14: STAGE_ABORT now defined
         }
 
       ctx.bid         = tick.bid;
       ctx.ask         = tick.ask;
+      ctx.spread_pts  = (tick.ask - tick.bid) / _Point;
       ctx.bar_time    = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
-      ctx.market_open = ((TimeCurrent() - tick.time) < 60);
+      ctx.market_open = ((TimeCurrent() - tick.time) < 60); // T5
 
       if(CheckPointer(m_data) != POINTER_INVALID)
          m_data->OnTick();
 
-      ctx.atr_points = (m_data != NULL) ? m_data->GetATRPoints() : 0;
+      // T4: populate both atr and atr_points
+      if(m_data != NULL)
+        {
+         ctx.atr        = m_data->GetATR();
+         ctx.atr_points = m_data->GetATRPoints(); // T4: field now exists
+        }
 
       m_current_stage.Stop();
       return STAGE_OK;
@@ -140,18 +157,8 @@ private:
       if(CheckPointer(m_sr) == POINTER_INVALID)
         { m_current_stage.Stop(); m_current_stage.skipped = true; return STAGE_SKIP; }
 
-      if(ctx.new_bar && CheckPointer(m_bus) != POINTER_INVALID)
-        {
-         PASREvent ev;
-         ev.id = EVENT_ID_NEW_BAR;
-         ev.priority = 10;
-         m_bus->Push(ev);
-
-         // Drain to process SR update immediately
-         PASREvent drain_ev;
-         while(m_bus->Pop(drain_ev))
-            m_bus->Dispatch(drain_ev);
-        }
+      if(ctx.new_bar)
+         PushAndDrain(EVENT_ID_NEW_BAR, 10);
 
       m_current_stage.Stop();
       return STAGE_OK;
@@ -164,18 +171,8 @@ private:
       if(CheckPointer(m_zone) == POINTER_INVALID)
         { m_current_stage.Stop(); m_current_stage.skipped = true; return STAGE_SKIP; }
 
-      // Zone updates happen via event bus (drained in SR stage)
-      // If new bar, push zone refresh event
-      if(ctx.new_bar && CheckPointer(m_bus) != POINTER_INVALID)
-        {
-         PASREvent ev;
-         ev.id = EVENT_ID_NEW_BAR;
-         ev.priority = 9;
-         m_bus->Push(ev);
-         PASREvent drain_ev;
-         while(m_bus->Pop(drain_ev))
-            m_bus->Dispatch(drain_ev);
-        }
+      if(ctx.new_bar)
+         PushAndDrain(EVENT_ID_NEW_BAR, 9);
 
       m_current_stage.Stop();
       return STAGE_OK;
@@ -188,18 +185,8 @@ private:
       if(CheckPointer(m_pattern) == POINTER_INVALID)
         { m_current_stage.Stop(); m_current_stage.skipped = true; return STAGE_SKIP; }
 
-      // Pattern recognition triggered via EVENT_ID_NEW_BAR dispatch
-      // PatternManager.OnEvent() handles the update internally
-      if(ctx.new_bar && CheckPointer(m_bus) != POINTER_INVALID)
-        {
-         PASREvent ev;
-         ev.id = EVENT_ID_NEW_BAR;
-         ev.priority = 8;
-         m_bus->Push(ev);
-         PASREvent drain_ev;
-         while(m_bus->Pop(drain_ev))
-            m_bus->Dispatch(drain_ev);
-        }
+      if(ctx.new_bar)
+         PushAndDrain(EVENT_ID_NEW_BAR, 8);
 
       m_current_stage.Stop();
       return STAGE_OK;
@@ -213,7 +200,7 @@ private:
         { m_current_stage.Stop(); m_current_stage.skipped = true; return STAGE_SKIP; }
 
       ctx.regime  = m_regime->GetCurrentRegime();
-      ctx.session = DetectSession();
+      ctx.session = DetectSession();  // T19: now defined in PipelineTypes.mqh
 
       m_current_stage.Stop();
       return STAGE_OK;
@@ -226,15 +213,18 @@ private:
       if(CheckPointer(m_signal) == POINTER_INVALID)
         { m_current_stage.Stop(); m_current_stage.skipped = true; return STAGE_SKIP; }
 
+      // T3: ctx.signal is SSignal struct now
       if(m_signal->HasSignal())
         {
-         ctx.signal = m_signal->GetCurrent();
+         ctx.signal          = m_signal->GetCurrent();   // returns SSignal
+         ctx.signal_strength = ctx.signal.strength;
         }
       else
         {
-         ctx.signal.direction = SIGNAL_NONE;
+         ZeroMemory(ctx.signal);
          ctx.Skip("No signal generated");
          m_current_stage.Stop();
+         m_current_stage.skipped = true;
          return STAGE_SKIP;
         }
 
@@ -252,22 +242,27 @@ private:
       float features[AI_FEATURE_DIM];
       if(m_ai_orch->BuildFeaturesPublic(features))
         {
-         ctx.ai_score    = m_ai_orch->Predict(features);
-         ctx.drift_score = m_ai_orch->GetDriftScore();
-         ctx.ai_veto     = (ctx.ai_score < 0.4f || ctx.drift_score > 0.6f);
+         // T6: write to scalar fields (also mirror to ai_result)
+         ctx.ai_score              = m_ai_orch->Predict(features);
+         ctx.drift_score           = m_ai_orch->GetDriftScore();
+         ctx.ai_result.score       = (double)ctx.ai_score;
+         ctx.ai_result.drift_index = (double)ctx.drift_score;
+
+         ctx.ai_veto = (ctx.ai_score < 0.4f || ctx.drift_score > 0.6f);
 
          if(ctx.ai_veto)
            {
             ctx.Skip("AI veto triggered");
             m_current_stage.Stop();
+            m_current_stage.skipped = true;
             return STAGE_SKIP;
            }
         }
       else
         {
-         ctx.ai_score    = 0.5f;
+         ctx.ai_score  = 0.5f;
          ctx.drift_score = 0.0f;
-         ctx.ai_veto     = false;
+         ctx.ai_veto   = false;
         }
 
       m_current_stage.Stop();
@@ -281,19 +276,21 @@ private:
       if(CheckPointer(m_risk) == POINTER_INVALID)
         { m_current_stage.Stop(); m_current_stage.skipped = true; return STAGE_SKIP; }
 
+      // T2/T11: RiskManager.Check() must call risk_result.SetResult() to keep aliases in sync
       ctx.risk_result = m_risk->Check(ctx.plan.slPoints);
 
       if(!ctx.risk_result.allowed)
         {
          if(m_debug_mode)
-            PrintFormat("[Pipeline] RiskBlock: %s", ctx.risk_result.reason);
-         ctx.Skip(ctx.risk_result.reason);
+            PrintFormat("[Pipeline] RiskBlock: %s", ctx.risk_result.block_reason);
+         ctx.Skip(ctx.risk_result.block_reason);  // T11: use canonical field name
          m_current_stage.Stop();
+         m_current_stage.skipped = true;
          return STAGE_SKIP;
         }
 
-      ctx.plan.lot      = ctx.risk_result.suggestedLot;
-      ctx.trading_allowed = true;
+      ctx.plan.lot      = ctx.risk_result.lot_size;   // T11: canonical field name
+      ctx.trading_allowed = true;                      // T7: field now exists
 
       m_current_stage.Stop();
       return STAGE_OK;
@@ -308,7 +305,7 @@ private:
 
       m_adaptive->UpdateParameters();
 
-      if(ctx.plan.valid && ctx.plan.slPoints > 0)
+      if(ctx.plan.valid && ctx.plan.slPoints > 0)   // T13: .valid + .slPoints now exist
         {
          double adaptiveSL = m_adaptive->GetStopLoss();
          double adaptiveTP = m_adaptive->GetTakeProfit();
@@ -320,6 +317,7 @@ private:
             ctx.plan.tpPoints = adaptiveTP;
         }
 
+      ctx.plan_locked = true;   // S7-007: write-once guard
       m_current_stage.Stop();
       return STAGE_OK;
      }
@@ -328,21 +326,22 @@ private:
      {
       m_current_stage.Start();
 
-      if(CheckPointer(m_exec) == POINTER_INVALID || !ctx.plan.valid)
+      if(CheckPointer(m_exec) == POINTER_INVALID || !ctx.plan.valid)  // T13
         { m_current_stage.Stop(); m_current_stage.skipped = true; return STAGE_SKIP; }
 
       ctx.exec_result = m_exec->Execute(ctx.plan);
 
+      // T1/T9: status field now defined in SExecResult
       if(ctx.exec_result.status == EXEC_OK)
         {
          if(CheckPointer(m_risk) != POINTER_INVALID)
             m_risk->OnTradeOpened();
 
          if(CheckPointer(m_recovery) != POINTER_INVALID)
-            // BUG-011 FIX: Use actual ticket from exec_result, not hardcoded 0
+            // BUG-011 fixed: use actual ticket from exec_result
             m_recovery->OnTradeOpen(
                ctx.exec_result.ticket,
-               ctx.plan.direction == SIGNAL_BUY ? 1 : -1,
+               ctx.signal.direction == SIGNAL_BUY ? 1 : -1,  // T3: ctx.signal is SSignal
                ctx.plan.entryPrice
             );
         }
@@ -355,7 +354,10 @@ private:
      {
       m_current_stage.Start();
 
-      ctx.has_position = (PositionsTotal() > 0);
+      ctx.positions_count = PositionsTotal();
+      ctx.has_position    = (ctx.positions_count > 0);  // T8
+      ctx.position_pnl    = 0;                          // T8: reset before summing
+
       if(ctx.has_position)
         {
          for(int i = PositionsTotal() - 1; i >= 0; i--)
@@ -363,8 +365,7 @@ private:
             if(PositionGetSymbol(i) == _Symbol)
               {
                ctx.position_ticket = PositionGetTicket(i);
-               ctx.position_pnl    = PositionGetDouble(POSITION_PROFIT);
-               break;
+               ctx.position_pnl   += PositionGetDouble(POSITION_PROFIT); // T8
               }
            }
         }
@@ -380,19 +381,7 @@ private:
       if(CheckPointer(m_recovery) == POINTER_INVALID)
         { m_current_stage.Stop(); m_current_stage.skipped = true; return STAGE_SKIP; }
 
-      // RecoveryManager.OnTick() handles trailing stop, BE, partial close
-      // It is called via the EventBus EVENT_ID_PRICE_UPDATE dispatch
-      // Explicit tick event push for recovery processing
-      if(CheckPointer(m_bus) != POINTER_INVALID)
-        {
-         PASREvent ev;
-         ev.id = EVENT_ID_PRICE_UPDATE;
-         ev.priority = 5;
-         m_bus->Push(ev);
-         PASREvent drain_ev;
-         while(m_bus->Pop(drain_ev))
-            m_bus->Dispatch(drain_ev);
-        }
+      PushAndDrain(EVENT_ID_PRICE_UPDATE, 5);
 
       m_current_stage.Stop();
       return STAGE_OK;
@@ -405,13 +394,12 @@ private:
       if(CheckPointer(m_dash) == POINTER_INVALID)
         { m_current_stage.Stop(); m_current_stage.skipped = true; return STAGE_SKIP; }
 
-      // Dashboard update via EVENT_ID_POSITION_UPDATE event
       if(CheckPointer(m_bus) != POINTER_INVALID)
         {
          PASREvent ev;
-         ev.id = EVENT_ID_POSITION_UPDATE;
+         ev.id     = EVENT_ID_POSITION_UPDATE;
          ev.priority = 3;
-         ev.profit   = ctx.position_pnl;
+         ev.profit   = ctx.position_pnl;   // T8: field now exists
          m_bus->Push(ev);
          PASREvent drain_ev;
          while(m_bus->Pop(drain_ev))
@@ -428,9 +416,11 @@ private:
 
       if(m_profiling_enabled && m_debug_mode)
         {
-         string msg = StringFormat("Pipeline cycle: %dµs (avg %.2fms)",
+         string msg = StringFormat("Pipeline cycle: %lluµs (avg %.2fms) stages=%d skipped=%d",
                                    m_report.last_cycle_time,
-                                   m_report.avg_cycle_time_ms);
+                                   m_report.avg_cycle_time_ms,
+                                   ctx.stages_executed,
+                                   ctx.stages_skipped);
          if(CheckPointer(m_journal) != POINTER_INVALID)
             m_journal->LogInfo(msg);
          else
@@ -448,7 +438,7 @@ public:
         m_exec(NULL), m_recovery(NULL), m_dash(NULL), m_journal(NULL),
         m_bus(NULL), m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL),
         m_regime_det(NULL), m_optimizer(NULL), m_async_orders(NULL),
-        m_health(NULL), m_snapshot(NULL),   // BUG-006 FIX
+        m_health(NULL), m_snapshot(NULL),
         m_profiling_enabled(true), m_debug_mode(false)
      {
       m_report.Reset();
@@ -456,11 +446,11 @@ public:
 
    ~CPipelineEngine() { /* Non-owning: do NOT delete injected refs */ }
 
-   void SetDebugMode(bool on)   { m_debug_mode = on; }
+   void SetDebugMode(bool on)    { m_debug_mode = on; }
    void EnableProfiling(bool on) { m_profiling_enabled = on; }
 
    //+----------------------------------------------------------------+
-   //| InjectManagers — called once by COrchestrator after alloc       |
+   //| InjectManagers                                                  |
    //+----------------------------------------------------------------+
    void InjectManagers(CDataManager *data,
                        CAnalysisSRManager *sr,
@@ -481,8 +471,8 @@ public:
                        CMarketRegimeDetector *regime_det   = NULL,
                        CLatencyOptimizer *optimizer        = NULL,
                        CAsyncOrderManager *async_orders    = NULL,
-                       CHealthMonitor *health              = NULL,  // BUG-006 FIX
-                       CSnapshotManager *snapshot          = NULL)  // BUG-006 FIX
+                       CHealthMonitor *health              = NULL,
+                       CSnapshotManager *snapshot          = NULL)
      {
       m_data         = data;
       m_sr           = sr;
@@ -503,35 +493,43 @@ public:
       m_regime_det   = regime_det;
       m_optimizer    = optimizer;
       m_async_orders = async_orders;
-      m_health       = health;    // BUG-006 FIX: now stored
-      m_snapshot     = snapshot;  // BUG-006 FIX: now stored
+      m_health       = health;    // BUG-006 fixed
+      m_snapshot     = snapshot;  // BUG-006 fixed
      }
 
    //+----------------------------------------------------------------+
-   //| ExecutePipeline — run all 14 stages in order                   |
+   //| ExecutePipeline — run all 14 stages in sequence               |
    //+----------------------------------------------------------------+
    ENUM_STAGE_RESULT ExecutePipeline(PipelineContext &ctx)
      {
       ulong cycle_start = GetMicrosecondCount();
+      ctx.cycle_start_time = TimeCurrent();
+
+      // Health gate: abort if EA is critically unhealthy
+      if(ctx.health_status >= 3)
+        {
+         ctx.Abort("EA in DEAD health state — pipeline blocked");
+         return STAGE_ABORT;
+        }
 
       typedef ENUM_STAGE_RESULT (CPipelineEngine::*StageFunc)(PipelineContext&);
       static const StageFunc stages[STAGE_COUNT] =
         {
-         NULL,
-         &CPipelineEngine::Stage_DataSync,
-         &CPipelineEngine::Stage_AnalysisSR,
-         &CPipelineEngine::Stage_AnalysisZone,
-         &CPipelineEngine::Stage_PatternRec,
-         &CPipelineEngine::Stage_RegimeDet,
-         &CPipelineEngine::Stage_SignalGen,
-         &CPipelineEngine::Stage_AIInference,
-         &CPipelineEngine::Stage_RiskCheck,
-         &CPipelineEngine::Stage_AdaptiveParams,
-         &CPipelineEngine::Stage_Execution,
-         &CPipelineEngine::Stage_PositionMgmt,
-         &CPipelineEngine::Stage_Recovery,
-         &CPipelineEngine::Stage_Dashboard,
-         &CPipelineEngine::Stage_Journal
+         NULL,                                  // [0] sentinel
+         &CPipelineEngine::Stage_DataSync,       // [1]
+         &CPipelineEngine::Stage_AnalysisSR,     // [2]
+         &CPipelineEngine::Stage_AnalysisZone,   // [3]
+         &CPipelineEngine::Stage_PatternRec,     // [4]
+         &CPipelineEngine::Stage_RegimeDet,      // [5]
+         &CPipelineEngine::Stage_SignalGen,      // [6]
+         &CPipelineEngine::Stage_AIInference,    // [7]
+         &CPipelineEngine::Stage_RiskCheck,      // [8]
+         &CPipelineEngine::Stage_AdaptiveParams, // [9]
+         &CPipelineEngine::Stage_Execution,      // [10]
+         &CPipelineEngine::Stage_PositionMgmt,   // [11]
+         &CPipelineEngine::Stage_Recovery,       // [12]
+         &CPipelineEngine::Stage_Dashboard,      // [13]
+         &CPipelineEngine::Stage_Journal         // [14]
         };
 
       ENUM_STAGE_RESULT result = STAGE_OK;
@@ -544,32 +542,41 @@ public:
          if(stages[i] != NULL)
             result = (this.*stages[i])(ctx);
 
+         // Timeout guard
+         if(m_current_stage.elapsed_us > STAGE_TIMEOUT_US)
+           {
+            m_current_stage.timed_out = true;
+            ctx.stages_timeout++;
+            if(m_debug_mode)
+               PrintFormat("[Pipeline] Stage[%d] TIMEOUT: %lluµs", i, m_current_stage.elapsed_us);
+           }
+
+         // Update ctx stage counters
+         switch(result)
+           {
+            case STAGE_OK:      ctx.stages_executed++; break;
+            case STAGE_SKIP:    ctx.stages_skipped++;  break;
+            case STAGE_FAIL:    ctx.stages_failed++;   break;
+            case STAGE_TIMEOUT: ctx.stages_timeout++;  break;
+            case STAGE_ABORT:   /* handled by ShouldContinue() */ break;
+            default:            break;
+           }
+
+         // Record per-stage metrics
          if(m_profiling_enabled)
            {
             m_report.stage_metrics[i].elapsed_us += m_current_stage.elapsed_us;
-            if(m_current_stage.executed) m_report.stage_metrics[i].executed = true;
-            if(m_current_stage.skipped)  m_report.stage_metrics[i].skipped  = true;
-            if(m_current_stage.aborted)  m_report.stage_metrics[i].aborted  = true;
            }
-
-         if(result == STAGE_ABORT) break;
         }
 
+      // Record cycle-level report (T16: PipelineReport.RecordCycle)
       ulong elapsed = GetMicrosecondCount() - cycle_start;
-      if(m_profiling_enabled)
-         m_report.RecordCycle(elapsed, result);
+      m_report.RecordCycle(elapsed, result);
 
-      ctx.exit_reason = result;
       return result;
      }
 
    const PipelineReport& GetReport() const { return m_report; }
-
-   void PrintProfile() const
-     {
-      if(!m_profiling_enabled) return;
-      Print(m_report.ToString());
-     }
   };
 
 #endif // __CORE_PIPELINE_ENGINE_MQH__
