@@ -1,1 +1,1 @@
-Nothing should be ignored based on the provided file changes, as they only contain source code files (.mqh) without any build artifacts, dependencies, or temporary files.
+Nothing should be ignored based on the provided file changes. The modified file 'Include/PASR/AI/AIFeatureBuilder.mqh' appears to be a source code file that should be tracked in version control. Since there are no build artifacts, dependencies, temporary files, or other ignorable items in the change list, no .gitignore rules are needed.
