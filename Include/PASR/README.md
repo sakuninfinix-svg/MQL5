@@ -1,7 +1,7 @@
 # PASR — Price Action Support Resistance EA
 
-> **Architecture:** Pipeline Orchestration (migrated from Monolith v9, Sprint 1–18)
-> **Last updated:** Sprint 18 (2026-05-24)
+> **Architecture:** Pipeline Orchestration (migrated from Monolith v9, Sprint 1–19)
+> **Last updated:** Sprint 19 (2026-05-24)
 > **Compile target:** `Experts/PASR_MODULAR.mq5`
 
 ---
@@ -55,11 +55,11 @@ Include/PASR/
 │   └── PASR_SymbolManager.mqh
 │
 ├── Analysis/                ← Market analysis managers
-│   ├── SRManager.mqh        ← ⚠ 54KB — Sprint 19 decomposition target
+│   ├── SRManager.mqh        ← ⚠ 54KB — Sprint 20 decomposition target
 │   ├── ZoneManager.mqh      ← Supply/Demand zones
 │   ├── MarketRegimeDetector.mqh
 │   ├── AdaptiveParameterManager.mqh
-│   └── Pattern/             ← Candlestick pattern sub-module (audit pending S19)
+│   └── Pattern/             ← Candlestick pattern sub-module (audit pending S20)
 │
 ├── Signal/                  ← v4.02 — Signal generation & regime filtering
 │   ├── SignalManager.mqh    ← v4.02
@@ -89,22 +89,22 @@ Include/PASR/
 │   ├── ModelRegistry.mqh
 │   └── ONNXBridge.mqh
 │
-├── Infra/                   ← ✅ S18 Audited (10 files)
+├── Infra/                   ← ✅ S19 Audited (10/10 files)
 │   ├── HealthMonitor.mqh    ← v2.00 — BUG-H1..H6 fixed (S7)
 │   ├── SessionState.mqh     ← v1.01 — SS-001 CLOSED, SS-002 FIXED (S18)
 │   ├── SnapshotManager.mqh  ← v2.00 — SNAP-001..005 fixed (S17)
 │   ├── JournalManager.mqh   ← v2.00 — JNL-001..005 fixed (S18) ✅
-│   ├── TelemetryRecorder.mqh← audit pending S19
-│   ├── PerformanceReport.mqh← audit pending S19
-│   ├── DataManager.mqh      ← audit pending S19
-│   ├── SanityManager.mqh    ← audit pending S19
-│   ├── StateManager.mqh     ← audit pending S19
-│   └── AdaptiveConfig.mqh   ← audit pending S19
+│   ├── TelemetryRecorder.mqh← v1.00 — TEL-001..004 found (S19) ⚠ fix S20
+│   ├── PerformanceReport.mqh← v1.00 — RPT-001..003 found (S19) ⚠ fix S20
+│   ├── DataManager.mqh      ← audit pending S20
+│   ├── SanityManager.mqh    ← v1.00 — SAN-001..004 found (S19) ⚠ fix S20
+│   ├── StateManager.mqh     ← v1.00 — STM-001..003 found (S19) ⚠ fix S20
+│   └── AdaptiveConfig.mqh   ← audit pending S20
 │
-├── Data/                    ← audit pending S19
-├── QA/                      ← audit pending S19
-├── Tools/                   ← audit pending S19
-├── UI/                      ← audit pending S19
+├── Data/                    ← audit pending S20
+├── QA/                      ← audit pending S20
+├── Tools/                   ← audit pending S20
+├── UI/                      ← audit pending S20
 └── docs/                    ← internal documentation
 
 Experts/
@@ -129,20 +129,52 @@ Experts/
 
 ### 🔴 OPEN
 
+#### Infra/TelemetryRecorder.mqh — 4 bugs (S19 audit)
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| **TEL-001** | 🔴 CRITICAL | `Initialize()` override signature salah — `virtual bool Initialize() override` tidak match `IManager::Initialize(IDataManager*, CEventBus*)`. Compile error karena IManager tidak punya `Initialize()` tanpa parameter. Perlu diganti `virtual bool Init(IDataManager *data, CEventBus *bus) override` |
+| **TEL-002** | 🔴 CRITICAL | `EventSubscribe()` dipanggil tapi method ini **tidak ada** di `IManager` — harusnya `m_bus->Subscribe(this, EVENT_ID_*)` atau `RegisterEvent()` sesuai EventBus contract |
+| **TEL-003** | 🟠 HIGH | `#include <File.mqh>` — MQL5 standard library path pakai `<>` bukan `""`, tapi `CFile` class dari `<File.mqh>` tidak expose `WriteString()` + `WriteLine()` + `Flush()` — semua I/O harus lewat `FileWrite*()` built-in function dengan handle int, bukan object method |
+| **TEL-004** | 🟡 MEDIUM | `m_buffer_size = ArrayResize(m_buffer, MAX_BUFFER_SIZE)` di constructor — `ArrayResize()` me-return jumlah elemen berhasil di-resize, bukan index. `m_buffer_size` harusnya dimulai dari `0` (jumlah elemen terisi), bukan `MAX_BUFFER_SIZE`. Setiap push baru harusnya `m_buffer[m_buffer_size++]` tapi constructor langsung set ke 100 sehingga buffer selalu dianggap penuh dan setiap push langsung Flush() |
+
+#### Infra/PerformanceReport.mqh — 3 bugs (S19 audit)
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| **RPT-001** | 🔴 CRITICAL | `m_journal.GetEntry(i)` return `const JournalEntry *` — pointer ke internal array. Tapi `JournalEntry` struct tidak dideklarasikan di `PerformanceReport.mqh`, hanya ada di `JournalManager.mqh`. Include ada tapi jika `JournalManager.mqh` berubah struct-nya, `RPT` tidak recompile. Tidak ada guard terhadap NULL pointer sebelum akses `e.aiScore`, `e.direction`, dll — bisa segfault jika journal kosong |
+| **RPT-002** | 🟠 HIGH | `m_journal.GetDailyPnL(dailyPnL)` dipanggil dengan `double dailyPnL[]` (array lokal) — tapi signature `GetDailyPnL()` di `JournalManager.mqh` v2.00 belum diaudit. Jika `JOURNAL_DAILY_SIZE` tidak didefinisikan di JournalManager include, `BuildEquitySVG(dailyPnL, JOURNAL_DAILY_SIZE)` akan compile error karena `JOURNAL_DAILY_SIZE` undefined |
+| **RPT-003** | 🟡 MEDIUM | `ENUM_MARKET_REGIME` dan `ENUM_TRADING_SESSION` digunakan di `BuildRegimeRows()` dan `BuildSessionRows()` tapi tidak di-include. Depend pada transitif include dari `JournalManager.mqh` — rawan break jika include chain berubah. Harus explicit `#include "../Analysis/MarketRegimeDetector.mqh"` |
+
+#### Infra/SanityManager.mqh — 4 bugs (S19 audit)
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| **SAN-001** | 🔴 CRITICAL | `Init(IDataManager *data, CEventBus *bus) override` dipanggil tapi tidak ada `EventSubscribe()` atau `m_bus->Subscribe()` — `CSanityManager` tidak menerima events apapun dari EventBus. Tidak subscribe ke `EVENT_ID_SYSTEM_WARNING` padahal dia yang dispatch event tersebut (circular gap) |
+| **SAN-002** | 🔴 CRITICAL | `CheckFreshness()` selalu return `true` — body berisi comment "Basic check passed, detailed stale check done in OnTimer" tapi **tidak ada OnTimer handler**. Stale tick detection adalah salah satu alasan utama SanityManager ada, tapi fungsinya dead code |
+| **SAN-003** | 🟠 HIGH | `CheckPriceGap()` pakai `tick.last` bukan `tick.bid`. Di Forex, `tick.last` selalu `0` karena tidak ada last-traded-price — hanya `bid` dan `ask` yang valid. Gap check tidak pernah aktif di Forex instrument |
+| **SAN-004** | 🟡 MEDIUM | `SendEvent()` membangun `PASREvent` dengan hanya `id`, `priority`, `tag` — tidak mengisi `payload` atau `string_value` dengan `msg` yang dikirim. Message hilang, subscriber menerima event kosong tanpa context |
+
+#### Infra/StateManager.mqh — 3 bugs (S19 audit)
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| **STM-001** | 🟠 HIGH | `ComputeStateCRC()` bukan CRC32 sejati — hanya XOR beberapa field dengan seed `0x12345678`. Collision rate sangat tinggi: dua state berbeda dengan field yang XOR-cancel bisa menghasilkan CRC sama. Contoh: `consecLoss=1, tradesToday=2` vs `consecLoss=3, tradesToday=0` → XOR sama. Untuk financial state persistence, perlu CRC32 polinom atau minimal FNV-1a hash |
+| **STM-002** | 🟡 MEDIUM | `CheckDailyReset()` kondisi: `today > m_state.lastTradeDate && m_state.tradesToday > 0` — reset hanya terjadi jika sudah ada trade hari sebelumnya. Jika EA restart di hari baru setelah hari tanpa trade, `dailyStartBalance` tidak di-update ke balance saat ini. Balance bisa stale dari beberapa hari lalu |
+| **STM-003** | 🟡 MEDIUM | `CStateManager` tidak extend `IManager` — standalone class. Tidak masalah secara desain (StateManager dipanggil langsung oleh RiskManager, bukan pipeline), tapi perlu dikonfirmasi di Orchestrator bahwa `m_state->OnDeinit()` dipanggil sebelum `FreeAll()` agar final save terjadi |
+
+#### Analysis & Lainnya
+
 | ID | Severity | File | Description | Target |
 |----|----------|------|-------------|--------|
-| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | S19 |
-| **A5** | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | S19 |
-| **INF-5** | 🔴 TBD | `Infra/TelemetryRecorder.mqh` | Belum diaudit | S19 |
-| **INF-6** | 🔴 TBD | `Infra/PerformanceReport.mqh` | Belum diaudit | S19 |
-| **INF-7** | 🔴 TBD | `Infra/DataManager.mqh` | Belum diaudit | S19 |
-| **INF-8** | 🔴 TBD | `Infra/SanityManager.mqh` | Belum diaudit | S19 |
-| **INF-9** | 🔴 TBD | `Infra/StateManager.mqh` | Belum diaudit | S19 |
-| **INF-10** | 🔴 TBD | `Infra/AdaptiveConfig.mqh` | Belum diaudit | S19 |
-| **DATA-?** | 🔴 TBD | `Data/` | Folder belum diaudit | S19 |
-| **QA-?** | 🔴 TBD | `QA/` | Folder belum diaudit | S19 |
-| **UI-?** | 🔴 TBD | `UI/` | Folder belum diaudit | S19 |
-| **TOOLS-?** | 🔴 TBD | `Tools/` | Folder belum diaudit | S19 |
+| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | S20 |
+| **A5** | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | S20 |
+| **INF-10** | 🔴 TBD | `Infra/AdaptiveConfig.mqh` | Belum diaudit | S20 |
+| **INF-7** | 🔴 TBD | `Infra/DataManager.mqh` | Belum diaudit | S20 |
+| **DATA-?** | 🔴 TBD | `Data/` | Folder belum diaudit | S20 |
+| **QA-?** | 🔴 TBD | `QA/` | Folder belum diaudit | S20 |
+| **UI-?** | 🔴 TBD | `UI/` | Folder belum diaudit | S20 |
+| **TOOLS-?** | 🔴 TBD | `Tools/` | Folder belum diaudit | S20 |
 
 ---
 
@@ -188,7 +220,8 @@ Experts/
 | S16 | AI subfolder fixes | AI-001..AI-007 resolved |
 | S17 | Infra audit partial — SnapshotManager rewrite | SNAP-001..005 resolved |
 | S18 | Infra audit — JournalManager + SessionState fix | JNL-001..005 + SS-002 resolved |
-| S19 | Infra remaining (5 files) + Data/QA/Tools/UI + SRManager decomposition | _(planned)_ |
+| S19 | Infra audit — TelemetryRecorder, PerformanceReport, SanityManager, StateManager | TEL-001..004, RPT-001..003, SAN-001..004, STM-001..003 logged |
+| S20 | Fix TEL/RPT/SAN/STM bugs + DataManager + AdaptiveConfig + Data/QA/Tools/UI | _(planned)_ |
 
 ---
 
@@ -244,11 +277,11 @@ orch.OnDeinit(reason);
 | `Infra/SessionState.mqh` | v1.01 | S18 | ✅ Stable |
 | `Infra/SnapshotManager.mqh` | v2.00 | S17 | ✅ Stable |
 | `Infra/JournalManager.mqh` | v2.00 | S18 | ✅ Stable |
-| `Infra/TelemetryRecorder.mqh` | — | — | 🔴 Not audited |
-| `Infra/PerformanceReport.mqh` | — | — | 🔴 Not audited |
+| `Infra/TelemetryRecorder.mqh` | v1.00 | S19 | ⚠️ 4 bugs open (TEL-001..004) |
+| `Infra/PerformanceReport.mqh` | v1.00 | S19 | ⚠️ 3 bugs open (RPT-001..003) |
+| `Infra/SanityManager.mqh` | v1.00 | S19 | ⚠️ 4 bugs open (SAN-001..004) |
+| `Infra/StateManager.mqh` | v1.00 | S19 | ⚠️ 3 bugs open (STM-001..003) |
 | `Infra/DataManager.mqh` | — | — | 🔴 Not audited |
-| `Infra/SanityManager.mqh` | — | — | 🔴 Not audited |
-| `Infra/StateManager.mqh` | — | — | 🔴 Not audited |
 | `Infra/AdaptiveConfig.mqh` | — | — | 🔴 Not audited |
 | `Analysis/SRManager.mqh` | — | — | ⚠️ Audit needed (54KB) |
 | `Analysis/Pattern/*.mqh` | — | — | 🔴 Not audited |
