@@ -1,116 +1,86 @@
 //+------------------------------------------------------------------+
-//| Infra/StateManager.mqh — v1.00                                    |
-//| Binary-file persistence: saves/loads EA state across restarts.  |
-//|                                                                  |
-//| PURPOSE (Phase 9):                                               |
-//|   Prevent VPS reboot / EA restart from resetting critical state: |
-//|   equity peak, daily PnL baseline, consecutive loss counter,     |
-//|   circuit breaker status. Without persistence these reset to     |
-//|   zero on restart, allowing the EA to bypass circuit breaker     |
-//|   protections that should still be active.                       |
-//|                                                                  |
-//| FILE LOCATION:                                                   |
-//|   MQL5/Files/PASR_State_{MagicNumber}_{Symbol}.bin               |
-//|                                                                  |
-//| INTEGRITY:                                                       |
-//|   Simple CRC32 stored in file header. Corrupted file is          |
-//|   discarded and state resets to safe defaults.                   |
-//|                                                                  |
-//| USAGE:                                                           |
-//|   CStateManager state;                                           |
-//|   state.Init(magicNumber, symbol);                               |
-//|   state.Load();      // called in OnInit after RiskManager init  |
-//|   // ... trade cycle ...                                         |
-//|   state.Save();      // called after every trade event           |
-//|   state.OnDeinit();  // final save on EA deinit                  |
-//|                                                                  |
-//| INTEGRATION WITH RiskManager:                                    |
-//|   CRiskManager exposes LoadState() and SaveState() that call     |
-//|   CStateManager internally. Orchestrator wires them together.    |
-//|                                                                  |
-//| CHANGE LOG:                                                      |
-//|   v1.00 (2026-05-21) — Phase 9: initial persistence engine      |
+//| Infra/StateManager.mqh — v2.00                                    |
+//| Binary-file persistence: saves/loads EA state across restarts.   |
+//|                                                                   |
+//| v2.00 (2026-05-24) — Sprint 20                                    |
+//|   STM-001: Replace XOR fake-CRC with FNV-1a 32-bit hash          |
+//|   STM-002: CheckDailyReset() always updates dailyStartBalance     |
+//|            on new day regardless of tradesToday count             |
+//|   STM-003: OnDeinit() documented — caller must invoke before free |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __INFRA_STATE_MANAGER_MQH__
 #define __INFRA_STATE_MANAGER_MQH__
 
-#define STATE_FILE_VERSION  0x0100  // v1.00 — bump on struct change
+#define STATE_FILE_VERSION  0x0200  // v2.00 — bump for CRC algorithm change
 
-// Persisted EA state snapshot
 struct PASRState
   {
-   ushort  version;           // STATE_FILE_VERSION
-   uint    crc;               // CRC32 of all other fields
-   // ── Risk fields ─────────────────────────────────────
-   double  equityPeak;        // highest equity seen since reset
-   double  dailyStartBalance; // balance at session start
-   int     consecLoss;        // consecutive losing trades
-   int     tradesToday;       // trades opened today
-   int     totalTrades;       // all-time trade count
-   datetime lastTradeDate;   // date of last trade (for daily reset)
-   datetime lastSaveTime;    // timestamp of this snapshot
-   // ── Circuit breaker ──────────────────────────────────
-   bool    circuitBroken;     // true = trading halted
-   char    circuitReason[64]; // last circuit breaker reason
+   ushort  version;
+   uint    crc;                // FNV-1a 32-bit of remaining fields
+   double  equityPeak;
+   double  dailyStartBalance;
+   int     consecLoss;
+   int     tradesToday;
+   int     totalTrades;
+   datetime lastTradeDate;
+   datetime lastSaveTime;
+   bool    circuitBroken;
+   char    circuitReason[64];
   };
 
 //+------------------------------------------------------------------+
-//| CRC32 helper (polynomial 0xEDB88320)                             |
+//| FNV-1a 32-bit hash — STM-001 FIX                                  |
+//| Much better collision resistance than XOR for financial state.    |
 //+------------------------------------------------------------------+
-uint CRC32Compute(const uchar &data[], int size)
+uint FNV1a32(const uint &words[], int count)
   {
-   uint crc = 0xFFFFFFFF;
-   for(int i = 0; i < size; i++)
+   uint hash = 0x811c9dc5u;  // FNV offset basis
+   for(int i = 0; i < count; i++)
      {
-      crc ^= data[i];
-      for(int j = 0; j < 8; j++)
-         crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320 : 0);
+      hash ^= words[i];
+      hash *= 0x01000193u;   // FNV prime
      }
-   return crc ^ 0xFFFFFFFF;
+   return hash;
   }
 
-//+------------------------------------------------------------------+
-//| CStateManager                                                    |
-//+------------------------------------------------------------------+
 class CStateManager
   {
 private:
-   string   m_filename;
-   bool     m_initialised;
-   bool     m_dirty;       // true = unsaved changes
+   string    m_filename;
+   bool      m_initialised;
+   bool      m_dirty;
    PASRState m_state;
 
-   // ── Build filename ─────────────────────────────────────────
    string BuildFilename(int magic, string sym) const
      {
-      // Safe for cross-platform: replace / with _ in symbol
       StringReplace(sym, "/", "_");
-      return StringFormat("PASR_State_%d_%s.bin", magic, sym);
+      StringReplace(sym, "+", "_");
+      return StringFormat("PASR_State_%d_%s_v2.bin", magic, sym);
      }
 
-   // ── Compute CRC over PASRState (excluding crc field itself) ──
-   uint ComputeStateCRC(const PASRState &s) const
+   // STM-001 FIX: FNV-1a hash over all meaningful fields
+   uint ComputeHash(const PASRState &s) const
      {
-      // Copy to uchar array, zero out crc field (bytes 2-5)
-      uchar buf[];
-      int sz = sizeof(PASRState);
-      ArrayResize(buf, sz);
-      // MQL5 has no direct memcpy, use a byte-by-byte struct copy via file trick
-      // Simple approach: XOR all double/int fields manually
-      uint crc = 0x12345678;
-      crc ^= (uint)(s.equityPeak * 1000.0);
-      crc ^= (uint)(s.dailyStartBalance * 1000.0);
-      crc ^= (uint)s.consecLoss;
-      crc ^= (uint)s.tradesToday;
-      crc ^= (uint)s.totalTrades;
-      crc ^= (uint)s.lastTradeDate;
-      crc ^= (uint)s.circuitBroken;
-      crc ^= s.version;
-      return crc;
+      uint words[];
+      ArrayResize(words, 10);
+      words[0] = (uint)(s.equityPeak        * 1000.0);
+      words[1] = (uint)(s.dailyStartBalance * 1000.0);
+      words[2] = (uint)s.consecLoss;
+      words[3] = (uint)s.tradesToday;
+      words[4] = (uint)s.totalTrades;
+      words[5] = (uint)s.lastTradeDate;
+      words[6] = (uint)s.lastSaveTime;
+      words[7] = (uint)s.circuitBroken;
+      words[8] = (uint)s.version;
+      // Pack first 8 chars of circuitReason into two uint32
+      uint r0 = 0, r1 = 0;
+      for(int i=0;i<4;i++) r0 |= ((uint)(uchar)s.circuitReason[i])   << (i*8);
+      for(int i=0;i<4;i++) r1 |= ((uint)(uchar)s.circuitReason[i+4]) << (i*8);
+      words[9] = r0 ^ r1;
+      return FNV1a32(words, 10);
      }
 
-   // ── Reset to safe defaults ───────────────────────────────────
    void ResetDefaults()
      {
       double bal = AccountInfoDouble(ACCOUNT_BALANCE);
@@ -128,6 +98,9 @@ private:
      }
 
 public:
+   // STM-003: CStateManager is standalone (not IManager) — by design.
+   // Orchestrator must call m_state.OnDeinit() in its FreeAll() BEFORE
+   // deleting CStateManager to guarantee final Save() executes.
    CStateManager() : m_initialised(false), m_dirty(false), m_filename("") {}
 
    bool Init(int magic, string sym)
@@ -138,24 +111,16 @@ public:
       return true;
      }
 
-   //+----------------------------------------------------------------+
-   //| Load — call in OnInit after Init()                             |
-   //+----------------------------------------------------------------+
    bool Load()
      {
       if(!m_initialised) return false;
       if(!FileIsExist(m_filename, FILE_COMMON))
-        {
-         Print("[State] No saved state found — using defaults");
-         return true;  // not an error: first run
-        }
+        { Print("[State] No saved state — using defaults"); return true; }
 
-      int fh = FileOpen(m_filename,
-                        FILE_READ|FILE_BIN|FILE_COMMON);
+      int fh = FileOpen(m_filename, FILE_READ|FILE_BIN|FILE_COMMON);
       if(fh == INVALID_HANDLE)
         {
-         PrintFormat("[State] Cannot open %s for read (err=%d)",
-                     m_filename, GetLastError());
+         PrintFormat("[State] Cannot open %s (err=%d)", m_filename, GetLastError());
          return false;
         }
 
@@ -164,70 +129,53 @@ public:
       FileClose(fh);
 
       if(bytesRead < sizeof(PASRState))
-        {
-         Print("[State] File too small — discarding, using defaults");
-         ResetDefaults();
-         return false;
-        }
+        { Print("[State] File too small — discarding"); ResetDefaults(); return false; }
 
-      // Version check
       if(loaded.version != STATE_FILE_VERSION)
         {
-         PrintFormat("[State] Version mismatch: file=%04X current=%04X — discarding",
+         PrintFormat("[State] Version mismatch file=%04X cur=%04X — discarding",
                      loaded.version, STATE_FILE_VERSION);
-         ResetDefaults();
-         return false;
+         ResetDefaults(); return false;
         }
 
-      // CRC integrity check
-      uint expected = ComputeStateCRC(loaded);
+      // STM-001 FIX: FNV-1a integrity check
+      uint expected = ComputeHash(loaded);
       if(loaded.crc != expected)
         {
-         PrintFormat("[State] CRC mismatch: file=%08X computed=%08X — discarding",
+         PrintFormat("[State] Hash mismatch file=%08X computed=%08X — discarding",
                      loaded.crc, expected);
-         ResetDefaults();
-         return false;
+         ResetDefaults(); return false;
         }
 
       m_state = loaded;
-      PrintFormat("[State] Loaded OK — equityPeak=%.2f consecLoss=%d circuit=%s",
+      PrintFormat("[State] Loaded OK — peak=%.2f loss=%d circuit=%s",
                   m_state.equityPeak, m_state.consecLoss,
                   m_state.circuitBroken ? "BROKEN" : "OK");
       return true;
      }
 
-   //+----------------------------------------------------------------+
-   //| Save — call after every state-changing event                   |
-   //+----------------------------------------------------------------+
    bool Save()
      {
       if(!m_initialised) return false;
-
       m_state.lastSaveTime = TimeCurrent();
-      m_state.crc          = ComputeStateCRC(m_state);
+      m_state.crc          = ComputeHash(m_state);  // STM-001 FIX
 
-      int fh = FileOpen(m_filename,
-                        FILE_WRITE|FILE_BIN|FILE_COMMON);
+      int fh = FileOpen(m_filename, FILE_WRITE|FILE_BIN|FILE_COMMON);
       if(fh == INVALID_HANDLE)
         {
-         PrintFormat("[State] Cannot open %s for write (err=%d)",
-                     m_filename, GetLastError());
+         PrintFormat("[State] Cannot write %s (err=%d)", m_filename, GetLastError());
          return false;
         }
-
       FileWriteStruct(fh, m_state);
       FileClose(fh);
       m_dirty = false;
-
-      if(m_state.circuitBroken)
-         PrintFormat("[State] Saved — circuit=BROKEN reason=%s",
-                     m_state.circuitReason);
       return true;
      }
 
+   // STM-003: MUST be called by Orchestrator::FreeAll() before delete
    void OnDeinit() { if(m_dirty) Save(); }
 
-   // ── Getters ───────────────────────────────────────────────────
+   // ── Getters ──────────────────────────────────────────────────────
    double   GetEquityPeak()        const { return m_state.equityPeak;        }
    double   GetDailyStartBalance() const { return m_state.dailyStartBalance; }
    int      GetConsecLoss()        const { return m_state.consecLoss;        }
@@ -238,51 +186,39 @@ public:
    string   GetCircuitReason()     const
      { return CharArrayToString(m_state.circuitReason); }
 
-   // ── Setters (mark dirty → must call Save() after) ───────────────
-   void SetEquityPeak(double v)
-     { m_state.equityPeak = v; m_dirty = true; }
-
-   void SetDailyStartBalance(double v)
-     { m_state.dailyStartBalance = v; m_dirty = true; }
-
-   void IncrConsecLoss()
-     { m_state.consecLoss++; m_dirty = true; }
-
-   void ResetConsecLoss()
-     { m_state.consecLoss = 0; m_dirty = true; }
-
-   void IncrTradesToday()
-     { m_state.tradesToday++; m_state.totalTrades++; m_dirty = true; }
-
-   void ResetTradesToday()
-     { m_state.tradesToday = 0; m_dirty = true; }
-
-   void SetLastTradeDate(datetime d)
-     { m_state.lastTradeDate = d; m_dirty = true; }
+   // ── Setters ──────────────────────────────────────────────────────
+   void SetEquityPeak(double v)        { m_state.equityPeak = v;        m_dirty=true; }
+   void SetDailyStartBalance(double v) { m_state.dailyStartBalance = v; m_dirty=true; }
+   void IncrConsecLoss()               { m_state.consecLoss++;          m_dirty=true; }
+   void ResetConsecLoss()              { m_state.consecLoss=0;          m_dirty=true; }
+   void IncrTradesToday()              { m_state.tradesToday++; m_state.totalTrades++; m_dirty=true; }
+   void ResetTradesToday()             { m_state.tradesToday=0;         m_dirty=true; }
+   void SetLastTradeDate(datetime d)   { m_state.lastTradeDate=d;       m_dirty=true; }
 
    void TripCircuit(const string reason)
      {
       m_state.circuitBroken = true;
-      StringToCharArray(reason, m_state.circuitReason,
-                        0, ArraySize(m_state.circuitReason));
+      StringToCharArray(reason, m_state.circuitReason, 0, ArraySize(m_state.circuitReason));
       m_dirty = true;
-      Save();  // immediate save on circuit trip
+      Save(); // immediate save on circuit trip
      }
 
    void ResetCircuit()
-     { m_state.circuitBroken=false;
-       ArrayInitialize(m_state.circuitReason,0);
-       m_dirty=true; }
+     { m_state.circuitBroken=false; ArrayInitialize(m_state.circuitReason,0); m_dirty=true; }
 
-   // Daily reset: call when date changes
+   // STM-002 FIX: reset daily balance unconditionally on new day
    void CheckDailyReset()
      {
       datetime today = StringToTime(TimeToString(TimeCurrent(), TIME_DATE));
-      if(today > m_state.lastTradeDate && m_state.tradesToday > 0)
+      datetime lastDate = m_state.lastTradeDate;
+
+      // STM-002 FIX: use midnight comparison, not trade-count guard
+      if(today > lastDate)
         {
-         PrintFormat("[State] Daily reset: trades=%d → 0",
-                     m_state.tradesToday);
-         m_state.dailyStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+         double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+         if(m_state.tradesToday > 0)
+            PrintFormat("[State] Daily reset: trades=%d → 0", m_state.tradesToday);
+         m_state.dailyStartBalance = bal;  // STM-002: always refresh
          m_state.tradesToday       = 0;
          m_dirty = true;
          Save();
@@ -291,3 +227,4 @@ public:
   };
 
 #endif // __INFRA_STATE_MANAGER_MQH__
+//+------------------------------------------------------------------+

@@ -3,308 +3,232 @@
 //|                                 Copyright © 2024, PASR System    |
 //|                                       Senior Quant Architecture  |
 //+------------------------------------------------------------------+
-#property copyright "Copyright © 2024, PASR System"
-#property link      "https://pasr.system"
-#property version   "1.00"
-#property description "Data Sanity Check & Circuit Breaker Implementation"
+//| v2.00 (2026-05-24) — Sprint 20                                    |
+//|   SAN-001: Added EventBus subscribe for SYSTEM events             |
+//|   SAN-002: CheckFreshness() now tracks stale seconds properly     |
+//|   SAN-003: CheckPriceGap() uses tick.bid (not tick.last for Forex)|
+//|   SAN-004: SendEvent() now carries msg in PASREvent.tag field     |
 //+------------------------------------------------------------------+
+#property strict
+#ifndef __INFRA_SANITY_MANAGER_MQH__
+#define __INFRA_SANITY_MANAGER_MQH__
+
 #include "../Core/IManager.mqh"
 #include "../Core/EventBus.mqh"
-#include "../Core/Config/Config.mqh"
+#include "../Core/Events.mqh"
+#include "../Core/Globals.mqh"
 
-// Forward declaration
-class IDataManager;
-//+------------------------------------------------------------------+
-//| Enum: Status Sirkuit Breaker                                     |
-//+------------------------------------------------------------------+
 enum ENUM_CIRCUIT_STATE
   {
-   CIRCUIT_CLOSED,     // Normal operation (Trading Allowed)
-   CIRCUIT_OPEN,       // Tripped (Trading Paused)
-   CIRCUIT_HALF_OPEN   // Testing waters (Limited check)
+   CIRCUIT_CLOSED,
+   CIRCUIT_OPEN,
+   CIRCUIT_HALF_OPEN
   };
-//+------------------------------------------------------------------+
-//| Struct: Konfigurasi Sanity                                       |
-//+------------------------------------------------------------------+
+
 struct SSanityConfig
   {
-   int      max_stale_ticks;       // Max ticks tanpa update sebelum pause
-   int      max_spread_points;     // Max spread sebelum pause
-   double   max_price_gap_pct;     // Max % gap harga sebelum pause
-   int      trip_threshold;        // Jumlah error berturut-turut untuk trip
-   int      reset_timeout_sec;     // Waktu tunggu sebelum reset breaker
+   int      max_stale_sec;         // SAN-002: seconds without tick before stale
+   int      max_spread_points;
+   double   max_price_gap_pct;
+   int      trip_threshold;
+   int      reset_timeout_sec;
   };
-//+------------------------------------------------------------------+
-//| Class: CSanityManager                                            |
-//| Implements IManager interface for Orchestrator integration       |
-//+------------------------------------------------------------------+
+
 class CSanityManager : public IManager
   {
 private:
-   SSanityConfig     m_config;
+   SSanityConfig      m_config;
    ENUM_CIRCUIT_STATE m_state;
-   int               m_consecutive_errors;
-   datetime          m_last_tick_time;
-   datetime          m_trip_time;
-   double            m_last_price;
+   int                m_consecutive_errors;
+   datetime           m_last_tick_time;
+   datetime           m_trip_time;
+   double             m_last_bid;          // SAN-003: track bid, not last-price
 
 public:
-   // Constructor
    CSanityManager() : IManager()
      {
       m_state              = CIRCUIT_CLOSED;
       m_consecutive_errors = 0;
       m_last_tick_time     = 0;
       m_trip_time          = 0;
-      m_last_price         = 0;
-      
-      // Default Config (Conservative)
-      m_config.max_stale_ticks    = 5;      // ~2.5 detik pada tick cepat
-      m_config.max_spread_points  = 20;     // Sesuaikan dengan simbol
-      m_config.max_price_gap_pct  = 0.5;    // 0.5% jump
-      m_config.trip_threshold     = 3;      // 3 strikes -> Out
-      m_config.reset_timeout_sec  = 60;     // Pause 1 menit
+      m_last_bid           = 0.0;          // SAN-003 FIX
+
+      m_config.max_stale_sec      = 30;    // SAN-002 FIX: renamed + meaningful
+      m_config.max_spread_points  = 20;
+      m_config.max_price_gap_pct  = 0.5;
+      m_config.trip_threshold     = 3;
+      m_config.reset_timeout_sec  = 60;
      }
 
-   // Destructor
    ~CSanityManager() {}
 
-   // IManager Interface Implementation
-   bool Init(IDataManager *data, CEventBus *bus) override
+   // SAN-001 FIX: subscribe to EventBus after Init
+   virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
-      
-      Print("[SANITY] Initialized with TripThreshold=", m_config.trip_threshold, 
-            " ResetTimeout=", m_config.reset_timeout_sec, "s");
+
+      if(m_bus != NULL)
+        {
+         // Listen for external circuit-reset commands (e.g. from HealthMonitor)
+         m_bus.Subscribe(this, EVENT_ID_SYSTEM_INFO);
+        }
+
+      PASRLogInfo(StringFormat("[SANITY] v2.00 — trip=%d reset=%ds stale=%ds",
+                              m_config.trip_threshold,
+                              m_config.reset_timeout_sec,
+                              m_config.max_stale_sec));
       return true;
      }
 
-   void OnTick() override
+   virtual void OnTick() override {}
+
+   virtual void OnEvent(const PASREvent &event) override
      {
-      // No per-tick processing needed - validation happens in ValidateTick()
+      // Receive external reset command via EVENT_ID_SYSTEM_INFO
+      if(event.id == EVENT_ID_SYSTEM_INFO)
+        {
+         if(StringFind(event.tag, "CIRCUIT_RESET") >= 0)
+           {
+            ResetCircuit();
+            PASRLogInfo("[SANITY] External circuit reset received.");
+           }
+        }
      }
 
-   void OnDeinit(const int reason) override
-     {
-      // Cleanup if needed
-     }
+   virtual void OnDeinit(const int reason) override {}
+   virtual string GetName() const override { return "SanityManager"; }
 
-   // Custom Initialize dengan konfigurasi spesifik
-   bool Initialize(const SSanityConfig &cfg)
-     {
-      m_config = cfg;
-      return true;
-     }
+   bool Configure(const SSanityConfig &cfg)
+     { m_config = cfg; return true; }
 
-   // Helper to send events via inherited m_bus
-   void SendEvent(ENUM_EVENT_ID evt_id, const string &msg)
-     {
-      if(m_bus == NULL) return;
-      
-      PASREvent evt;
-      evt.id       = evt_id;
-      evt.priority = 50;
-      evt.tag      = "SanityManager";
-      m_bus.Push(evt);
-     }
-
-   // --- CORE LOGIC: Validasi Data Masuk ---
-   
-   /*
-    * Memvalidasi data tick terbaru. 
-    * Return: true jika data AMAN untuk diproses pipeline.
-    *         false jika data BERBAHAYA (Pipeline harus abort).
-    */
+   // --- CORE: Validate incoming tick ---
    bool ValidateTick(const MqlTick &tick)
      {
-      // Jika Circuit OPEN, tolak semua data (kecuali logic reset)
       if(m_state == CIRCUIT_OPEN)
         {
          if(!TryResetBreaker()) return false;
-         // Masih open, tapi sudah coba reset. Biarkan lolos ke validasi biasa
-         // agar kita bisa cek apakah masalah sudah hilang.
         }
 
-      bool is_valid = true;
-      string reason = "";
+      bool  is_valid = true;
+      string reason  = "";
 
-      // 1. Check Stale Data (Waktu)
-      if(!CheckFreshness(tick.time))
-        {
-         reason = "STALE_DATA";
-         is_valid = false;
-        }
+      if(!CheckFreshness(tick.time))                // SAN-002
+        { reason = "STALE_DATA"; is_valid = false; }
 
-      // 2. Check Spread Anomali
       if(is_valid && !CheckSpread(tick.ask, tick.bid))
-        {
-         reason = "WIDE_SPREAD";
-         is_valid = false;
-        }
+        { reason = "WIDE_SPREAD"; is_valid = false; }
 
-      // 3. Check Price Gap (Lonjakan Harga)
-      if(is_valid && !CheckPriceGap(tick.last))
-        {
-         reason = "PRICE_GAP";
-         is_valid = false;
-        }
+      if(is_valid && !CheckPriceGap(tick.bid))      // SAN-003 FIX: bid not last
+        { reason = "PRICE_GAP"; is_valid = false; }
 
-      // Handle Result
-      if(is_valid)
-        {
-         OnSuccess();
-         return true;
-        }
-      else
-        {
-         OnFailure(reason);
-         return false;
-        }
+      if(is_valid) { OnSuccess(); return true; }
+      else         { OnFailure(reason); return false; }
      }
 
-   // Getter Status
-   ENUM_CIRCUIT_STATE GetState() const { return m_state; }
-   
-   bool IsTradingAllowed() const 
-     { 
-      return (m_state == CIRCUIT_CLOSED || m_state == CIRCUIT_HALF_OPEN); 
-     }
+   ENUM_CIRCUIT_STATE GetState()      const { return m_state; }
+   bool               IsTradingAllowed() const
+     { return (m_state == CIRCUIT_CLOSED || m_state == CIRCUIT_HALF_OPEN); }
 
    string GetStateString() const
      {
       switch(m_state)
         {
-         case CIRCUIT_CLOSED:   return "CLOSED (Normal)";
-         case CIRCUIT_OPEN:     return "OPEN (Paused)";
-         case CIRCUIT_HALF_OPEN:return "HALF-OPEN (Testing)";
-         default:               return "UNKNOWN";
+         case CIRCUIT_CLOSED:    return "CLOSED";
+         case CIRCUIT_OPEN:      return "OPEN";
+         case CIRCUIT_HALF_OPEN: return "HALF-OPEN";
+         default:                return "UNKNOWN";
         }
      }
 
-private:
-   // --- Validation Helpers ---
+   void ResetCircuit()
+     { m_state=CIRCUIT_CLOSED; m_consecutive_errors=0; }
 
+private:
+   // SAN-002 FIX: actual staleness check using seconds elapsed
    bool CheckFreshness(datetime tick_time)
      {
       if(tick_time == 0) return false;
-      
-      // Update last seen time
-      if(tick_time >= m_last_tick_time)
-         m_last_tick_time = tick_time;
-      
-      // Hitung selisih detik dari waktu server saat ini
-      // Catatan: Dalam OnTick, TimeCurrent() mungkin sama dengan tick.time
-      // Kita cek apakah ada jeda terlalu lama sejak tick terakhir yang VALID
-      // Logika ini lebih efektif jika dikombinasikan dengan OnTimer check
-      
-      return true; // Basic check passed, detailed stale check done in OnTimer
+      m_last_tick_time = tick_time;
+      datetime elapsed = TimeCurrent() - tick_time;
+      if(elapsed > m_config.max_stale_sec)
+        {
+         PASRLogWarn(StringFormat("[SANITY] Stale tick: %ds old", (int)elapsed));
+         return false;
+        }
+      return true;
      }
 
    bool CheckSpread(double ask, double bid)
      {
-      if(ask <= 0 || bid <= 0 || ask <= bid) return false; // Invalid price
-      
-      long spread_points = (long)((ask - bid) / _Point);
-      if(spread_points > m_config.max_spread_points)
-        {
-         return false;
-        }
-      return true;
+      if(ask <= 0 || bid <= 0 || ask <= bid) return false;
+      long spread = (long)((ask - bid) / _Point);
+      return (spread <= m_config.max_spread_points);
      }
 
-   bool CheckPriceGap(double current_price)
+   // SAN-003 FIX: use bid (valid for Forex), not tick.last (always 0 in Forex)
+   bool CheckPriceGap(double bid)
      {
-      if(m_last_price == 0) 
-        {
-         m_last_price = current_price;
-         return true; // First tick
-        }
-
-      if(current_price == 0) return false;
-
-      double change_pct = MathAbs((current_price - m_last_price) / m_last_price) * 100.0;
-      
-      if(change_pct > m_config.max_price_gap_pct)
-        {
-         return false;
-        }
-
-      m_last_price = current_price;
-      return true;
+      if(m_last_bid == 0.0) { m_last_bid = bid; return true; }
+      if(bid <= 0.0)        return false;
+      double change_pct = MathAbs((bid - m_last_bid) / m_last_bid) * 100.0;
+      m_last_bid = bid;
+      return (change_pct <= m_config.max_price_gap_pct);
      }
-
-   // --- State Management ---
 
    void OnSuccess()
      {
       m_consecutive_errors = 0;
-      
-      // Jika sebelumnya Half-Open dan sukses, kembalikan ke Closed
       if(m_state == CIRCUIT_HALF_OPEN)
-        {
-         m_state = CIRCUIT_CLOSED;
-         NotifyStateChange("Circuit Reset to CLOSED");
-        }
+        { m_state = CIRCUIT_CLOSED; NotifyStateChange("CLOSED"); }
      }
 
    void OnFailure(const string &reason)
      {
       m_consecutive_errors++;
-      
-      string msg = StringFormat("[SANITY FAIL] Reason=%s Errors=%d/%d", 
+      string msg = StringFormat("[SANITY] reason=%s errors=%d/%d",
                                 reason, m_consecutive_errors, m_config.trip_threshold);
-      
-      // Kirim Event Warning via inherited m_bus
-      SendEvent(EVENT_ID_SYSTEM_WARNING, msg);
-
-      // Check Threshold
+      SendEvt(EVENT_ID_SYSTEM_WARNING, msg);
       if(m_consecutive_errors >= m_config.trip_threshold)
-        {
          TripBreaker(reason);
-        }
      }
 
    void TripBreaker(const string &reason)
      {
-      if(m_state == CIRCUIT_OPEN) return; // Sudah open
-
-      m_state = CIRCUIT_OPEN;
+      if(m_state == CIRCUIT_OPEN) return;
+      m_state     = CIRCUIT_OPEN;
       m_trip_time = TimeCurrent();
-      
-      string msg = StringFormat("[CIRCUIT BREAKER TRIPPED] Reason=%s. Pausing for %d sec.", 
-                                reason, m_config.reset_timeout_sec);
-      
-      // Kirim Critical Event
-      SendEvent(EVENT_ID_SYSTEM_CRITICAL, msg);
-      Print("*** CRITICAL: ", msg);
+      string msg  = StringFormat("[CIRCUIT TRIPPED] %s — pausing %ds",
+                                 reason, m_config.reset_timeout_sec);
+      SendEvt(EVENT_ID_SYSTEM_CRITICAL, msg);
+      PASRLogError("*** " + msg);
      }
 
    bool TryResetBreaker()
      {
       if(m_state != CIRCUIT_OPEN) return true;
-
-      // Cek timeout
       if(TimeCurrent() - m_trip_time >= m_config.reset_timeout_sec)
-        {
-         m_state = CIRCUIT_HALF_OPEN;
-         NotifyStateChange("Circuit entering HALF-OPEN state for testing");
-         return true;
-        }
-      
-      return false; // Masih dalam masa tunggu
+        { m_state = CIRCUIT_HALF_OPEN; NotifyStateChange("HALF-OPEN"); return true; }
+      return false;
      }
 
-   void NotifyStateChange(const string &msg)
+   void NotifyStateChange(const string &state_name)
      {
-      if(m_bus != NULL)
-        {
-         PASREvent evt;
-         evt.id       = EVENT_ID_SYSTEM_INFO;
-         evt.priority = 50;
-         evt.tag      = "SanityManager";
-         m_bus.Push(evt);
-        }
-      Print("[SANITY STATE] ", msg);
+      string msg = "[SANITY] Circuit → " + state_name;
+      SendEvt(EVENT_ID_SYSTEM_INFO, msg);
+      PASRLogInfo(msg);
+     }
+
+   // SAN-004 FIX: carry message in event.tag so subscribers can read it
+   void SendEvt(ENUM_EVENT_ID id, const string &msg)
+     {
+      if(m_bus == NULL) return;
+      PASREvent evt;
+      evt.id       = id;
+      evt.priority = 50;
+      evt.tag      = msg;              // SAN-004 FIX: payload in tag
+      m_bus.Push(evt);
      }
   };
+
+#endif // __INFRA_SANITY_MANAGER_MQH__
 //+------------------------------------------------------------------+

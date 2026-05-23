@@ -3,14 +3,20 @@
 //|                                  Copyright 2024, PASR Architecture |
 //|                                             https://pasr.quant.id |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2024, PASR Architecture"
-#property link      "https://pasr.quant.id"
-#property version   "1.00"
-#property description "Centralized Telemetry & Metrics Export System (Fase 3)"
+//| v2.00 (2026-05-24) — Sprint 20                                    |
+//|   TEL-001: Initialize() → Init(IDataManager*, CEventBus*) override|
+//|   TEL-002: EventSubscribe() → m_bus->Subscribe() via IManager     |
+//|   TEL-003: CFile object methods → FileWrite*() built-in functions  |
+//|   TEL-004: m_buffer_size init to 0, not MAX_BUFFER_SIZE           |
+//+------------------------------------------------------------------+
+#property strict
+#ifndef __INFRA_TELEMETRY_RECORDER_MQH__
+#define __INFRA_TELEMETRY_RECORDER_MQH__
 
-#include "../Core/EventBus.mqh"
 #include "../Core/IManager.mqh"
-#include <File.mqh>
+#include "../Core/EventBus.mqh"
+#include "../Core/Events.mqh"
+#include "../Core/Globals.mqh"
 
 //+------------------------------------------------------------------+
 //| Telemetry Metrics Structure                                      |
@@ -23,230 +29,206 @@ struct STelemetryMetric
    string           unit;
    ulong            stage_id;
    string           symbol;
-   
-   void Serialize(CFile &file)
-   {
-      file.WriteLong(timestamp);
-      file.WriteString(metric_name);
-      file.WriteDouble(value);
-      file.WriteString(unit);
-      file.WriteULong(stage_id);
-      file.WriteString(symbol);
-   }
 };
 
 //+------------------------------------------------------------------+
-//| CTelemetryRecorder Class                                         |
+//| CTelemetryRecorder — v2.00                                       |
 //+------------------------------------------------------------------+
 class CTelemetryRecorder : public IManager
 {
 private:
-   string                     m_base_path;
-   string                     m_current_file;
-   CFile                      m_csv_file;
-   bool                       m_is_open;
-   datetime                   m_last_flush;
-   int                        m_records_pending;
-   
-   // Buffer untuk write batching
-   STelemetryMetric           m_buffer[];
-   int                        m_buffer_size;
-   const int                  MAX_BUFFER_SIZE = 100;
-   
+   string            m_base_path;
+   string            m_current_file;
+   int               m_file_handle;        // TEL-003: int handle, not CFile object
+   bool              m_is_open;
+   datetime          m_last_flush;
+   int               m_records_pending;
+
+   // TEL-004: buffer — m_buffer_count starts at 0 (items filled), not capacity
+   static const int  MAX_BUFFER      = 100;
+   STelemetryMetric  m_buffer[100];
+   int               m_buffer_count;       // 0..MAX_BUFFER-1 items currently stored
+
    // Metrics counters
-   ulong                      m_total_records;
-   ulong                      m_pipeline_ticks;
-   ulong                      m_execution_lags;
-   double                     m_avg_latency;
-   double                     m_max_slippage;
+   ulong             m_total_records;
+   ulong             m_pipeline_ticks;
+   ulong             m_execution_lags;
+   double            m_avg_latency;
+   double            m_max_slippage;
 
 public:
-   CTelemetryRecorder() : m_is_open(false), m_last_flush(0), 
-                          m_records_pending(0), m_buffer_size(0),
-                          m_total_records(0), m_pipeline_ticks(0),
-                          m_execution_lags(0), m_avg_latency(0), m_max_slippage(0)
-   {
-      m_buffer_size = ArrayResize(m_buffer, MAX_BUFFER_SIZE);
-   }
-   
+   CTelemetryRecorder()
+      : m_is_open(false), m_last_flush(0), m_records_pending(0),
+        m_buffer_count(0),                 // TEL-004 FIX: start empty
+        m_total_records(0), m_pipeline_ticks(0),
+        m_execution_lags(0), m_avg_latency(0.0), m_max_slippage(0.0),
+        m_file_handle(INVALID_HANDLE)      // TEL-003 FIX: int handle
+   {}
+
    ~CTelemetryRecorder()
    {
       Flush();
       CloseFile();
    }
-   
-   //--- IManager Interface
-   virtual bool Initialize() override
+
+   //--- IManager Interface — TEL-001 FIX: correct override signature
+   virtual bool Init(IDataManager *data, CEventBus *bus) override
    {
-      m_base_path = "\\MQL5\\Files\\PASR\\Telemetry\\";
-      if(!DirectoryCreate(m_base_path))
-         return false;
-      
+      if(!IManager::Init(data, bus)) return false;
+
+      m_base_path = "PASR\\Telemetry\\";
+
       OpenNewFile();
       WriteHeader();
-      
-      EventSubscribe(EVENT_ID_PIPELINE_STAGE_COMPLETE);
-      EventSubscribe(EVENT_ID_ORDER_EXECUTED);
-      EventSubscribe(EVENT_ID_SIGNAL_GENERATED);
-      
-      Print("[Telemetry] Initialized - Recording to: ", m_base_path);
+
+      // TEL-002 FIX: subscribe via EventBus, not phantom EventSubscribe()
+      if(m_bus != NULL)
+      {
+         m_bus.Subscribe(this, EVENT_ID_PIPELINE_STAGE_COMPLETE);
+         m_bus.Subscribe(this, EVENT_ID_ORDER_EXECUTED);
+         m_bus.Subscribe(this, EVENT_ID_SIGNAL_GENERATED);
+      }
+
+      PASRLogInfo("[Telemetry] v2.00 Initialized — recording to: " + m_base_path);
       return true;
    }
-   
+
    virtual void Shutdown() override
    {
       Flush();
       CloseFile();
-      Print("[Telemetry] Shutdown complete. Total records: ", m_total_records);
+      PASRLogInfo("[Telemetry] Shutdown. Total records: " + IntegerToString((long)m_total_records));
    }
-   
-   virtual void OnEvent(const SEvent &event) override
+
+   virtual void OnEvent(const PASREvent &event) override
    {
-      switch(event.event_id)
+      switch(event.id)
       {
-         case EVENT_ID_PIPELINE_STAGE_COMPLETE:
-            RecordPipelineLatency(event);
-            break;
-            
-         case EVENT_ID_ORDER_EXECUTED:
-            RecordExecutionMetrics(event);
-            break;
-            
-         case EVENT_ID_SIGNAL_GENERATED:
-            RecordSignalMetrics(event);
-            break;
+         case EVENT_ID_PIPELINE_STAGE_COMPLETE: RecordPipelineLatency(event); break;
+         case EVENT_ID_ORDER_EXECUTED:          RecordExecutionMetrics(event); break;
+         case EVENT_ID_SIGNAL_GENERATED:        RecordSignalMetrics(event);   break;
       }
    }
-   
+
    virtual string GetName() const override { return "TelemetryRecorder"; }
-   
+
    //--- Public API
-   void RecordMetric(const string name, double value, const string unit, ulong stage_id=0, const string symbol="")
+   void RecordMetric(const string name, double value,
+                     const string unit, ulong stage_id=0, const string symbol="")
    {
-      if(m_buffer_size >= MAX_BUFFER_SIZE)
+      // TEL-004 FIX: flush when buffer FULL (count == MAX), not always
+      if(m_buffer_count >= MAX_BUFFER)
          Flush();
-      
-      STelemetryMetric &metric = m_buffer[m_buffer_size];
-      metric.timestamp = TimeCurrent();
-      metric.metric_name = name;
-      metric.value = value;
-      metric.unit = unit;
-      metric.stage_id = stage_id;
-      metric.symbol = symbol;
-      
-      m_buffer_size++;
+
+      STelemetryMetric &m = m_buffer[m_buffer_count];
+      m.timestamp   = TimeCurrent();
+      m.metric_name = name;
+      m.value       = value;
+      m.unit        = unit;
+      m.stage_id    = stage_id;
+      m.symbol      = (symbol == "") ? _Symbol : symbol;
+
+      m_buffer_count++;
       m_records_pending++;
       m_total_records++;
-      
-      // Auto-flush setiap 5 detik
+
+      // Auto-flush every 5 seconds
       if(TimeCurrent() - m_last_flush > 5)
          Flush();
    }
-   
+
    void Flush()
    {
-      if(!m_is_open || m_buffer_size == 0)
-         return;
-      
-      for(int i = 0; i < m_buffer_size; i++)
-      {
+      if(!m_is_open || m_buffer_count == 0) return;
+
+      for(int i = 0; i < m_buffer_count; i++)
          WriteRecord(m_buffer[i]);
-      }
-      
-      m_buffer_size = 0;
+
+      m_buffer_count    = 0;            // TEL-004 FIX: reset item count
       m_records_pending = 0;
-      m_last_flush = TimeCurrent();
-      
-      m_csv_file.Flush();
+      m_last_flush      = TimeCurrent();
+
+      FileFlush(m_file_handle);         // TEL-003 FIX: built-in FileFlush
    }
-   
+
 private:
    void OpenNewFile()
    {
       CloseFile();
-      
-      string filename = StringFormat("telemetry_%s_%d.csv", 
-                                     TimeToString(TimeCurrent(), TIME_DATE), 
-                                     TimeCurrent());
-      m_current_file = m_base_path + filename;
-      
-      if(m_csv_file.Open(m_current_file, FILE_WRITE | FILE_CSV | FILE_ANSI))
+
+      MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
+      m_current_file = StringFormat("%stelemetry_%04d%02d%02d_%d.csv",
+                                    m_base_path, dt.year, dt.mon, dt.day,
+                                    (int)TimeCurrent());
+
+      // TEL-003 FIX: FileOpen returns int handle
+      m_file_handle = FileOpen(m_current_file, FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON);
+      if(m_file_handle == INVALID_HANDLE)
       {
-         m_is_open = true;
+         PASRLogError("[Telemetry] Cannot open file: " + m_current_file
+                      + " err=" + IntegerToString(GetLastError()));
+         m_is_open = false;
       }
       else
-      {
-         Print("[Telemetry ERROR] Cannot open file: ", m_current_file);
-         m_is_open = false;
-      }
+         m_is_open = true;
    }
-   
+
    void CloseFile()
    {
-      if(m_is_open)
+      if(m_is_open && m_file_handle != INVALID_HANDLE)
       {
-         m_csv_file.Close();
-         m_is_open = false;
+         FileClose(m_file_handle);      // TEL-003 FIX
+         m_file_handle = INVALID_HANDLE;
+         m_is_open     = false;
       }
    }
-   
+
    void WriteHeader()
    {
       if(!m_is_open) return;
-      
-      m_csv_file.WriteString("Timestamp");
-      m_csv_file.WriteString(",MetricName");
-      m_csv_file.WriteString(",Value");
-      m_csv_file.WriteString(",Unit");
-      m_csv_file.WriteString(",StageID");
-      m_csv_file.WriteString(",Symbol");
-      m_csv_file.WriteLine();
+      // TEL-003 FIX: FileWrite with comma-separated CSV
+      FileWrite(m_file_handle, "Timestamp", "MetricName", "Value", "Unit", "StageID", "Symbol");
    }
-   
-   void WriteRecord(const STelemetryMetric &metric)
+
+   void WriteRecord(const STelemetryMetric &m)
    {
       if(!m_is_open) return;
-      
-      m_csv_file.WriteString(TimeToString(metric.timestamp, TIME_DATE|TIME_SECONDS));
-      m_csv_file.WriteString("," + metric.metric_name);
-      m_csv_file.WriteString("," + DoubleToString(metric.value, 6));
-      m_csv_file.WriteString("," + metric.unit);
-      m_csv_file.WriteString("," + IntegerToString(metric.stage_id));
-      m_csv_file.WriteString("," + metric.symbol);
-      m_csv_file.WriteLine();
+      // TEL-003 FIX: FileWrite (CSV mode) handles delimiter automatically
+      FileWrite(m_file_handle,
+                TimeToString(m.timestamp, TIME_DATE|TIME_SECONDS),
+                m.metric_name,
+                DoubleToString(m.value, 6),
+                m.unit,
+                IntegerToString((long)m.stage_id),
+                m.symbol);
    }
-   
-   //--- Event Handlers
-   void RecordPipelineLatency(const SEvent &event)
+
+   void RecordPipelineLatency(const PASREvent &event)
    {
-      double latency_us = event.data.double_value;
-      string stage_name = event.data.string_value;
-      
+      double latency_us = event.double_value;
+      string stage_name = event.tag;
       RecordMetric("Pipeline_Latency_" + stage_name, latency_us, "microseconds", event.stage_id);
-      
       m_pipeline_ticks++;
-      m_avg_latency = (m_avg_latency * (m_pipeline_ticks-1) + latency_us) / m_pipeline_ticks;
+      if(m_pipeline_ticks > 0)
+         m_avg_latency = (m_avg_latency * (m_pipeline_ticks-1) + latency_us) / m_pipeline_ticks;
    }
-   
-   void RecordExecutionMetrics(const SEvent &event)
+
+   void RecordExecutionMetrics(const PASREvent &event)
    {
-      double slippage = event.data.double_value;
-      string symbol = event.data.string_value;
-      
-      RecordMetric("Execution_Slippage", slippage, "points", 0, symbol);
-      
-      if(slippage > m_max_slippage)
-         m_max_slippage = slippage;
-      
+      double slippage = event.double_value;
+      string sym      = event.tag;
+      RecordMetric("Execution_Slippage", slippage, "points", 0, sym);
+      if(slippage > m_max_slippage) m_max_slippage = slippage;
       m_execution_lags++;
    }
-   
-   void RecordSignalMetrics(const SEvent &event)
+
+   void RecordSignalMetrics(const PASREvent &event)
    {
-      double signal_strength = event.data.double_value;
-      string symbol = event.data.string_value;
-      
-      RecordMetric("Signal_Strength", signal_strength, "normalized", 0, symbol);
+      double strength = event.double_value;
+      string sym      = event.tag;
+      RecordMetric("Signal_Strength", strength, "normalized", 0, sym);
    }
 };
+
+#endif // __INFRA_TELEMETRY_RECORDER_MQH__
 //+------------------------------------------------------------------+
