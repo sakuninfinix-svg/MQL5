@@ -1,10 +1,10 @@
 # PASR Architecture Migration Status
 
-> Last updated: 2026-05-23 (Sprint 6) | **ALL 6 SPRINTS COMPLETE**
+> Last updated: 2026-05-23 (Sprint 7) | **ALL 7 SPRINTS COMPLETE**
 
 ## Migration: Monolith → Pipeline Orchestration
 
-### Status: ✅ COMPLETE (12 bugs + 6 perf + 5 S5 + 6 S6 tasks resolved)
+### Status: ✅ COMPLETE (13 bugs + 6 perf + 5 S5 + 6 S6 + 2 S7 tasks resolved)
 
 ---
 
@@ -24,6 +24,7 @@
 | BUG-010 | 🟡 MEDIUM | `Orchestrator.mqh` | `DrainQueue()` 2x redundan per tick | ✅ v3.03 |
 | BUG-011 | 🟡 MEDIUM | `PipelineEngine.mqh` | `ticket=0` hardcode di Stage_Execution | ✅ v2.01 |
 | BUG-012 | 🟡 MEDIUM | `Globals.mqh` | `_MagicNumber` bukan built-in MQL5 | ✅ v2.14 |
+| BUG-013 | 🟠 HIGH | `ZoneManager.mqh` | `OnEvent()` override missing — EventBus dispatch silent fail | ✅ v2.02 |
 
 ---
 
@@ -63,6 +64,32 @@
 | S6-005 | `Infra/SnapshotManager.mqh` | Async write guard pattern | ✅ Documented |
 | S6-006 | `Signal/ZoneSignalSource.mqh` | Registered in Orchestrator | ✅ Documented |
 | S6-007 | `Scripts/PASR_QA_Run.mq5` | Master QA script runner | ✅ NEW |
+
+---
+
+## Sprint 7 — Manager Connectivity Audit
+
+| Item | File | Description | Status |
+|---|---|---|---|
+| S7-001 | `Analysis/ZoneManager.mqh` v2.02 | BUG-013: Add missing `OnEvent()` override | ✅ FIXED |
+| S7-002 | `Analysis/SRManager.mqh` v6.0 | Full pipeline audit — PASS | ✅ OK |
+| S7-003 | `Analysis/SRDetector.mqh` | Pivot scan logic audit — PASS | ✅ OK |
+| S7-004 | `Analysis/SRZoneStore.mqh` | Zone lifecycle audit — PASS | ✅ OK |
+| S7-005 | `Core/Orchestrator.mqh` v3.05 | Full bug audit — all BUGs fixed | ✅ OK |
+| S7-006 | `Core/PipelineEngine.mqh` v2.02 | All stages reviewed — PASS | ✅ OK |
+
+---
+
+## Sprint 8 — Roadmap (Next Steps)
+
+| Item | Target File | Task |
+|---|---|---|
+| S8-001 | `Analysis/PatternManager.mqh` | Audit OnEvent() + pattern logic completeness |
+| S8-002 | `Signal/SignalManager.mqh` | Verify confluence scoring with ZoneSignalSource |
+| S8-003 | `Trade/RiskManager.mqh` | Audit equity cache + max drawdown circuit |
+| S8-004 | `Trade/ExecutionManager.mqh` | Audit slippage + async order flow |
+| S8-005 | `Signal/AI/AIOrchestrator.mqh` | Audit ONNX inference path + online learning |
+| S8-006 | Full compile test | MetaEditor F7 compile — 0 errors, 0 warnings target |
 
 ---
 
@@ -108,12 +135,42 @@ AI:        if ai_score > 0.75 → override direction
 
 ---
 
+## Pipeline Stage Map (v2.02 — All Stages Active)
+
+```
+OnTick()  → Push EVENT_PRICE_UPDATE / EVENT_NEW_BAR → DrainQueue()
+
+OnTimer() → CPipelineEngine::ExecutePipeline(ctx)
+  Stage 1:  DataSync      → m_data->OnTick()
+  Stage 2:  AnalysisSR    → EventBus: EVENT_NEW_BAR → m_sr->OnNewBar()
+  Stage 3:  AnalysisZone  → EventBus: EVENT_NEW_BAR → m_zone->OnNewBar()  ← BUG-013 FIXED
+  Stage 4:  PatternRec    → EventBus: EVENT_NEW_BAR → m_pattern->OnNewBar()
+  Stage 5:  RegimeDet     → m_regime_det->Update() + DetectSession()
+  Stage 6:  SignalGen     → m_signal->Evaluate() → ctx.signal
+  Stage 7:  AIInfer       → m_ai_orch->Predict() → ctx.ai_score
+  Stage 8:  RiskCheck     → m_risk->Check() → ctx.risk_result
+  Stage 9:  AdaptParams   → m_adaptive->UpdateParameters()
+  Stage 10: Execution     → m_exec->Execute() → ctx.exec_result
+  Stage 11: PosMgmt       → position trailing + BE management
+  Stage 12: Recovery      → m_recovery->OnTick()
+  Stage 13: Dashboard     → m_dash->Update()
+  Stage 14: Journal       → m_telemetry->Log() + m_journal->Write()
+
+OnTradeTransaction() → m_recovery->OnTradeOpen/Close()
+                     → m_risk->OnTradeClosed()
+                     → m_session->RecordTrade(profit)
+                     → m_ai_orch->OnTradeResult() [online learning]
+```
+
+---
+
 ## How to Run QA
 
 ```
 Step 1: Compile
   MetaEditor → Open Experts/PASR/PASR_MODULAR.mq5 → F7
   MetaEditor → Open Experts/PASR/Scripts/PASR_QA_Run.mq5 → F7
+  Target: 0 errors, 0 warnings
 
 Step 2: Run QA Script
   MT5 → Navigator → Scripts → PASR_QA_Run → drag to any chart
@@ -130,17 +187,3 @@ Step 3: Check Experts tab for:
 
 Step 4: If any FAIL → paste Experts tab output to chat
 ```
-
----
-
-## Architecture Complete — Summary
-
-| Layer | Pattern | Status |
-|---|---|---|
-| EA Entry point | Thin delegate (PASR_MODULAR) | ✅ |
-| Orchestration | Event-driven pipeline | ✅ |
-| Signal confluence | 3-pillar weighted sum | ✅ |
-| Risk management | Per-tick cache + circuit breaker | ✅ |
-| AI inference | ONNX + ensemble + online learning | ✅ |
-| QA infrastructure | Mock + Harness + AssertHelpers | ✅ |
-| Monitoring | Health + Snapshot + Telemetry | ✅ |
