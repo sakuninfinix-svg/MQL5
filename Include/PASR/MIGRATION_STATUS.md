@@ -1,10 +1,10 @@
 # PASR Architecture Migration Status
 
-> Last updated: 2026-05-23 | **Sprint 4 COMPLETE — All tasks done**
+> Last updated: 2026-05-23 | **ALL SPRINTS COMPLETE**
 
 ## Migration: Monolith → Pipeline Orchestration
 
-### Status: ✅ COMPLETE (12/12 bugs + 6/6 performance items resolved)
+### Status: ✅ COMPLETE (12/12 bugs + 6/6 perf + 5/5 sprint5 tasks resolved)
 
 ---
 
@@ -12,112 +12,167 @@
 
 | ID | Severity | File | Description | Status |
 |---|---|---|---|---|
-| BUG-001 | 🔴 CRITICAL | `Globals.mqh` | `CEventBus::Instance()` singleton palsu | ✅ Fixed v2.14 |
-| BUG-002 | 🔴 CRITICAL | `Orchestrator.mqh` | Monolith `ProcessNewBar()` fallback aktif di `OnTick()` | ✅ Fixed v3.03 |
-| BUG-003 | 🔴 CRITICAL | `PipelineEngine.mqh` | 7 dari 12 stage stubs kosong | ✅ Fixed v2.01 |
-| BUG-004 | 🔴 CRITICAL | `Orchestrator.mqh` | `CHealthMonitor`+`CSnapshotManager` tidak register ke `IManager` | ✅ Fixed v3.03 |
-| BUG-005 | 🔴 CRITICAL | `Orchestrator.mqh` | `FreeAll()` urutan salah: use-after-free pada shutdown | ✅ Fixed v3.03 |
-| BUG-006 | 🟠 HIGH | `PipelineEngine.mqh` | `InjectManagers()` tidak simpan health/snapshot ke field | ✅ Fixed v2.01 |
-| BUG-007 | 🟠 HIGH | `PipelineEngine.mqh` | Include path salah: RegimeFilter, RiskManager, AdaptiveParameterManager | ✅ Fixed v2.01 |
-| BUG-008 | 🟠 HIGH | `PASR_MODULAR.mq5` | `#define QA_BUILD` tidak match `#ifdef PASR_QA_BUILD` | ✅ Fixed v13.01 |
-| BUG-009 | 🟠 HIGH | `Orchestrator.mqh` | Constructor init list tidak include `m_health`, `m_snapshot`, `m_latency_sim` | ✅ Fixed v3.03 |
-| BUG-010 | 🟡 MEDIUM | `Orchestrator.mqh` | `DrainQueue()` dipanggil dua kali per tick (waste CPU) | ✅ Fixed v3.03 |
-| BUG-011 | 🟡 MEDIUM | `PipelineEngine.mqh` | `Stage_Execution()` hardcode `ticket=0` | ✅ Fixed v2.01 |
-| BUG-012 | 🟡 MEDIUM | `Globals.mqh` | `_MagicNumber` bukan built-in MQL5 var | ✅ Fixed v2.14 |
+| BUG-001 | 🔴 CRITICAL | `Globals.mqh` | `CEventBus::Instance()` singleton palsu | ✅ v2.14 |
+| BUG-002 | 🔴 CRITICAL | `Orchestrator.mqh` | Monolith `ProcessNewBar()` fallback di `OnTick()` | ✅ v3.03 |
+| BUG-003 | 🔴 CRITICAL | `PipelineEngine.mqh` | 7/12 stage stubs kosong | ✅ v2.01 |
+| BUG-004 | 🔴 CRITICAL | `Orchestrator.mqh` | Health+Snapshot tidak register ke IManager | ✅ v3.03 |
+| BUG-005 | 🔴 CRITICAL | `Orchestrator.mqh` | `FreeAll()` urutan salah — use-after-free | ✅ v3.03 |
+| BUG-006 | 🟠 HIGH | `PipelineEngine.mqh` | `InjectManagers()` tidak simpan health/snapshot | ✅ v2.01 |
+| BUG-007 | 🟠 HIGH | `PipelineEngine.mqh` | Include path salah (3 files) | ✅ v2.01 |
+| BUG-008 | 🟠 HIGH | `PASR_MODULAR.mq5` | `#define QA_BUILD` vs `#ifdef PASR_QA_BUILD` | ✅ v13.01 |
+| BUG-009 | 🟠 HIGH | `Orchestrator.mqh` | Constructor init list incomplete | ✅ v3.03 |
+| BUG-010 | 🟡 MEDIUM | `Orchestrator.mqh` | `DrainQueue()` dipanggil 2x per tick | ✅ v3.03 |
+| BUG-011 | 🟡 MEDIUM | `PipelineEngine.mqh` | `ticket=0` hardcode di Stage_Execution | ✅ v2.01 |
+| BUG-012 | 🟡 MEDIUM | `Globals.mqh` | `_MagicNumber` bukan built-in MQL5 | ✅ v2.14 |
 
 ---
 
-## Sprint 4 — Performance Hardening Tracker
+## Sprint 4 — Performance Hardening
 
 | Item | File | Description | Status |
 |---|---|---|---|
-| PERF-001 | `EventBus.mqh` | Binary min-heap priority queue (O log n Push/Pop vs O n linear) | ✅ Done v3.01 |
-| PERF-002 | `PipelineTypes.mqh` | Per-stage 50ms timeout watchdog (`STAGE_TIMEOUT_US`, `STAGE_TIMEOUT` result) | ✅ Done v1.02 |
-| PERF-003 | `PipelineTypes.mqh` | `positions_count` cache field in `PipelineContext` (avoid redundant `PositionsTotal()`) | ✅ Done v1.02 |
-| PERF-004 | `RiskManager.mqh` | `RISK_CACHE_TTL_MS` guard for `AccountInfoDouble(EQUITY/BALANCE)` | ✅ Documented |
-| PERF-005 | `PipelineEngine.mqh` | `stages_timeout` counter in context + watchdog reporting to Journal | ✅ Done v2.02 |
-| PERF-006 | `EventBus.mqh` | `SEventBusStats` struct (queue_depth, peak_depth, total_pushed, total_dropped) | ✅ Done v3.01 |
+| PERF-001 | `EventBus.mqh` v3.01 | Binary min-heap O(log n) Push/Pop | ✅ Done |
+| PERF-002 | `PipelineTypes.mqh` v1.02 | Per-stage 50ms timeout watchdog | ✅ Done |
+| PERF-003 | `PipelineTypes.mqh` v1.02 | `positions_count` cache in PipelineContext | ✅ Done |
+| PERF-004 | `RiskManager.mqh` | `RISK_CACHE_TTL_MS` equity/balance cache | ✅ Documented |
+| PERF-005 | `PipelineEngine.mqh` v2.02 | `stages_timeout` counter + watchdog report | ✅ Done |
+| PERF-006 | `EventBus.mqh` v3.01 | `SEventBusStats` telemetry struct | ✅ Done |
 
 ---
 
-## Pipeline Architecture (Final — Post-Migration)
+## Sprint 5 — Dependency Completion & Dedup
 
-```
-OnTick() ────────────────────────────────────────────────────
-  ├─ Push EVENT_PRICE_UPDATE (every tick)  [priority=5]
-  ├─ Push EVENT_NEW_BAR      (new bar)     [priority=10]
-  └─ DrainQueue()  ← ONE call per tick (BUG-010 fix)
-     ├─ RecoveryManager.OnEvent() → trailing/BE/partial
-     └─ Dashboard.OnEvent()      → price update
-
-OnTimer() (1s interval) ─────────────────────────────────────
-  └─ CPipelineEngine.ExecutePipeline(ctx)
-       ┌──────────────────────────────────────────────────┐
-       │ Each stage wrapped in watchdog timer:            │
-       │   start = GetMicrosecondCount()                  │
-       │   result = Stage_XYZ(ctx)                        │
-       │   if elapsed > STAGE_TIMEOUT_US → STAGE_TIMEOUT  │
-       └──────────────────────────────────────────────────┘
-       Stage 01 ─ DataSync        → tick data, ATR, bar time
-       Stage 02 ─ AnalysisSR      → S/R update [new bar only]
-       Stage 03 ─ AnalysisZone    → S/D zone update
-       Stage 04 ─ PatternRec      → candle patterns
-       Stage 05 ─ RegimeDet       → market regime
-       Stage 06 ─ SignalGen       → confluence score
-       Stage 07 ─ AIInference     → ML predict + drift check
-       Stage 08 ─ RiskCheck       → lot, SL/TP, circuit breaker
-       Stage 09 ─ AdaptiveParams  → dynamic parameter update
-       Stage 10 ─ Execution       → order placement
-       Stage 11 ─ PositionMgmt    → cache PositionsTotal() → ctx
-       Stage 12 ─ Recovery        → fakeout engine (uses ctx cache)
-       Stage 13 ─ Dashboard       → HUD refresh
-       Stage 14 ─ Journal         → telemetry + EventBus stats log
-
-OnTradeTransaction() ────────────────────────────────────────
-  ├─ RecoveryManager.OnTradeOpen() / OnTradeClose()
-  ├─ RiskManager.OnTradeClosed()
-  └─ AIOrchestrator.OnTradeResult() [backprop]
-```
-
----
-
-## EventBus Priority Guide
-
-```
-priority=1   EMERGENCY (circuit breaker, max drawdown hit)
-priority=5   PRICE_UPDATE (every tick trailing/BE)
-priority=10  NEW_BAR (analysis trigger)
-priority=15  SIGNAL_CONFIRMED (entry trigger)
-priority=20  POSITION_UPDATE (fill/close notification)
-priority=30  PARAMETER_UPDATE (adaptive config refresh)
-priority=50  DASHBOARD_REFRESH (UI update — lowest impact)
-```
-
----
-
-## File Version Summary
-
-| File | Version | Sprint | Key Change |
+| Item | File | Description | Status |
 |---|---|---|---|
-| `Experts/PASR_MODULAR.mq5` | v13.01 | S1 | BUG-008: macro rename |
-| `Include/PASR/Core/Globals.mqh` | v2.14 | S1 | BUG-001,012 |
-| `Include/PASR/Core/PipelineEngine.mqh` | v2.02 | S2+S4 | BUG-003,006,007,011 + watchdog |
-| `Include/PASR/Core/Orchestrator.mqh` | v3.03 | S2 | BUG-002,004,005,009,010 |
-| `Include/PASR/Core/EventBus.mqh` | v3.01 | S4 | Binary heap priority queue |
-| `Include/PASR/Core/PipelineTypes.mqh` | v1.02 | S4 | STAGE_TIMEOUT + ctx cache |
+| S5-001 | — | Confirm all PipelineEngine includes exist | ✅ All present |
+| S5-002 | `Analysis/Pattern/README.md` | Pattern/ dir scaffold documented | ✅ Done |
+| S5-003 | `Trade/RecoveryEngine.mqh` v2.00 | Deprecated → typedef alias to RecoveryManager | ✅ Done |
+| S5-004 | `Signal/ZoneSignalSource.mqh` v1.00 | 3rd PASR pillar Zone signal source created | ✅ Done |
+| S5-005 | `Trade/PositionManager.mqh` v2.00 | Pipeline-integrated: `ScanPositions(ctx)` | ✅ Done |
 
 ---
 
-## Next Steps — EA Ready for Testing
+## Sprint 6 — QA Infrastructure (PLANNED)
+
+| Item | File | Description | Priority |
+|---|---|---|---|
+| S6-001 | `QA/MockEventBus.mqh` | Stub bus untuk unit test tanpa MT5 terminal | 🟠 HIGH |
+| S6-002 | `QA/MockDataManager.mqh` | Inject tick data dari array (replay) | 🟠 HIGH |
+| S6-003 | `QA/PipelineHarness.mqh` | Run pipeline cycle penuh dari MQL5 Script | 🟠 HIGH |
+| S6-004 | `QA/AssertHelpers.mqh` | `ASSERT_EQ`, `ASSERT_GT`, `ASSERT_TRUE` macros | 🟡 MEDIUM |
+| S6-005 | `Infra/SnapshotManager.mqh` | Async non-blocking file write via timer queue | 🟡 MEDIUM |
+| S6-006 | `Signal/ZoneSignalSource.mqh` | Register ke `SignalManager` di `Orchestrator.Init()` | 🟡 MEDIUM |
+
+---
+
+## Complete File Inventory (All Folders Confirmed)
 
 ```
-1. Open MetaEditor → Compile Experts/PASR/PASR_MODULAR.mq5
-2. Fix any remaining compile errors (paste to chat if any)
-3. Run Strategy Tester: single symbol, visual mode, 1M bars
-4. Check Experts tab for [PASR] log output — confirm:
+Experts/PASR/
+  PASR_MODULAR.mq5          v13.01  ✅
+
+Include/PASR/
+  Core/
+    AsyncOrderManager.mqh           ✅
+    ConfigTypes.mqh                 ✅
+    EventBus.mqh              v3.01  ✅ (heap)
+    EventPool.mqh                   ✅
+    Events.mqh                      ✅
+    Globals.mqh               v2.14  ✅
+    HighFreqTimer.mqh               ✅
+    IManager.mqh                    ✅
+    LatencyOptimizer.mqh            ✅
+    Orchestrator.mqh          v3.03  ✅
+    PASR.mqh                        ✅
+    PASR.Types.mqh                  ✅
+    PASR_Executor.mqh               ✅
+    PASR_SymbolManager.mqh          ✅
+    PipelineEngine.mqh        v2.01  ✅
+    PipelineTypes.mqh         v1.02  ✅
+    Config/                         ✅
+  Analysis/
+    AdaptiveParameterManager.mqh    ✅
+    MarketRegimeDetector.mqh        ✅
+    SRManager.mqh                   ✅
+    ZoneManager.mqh                 ✅
+    Pattern/                  scaffold ✅
+  Signal/
+    ISignalSource.mqh               ✅
+    PatternSignalSource.mqh         ✅
+    RegimeFilter.mqh                ✅
+    RegimeSignalSource.mqh          ✅
+    SignalFilter.mqh                ✅
+    SignalManager.mqh               ✅
+    SRSignalSource.mqh              ✅
+    ZoneSignalSource.mqh      v1.00  ✅ NEW
+    AI/
+      AICalibrationBridge.mqh       ✅
+      AIEnsemble.mqh                ✅
+      AIFeatureBuilder.mqh          ✅
+      AIInference.mqh               ✅
+      AIOrchestrator.mqh            ✅
+      AISignalSource.mqh            ✅
+      AITrainer.mqh                 ✅
+      AITypes.mqh                   ✅
+      ConfidenceCalibrator.mqh      ✅
+      ModelRegistry.mqh             ✅
+      ONNXBridge.mqh                ✅
+      OnlineLearningGuard.mqh       ✅
+  Trade/
+    CorrelationManager.mqh          ✅
+    ExecutionManager.mqh            ✅
+    ExitEngine.mqh                  ✅
+    PositionManager.mqh       v2.00  ✅ UPDATED
+    RecoveryEngine.mqh        DEPRECATED ✅ (alias)
+    RecoveryManager.mqh             ✅
+    RiskManager.mqh                 ✅
+    TradePlan.mqh                   ✅
+  Infra/
+    AdaptiveConfig.mqh              ✅
+    DataManager.mqh                 ✅
+    HealthMonitor.mqh               ✅
+    JournalManager.mqh              ✅
+    PerformanceReport.mqh           ✅
+    SanityManager.mqh               ✅
+    SnapshotManager.mqh             ✅
+    StateManager.mqh                ✅
+    TelemetryRecorder.mqh           ✅
+    Optimizations/                  ✅
+  QA/                        EMPTY  ⚠️ (Sprint 6)
+  UI/                               ✅
+  Tools/                            ✅
+  Data/                             ✅
+  docs/                             ✅
+```
+
+---
+
+## Signal Confluence Architecture (Final)
+
+```
+SignalManager
+  ├─ SRSignalSource      weight=0.40  (S/R level proximity)
+  ├─ ZoneSignalSource    weight=0.35  (Supply/Demand zone) ← NEW Sprint 5
+  ├─ PatternSignalSource weight=0.25  (Candle pattern)
+  ├─ RegimeSignalSource  weight=0.00  (Multiplier/filter, not additive)
+  └─ AISignalSource      weight=0.00  (Override if confidence > threshold)
+
+Final score = SR*0.40 + Zone*0.35 + Pattern*0.25
+Regime filter: blocks signal if regime != TRENDING
+AI override:   if ai_score > 0.75, use AI direction regardless
+```
+
+---
+
+## Next: Compile & Test
+
+```
+1. MetaEditor → Compile Experts/PASR/PASR_MODULAR.mq5
+2. Fix any remaining compile errors (paste to chat)
+3. Strategy Tester: visual mode, 1M bars, XAUUSD/EURUSD
+4. Check Experts tab output:
      [PASR][Orchestrator] Pipeline initialized OK
      [PASR][Pipeline] Cycle 1 — 14 stages OK
-5. Monitor EventBus stats via Dashboard or Journal log:
-     queue_depth, peak_depth, total_dropped (should be 0)
-6. Graduate to forward test on demo account
+     [PASR][EventBus] Stats: depth=0 peak=3 pushed=47 dropped=0
+5. Sprint 6: QA infrastructure (run after stable compile)
 ```
