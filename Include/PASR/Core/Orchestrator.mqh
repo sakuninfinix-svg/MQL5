@@ -590,15 +590,14 @@ public:
 
          if(m_ai_orch != NULL)
            {
-            float label = (profit >= 0.0) ? 1.0f : 0.0f;
-            float features[AI_FEATURE_DIM];
-            if(m_ai_orch->BuildFeaturesPublic(features))
-               m_ai_orch->OnTradeResult(features, label);
-            else
-              {
-               ArrayInitialize(features, 0.0f);
-               m_ai_orch->OnTradeResult(features, label, 0.1f);
-              }
+            // AI-001 FIX: Prevent feature leakage - use event-based learning only
+            // Do NOT build features at trade close time (avoids look-ahead bias)
+            // Online learning uses cached features from entry time via event system
+            PASREvent ai_ev;
+            ai_ev.id = EVENT_ID_TRADE_CLOSED;
+            ai_ev.trade_closed.profit = profit;
+            ai_ev.trade_closed.ticket = pos;
+            m_bus.Push(ai_ev);
            }
 
          PASREvent ev;
