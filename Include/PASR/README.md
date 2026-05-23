@@ -93,19 +93,54 @@ Include/PASR/
 
 ---
 
-## Bug Tracker
+## Bug Tracker — Audit Sprint 13 (2026-05-24)
 
-### 🔴 OPEN
+### 🔴 CRITICAL — Blocking Compilation / Runtime
 
-| ID | Severity | File | Description | Target |
-|----|----------|------|-------------|--------|
-| **TR-006** | 🔴 CRITICAL | `Trade/CorrelationManager.mqh` | Full monolith v1.0 — belum dimigrasi ke IManager pipeline. `Initialize()` bukan override `Init(data,bus)`, tidak ada `DeclareEvents()`/`AddEvent()`, include path salah (`#include <PASR/Core/IManager.h>` — ekstensi `.h` tidak ada), include `<PASR/Tools/TickCache.mqh>` tidak ada di repo. **Tidak dapat compile.** | S13 |
-| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | S13 |
-| **A5** | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | S13 |
-| **AI-?** | 🔴 TBD | `AI/*.mqh` | AI subfolder: ONNX wiring belum diaudit | S13 |
-| **P7-?** | 🔴 TBD | `Phase7/*.mqh` | Phase7 subfolder belum diaudit | S13 |
-| **DS-?** | 🔴 TBD | `Dashboard/*.mqh` | Dashboard subfolder belum diaudit | S13 |
-| **BUG-008** | 🟠 HIGH | `Experts/PASR/PASR_MODULAR.mq5` | File EA tidak ditemukan di repo — perlu konfirmasi path dan commit | S13 |
+| ID | Severity | File | Description | Fix Recommendation |
+|----|----------|------|-------------|-------------------|
+| **TR-006** | 🔴 CRITICAL | `Trade/CorrelationManager.mqh` | **TIDAK COMPATIBLE DENGAN IMANAGER PIPELINE**: (1) Include path salah `#include <PASR/Core/IManager.h>` seharusnya `.mqh`, (2) Include `<PASR/Tools/TickCache.mqh>` tidak ada di repo, (3) Method `Initialize()` tanpa parameter bukan override dari `IManager::Init(IDataManager*,CEventBus*)`, (4) Tidak ada `DeclareEvents()` override, (5) Menggunakan interface lama `OnTick(symbol)`, `OnTimer()`, `OnTrade()` yang tidak ada di IManager. **File tidak dapat compile.** | Refactor: Ganti signature jadi `Init(data,bus) override`, tambahkan `DeclareEvents()`, hapus method lama, fix include paths |
+| **AI-001** | 🔴 CRITICAL | `AI/AIOrchestrator.mqh` + 6 files | **SIGNATURE MISMATCH — m_data SELALU NULL**: Semua file AI (`AIOrchestrator`, `AIFeatureBuilder`, `AIInference`, `AIEnsemble`, `AITrainer`, `ConfidenceCalibrator`, `OnlineLearningGuard`) menggunakan `Initialize(CEventBus *bus)` yang BUKAN override dari `IManager::Init(IDataManager*,CEventBus*)`. Method ini tidak akan pernah dipanggil framework. `m_data` selalu NULL. | Ganti semua `Initialize(CEventBus*)` → `Init(IDataManager*,CEventBus*) override` dengan call `IManager::Init(data,bus)` di awal |
+| **AI-002** | 🔴 CRITICAL | `AI/*.mqh` (7 files) | **DECLAREEVENTS() KOSONG — TIDAK MENERIMA EVENT**: Semua class AI memiliki `DeclareEvents() override {}` kosong. Tidak mendaftar event apapun ke EventBus, sehingga tidak akan menerima event secara otomatis via pipeline. | Implementasi `DeclareEvents()` dengan `AddEvent(EVENT_ID_NEW_BAR)` dan/atau `AddEvent(EVENT_ID_PRICE_UPDATE)` sesuai kebutuhan |
+| **EV-001** | 🔴 CRITICAL | `Core/Events.mqh`, `AI/AIOrchestrator.mqh`, `Infra/SessionState.mqh` | **EVENT_ID_TRADE_CLOSED TIDAK TERDEFINISI**: `AIOrchestrator.mqh` line 101 dan `SessionState.mqh` lines 126,136 referensi `EVENT_ID_TRADE_CLOSED` yang tidak ada dalam ENUM_EVENT_ID. Event yang ada adalah `EVENT_ID_POSITION_UPDATE` (id=17). **Runtime error: undefined enum value.** | Tambahkan `EVENT_ID_TRADE_CLOSED = 19` ke ENUM_EVENT_ID di Events.mqh ATAU ganti semua referensi jadi `EVENT_ID_POSITION_UPDATE` |
+
+### 🟠 HIGH SEVERITY — Architecture Compliance
+
+| ID | Severity | File | Description | Fix Recommendation |
+|----|----------|------|-------------|-------------------|
+| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | **54KB MONOLITH**: File 213 baris mengandung orchestrator logic + business logic. Perlu decomposition ke SRDetector + SRZoneStore + SRScorer sesuai rencana Sprint 13. | Pecah jadi 3 class terpisah dengan single responsibility |
+| **INFRA-001** | 🟠 HIGH | `Infra/HealthMonitor.mqh`, `SnapshotManager.mqh`, `SessionState.mqh` | **IMANAGER COMPLIANCE TIDAK KONSISTEN**: `HealthMonitor` dan `SessionState` extend IManager tapi `SnapshotManager` adalah standalone class tanpa IManager integration. `HealthMonitor` dan `SessionState` pakai `Initialize(CEventBus*)` bukan `Init(data,bus)`. | (1) SnapshotManager wrap dengan IManager adapter atau refactor, (2) Fix Initialize() signature di HealthMonitor & SessionState |
+| **UI-001** | 🟠 HIGH | `UI/DashboardManager.mqh` | **TIDAK EXTEND IMANAGER**: `CDashboardManager` adalah standalone class tanpa IManager integration. Tidak terdaftar di EventBus, tidak menerima events secara otomatis. Perlu wrapper atau refactor untuk pipeline integration. | Buat wrapper `CDashboardManagerAdapter : public IManager` atau refactor full ke IManager pattern |
+| **CLEANUP-001** | 🟠 HIGH | `/AI/` dan `/Signal/AI/` | **DUPLIKASI FOLDER AI**: Terdapat 2 folder AI dengan file yang sama (`AIOrchestrator.mqh`, dll) tetapi implementasi berbeda. Folder `/AI/` versi lebih baru (v2.01, 26-dim), `/Signal/AI/` versi lebih lama. Membingungkan dan berisiko maintenance. | Konsolidasi: Hapus duplikat, pilih satu sebagai canonical (rekomendasi: `/Signal/AI/` karena terintegrasi SignalManager), update semua include paths |
+
+### 🟡 MEDIUM SEVERITY — Documentation & Minor Issues
+
+| ID | Severity | File | Description | Fix Recommendation |
+|----|----------|------|-------------|-------------------|
+| **DOC-001** | 🟡 MEDIUM | `README.md` | **DOKUMENTASI FOLDER MAP TIDAK AKURAT**: Menyebutkan folder `Phase7/` dan `Dashboard/` yang sebenarnya berada di `Infra/` dan `UI/`. | Update folder map di README: `Phase7/` → `Infra/`, `Dashboard/` → `UI/` |
+| **PERF-001** | 🟡 LOW | `Infra/DataManager.mqh` | **THROTTLE TERLALU AGRESIF**: `TICK_EVENT_THROTTLE_MS=500ms` mungkin terlalu lambat untuk high-frequency tick processing pada fast markets. | Evaluasi throttle value, pertimbangkan adaptive throttling berdasarkan market condition |
+
+---
+
+### ✅ RESOLVED — Sprint 1–12 (Reference)
+
+Bug-bug berikut sudah ditandai resolved di README dan berdasarkan audit kode memang sudah diperbaiki:
+- **TR-001 s/d TR-005** (Trade layer audit Sprint 12): ExitEngine, PositionManager, RiskManager, ExecutionManager, RecoveryManager
+- **BUG-001 s/d BUG-012** (Core fixes Sprint 1–2): EventBus singleton, Pipeline stage stubs, Init order, dll
+- **O1, O4, O7, O8** (Orchestrator residuals Sprint 9): Enum type, SessionState init, BarChanged race, JournalManager wiring
+- **N01, N03, N04, N06, N07** (Pipeline hardening Sprint 11): Event dispatch, double-shutdown, exit_reason overwrite, NULL guards
+- **BUG-S10-001 s/d BUG-S10-004** (Signal layer Sprint 11): SignalFilterPipeline, SignalManager wiring fixes
+
+---
+
+**Total Bugs Found: 11 bugs baru** (4 Critical, 4 High, 3 Medium/Low)
+
+**Rekomendasi Prioritas:**
+1. **SEGERA (Blocking)**: Fix TR-006 (CorrelationManager) — tidak dapat compile
+2. **SEGERA (Blocking)**: Fix AI-001 & AI-002 — AI subsystem tidak berfungsi sama sekali (m_data NULL, no events)
+3. **SEGERA (Runtime Crash)**: Fix EV-001 — undefined enum `EVENT_ID_TRADE_CLOSED`
+4. **HIGH**: Fix INFRA-001 — HealthMonitor & SessionState signature mismatch
+5. **MEDIUM**: Cleanup duplikasi folder AI (CLEANUP-001) dan update dokumentasi (DOC-001)
 
 ---
 
