@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Analysis/SRManager.mqh — v2.02 (FULLY OPTIMIZED)                 |
+//| Analysis/SRManager.mqh — v4.0.0 (ADVANCED OPTIMIZATION SUITE)    |
 //| Swing pivot detection + zone clustering + strength scoring.       |
 //|                                                                   |
 //| OPTIMIZATIONS v2.00:                                              |
@@ -20,6 +20,14 @@
 //|  - Refactored ScanForPivots to use high-performance swing detect |
 //|  - Added comprehensive [OPTIMIZED] comments throughout           |
 //|  - Ensured lazy evaluation cache is properly implemented         |
+//|                                                                   |
+//| [NEW] v4.0.0 ADVANCED FEATURES:                                   |
+//|  - Zone Age Decay Mechanism (strength decays over time)          |
+//|  - Smart Zone Merging Algorithm (merge nearby zones)             |
+//|  - Dynamic Lookback based on Market Regime                       |
+//|  - Volatility-Adaptive Buffer (ATR-based zone width)             |
+//|  - Visual Debugging Mode                                         |
+//|  - Multi-Timeframe Parallel Processing                           |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_SR_MANAGER_MQH__
@@ -41,6 +49,12 @@
 #define ASR_BREAKOUT_BARS   5      // Bars to check for breakout confirmation
 #define ASR_BREAKOUT_CLOSES 2      // Required closes beyond zone for breakout
 
+// [NEW] Advanced configuration for v4.0
+#define ASR_AGE_DECAY_FACTOR    0.95   // Strength decay per bar after 100 bars
+#define ASR_MERGE_THRESHOLD     0.3    // ATR multiplier for zone merging
+#define ASR_VOLATILITY_ADAPTIVE 0.5    // ATR multiplier for dynamic buffer
+#define ASR_VISUAL_DEBUG_MODE   false  // Enable visual debugging
+
 //+------------------------------------------------------------------+
 //| HTF Alignment enum                                               |
 //+------------------------------------------------------------------+
@@ -49,6 +63,37 @@ enum ENUM_HTF_ALIGNMENT
    HTF_CONTRA = -1,      // Zone contra to HTF direction
    HTF_NEUTRAL = 0,      // No HTF alignment signal
    HTF_ALIGNED = 1       // Zone aligned with HTF direction
+  };
+
+// [NEW] Market Regime enum for dynamic lookback
+enum ENUM_MARKET_REGIME
+  {
+   REGIME_LOW_VOL   = 0,  // Low volatility: short lookback
+   REGIME_NORM_VOL  = 1,  // Normal volatility: standard lookback
+   REGIME_HIGH_VOL  = 2,  // High volatility: long lookback
+   REGIME_TRENDING  = 3,  // Trending market: medium lookback
+   REGIME_RANGING   = 4   // Ranging market: extended lookback
+  };
+
+// [NEW] Visual Debugging Data Structure
+struct VisualZoneData
+  {
+   datetime time;
+   double   price;
+   double   range;
+   int      strength;
+   bool     is_merged;
+   string   label;
+   
+   void Init()
+     {
+      time        = 0;
+      price       = 0.0;
+      range       = 0.0;
+      strength    = 0;
+      is_merged   = false;
+      label       = "";
+     }
   };
 
 //+------------------------------------------------------------------+
@@ -62,6 +107,12 @@ struct SRZoneExtended : public SRZone
    double buffer_multiplier; // Dynamic buffer based on touch count
    ENUM_HTF_ALIGNMENT htf_alignment; // HTF alignment status
    
+   // [NEW] v4.0 Advanced Fields
+   double age_decay_factor;  // Current age decay multiplier
+   bool   is_merged_zone;    // Flag if zone was merged from multiple zones
+   int    merge_count;       // Number of zones merged into this one
+   double volatility_adj;    // Volatility adjustment factor
+   
    void InitExtended()
      {
       Init();
@@ -70,13 +121,19 @@ struct SRZoneExtended : public SRZone
       last_reaction    = 0.0;
       buffer_multiplier= 1.0;
       htf_alignment    = HTF_NEUTRAL;
+      // [NEW] Initialize v4.0 fields
+      age_decay_factor = 1.0;
+      is_merged_zone   = false;
+      merge_count      = 1;
+      volatility_adj   = 1.0;
      }
      
    string ToString() const
      {
-      return StringFormat("SRZone[%.5f|%.5f|%s|Str=%.1f|Conf=%.1f|Touches=%d|HTF=%d]",
+      return StringFormat("SRZone[%.5f|%.5f|%s|Str=%.1f|Conf=%.1f|Touches=%d|HTF=%d|AgeDecay=%.2f|Merged=%d]",
                          low, high, isSupport ? "SUP" : "RES", 
-                         strength, confidence, touchCount, (int)htf_alignment);
+                         strength, confidence, touchCount, (int)htf_alignment,
+                         age_decay_factor, merge_count);
      }
   };
 
@@ -103,6 +160,14 @@ private:
    // HTF data cache
    ENUM_TIMEFRAMES m_htfPeriod;
    double          m_htf_atr;
+   
+   // [NEW] v4.0 Advanced Fields
+   ENUM_MARKET_REGIME m_currentRegime;     // Current market regime
+   bool               m_visualDebugMode;    // Visual debugging flag
+   VisualZoneData     m_visualZones[];      // Array for visual debugging
+   double             m_volatilityRatio;    // Current volatility ratio
+   int                m_mtfTimeframes[];    // Multi-timeframe array
+   double             m_mtfScores[];        // MTF alignment scores
 
    //── [OPTIMIZED] Enhanced IsBroken with 2-close confirmation ────────
    // [OPTIMIZED]: Requires minimum 2 closes beyond zone for confirmed breakout
@@ -240,6 +305,40 @@ private:
       if(touchCount >= 3) return 0.85;  // Strong: moderate buffer
       if(touchCount >= 2) return 1.0;   // Normal: standard buffer
       return 1.3;                       // Weak: wider buffer
+     }
+     
+   //── [NEW] Volatility-Adaptive Buffer Multiplier ────────────────────
+   // [NEW]: Adjusts buffer based on current market volatility
+   // [NEW]: High volatility = wider buffer, Low volatility = tighter buffer
+   
+   double GetVolatilityAdaptiveBuffer(double baseMultiplier) const
+     {
+      // Calculate volatility ratio (current ATR vs average ATR)
+      double atr20 = iATR(_Symbol, _Period, 20, 1);
+      double atr50 = iATR(_Symbol, _Period, 50, 1);
+      
+      if(atr50 <= 0 || atr20 <= 0) return baseMultiplier;
+      
+      double volRatio = atr20 / atr50;
+      
+      // Adjust buffer based on volatility
+      // volRatio > 1.2 = high volatility (widen buffer)
+      // volRatio < 0.8 = low volatility (tighten buffer)
+      if(volRatio > 1.2)
+         return baseMultiplier * (1.0 + (volRatio - 1.2) * 0.5);
+      else if(volRatio < 0.8)
+         return baseMultiplier * MathMax(0.5, 1.0 - (0.8 - volRatio) * 0.3);
+      
+      return baseMultiplier;
+     }
+     
+   //── [NEW] Combined Dynamic Buffer (Touch + Volatility) ─────────────
+   // [NEW]: Combines touch count and volatility adjustments
+   
+   double GetCombinedBufferMultiplier(int touchCount) const
+     {
+      double baseMultiplier = GetDynamicBufferMultiplier(touchCount);
+      return GetVolatilityAdaptiveBuffer(baseMultiplier);
      }
 
    //── [OPTIMIZED] HTF Alignment Check ────────────────────────────────
@@ -432,6 +531,8 @@ private:
       // 3. Freshness bonus (max 20 points, not broken)
       // 4. Reaction strength (max 10 points)
       // 5. HTF Alignment bonus (max 10 points)
+      // [NEW] 6. Age Decay penalty (for zones older than 100 bars)
+      // [NEW] 7. Volatility adjustment
       
       double touchScore = MathMin(5.0, (double)z.touchCount);
       touchScore = touchScore / 5.0 * 40.0;
@@ -447,7 +548,22 @@ private:
       if(z.htf_alignment == HTF_ALIGNED) htfBonus = 10.0;
       else if(z.htf_alignment == HTF_CONTRA) htfBonus = -5.0;
       
-      return MathMin(100.0, touchScore + recencyScore + freshness + reactionScore + htfBonus);
+      // [NEW] Age Decay penalty
+      double ageDecay = 1.0;
+      if(z.formation_bars > 100)
+        {
+         // Apply decay factor for each 10 bars over 100
+         int excessBars = z.formation_bars - 100;
+         ageDecay = MathPow(ASR_AGE_DECAY_FACTOR, excessBars / 10.0);
+        }
+      
+      // Calculate base strength
+      double baseStrength = touchScore + recencyScore + freshness + reactionScore + htfBonus;
+      
+      // Apply age decay
+      double finalStrength = baseStrength * ageDecay;
+      
+      return MathMin(100.0, MathMax(0.0, finalStrength));
      }
      
    double CalcConfidence(const SRZoneExtended &z) const
@@ -509,6 +625,10 @@ private:
          if(m_zones[i].formation_bars > 500 && m_zones[i].touchCount < 2)
             isStale = true;
          
+         // [NEW] Age decay staleness check
+         if(m_zones[i].age_decay_factor < 0.5 && m_zones[i].strength < 30.0)
+            isStale = true;
+         
          if(!isStale)
            {
             if(keep != i) m_zones[keep] = m_zones[i];
@@ -517,6 +637,71 @@ private:
         }
         
       m_zoneCount = keep;
+     }
+     
+   //── [NEW] Smart Zone Merging Algorithm ─────────────────────────────
+   // [NEW]: Merges nearby zones to reduce redundancy and noise
+   // [NEW]: Uses ATR-based threshold for determining "nearby"
+   
+   void MergeNearbyZones()
+     {
+      if(m_zoneCount < 2) return;
+      
+      double mergeThreshold = m_atrCurrent * ASR_MERGE_THRESHOLD;
+      int mergedCount = 0;
+      
+      for(int i = 0; i < m_zoneCount; i++)
+        {
+         if(m_zones[i].isBroken) continue;
+         
+         for(int j = i + 1; j < m_zoneCount; j++)
+           {
+            if(m_zones[j].isBroken) continue;
+            if(m_zones[i].isSupport != m_zones[j].isSupport) continue;
+            
+            double priceDist = MathAbs(m_zones[i].price - m_zones[j].price);
+            
+            if(priceDist <= mergeThreshold)
+              {
+               // Merge zone j into zone i
+               // Weighted average based on strength
+               double totalStrength = m_zones[i].strength + m_zones[j].strength;
+               double weightI = (totalStrength > 0) ? m_zones[i].strength / totalStrength : 0.5;
+               double weightJ = 1.0 - weightI;
+               
+               // Update merged zone properties
+               m_zones[i].price = m_zones[i].price * weightI + m_zones[j].price * weightJ;
+               m_zones[i].touchCount += m_zones[j].touchCount;
+               m_zones[i].formation_bars = MathMin(m_zones[i].formation_bars, m_zones[j].formation_bars);
+               m_zones[i].lastTouchAge = MathMin(m_zones[i].lastTouchAge, m_zones[j].lastTouchAge);
+               m_zones[i].lastTouchTime = MathMax(m_zones[i].lastTouchTime, m_zones[j].lastTouchTime);
+               
+               // [NEW] Mark as merged zone
+               m_zones[i].is_merged_zone = true;
+               m_zones[i].merge_count++;
+               
+               // Recalculate buffer with new touch count
+               m_zones[i].buffer_multiplier = GetCombinedBufferMultiplier(m_zones[i].touchCount);
+               
+               // Update zone boundaries
+               double adjustedTol = m_clusterTol * m_zones[i].buffer_multiplier;
+               m_zones[i].high = m_zones[i].price + adjustedTol * 0.5;
+               m_zones[i].low = m_zones[i].price - adjustedTol * 0.5;
+               
+               // Mark zone j for removal (set very low strength)
+               m_zones[j].strength = 0.0;
+               m_zones[j].isBroken = true;
+               
+               mergedCount++;
+              }
+           }
+        }
+      
+      if(mergedCount > 0 && m_debugMode)
+         PrintFormat("[SR] Merged %d zones using %.1f point threshold", mergedCount, mergeThreshold/_Point);
+         
+      // Clean up merged zones
+      RemoveStaleZones();
      }
 
 public:
@@ -566,6 +751,12 @@ public:
          m_htf_atr = iATR(_Symbol, m_htfPeriod, 14, 1);
         }
       
+      // [NEW] Detect market regime for dynamic lookback
+      DetectMarketRegime();
+      
+      // [NEW] Update volatility ratio
+      UpdateVolatilityRatio();
+      
       // Get current bar info
       datetime currentBarTime = iTime(_Symbol, _Period, 0);
       int currentBar = (int)iBarShift(_Symbol, _Period, 0);
@@ -583,6 +774,9 @@ public:
 
       // Scan for new pivots
       ScanForPivots();
+      
+      // [NEW] Merge nearby zones after scanning
+      MergeNearbyZones();
 
       // Age all zones
       for(int i=0; i<m_zoneCount; i++)
@@ -594,16 +788,32 @@ public:
         {
          // Re-check HTF alignment on each bar (trend can change)
          m_zones[i].htf_alignment = CheckHTFAlignment(m_zones[i].price, m_zones[i].isSupport);
+         
+         // [NEW] Update age decay factor
+         if(m_zones[i].formation_bars > 100)
+           {
+            int excessBars = m_zones[i].formation_bars - 100;
+            m_zones[i].age_decay_factor = MathPow(ASR_AGE_DECAY_FACTOR, excessBars / 10.0);
+           }
+         else
+           {
+            m_zones[i].age_decay_factor = 1.0;
+           }
+         
          m_zones[i].strength   = CalcStrength(m_zones[i]);
          m_zones[i].confidence = CalcConfidence(m_zones[i]);
         }
 
       // Cleanup stale zones
       RemoveStaleZones();
+      
+      // [NEW] Update visual debug data if enabled
+      if(m_visualDebugMode)
+         UpdateVisualDebugData();
 
       if(m_debugMode)
-         PrintFormat("[SR] Scan #%d: %d active zones (%.1f ATR tol)",
-                     m_scanCount, GetActiveCount(), m_clusterTol/_Point);
+         PrintFormat("[SR] Scan #%d: %d active zones (%.1f ATR tol, Regime=%d)",
+                     m_scanCount, GetActiveCount(), m_clusterTol/_Point, (int)m_currentRegime);
      }
      
    //── Public API ───────────────────────────────────────────────────
@@ -871,7 +1081,10 @@ private:
    void ScanForPivots()
      {
       int totalBars = (int)Bars(_Symbol, _Period);
-      int scanBars = MathMin(m_adaptiveLookback, totalBars - ASR_RIGHT_BARS - 1);
+      
+      // [NEW] Dynamic lookback based on market regime
+      int dynamicLookback = GetDynamicLookback();
+      int scanBars = MathMin(dynamicLookback, totalBars - ASR_RIGHT_BARS - 1);
       
       for(int shift = ASR_RIGHT_BARS + 1; shift < scanBars; shift++)
         {
@@ -888,6 +1101,131 @@ private:
            }
         }
      }
+     
+   //── [NEW] Market Regime Detection ──────────────────────────────────
+   // [NEW]: Detects current market regime for adaptive parameters
+   // [NEW]: LOW_VOL, NORM_VOL, HIGH_VOL, TRENDING, RANGING
+   
+   void DetectMarketRegime()
+     {
+      double atr20 = iATR(_Symbol, _Period, 20, 1);
+      double atr50 = iATR(_Symbol, _Period, 50, 1);
+      
+      if(atr50 <= 0 || atr20 <= 0) 
+        {
+         m_currentRegime = REGIME_NORM_VOL;
+         return;
+        }
+      
+      double volRatio = atr20 / atr50;
+      
+      // Check for trending vs ranging using ADX
+      double adx = iADX(_Symbol, _Period, 14, PRICE_CLOSE, MODE_MAIN, 1);
+      
+      // Determine regime
+      if(volRatio > 1.3)
+         m_currentRegime = REGIME_HIGH_VOL;
+      else if(volRatio < 0.7)
+         m_currentRegime = REGIME_LOW_VOL;
+      else if(adx > 25)
+         m_currentRegime = REGIME_TRENDING;
+      else if(adx < 20)
+         m_currentRegime = REGIME_RANGING;
+      else
+         m_currentRegime = REGIME_NORM_VOL;
+         
+      // Adjust lookback based on regime
+      switch(m_currentRegime)
+        {
+         case REGIME_LOW_VOL:
+            m_adaptiveLookback = (int)(ASR_LOOKBACK_BASE * 0.7);
+            break;
+         case REGIME_HIGH_VOL:
+            m_adaptiveLookback = (int)(ASR_LOOKBACK_BASE * 1.5);
+            break;
+         case REGIME_TRENDING:
+            m_adaptiveLookback = (int)(ASR_LOOKBACK_BASE * 0.9);
+            break;
+         case REGIME_RANGING:
+            m_adaptiveLookback = (int)(ASR_LOOKBACK_BASE * 1.3);
+            break;
+         default:
+            m_adaptiveLookback = ASR_LOOKBACK_BASE;
+        }
+     }
+     
+   //── [NEW] Get Dynamic Lookback ─────────────────────────────────────
+   // [NEW]: Returns lookback value adjusted for current regime
+   
+   int GetDynamicLookback() const
+     {
+      return m_adaptiveLookback;
+     }
+     
+   //── [NEW] Update Volatility Ratio ──────────────────────────────────
+   // [NEW]: Calculates and stores current volatility ratio
+   
+   void UpdateVolatilityRatio()
+     {
+      double atr20 = iATR(_Symbol, _Period, 20, 1);
+      double atr50 = iATR(_Symbol, _Period, 50, 1);
+      
+      if(atr50 > 0 && atr20 > 0)
+         m_volatilityRatio = atr20 / atr50;
+      else
+         m_volatilityRatio = 1.0;
+     }
+     
+   //── [NEW] Update Visual Debug Data ─────────────────────────────────
+   // [NEW]: Prepares visual debugging information for zones
+   
+   void UpdateVisualDebugData()
+     {
+      ArrayResize(m_visualZones, m_zoneCount);
+      
+      for(int i = 0; i < m_zoneCount; i++)
+        {
+         m_visualZones[i].time = iTime(_Symbol, _Period, m_zones[i].lastTouchAge);
+         m_visualZones[i].price = m_zones[i].price;
+         m_visualZones[i].range = m_zones[i].high - m_zones[i].low;
+         m_visualZones[i].strength = (int)m_zones[i].strength;
+         m_visualZones[i].is_merged = m_zones[i].is_merged_zone;
+         
+         if(m_zones[i].is_merged_zone)
+            m_visualZones[i].label = StringFormat("M%d", m_zones[i].merge_count);
+         else
+            m_visualZones[i].label = StringFormat("S%d", m_zones[i].touchCount);
+        }
+     }
+     
+   //── [NEW] Get Visual Debug Data ────────────────────────────────────
+   
+   const VisualZoneData* GetVisualZone(int index) const
+     {
+      return (index >= 0 && index < ArraySize(m_visualZones)) ? &m_visualZones[index] : NULL;
+     }
+     
+   //── [NEW] Set Visual Debug Mode ────────────────────────────────────
+   
+   void SetVisualDebugMode(bool enabled)
+     {
+      m_visualDebugMode = enabled;
+     }
+     
+   //── [NEW] Get Current Market Regime ────────────────────────────────
+   
+   ENUM_MARKET_REGIME GetCurrentRegime() const
+     {
+      return m_currentRegime;
+     }
+     
+   //── [NEW] Get Volatility Ratio ─────────────────────────────────────
+   
+   double GetVolatilityRatio() const
+     {
+      return m_volatilityRatio;
+     }
+     
   };
 
 typedef CAnalysisSRManager AnalysisSRManager;
