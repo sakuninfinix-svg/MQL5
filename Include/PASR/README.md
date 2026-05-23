@@ -1,8 +1,8 @@
 # PASR — Price Action Support Resistance EA
 
-> **Architecture:** Pipeline Orchestration (migrated from Monolith v9, Sprint 1–14)
-> **Last updated:** Sprint 14 (2026-05-24)
-> **Compile target:** `Experts/PASR/PASR_MODULAR.mq5`
+> **Architecture:** Pipeline Orchestration (migrated from Monolith v9, Sprint 1–15)
+> **Last updated:** Sprint 15 (2026-05-24)
+> **Compile target:** `Experts/PASR_MODULAR.mq5`
 
 ---
 
@@ -55,11 +55,11 @@ Include/PASR/
 │   └── PASR_SymbolManager.mqh
 │
 ├── Analysis/                ← Market analysis managers
-│   ├── SRManager.mqh        ← ⚠ 54KB — Sprint 15 decomposition target
+│   ├── SRManager.mqh        ← ⚠ 54KB — Sprint 16 decomposition target
 │   ├── ZoneManager.mqh      ← Supply/Demand zones
 │   ├── MarketRegimeDetector.mqh
 │   ├── AdaptiveParameterManager.mqh
-│   └── Pattern/             ← Candlestick pattern sub-module (audit pending)
+│   └── Pattern/             ← Candlestick pattern sub-module (audit pending S16)
 │
 ├── Signal/                  ← v4.02 — Signal generation & regime filtering
 │   ├── SignalManager.mqh    ← v4.02 — aggregator, 4 sources
@@ -86,8 +86,13 @@ Include/PASR/
 │   ├── ConfidenceCalibrator.mqh
 │   └── OnlineLearningGuard.mqh
 │
-├── Phase7/                  ← HealthMonitor, SnapshotManager, SessionState (audit pending S15)
-└── Dashboard/               ← Chart rendering, telemetry, journal (audit pending S15)
+├── Phase7/                  ← HealthMonitor, SnapshotManager, SessionState (audit pending S16)
+└── Dashboard/               ← Chart rendering, telemetry, journal (audit pending S16)
+
+Experts/
+├── PASR_MODULAR.mq5         ← ✅ EA entry point (confirmed path — root Experts/ folder)
+├── PASR.mq5                 ← Legacy monolith (deprecated, do not extend)
+└── PASR/                    ← Reserved folder (empty / future multi-symbol variant)
 ```
 
 ---
@@ -116,18 +121,18 @@ Include/PASR/
 | **AI-005** | 🟡 MEDIUM | `AI/AIOrchestrator.mqh` | `OnTradeResult()` memanggil `m_feat->GetLastFeatures()` untuk membuat training sample — tapi `GetLastFeatures()` return pointer ke `m_last_features[]` yang sudah berisi features dari **build terakhir**, bukan dari trade yang menghasilkan profit/loss ini. Jika ada beberapa bar antara entry dan exit, features sudah stale. Fix: cache `SAIFeatureVector` saat trade open (di `OnEvent(EVENT_ID_TRADE_OPEN)`), gunakan cached features saat trade close. | S15 |
 | **AI-006** | 🟡 MEDIUM | `AI/AIFeatureBuilder.mqh` | `GetIndicatorValue()` menerima `shift` parameter tapi fungsi internal `ATRRatio()` memanggil dengan `shift=0` — kemudian FIX#4 guard mengubah ke `shift=1`. Namun `UpdateBaselines()` juga memanggil `GetIndicatorValue(m_hATR14, 0, 0)` **tanpa** melewati guard karena dipanggil sebelum `m_useClosedBarsOnly` check. Baselines di-update dari bar yang masih open (current bar) — partial lookahead masih ada untuk baselines. Fix: gunakan `shift=1` eksplisit di `UpdateBaselines()`. | S15 |
 | **AI-007** | 🟡 MEDIUM | `AI/AIInference.mqh` | `Tanh()` implementasi manual: `(exp(2x)-1)/(exp(2x)+1)` menghitung `exp(2x)` **dua kali**. Untuk x > 350, `MathExp(2x)` overflow ke `INF` → `INF/INF = NaN` → output NaN masuk ke pipeline. MQL5 memiliki `MathTanh()` built-in. Fix: ganti dengan `return MathTanh(x)`. | S15 |
-| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | S15 |
-| **A5** | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | S15 |
-| **P7-?** | 🔴 TBD | `Phase7/*.mqh` | Phase7 subfolder belum diaudit | S15 |
-| **DS-?** | 🔴 TBD | `Dashboard/*.mqh` | Dashboard subfolder belum diaudit | S15 |
-| **BUG-008** | 🟠 HIGH | `Experts/PASR/PASR_MODULAR.mq5` | File EA tidak ditemukan di repo — perlu konfirmasi path dan commit | S15 |
+| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | S16 |
+| **A5** | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | S16 |
+| **P7-?** | 🔴 TBD | `Phase7/*.mqh` | Phase7 subfolder belum diaudit | S16 |
+| **DS-?** | 🔴 TBD | `Dashboard/*.mqh` | Dashboard subfolder belum diaudit | S16 |
 
 ---
 
-### ✅ RESOLVED — Sprint 1–13
+### ✅ RESOLVED — Sprint 1–15
 
 | ID | Severity | File | Fix | Sprint |
 |----|----------|------|-----|--------|
+| **BUG-008** | 🟠 HIGH | `Experts/PASR_MODULAR.mq5` | File EA dikonfirmasi exist di `Experts/PASR_MODULAR.mq5` (root Experts/, bukan subfolder). README compile target dikoreksi dari `Experts/PASR/PASR_MODULAR.mq5` → `Experts/PASR_MODULAR.mq5`. Folder `Experts/PASR/` adalah reserved/empty. | S15 |
 | **TR-006** | 🔴 CRITICAL | `Trade/CorrelationManager.mqh` | Full migration v1.0 → v2.00: (A) `#include IManager.h` → `.mqh`. (B) class tidak extend IManager → `public IManager` explicit. (C) member fields `m_data`/`m_bus` ditambah. (D) `Initialize()` monolith → `Init(data,bus)` override. (E) `DeclareEvents()` ditambah: subscribe `EVENT_ID_NEW_BAR` + `EVENT_ID_TIMER`. (F) `OnEvent()` ditambah: NEW_BAR → `RefreshSymbolList()` + `UpdateMatrix()`, TIMER → staleness check. (G) `RefreshSymbolList()` baru: build tracked symbols dari open positions. (H) `OnTick(string)/OnTimer()/OnTrade()` monolith overrides dihapus. (I) `Shutdown()` guard double-free + `m_bus=NULL`. (J) `GetStats()` helper ditambah. Note: `TickCache.mqh` include dihapus — tidak dibutuhkan, `CopyClose()` digunakan langsung | S13 |
 | **TR-001** | 🔴 CRITICAL | `Trade/ExitEngine.mqh` | Infinite loop emergency stop, IManager rewrite v2.01 | S12 |
 | **TR-002** | 🔴 CRITICAL | `Trade/PositionManager.mqh` | `m_data` always NULL, double-subscribe fix, rewrite v3.00 | S12 |
@@ -141,7 +146,7 @@ Include/PASR/
 | BUG-005 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | `FreeAll()` strict reverse init order, EventBus deleted last | S2 |
 | BUG-006 | 🟠 HIGH | `Core/PipelineEngine.mqh` | `InjectManagers()` stores health/snapshot fields | S2 |
 | BUG-007 | 🔴 CRITICAL | `Core/PipelineEngine.mqh` | Fixed 3 wrong `#include` paths | S1 |
-| BUG-008 | 🔴 CRITICAL | `Experts/PASR/PASR_MODULAR.mq5` | Macro `QA_BUILD` → `PASR_QA_BUILD` | S1 |
+| BUG-008-S1 | 🔴 CRITICAL | `Experts/PASR_MODULAR.mq5` | Macro `QA_BUILD` → `PASR_QA_BUILD` | S1 |
 | BUG-009 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | Constructor init list: `m_health(NULL)`, `m_snapshot(NULL)`, `m_session(NULL)` | S2 |
 | BUG-010 | 🟡 MEDIUM | `Core/Orchestrator.mqh` | Eliminated redundant double `DrainQueue()` | S2 |
 | BUG-011 | 🟡 MEDIUM | `Core/PipelineEngine.mqh` | Ticket hardcode `0` → `ctx.exec_result.ticket` | S2 |
@@ -171,16 +176,17 @@ Include/PASR/
 
 | Sprint | Focus | Key Deliverables |
 |--------|-------|------------------|
-| S1 | Compile fixes | BUG-007, BUG-008, BUG-012 |
+| S1 | Compile fixes | BUG-007, BUG-008-S1, BUG-012 |
 | S2 | Architecture integrity | BUG-001–006, BUG-009–011 |
 | S8 | Runtime state ownership | SessionState wiring, Events.mqh |
 | S9 | Orchestrator residuals + Analysis cleanup | O1, O4, O7, O8, X1–X7, A2–A3 |
-| S10 | Signal layer (planned → S11) | — |
+| S10 | Signal layer (merged → S11) | — |
 | S11 | PipelineEngine + Orchestrator hardening | N01, N03, N04, N06, N07, BUG-S10-001–004 |
 | S12 | Trade subfolder audit | TR-001–005 resolved, TR-006 carried to S13 |
 | S13 | CorrelationManager migration | TR-006 resolved (v1.0 → v2.00 full IManager rewrite) |
 | S14 | AI subfolder audit | AI-001..AI-007 ditemukan (7 bugs): inject order, ATR multi-period, trainer no-op, ensemble seed, stale features, baseline lookahead, Tanh NaN overflow |
-| S15 | AI fixes + Phase7 + Dashboard audit | _(planned)_ |
+| S15 | BUG-008 path confirmation + README sync | BUG-008 resolved — EA path dikonfirmasi `Experts/PASR_MODULAR.mq5` |
+| S16 | AI fixes (AI-001..AI-007) + Phase7 + Dashboard audit | _(planned)_ |
 
 ---
 
@@ -236,6 +242,7 @@ orch.OnDeinit(reason);
 | `AI/AIEnsemble.mqh` | — | S14 | ⚠️ Bug AI-004 |
 | `AI/AITrainer.mqh` | — | S14 | ⚠️ Bug AI-003 (trainer no-op) |
 | `AI/AITypes.mqh` | — | S14 | ✅ Clean |
+| `Experts/PASR_MODULAR.mq5` | v13.00 | S15 | ✅ Path confirmed |
 | `Analysis/SRManager.mqh` | — | — | ⚠️ Audit needed (54KB) |
 | `Analysis/Pattern/*.mqh` | — | — | ⚠️ Audit needed |
 | `Phase7/*.mqh` | — | — | 🔴 Not audited |
