@@ -207,16 +207,9 @@ ulong GetOpenPositionTicket(const string symbol)
    return 0;
   }
 
-double GetATR(const string symbol, int period = 14)
-  {
-   double atr[];
-   ArraySetAsSeries(atr, true);
-   int h = iATR(symbol, PERIOD_CURRENT, period);
-   if(h == INVALID_HANDLE) return 0;
-   CopyBuffer(h, 0, 0, 1, atr);
-   IndicatorRelease(h);
-   return (ArraySize(atr) > 0) ? atr[0] : 0;
-  }
+// FIX #2: Removed GetATR() helper - was creating/destroying indicator handles
+// on every call, causing handle spam. Use m_data.GetATRPoints() instead which
+// caches the ATR value per tick.
 
 double GetSpreadPips(const string symbol = NULL)
   {

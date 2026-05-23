@@ -101,13 +101,18 @@ bool DataManager::Init(IDataManager *data, CEventBus *bus)
 //+------------------------------------------------------------------+
 void DataManager::OnTick()
 {
-   //--- Update ATR cache periodically
+   //--- Update ATR cache periodically (every 60 seconds)
    static datetime lastATRUpdate = 0;
    if(TimeCurrent() - lastATRUpdate > 60)
    {
-      double atr = iATR(_Symbol, _Period, 14, 1);
-      if(atr > 0)
-         m_atrPoints = atr;
+      int handle = iATR(_Symbol, _Period, 14);
+      if(handle != INVALID_HANDLE)
+      {
+         double atrBuffer[1];
+         if(CopyBuffer(handle, 0, 0, 1, atrBuffer) > 0 && atrBuffer[0] > 0)
+            m_atrPoints = atrBuffer[0];
+         IndicatorRelease(handle);
+      }
       lastATRUpdate = TimeCurrent();
    }
    
