@@ -1,7 +1,7 @@
 # PASR — Price Action Support Resistance EA
 
-> **Architecture:** Pipeline Orchestration (migrated from Monolith v9, Sprint 1–16)
-> **Last updated:** Sprint 16 (2026-05-24)
+> **Architecture:** Pipeline Orchestration (migrated from Monolith v9, Sprint 1–17)
+> **Last updated:** Sprint 17 (2026-05-24)
 > **Compile target:** `Experts/PASR_MODULAR.mq5`
 
 ---
@@ -55,47 +55,61 @@ Include/PASR/
 │   └── PASR_SymbolManager.mqh
 │
 ├── Analysis/                ← Market analysis managers
-│   ├── SRManager.mqh        ← ⚠ 54KB — Sprint 17 decomposition target
+│   ├── SRManager.mqh        ← ⚠ 54KB — Sprint 18 decomposition target
 │   ├── ZoneManager.mqh      ← Supply/Demand zones
 │   ├── MarketRegimeDetector.mqh
 │   ├── AdaptiveParameterManager.mqh
-│   └── Pattern/             ← Candlestick pattern sub-module (audit pending S17)
+│   └── Pattern/             ← Candlestick pattern sub-module (audit pending S18)
 │
 ├── Signal/                  ← v4.02 — Signal generation & regime filtering
-│   ├── SignalManager.mqh    ← v4.02 — aggregator, 4 sources
-│   └── SignalFilterPipeline.mqh ← v1.02 — MTF + custom filter pipeline
+│   ├── SignalManager.mqh    ← v4.02
+│   └── SignalFilterPipeline.mqh ← v1.02
 │
 ├── Trade/                   ← ✅ S13 Fully Audited — 8 files
-│   ├── ExecutionManager.mqh ← v3.02 — async retry + stops clamp
-│   ├── RiskManager.mqh      ← v2.02 — circuit breaker, daily loss, lot calc
-│   ├── RecoveryManager.mqh  ← v2.18 — fakeout detection, partial close
-│   ├── RecoveryEngine.mqh   ← struct + state machine per position
-│   ├── ExitEngine.mqh       ← v2.01 — Chandelier + Structure + ProfitFade exits
-│   ├── PositionManager.mqh  ← v3.00 — pipeline-aware scanner, ScanPositions(ctx)
-│   ├── TradePlan.mqh        ← struct TradePlan
-│   └── CorrelationManager.mqh ← ✅ v2.00 — IManager pipeline, S13
+│   ├── ExecutionManager.mqh ← v3.02
+│   ├── RiskManager.mqh      ← v2.02
+│   ├── RecoveryManager.mqh  ← v2.18
+│   ├── RecoveryEngine.mqh
+│   ├── ExitEngine.mqh       ← v2.01
+│   ├── PositionManager.mqh  ← v3.00
+│   ├── TradePlan.mqh
+│   └── CorrelationManager.mqh ← v2.00
 │
-├── AI/                      ← ✅ S16 Fully Audited — 7 bugs resolved
-│   ├── AITypes.mqh          ← Shared structs, zero deps
-│   ├── AIOrchestrator.mqh   ← v2.02 — AI-001,003,005 fixed; InjectContext, open-feat cache
-│   ├── AIFeatureBuilder.mqh ← v2.01 — AI-001,002,006 fixed; pending inject, 4x ATR, baseline shift
-│   ├── AIInference.mqh      ← v2.01 — AI-007 fixed; MathTanh(), seed param, SGDUpdate()
-│   ├── AIEnsemble.mqh       ← v2.01 — AI-004 fixed; seed table {42,137,271,919}, GetModel()
-│   ├── AITrainer.mqh        ← v2.01 — AI-003 fixed; RunSGD() via SetEnsemble() wiring
-│   ├── AICalibrationBridge.mqh
+├── AI/                      ← ✅ S16 Fully Audited
+│   ├── AIOrchestrator.mqh   ← v2.02
+│   ├── AIFeatureBuilder.mqh ← v2.01
+│   ├── AIInference.mqh      ← v2.01
+│   ├── AIEnsemble.mqh       ← v2.01
+│   ├── AITrainer.mqh        ← v2.01
+│   ├── AITypes.mqh
 │   ├── ConfidenceCalibrator.mqh
+│   ├── OnlineLearningGuard.mqh
+│   ├── AICalibrationBridge.mqh
 │   ├── AISignalSource.mqh
 │   ├── ModelRegistry.mqh
-│   ├── ONNXBridge.mqh
-│   └── OnlineLearningGuard.mqh
+│   └── ONNXBridge.mqh
 │
-├── Phase7/                  ← HealthMonitor, SnapshotManager, SessionState (audit pending S17)
-└── Dashboard/               ← Chart rendering, telemetry, journal (audit pending S17)
+├── Infra/                   ← ✅ S17 Audited (10 files)
+│   ├── HealthMonitor.mqh    ← v2.00 — BUG-H1..H6 fixed (S7)
+│   ├── SessionState.mqh     ← v1.00 — IManager compliant, 2 minor issues (SS-001,SS-002 open)
+│   ├── SnapshotManager.mqh  ← v2.00 — SNAP-001..005 fixed (S17)
+│   ├── JournalManager.mqh   ← ⚠ 17KB — audit pending S18
+│   ├── TelemetryRecorder.mqh← audit pending S18
+│   ├── PerformanceReport.mqh← audit pending S18
+│   ├── DataManager.mqh      ← audit pending S18
+│   ├── SanityManager.mqh    ← audit pending S18
+│   ├── StateManager.mqh     ← audit pending S18
+│   └── AdaptiveConfig.mqh   ← audit pending S18
+│
+├── Data/                    ← audit pending S18
+├── QA/                      ← audit pending S18
+├── Tools/                   ← audit pending S18
+├── UI/                      ← audit pending S18
+└── docs/                    ← internal documentation
 
 Experts/
-├── PASR_MODULAR.mq5         ← ✅ EA entry point v13.00 (confirmed path — root Experts/ folder)
-├── PASR.mq5                 ← Legacy monolith (deprecated, do not extend)
-└── PASR/                    ← Reserved folder (empty / future multi-symbol variant)
+├── PASR_MODULAR.mq5         ← ✅ EA entry point v13.00
+└── PASR.mq5                 ← Legacy monolith (deprecated, do not extend)
 ```
 
 ---
@@ -107,7 +121,7 @@ Experts/
 #define PASR_DEBUG       // Verbose logging per manager
 ```
 
-> ⚠️ **Old flags removed:** `QA_BUILD` (renamed → `PASR_QA_BUILD`), `OOP_ARCHITECTURE`, `PERF_METRICS` — do NOT use these.
+> ⚠️ **Old flags removed:** `QA_BUILD`, `OOP_ARCHITECTURE`, `PERF_METRICS` — do NOT use.
 
 ---
 
@@ -117,61 +131,43 @@ Experts/
 
 | ID | Severity | File | Description | Target |
 |----|----------|------|-------------|--------|
-| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | S17 |
-| **A5** | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | S17 |
-| **P7-?** | 🔴 TBD | `Phase7/*.mqh` | Phase7 subfolder belum diaudit | S17 |
-| **DS-?** | 🔴 TBD | `Dashboard/*.mqh` | Dashboard subfolder belum diaudit | S17 |
+| **SS-001** | 🟡 MEDIUM | `Infra/SessionState.mqh` | `BroadcastSnapshot()` menggunakan `EVENT_ID_SESSION_UPDATED` yang belum ada di `Events.mqh` — compile error jika event ID belum terdefinisi | S18 |
+| **SS-002** | 🟡 MEDIUM | `Infra/SessionState.mqh` | `IsNewDay()` hanya cek `session_start` vs now, bukan midnight-floor — jika EA di-restart di hari yang sama, daily_pnl tidak di-reset karena `session_start` ikut reset | S18 |
+| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | S18 |
+| **A5** | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | S18 |
+| **INF-?** | 🔴 TBD | `Infra/JournalManager.mqh` + 6 file lain | 7 file Infra belum diaudit (JournalManager 17KB, TelemetryRecorder, PerformanceReport, DataManager, SanityManager, StateManager, AdaptiveConfig) | S18 |
+| **DATA-?** | 🔴 TBD | `Data/` | Folder belum diaudit | S18 |
+| **QA-?** | 🔴 TBD | `QA/` | Folder belum diaudit | S18 |
+| **UI-?** | 🔴 TBD | `UI/` | Folder belum diaudit | S18 |
+| **TOOLS-?** | 🔴 TBD | `Tools/` | Folder belum diaudit | S18 |
 
 ---
 
-### ✅ RESOLVED — Sprint 1–16
+### ✅ RESOLVED — Sprint 1–17
 
 | ID | Severity | File | Fix | Sprint |
 |----|----------|------|-----|--------|
-| **AI-001** | 🟠 HIGH | `AI/AIFeatureBuilder.mqh` | `InjectStructure()`/`InjectRegime()` sekarang menulis ke **pending buffer** (`m_pending_*`). `Build()` apply pending buffer ke `f[]` sebelum copy-out — injection selalu masuk ke feature vector. `AIOrchestrator::InjectContext()` harus dipanggil sebelum `Predict()`. | S16 |
-| **AI-002** | 🔴 CRITICAL | `AI/AIFeatureBuilder.mqh` | `ATRRatio()` monolitik dihapus — diganti `ATRRatioByHandle(handle)`. Dibuat 4 handle terpisah: `m_hATR3`, `m_hATR5`, `m_hATR10`, `m_hATR20`. Feature f[4]–f[7] kini return nilai berbeda (genuine multi-period volatility). | S16 |
-| **AI-003** | 🔴 CRITICAL | `AI/AITrainer.mqh` + `AI/AIInference.mqh` | `MaybeRetrain()` memanggil `RunSGD(mini_batch)` yang melakukan real backprop via `CAIInference::SGDUpdate()`. `CAIInference` mendapat method `SGDUpdate()` baru (full backprop: output layer, hidden2, hidden1). `CAITrainer` menerima ensemble pointer via `SetEnsemble()`. `CAIOrchestrator::Initialize()` memanggil `m_trainer->SetEnsemble(m_ensemble)`. | S16 |
-| **AI-004** | 🟠 HIGH | `AI/AIEnsemble.mqh` | Seed table `AI_ENSEMBLE_SEEDS[] = {42, 137, 271, 919}` ditambah. Setiap `CAIInference` dibuat dengan seed berbeda via `new CAIInference(AI_ENSEMBLE_SEEDS[i])`. Weights Xavier-random kini unik per model. `agreement` tidak lagi selalu 1.0. | S16 |
-| **AI-005** | 🟡 MEDIUM | `AI/AIOrchestrator.mqh` | `m_open_features` (SAIFeatureVector) di-cache saat `EVENT_ID_TRADE_OPEN`. `OnTradeResult()` menggunakan cached features jika valid, fallback ke `GetLastFeatures()` jika tidak ada cached (posisi dibuka sebelum AI init). | S16 |
-| **AI-006** | 🟡 MEDIUM | `AI/AIFeatureBuilder.mqh` | `UpdateBaselines()` menggunakan `CopyBuffer(m_hATR14, 0, 1, 1, atrVal)` dan `iVolume(..., 1)` — explicit `shift=1`. Partial lookahead pada baselines dihilangkan. | S16 |
-| **AI-007** | 🟡 MEDIUM | `AI/AIInference.mqh` | `Tanh(double x)` diganti dari `(exp(2x)-1)/(exp(2x)+1)` ke `return MathTanh(x)`. Tidak ada double-`exp()`, tidak ada NaN pada x > 350. | S16 |
-| **BUG-008** | 🟠 HIGH | `Experts/PASR_MODULAR.mq5` | Path dikonfirmasi: `Experts/PASR_MODULAR.mq5` (root, bukan subfolder). README compile target dikoreksi. | S15 |
-| **TR-006** | 🔴 CRITICAL | `Trade/CorrelationManager.mqh` | Full migration v1.0 → v2.00: IManager extend, DeclareEvents(), OnEvent(), RefreshSymbolList(), Shutdown() double-free guard. | S13 |
-| **TR-001** | 🔴 CRITICAL | `Trade/ExitEngine.mqh` | Infinite loop emergency stop, IManager rewrite v2.01 | S12 |
-| **TR-002** | 🔴 CRITICAL | `Trade/PositionManager.mqh` | `m_data` always NULL, double-subscribe fix, rewrite v3.00 | S12 |
-| **TR-003** | 🔴 CRITICAL | `Trade/RiskManager.mqh` | Double-accumulation dailyLoss fix v2.02 | S12 |
-| **TR-004** | 🟠 HIGH | `Trade/ExecutionManager.mqh` | SL/TP stops-level clamp v3.02 | S12 |
-| **TR-005** | 🟡 MEDIUM | `Trade/RecoveryManager.mqh` | Day-of-month key → midnight-floor datetime fix v2.18 | S12 |
-| BUG-001 | 🔴 CRITICAL | `Core/Globals.mqh` | Removed `CEventBus::Instance()` fake singleton | S2 |
-| BUG-002 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | Removed monolith `ProcessNewBar()` fallback in OnTick | S2 |
-| BUG-003 | 🔴 CRITICAL | `Core/PipelineEngine.mqh` | All 7 empty stage stubs implemented | S2 |
-| BUG-004 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | HealthMonitor + SnapshotManager registered via `InitManager()` | S2 |
-| BUG-005 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | `FreeAll()` strict reverse init order, EventBus deleted last | S2 |
-| BUG-006 | 🟠 HIGH | `Core/PipelineEngine.mqh` | `InjectManagers()` stores health/snapshot fields | S2 |
-| BUG-007 | 🔴 CRITICAL | `Core/PipelineEngine.mqh` | Fixed 3 wrong `#include` paths | S1 |
-| BUG-008-S1 | 🔴 CRITICAL | `Experts/PASR_MODULAR.mq5` | Macro `QA_BUILD` → `PASR_QA_BUILD` | S1 |
-| BUG-009 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | Constructor init list: `m_health(NULL)`, `m_snapshot(NULL)`, `m_session(NULL)` | S2 |
-| BUG-010 | 🟡 MEDIUM | `Core/Orchestrator.mqh` | Eliminated redundant double `DrainQueue()` | S2 |
-| BUG-011 | 🟡 MEDIUM | `Core/PipelineEngine.mqh` | Ticket hardcode `0` → `ctx.exec_result.ticket` | S2 |
-| BUG-012 | 🟡 MEDIUM | `Core/Globals.mqh` | `_MagicNumber` → explicit `magic` param | S1 |
-| O1 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | `ENUM_PIPELINE_STAGE` undefined type fix | S9 |
-| O4 | 🟠 HIGH | `Core/Orchestrator.mqh` | SessionState init wiring fixed | S9 |
-| O7 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | `BarChanged()` double-flip race → `m_new_bar_flag` pattern | S9 |
-| O8 | 🟠 HIGH | `Core/Orchestrator.mqh` | `CJournalManager` passed as NULL → owned member `m_journal` | S9 |
-| X1–X7 | 🔴 CRITICAL | `Core/PASR_Executor.mqh` | DELETED — monolith zombie, 7 bugs | S9 |
-| A2 | 🟠 HIGH | `Analysis/Optimized/` | DELETED entire orphaned folder | S9 |
-| A3 | 🟡 LOW | `Analysis/OPTIMIZATION_SUMMARY.md` | DELETED dev artifact | S9 |
-| S8-001 | 🔴 CRITICAL | `Core/Events.mqh` | Added missing event IDs | S8 |
-| S8-005 | 🔴 CRITICAL | `Core/Events.mqh` | Removed non-existent `data_i[]` from `PASREvent` | S8 |
-| N01 | 🔴 CRITICAL | `Core/PipelineEngine.mqh` | Stage_AnalysisSR event dispatch fix | S11 |
-| N03 | 🟠 HIGH | `Core/Orchestrator.mqh` | OnDeinit() double-shutdown fix | S11 |
-| N04 | 🟠 HIGH | `Core/PipelineEngine.mqh` | Stage_RiskCheck false-alarm exit fix | S11 |
-| N06 | 🟠 HIGH | `Core/Orchestrator.mqh` | RegisterManager() NULL bus guard | S11 |
-| N07 | 🔴 CRITICAL | `Core/PipelineEngine.mqh` | SkipIfNull() undefined behavior fix | S11 |
-| BUG-S10-001 | 🔴 CRITICAL | `Signal/SignalFilterPipeline.mqh` | `support`/`resistance` undefined compile error | S11 |
-| BUG-S10-002 | 🟠 HIGH | `Signal/SignalFilterPipeline.mqh` | `RunCustomFilters()` never called from pipeline | S11 |
-| BUG-S10-003 | 🟠 HIGH | `Signal/SignalFilterPipeline.mqh` | MTF referencePrice: tick price → bar close | S11 |
-| BUG-S10-004 | 🔴 CRITICAL | `Signal/SignalManager.mqh` | `RunCompletePipeline()` signature mismatch compile error | S11 |
+| **SNAP-001** | 🔴 CRITICAL | `Infra/SnapshotManager.mqh` | Tidak extend IManager — rewrite jadi `class CSnapshotManager : public IManager` | S17 |
+| **SNAP-002** | 🔴 CRITICAL | `Infra/SnapshotManager.mqh` | Include `../Core/Config/SystemConfig.mqh` tidak ada — diganti `IManager.mqh` + `EventBus.mqh` | S17 |
+| **SNAP-003** | 🔴 CRITICAL | `Infra/SnapshotManager.mqh` | `CalculateChecksum()` pakai `PointerToStruct()` cast — TIDAK VALID di MQL5. Diganti field-by-field XOR checksum | S17 |
+| **SNAP-004** | 🟠 HIGH | `Infra/SnapshotManager.mqh` | Signature `Initialize(string folder)` tidak cocok dengan `IManager::Initialize(CEventBus*)` — sekarang ada `Initialize(CEventBus*)` override + `Initialize(CEventBus*, string folder)` extended | S17 |
+| **SNAP-005** | 🟡 MEDIUM | `Infra/SnapshotManager.mqh` | `static int s_index` dalam `SaveSnapshot()` — persist cross-EA-reload tapi reset saat terminal restart → desync. Diganti member `m_save_index` | S17 |
+| **BUG-H1..H6** | 🔴 CRITICAL | `Infra/HealthMonitor.mqh` | EventBus* type, SendEvent→Push, PASR_MemoryUsage, recovery flag, dual-purpose flag, heartbeat false alarm | S7 |
+| **AI-001** | 🟠 HIGH | `AI/AIFeatureBuilder.mqh` | Pending buffer pattern — inject sebelum Build() | S16 |
+| **AI-002** | 🔴 CRITICAL | `AI/AIFeatureBuilder.mqh` | 4 ATR handle terpisah (m_hATR3/5/10/20) | S16 |
+| **AI-003** | 🔴 CRITICAL | `AI/AITrainer.mqh` | Real SGD backprop via SGDUpdate() + SetEnsemble() | S16 |
+| **AI-004** | 🟠 HIGH | `AI/AIEnsemble.mqh` | Seed table {42,137,271,919} — ensemble diversity aktif | S16 |
+| **AI-005** | 🟡 MEDIUM | `AI/AIOrchestrator.mqh` | m_open_features cache saat EVENT_ID_TRADE_OPEN | S16 |
+| **AI-006** | 🟡 MEDIUM | `AI/AIFeatureBuilder.mqh` | Baselines shift=1 (no lookahead) | S16 |
+| **AI-007** | 🟡 MEDIUM | `AI/AIInference.mqh` | MathTanh() — no NaN | S16 |
+| **BUG-008** | 🟠 HIGH | `Experts/PASR_MODULAR.mq5` | Path dikonfirmasi root Experts/ | S15 |
+| **TR-001..TR-006** | 🔴 CRITICAL | `Trade/*.mqh` | ExitEngine, PositionManager, RiskManager, ExecutionManager, RecoveryManager, CorrelationManager | S12–13 |
+| BUG-001..012 | 🔴 CRITICAL | `Core/*.mqh` | Monolith cleanup, pipeline wiring, compile fixes | S1–2 |
+| O1,O4,O7,O8 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | ENUM_PIPELINE_STAGE, SessionState wiring, BarChanged race, JournalManager | S9 |
+| X1–X7 | 🔴 CRITICAL | `Core/PASR_Executor.mqh` | DELETED — monolith zombie | S9 |
+| S8-001,S8-005 | 🔴 CRITICAL | `Core/Events.mqh` | Missing event IDs, non-existent data_i[] | S8 |
+| N01,N03,N04,N06,N07 | 🔴 CRITICAL | `Core/*.mqh` | PipelineEngine + Orchestrator hardening | S11 |
+| BUG-S10-001..004 | 🔴 CRITICAL | `Signal/*.mqh` | SignalFilterPipeline + SignalManager compile fixes | S11 |
 
 ---
 
@@ -181,16 +177,17 @@ Experts/
 |--------|-------|------------------|
 | S1 | Compile fixes | BUG-007, BUG-008-S1, BUG-012 |
 | S2 | Architecture integrity | BUG-001–006, BUG-009–011 |
+| S7 | HealthMonitor rewrite | BUG-H1..H6 resolved |
 | S8 | Runtime state ownership | SessionState wiring, Events.mqh |
-| S9 | Orchestrator residuals + Analysis cleanup | O1, O4, O7, O8, X1–X7, A2–A3 |
-| S10 | Signal layer (merged → S11) | — |
+| S9 | Orchestrator residuals + Analysis cleanup | O1, O4, O7, O8, X1–X7 |
 | S11 | PipelineEngine + Orchestrator hardening | N01, N03, N04, N06, N07, BUG-S10-001–004 |
-| S12 | Trade subfolder audit | TR-001–005 resolved, TR-006 carried to S13 |
-| S13 | CorrelationManager migration | TR-006 resolved (v1.0 → v2.00 full IManager rewrite) |
-| S14 | AI subfolder audit | AI-001..AI-007 ditemukan (7 bugs) |
-| S15 | BUG-008 path confirmation + README sync | BUG-008 resolved |
-| S16 | AI subfolder fixes | AI-001..AI-007 **resolved** — inject order, 4x ATR, real SGD, ensemble seeds, stale-feature cache, baseline shift=1, MathTanh() |
-| S17 | Phase7 + Dashboard audit + SRManager decomposition | _(planned)_ |
+| S12 | Trade subfolder audit | TR-001–005 |
+| S13 | CorrelationManager migration | TR-006 (v1.0 → v2.00) |
+| S14 | AI subfolder audit | AI-001..AI-007 ditemukan |
+| S15 | BUG-008 path confirmation | BUG-008 resolved |
+| S16 | AI subfolder fixes | AI-001..AI-007 resolved |
+| S17 | Infra subfolder audit + SnapshotManager rewrite | SNAP-001..005 resolved; SS-001,SS-002 open; 7 Infra files queued S18 |
+| S18 | Infra remaining (7 files) + Data/QA/Tools/UI audit + SRManager decomposition | _(planned)_ |
 
 ---
 
@@ -216,7 +213,6 @@ orch.OnTradeTransaction(trans, request, result);
 
 // In OnDeinit:
 orch.OnDeinit(reason);
-// Note: EventKillTimer() is called inside orch.OnDeinit()
 ```
 
 ---
@@ -237,20 +233,29 @@ orch.OnDeinit(reason);
 | `Trade/RecoveryManager.mqh` | v2.18 | S12 | ✅ Stable |
 | `Trade/ExitEngine.mqh` | v2.01 | S12 | ✅ Stable |
 | `Trade/PositionManager.mqh` | v3.00 | S12 | ✅ Stable |
-| `Trade/TradePlan.mqh` | — | S12 | ✅ Stable |
-| `Trade/RecoveryEngine.mqh` | — | S12 | ✅ Stable |
 | `Trade/CorrelationManager.mqh` | v2.00 | S13 | ✅ Stable |
 | `AI/AIOrchestrator.mqh` | v2.02 | S16 | ✅ Stable |
 | `AI/AIFeatureBuilder.mqh` | v2.01 | S16 | ✅ Stable |
 | `AI/AIInference.mqh` | v2.01 | S16 | ✅ Stable |
 | `AI/AIEnsemble.mqh` | v2.01 | S16 | ✅ Stable |
 | `AI/AITrainer.mqh` | v2.01 | S16 | ✅ Stable |
-| `AI/AITypes.mqh` | — | S14 | ✅ Clean |
-| `Experts/PASR_MODULAR.mq5` | v13.00 | S15 | ✅ Path confirmed |
+| `Infra/HealthMonitor.mqh` | v2.00 | S7 | ✅ Stable |
+| `Infra/SessionState.mqh` | v1.00 | S17 | ⚠️ 2 issues open (SS-001,SS-002) |
+| `Infra/SnapshotManager.mqh` | v2.00 | S17 | ✅ Stable |
+| `Infra/JournalManager.mqh` | — | — | ⚠️ Audit needed (17KB) |
+| `Infra/TelemetryRecorder.mqh` | — | — | 🔴 Not audited |
+| `Infra/PerformanceReport.mqh` | — | — | 🔴 Not audited |
+| `Infra/DataManager.mqh` | — | — | 🔴 Not audited |
+| `Infra/SanityManager.mqh` | — | — | 🔴 Not audited |
+| `Infra/StateManager.mqh` | — | — | 🔴 Not audited |
+| `Infra/AdaptiveConfig.mqh` | — | — | 🔴 Not audited |
 | `Analysis/SRManager.mqh` | — | — | ⚠️ Audit needed (54KB) |
-| `Analysis/Pattern/*.mqh` | — | — | ⚠️ Audit needed |
-| `Phase7/*.mqh` | — | — | 🔴 Not audited |
-| `Dashboard/*.mqh` | — | — | 🔴 Not audited |
+| `Analysis/Pattern/*.mqh` | — | — | 🔴 Not audited |
+| `Data/*.mqh` | — | — | 🔴 Not audited |
+| `QA/*.mqh` | — | — | 🔴 Not audited |
+| `UI/*.mqh` | — | — | 🔴 Not audited |
+| `Tools/*.mqh` | — | — | 🔴 Not audited |
+| `Experts/PASR_MODULAR.mq5` | v13.00 | S15 | ✅ Path confirmed |
 
 ---
 
