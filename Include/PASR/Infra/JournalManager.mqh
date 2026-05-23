@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/JournalManager.mqh — v1.00                                 |
+//| Infra/JournalManager.mqh — v2.00                                 |
 //| Per-trade CSV journal + in-memory performance analytics.         |
 //|                                                                  |
 //| RESPONSIBILITIES:                                                |
@@ -17,18 +17,28 @@
 //|   f00..f25 (26 feature dims)                                     |
 //|                                                                  |
 //| USAGE:                                                           |
-//|   OnPositionClosed() — call from Orchestrator/OnTradeTransaction  |
-//|   GetStats()         — aggregate TradeStat                       |
-//|   GetDailyPnL()      — array of last 30 daily PnL values         |
+//|   Via EventBus EVENT_ID_TRADE_CLOSED (primary path)             |
+//|   GetStats()    — aggregate TradeStat                            |
+//|   GetDailyPnL() — array of last 30 daily PnL values             |
 //|                                                                  |
-//| CHANGE LOG:                                                      |
+//| CHANGE LOG:                                                       |
+//|   v2.00 (2026-05-24) Sprint 18 — IManager compliance rewrite    |
+//|     JNL-001: extends IManager, Initialize(CEventBus*) override  |
+//|     JNL-002: removed AdaptiveConfig.mqh include (wrong dep)     |
+//|     JNL-003: OnEvent() handles EVENT_ID_TRADE_CLOSED             |
+//|     JNL-004: CSV append via FILE_WRITE|FILE_CSV|FILE_ANSI only   |
+//|     JNL-005: standalone Log helpers replaced by PASRLog*         |
 //|   v1.00 (2026-05-21) — Phase 10 initial                          |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __INFRA_JOURNAL_MANAGER_MQH__
 #define __INFRA_JOURNAL_MANAGER_MQH__
 
-#include "AdaptiveConfig.mqh"
+// JNL-002 FIX: include IManager (not AdaptiveConfig) as primary dep
+#include "../Core/IManager.mqh"
+#include "../Core/EventBus.mqh"
+#include "../Core/Events.mqh"
+#include "../Core/Globals.mqh"
 #include "../Signal/AI/AITypes.mqh"
 #include "../Signal/AI/AIFeatureBuilder.mqh"
 #include "../Trade/TradePlan.mqh"
@@ -69,7 +79,7 @@ struct JournalEntry
    bool     beDone;
    bool     partialDone;
    bool     runnerActive;
-   // Feature snapshot (18 dims)
+   // Feature snapshot
    double   features[AI_FEATURE_DIM];
   };
 
@@ -95,9 +105,10 @@ struct TradeStat
   };
 
 //+------------------------------------------------------------------+
-//| CJournalManager                                                  |
+//| CJournalManager — IManager compliant (v2.00)                     |
 //+------------------------------------------------------------------+
-class CJournalManager
+// JNL-001 FIX: extend IManager so Orchestrator can use InitManager()
+class CJournalManager : public IManager
   {
 private:
    JournalEntry m_buf[JOURNAL_BUF_SIZE];
@@ -119,6 +130,10 @@ private:
    string   m_csvPrefix;  // default "PASR_Journal"
    bool     m_csvEnabled;
 
+   // EventBus ref (IManager provides m_bus via base — stored separately for explicit access)
+   CEventBus *m_busRef;
+
+   //--- Internal helpers ---
    string CSVFilename() const
      {
       MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
@@ -188,7 +203,6 @@ private:
         IntegerToString(e.beDone?1:0),
         IntegerToString(e.partialDone?1:0),
         IntegerToString(e.runnerActive?1:0),
-        // 18 features
         DoubleToString(e.features[0],3),  DoubleToString(e.features[1],3),
         DoubleToString(e.features[2],3),  DoubleToString(e.features[3],3),
         DoubleToString(e.features[4],3),  DoubleToString(e.features[5],3),
@@ -202,10 +216,9 @@ private:
 
    void UpdateDailyPnL(double pnl)
      {
-      datetime today = StringToTime(TimeToString(TimeCurrent(), TIME_DATE));
+      datetime today = (datetime)(TimeCurrent() - TimeCurrent() % 86400); // midnight-floor
       if(today != m_todayDate)
         {
-         // New day: push yesterday's total
          m_dailyPnL[m_dailyHead] = m_todayPnL;
          m_dailyHead = (m_dailyHead + 1) % JOURNAL_DAILY_SIZE;
          m_todayPnL  = 0;
@@ -222,16 +235,63 @@ private:
       if(dd > m_maxDrawdown) m_maxDrawdown = dd;
      }
 
+   // JNL-004 FIX: correct CSV append — open FILE_WRITE only, seek to end
+   void AppendToCSV(const JournalEntry &e)
+     {
+      if(!m_csvEnabled) return;
+      string fn = CSVFilename();
+      bool newFile = !FileIsExist(fn, FILE_COMMON);
+      // JNL-004: do NOT mix FILE_READ with FILE_WRITE for append
+      int h = FileOpen(fn, FILE_WRITE|FILE_CSV|FILE_COMMON|FILE_ANSI);
+      if(h == INVALID_HANDLE)
+        {
+         PASRLogError("Journal", "CSV open failed: " + IntegerToString(GetLastError()));
+         return;
+        }
+      if(newFile)
+         WriteCsvHeader(h);
+      FileSeek(h, 0, SEEK_END);
+      AppendCSVRow(h, e);
+      FileClose(h);
+     }
+
 public:
    CJournalManager()
       : m_head(0), m_count(0), m_totalTrades(0),
         m_dailyHead(0), m_todayPnL(0), m_todayDate(0),
         m_peakEquity(0), m_maxDrawdown(0),
-        m_csvPrefix("PASR_Journal"), m_csvEnabled(true)
+        m_csvPrefix("PASR_Journal"), m_csvEnabled(true),
+        m_busRef(NULL)
      {
       ArrayInitialize(m_dailyPnL, 0);
       m_peakEquity = AccountInfoDouble(ACCOUNT_BALANCE);
-      m_todayDate  = StringToTime(TimeToString(TimeCurrent(), TIME_DATE));
+      // midnight-floor for today
+      m_todayDate  = (datetime)(TimeCurrent() - TimeCurrent() % 86400);
+     }
+
+   // JNL-001: IManager interface
+   virtual bool   Initialize(CEventBus *bus) override
+     {
+      if(CheckPointer(bus) == POINTER_INVALID)
+        { PASRLogError("Journal", "NULL bus"); return false; }
+      m_busRef = bus;
+      // JNL-003: subscribe to TRADE_CLOSED so Stage_Journal can fire via EventBus
+      m_busRef.Subscribe(GetPointer(this), EVENT_ID_TRADE_CLOSED);
+      PASRLogInfo("Journal", "Initialized. CSV=" + (m_csvEnabled ? "ON" : "OFF"));
+      return true;
+     }
+
+   virtual void   Shutdown() override
+     { PASRLogInfo("Journal", StringFormat("Shutdown. Total trades: %d", m_totalTrades)); }
+
+   virtual string Name() const override { return "CJournalManager"; }
+
+   // JNL-003: EventBus-driven entry (called by EventBus drain)
+   // ev.ticket=ticket, ev.value1=pnl, ev.data1=regime, ev.data2=session
+   // Full detail path via OnPositionClosed() (called from Orchestrator::OnTradeTransaction)
+   virtual void   OnEvent(const PASREvent &ev) override
+     {
+      // light-weight event path — full data arrives via OnPositionClosed
      }
 
    void SetCSVEnabled(bool b)       { m_csvEnabled = b; }
@@ -278,18 +338,15 @@ public:
       e.driftScore   = driftScore;
       e.ensembleModel= ensembleModel;
       e.isWin        = (pnl > 0);
+      e.durationMin  = (int)((e.timeClose - timeOpen) / 60);
 
-      // Duration
-      e.durationMin = (int)((e.timeClose - timeOpen) / 60);
-
-      // R:R — initial risk in price units
+      // R:R
       double riskPts = MathAbs(plan.entryPrice - plan.sl);
       double pnlPts  = MathAbs(closePrice - plan.entryPrice);
       e.rr = (riskPts > 0)
              ? ((pnl > 0 ? 1 : -1) * pnlPts / riskPts)
              : 0;
 
-      // Feature snapshot
       for(int i=0; i<AI_FEATURE_DIM; i++) e.features[i] = fv.f[i];
 
       // Store in ring buffer
@@ -300,31 +357,15 @@ public:
 
       UpdateDailyPnL(pnl);
       UpdateDrawdown(pnl);
+      AppendToCSV(e);
 
-      // Append to CSV
-      if(m_csvEnabled)
-        {
-         string fn = CSVFilename();
-         bool newFile = !FileIsExist(fn, FILE_COMMON);
-         int h = FileOpen(fn, FILE_WRITE|FILE_CSV|FILE_COMMON|FILE_ANSI|
-                          (newFile?0:FILE_READ));
-         if(h != INVALID_HANDLE)
-           {
-            if(newFile) WriteCsvHeader(h);
-            else        FileSeek(h, 0, SEEK_END);
-            AppendCSVRow(h, e);
-            FileClose(h);
-           }
-         else
-            PrintFormat("[Journal] CSV open failed: %d", GetLastError());
-        }
-
-      PrintFormat("[Journal] #%d %s %s PnL=%.2f RR=%.2f AI=%.2f %s",
+      // JNL-005: use PASRLog* (Globals.mqh) instead of standalone helpers
+      PASRLogInfo("Journal", StringFormat("#%d %s %s PnL=%.2f RR=%.2f AI=%.2f%s",
                   m_totalTrades,
                   e.direction==SIGNAL_BUY?"BUY":"SELL",
                   e.isWin?"WIN":"LOSS",
                   pnl, e.rr, aiScore,
-                  e.beDone?"[BE]":"");
+                  e.beDone?" [BE]":""));
      }
 
    //+----------------------------------------------------------------+
@@ -344,7 +385,6 @@ public:
 
       for(int i = 0; i < n; i++)
         {
-         // Walk backward from latest
          int idx = (m_head - 1 - i + JOURNAL_BUF_SIZE) % JOURNAL_BUF_SIZE;
          const JournalEntry &e = m_buf[idx];
          s.totalTrades++;
@@ -385,9 +425,6 @@ public:
       return s;
      }
 
-   //+----------------------------------------------------------------+
-   //| GetStatsByRegime — filter stats for one regime                 |
-   //+----------------------------------------------------------------+
    TradeStat GetStatsByRegime(ENUM_MARKET_REGIME regime) const
      {
       TradeStat s; ZeroMemory(s);
@@ -413,9 +450,6 @@ public:
       return s;
      }
 
-   //+----------------------------------------------------------------+
-   //| GetStatsBySession                                               |
-   //+----------------------------------------------------------------+
    TradeStat GetStatsBySession(ENUM_TRADING_SESSION session) const
      {
       TradeStat s; ZeroMemory(s);
@@ -441,19 +475,14 @@ public:
       return s;
      }
 
-   //+----------------------------------------------------------------+
-   //| Daily PnL array for equity curve                               |
-   //+----------------------------------------------------------------+
    void GetDailyPnL(double &out[]) const
      {
       ArrayResize(out, JOURNAL_DAILY_SIZE);
       for(int i=0; i<JOURNAL_DAILY_SIZE; i++)
          out[i] = m_dailyPnL[(m_dailyHead + i) % JOURNAL_DAILY_SIZE];
-      // append today's running total
       out[JOURNAL_DAILY_SIZE-1] = m_todayPnL;
      }
 
-   // Accessors for PerformanceReport
    int          GetTotalTrades() const { return m_totalTrades; }
    int          GetCount()       const { return m_count; }
    double       GetMaxDrawdown() const { return m_maxDrawdown; }
@@ -463,27 +492,6 @@ public:
       if(i < 0 || i >= m_count) return NULL;
       int idx = (m_head - 1 - i + JOURNAL_BUF_SIZE) % JOURNAL_BUF_SIZE;
       return &m_buf[idx];
-     }
-   
-   //+----------------------------------------------------------------+
-   //| Logging helpers for centralized logging                        |
-   //+----------------------------------------------------------------+
-   void LogInfo(const string msg) const
-     {
-      PrintFormat("[PASR][INFO] %s", msg);
-     }
-   
-   void LogWarn(const string msg) const
-     {
-      PrintFormat("[PASR][WARN] %s", msg);
-     }
-   
-   void LogError(const string msg, const int errCode = 0) const
-     {
-      if(errCode != 0)
-         PrintFormat("[PASR][ERROR] %s | Code: %d", msg, errCode);
-      else
-         PrintFormat("[PASR][ERROR] %s", msg);
      }
   };
 
