@@ -1,7 +1,7 @@
 # PASR — Price Action Support Resistance EA
 
-> **Architecture:** Pipeline Orchestration (migrated from Monolith v9, Sprint 1–11)
-> **Last updated:** Sprint 11 (2026-05-24)
+> **Architecture:** Pipeline Orchestration (migrated from Monolith v9, Sprint 1–12)
+> **Last updated:** Sprint 12 (2026-05-24)
 > **Compile target:** `Experts/PASR/PASR_MODULAR.mq5`
 
 ---
@@ -25,7 +25,7 @@ OnTimer() → DrainQueue()
               Stage  8: RiskCheck        ← CRiskManager + IsSpreadAcceptable()
               Stage  9: AdaptiveParams   ← CAdaptiveParameterManager->OnNewBar()
               Stage 10: Execution        ← CExecutionManager + ticket capture
-              Stage 11: PosMgmt          ← CExecutionManager->ManagePositions()
+              Stage 11: PosMgmt          ← CPositionManager->ScanPositions() + CExitEngine->CheckExit()
               Stage 12: Recovery         ← CRecoveryManager->OnTick()
               Stage 13: Dashboard        ← CDashboardManager->OnTimer()
               Stage 14: Journal          ← CJournalManager->LogEntry()
@@ -55,7 +55,7 @@ Include/PASR/
 │   └── PASR_SymbolManager.mqh
 │
 ├── Analysis/                ← Market analysis managers
-│   ├── SRManager.mqh        ← S/R detection (⚠ 54KB, Sprint 12 decomposition target)
+│   ├── SRManager.mqh        ← S/R detection (⚠ 54KB, Sprint 13 decomposition target)
 │   ├── ZoneManager.mqh      ← Supply/Demand zones
 │   ├── MarketRegimeDetector.mqh
 │   ├── AdaptiveParameterManager.mqh
@@ -65,10 +65,19 @@ Include/PASR/
 │   ├── SignalManager.mqh    ← v4.02 — aggregator, 4 sources
 │   └── SignalFilterPipeline.mqh ← v1.02 — MTF + custom filter pipeline
 │
-├── Trade/                   ← Execution, Risk, Recovery managers
-├── AI/                      ← AIOrchestrator, ONNX integration
-├── Phase7/                  ← HealthMonitor, SnapshotManager, SessionState
-└── Dashboard/               ← Chart rendering, telemetry, journal
+├── Trade/                   ← ✅ S12 Audited — 6 files
+│   ├── ExecutionManager.mqh ← v3.02 — async retry + stops clamp (BUG-T14)
+│   ├── RiskManager.mqh      ← v2.02 — circuit breaker, daily loss, lot calc
+│   ├── RecoveryManager.mqh  ← v2.18 — fakeout detection, partial close, equity decay guard
+│   ├── RecoveryEngine.mqh   ← struct + state machine per position
+│   ├── ExitEngine.mqh       ← v2.01 — Chandelier + Structure + ProfitFade exits
+│   ├── PositionManager.mqh  ← v3.00 — pipeline-aware scanner, ScanPositions(ctx)
+│   ├── TradePlan.mqh        ← struct TradePlan (direction, lot, sl, tp, comment)
+│   └── CorrelationManager.mqh ← 🔴 TR-006 OPEN — full monolith v1.0, belum dimigrasi
+│
+├── AI/                      ← AIOrchestrator, ONNX integration (audit pending)
+├── Phase7/                  ← HealthMonitor, SnapshotManager, SessionState (audit pending)
+└── Dashboard/               ← Chart rendering, telemetry, journal (audit pending)
 ```
 
 ---
@@ -86,24 +95,29 @@ Include/PASR/
 
 ## Bug Tracker
 
-### 🔴 OPEN — Pending subfolder audits
+### 🔴 OPEN
 
 | ID | Severity | File | Description | Target |
 |----|----------|------|-------------|--------|
-| A1 | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | Sprint 12 |
-| A5 | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | Sprint 12 |
-| TR-? | 🔴 TBD | `Trade/*.mqh` | Trade subfolder: architecture belum diaudit | Sprint 12 |
-| AI-? | 🔴 TBD | `AI/*.mqh` | AI subfolder: ONNX wiring belum diaudit | Sprint 12 |
-| P7-? | 🔴 TBD | `Phase7/*.mqh` | Phase7 subfolder belum diaudit | Sprint 12 |
-| DS-? | 🔴 TBD | `Dashboard/*.mqh` | Dashboard subfolder belum diaudit | Sprint 12 |
-| BUG-008 | 🟠 HIGH | `Experts/PASR/PASR_MODULAR.mq5` | File EA tidak ditemukan di repo — perlu konfirmasi path dan commit | Sprint 12 |
+| **TR-006** | 🔴 CRITICAL | `Trade/CorrelationManager.mqh` | Full monolith v1.0 — belum dimigrasi ke IManager pipeline. `Initialize()` bukan override `Init(data,bus)`, tidak ada `DeclareEvents()`/`AddEvent()`, include path salah (`#include <PASR/Core/IManager.h>` — ekstensi `.h` tidak ada), include `<PASR/Tools/TickCache.mqh>` tidak ada di repo. **Tidak dapat compile.** | S13 |
+| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | S13 |
+| **A5** | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | S13 |
+| **AI-?** | 🔴 TBD | `AI/*.mqh` | AI subfolder: ONNX wiring belum diaudit | S13 |
+| **P7-?** | 🔴 TBD | `Phase7/*.mqh` | Phase7 subfolder belum diaudit | S13 |
+| **DS-?** | 🔴 TBD | `Dashboard/*.mqh` | Dashboard subfolder belum diaudit | S13 |
+| **BUG-008** | 🟠 HIGH | `Experts/PASR/PASR_MODULAR.mq5` | File EA tidak ditemukan di repo — perlu konfirmasi path dan commit | S13 |
 
 ---
 
-### ✅ RESOLVED — Sprint 1–11
+### ✅ RESOLVED — Sprint 1–12
 
 | ID | Severity | File | Fix | Sprint |
 |----|----------|------|-----|--------|
+| **TR-001** | 🔴 CRITICAL | `Trade/ExitEngine.mqh` | `#include <PASR/Core/IManager.h>` → `.mqh`. Class tidak extend IManager, 5 bugs (T01–T05) termasuk infinite loop EVENT_ID_EMERGENCY_STOP re-dispatch (T12). Fully rewritten ke v2.01 dengan IManager pipeline integration | S12 (S3A) |
+| **TR-002** | 🔴 CRITICAL | `Trade/PositionManager.mqh` | `Initialize(CEventBus*)` bukan true override → `m_data` selalu NULL (crash). `DeclareEvents()` pakai `m_bus.Subscribe()` langsung → double-subscribe. Event ID `TRADE_CLOSED`/`TRADE_OPENED` tidak ada → `POSITION_UPDATE`. Rewritten ke v3.00 | S12 (S3A) |
+| **TR-003** | 🔴 CRITICAL | `Trade/RiskManager.mqh` | Double-accumulation dailyLoss: `OnTradeClosed()` + `OnEvent(POSITION_UPDATE)` keduanya akumulasi P&L → daily limit hit 2x lebih cepat. Fix: `OnTradeClosed()` hapus akumulasi (v2.02 BUG-T13). Guard ev.profit≠0 ditambah (v2.01 BUG-T06) | S12 (S3B) |
+| **TR-004** | 🟠 HIGH | `Trade/ExecutionManager.mqh` | SL/TP tidak divalidasi terhadap `SYMBOL_TRADE_STOPS_LEVEL` sebelum order dikirim → broker reject `TRADE_RETCODE_INVALID_STOPS` jika price bergerak antara TradePlan creation dan execution. Fix: `ClampStopsToMinLevel()` dengan safety margin 1.1× (v3.02 BUG-T14) | S12 (S3B) |
+| **TR-005** | 🟡 MEDIUM | `Trade/RecoveryManager.mqh` | `IsRecoveryAllowed()` + `RecordRecoveryAttempt()` + `OnNewBar()` daily reset menggunakan `TimeToStruct().day` (day-of-month 1–31) sebagai key unik. Pada tanggal 1 di bulan berbeda, counter reset prematur. Fix: midnight-floor datetime `(datetime)(now - now%86400)` — konsisten dengan RiskManager pattern (v2.18 BUG-T07) | S12 (S3B) |
 | BUG-001 | 🔴 CRITICAL | `Core/Globals.mqh` | Removed `CEventBus::Instance()` fake singleton. Replaced with explicit bus param `PASRDispatchEvent(ev, bus)` | S2 |
 | BUG-002 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | Removed monolith `ProcessNewBar()` fallback in OnTick. OnTick is now pure event-push only | S2 |
 | BUG-003 | 🔴 CRITICAL | `Core/PipelineEngine.mqh` | All 7 empty stage stubs implemented (Stage_AnalysisZone, PatternRec, Recovery, Dashboard, Journal, AdaptiveParams, Execution) | S2 |
@@ -120,20 +134,20 @@ Include/PASR/
 | O4 | 🟠 HIGH | `Core/Orchestrator.mqh` | SessionState init wiring fixed | S9 |
 | O7 | 🔴 CRITICAL | `Core/Orchestrator.mqh` | `BarChanged()` race: dipanggil dua kali (OnTick + OnTimer), double-flip `m_lastBarTime`. Fixed dengan `m_new_bar_flag` — set di OnTick, consumed+reset di OnTimer | S9 |
 | O8 | 🟠 HIGH | `Core/Orchestrator.mqh` | `CJournalManager` selalu dipassing sebagai `NULL` ke `InjectManagers()`. Added sebagai owned member `m_journal`, initialized di `Init()` | S9 |
-| X1–X7 | 🔴 CRITICAL | `Core/PASR_Executor.mqh` | **DELETED** — 2024 monolith zombie. 7 bugs: no IManager, `Sleep()` recursive deadlock, `EXEC_NONE`/`EXEC_FAILED` enum collision, duplicate `ExecutionRequest` struct, duplicate switch case, no include guard. Superseded by `CExecutionManager` + `CAsyncOrderManager` | S9 |
-| A2 | 🟠 HIGH | `Analysis/Optimized/` | **DELETED** entire folder (6 files) — orphaned parallel refactoring experiment, tidak pernah diwire ke PASR.mqh atau pipeline | S9 |
-| A3 | 🟡 LOW | `Analysis/OPTIMIZATION_SUMMARY.md` | **DELETED** — dev artifact, bukan official documentation | S9 |
-| S8-001 | 🔴 CRITICAL | `Core/Events.mqh` | Added missing `EVENT_ID_PRICE_UPDATE`, `EVENT_ID_TIMER`, `EVENT_ID_POSITION_UPDATE` (compile errors in OnTick/OnTimer) | S8 |
+| X1–X7 | 🔴 CRITICAL | `Core/PASR_Executor.mqh` | **DELETED** — 2024 monolith zombie. 7 bugs: no IManager, `Sleep()` recursive deadlock, enum collision, duplicate structs. Superseded by `CExecutionManager` + `CAsyncOrderManager` | S9 |
+| A2 | 🟠 HIGH | `Analysis/Optimized/` | **DELETED** entire folder (6 files) — orphaned parallel refactoring experiment | S9 |
+| A3 | 🟡 LOW | `Analysis/OPTIMIZATION_SUMMARY.md` | **DELETED** — dev artifact | S9 |
+| S8-001 | 🔴 CRITICAL | `Core/Events.mqh` | Added missing `EVENT_ID_PRICE_UPDATE`, `EVENT_ID_TIMER`, `EVENT_ID_POSITION_UPDATE` | S8 |
 | S8-005 | 🔴 CRITICAL | `Core/Events.mqh` | Removed non-existent `data_i[]` array from `PASREvent`. Replaced with `data1`/`data2` double fields | S8 |
-| N01 | 🔴 CRITICAL | `Core/PipelineEngine.mqh` | `Stage_AnalysisSR` push event tanpa dispatch — SR `OnEvent()` tidak pernah fired di timer path. Fix: `m_bus.Dispatch(ev)` dipanggil langsung setelah Push | S11 |
-| N03 | 🟠 HIGH | `Core/Orchestrator.mqh` | `OnDeinit()` memanggil `m_health->Shutdown()` + `m_ai_orch->Deinit()` + `m_dash->Destroy()` secara manual, lalu `FreeAll()` menjalankan hal yang sama lagi (double-shutdown/free). Fix: `OnDeinit()` hanya stop timer + log. `FreeAll()` adalah satu-satunya owner teardown | S11 |
-| N04 | 🟠 HIGH | `Core/PipelineEngine.mqh` | `Stage_RiskCheck` set `ctx.exit_reason = STAGE_SKIP` pada soft rejection — meracuni exit_reason dan trigger false-alarm debug log di Orchestrator. Fix: exit_reason tidak dioverwrite; hanya `exit_message` yang ditulis | S11 |
-| N06 | 🟠 HIGH | `Core/Orchestrator.mqh` | `RegisterManager()` tidak guard `m_bus == NULL`. Jika bus alokasi gagal, `m_bus.Register()` crash. Fix: early-return jika `m_bus == NULL` | S11 |
-| N07 | 🔴 CRITICAL | `Core/PipelineEngine.mqh` | `SkipIfNull()` menggunakan `CheckPointer(void*)` — undefined behavior di MQL5, bisa return `POINTER_DYNAMIC` untuk pointer NULL sehingga semua 14 stage guard tidak berfungsi. Fix: ganti dengan `ptr == NULL` plain check | S11 |
-| BUG-S10-001 | 🔴 CRITICAL | `Signal/SignalFilterPipeline.mqh` | `support`/`resistance` undefined — `GetZoneContext()` tidak assign ke local vars sebelum dipakai. Compile error | S11 |
-| BUG-S10-002 | 🟠 HIGH | `Signal/SignalFilterPipeline.mqh` | `RunCustomFilters()` ada di class tapi tidak pernah dipanggil dari `RunCompletePipeline()`. Custom filters tidak pernah aktif | S11 |
-| BUG-S10-003 | 🟠 HIGH | `Signal/SignalFilterPipeline.mqh` | MTF `referencePrice` menggunakan `ctx.bid` (tick price) bukan `ctx.close` (bar close) — filter MTF tidak konsisten dengan bar-based analysis | S11 |
-| BUG-S10-004 | 🔴 CRITICAL | `Signal/SignalManager.mqh` | Call site `RunCompletePipeline()` di `SignalManager` menggunakan signature lama (3 param) sedangkan v1.01 sudah 5 param — compile error | S11 |
+| N01 | 🔴 CRITICAL | `Core/PipelineEngine.mqh` | `Stage_AnalysisSR` push event tanpa dispatch — SR `OnEvent()` tidak pernah fired di timer path | S11 |
+| N03 | 🟠 HIGH | `Core/Orchestrator.mqh` | `OnDeinit()` double-shutdown: manual teardown + `FreeAll()` keduanya jalan. Fix: `OnDeinit()` hanya stop timer + log | S11 |
+| N04 | 🟠 HIGH | `Core/PipelineEngine.mqh` | `Stage_RiskCheck` overwrite `ctx.exit_reason` pada soft rejection → false-alarm exit trigger. Fix: hanya `exit_message` yang ditulis | S11 |
+| N06 | 🟠 HIGH | `Core/Orchestrator.mqh` | `RegisterManager()` crash jika `m_bus == NULL`. Fix: early-return guard | S11 |
+| N07 | 🔴 CRITICAL | `Core/PipelineEngine.mqh` | `SkipIfNull()` menggunakan `CheckPointer(void*)` — undefined behavior, semua 14 stage guard tidak berfungsi. Fix: plain `ptr == NULL` check | S11 |
+| BUG-S10-001 | 🔴 CRITICAL | `Signal/SignalFilterPipeline.mqh` | `support`/`resistance` undefined — compile error | S11 |
+| BUG-S10-002 | 🟠 HIGH | `Signal/SignalFilterPipeline.mqh` | `RunCustomFilters()` tidak pernah dipanggil dari `RunCompletePipeline()` | S11 |
+| BUG-S10-003 | 🟠 HIGH | `Signal/SignalFilterPipeline.mqh` | MTF `referencePrice` menggunakan tick price bukan bar close | S11 |
+| BUG-S10-004 | 🔴 CRITICAL | `Signal/SignalManager.mqh` | Call site `RunCompletePipeline()` signature mismatch (3 vs 5 param) — compile error | S11 |
 
 ---
 
@@ -143,11 +157,12 @@ Include/PASR/
 |--------|-------|------------------|
 | S1 | Compile fixes | BUG-007, BUG-008, BUG-012 |
 | S2 | Architecture integrity | BUG-001–006, BUG-009–011 |
-| S8 | Runtime state ownership | SessionState wiring, Events.mqh fixes, health/snapshot injection |
-| S9 | Orchestrator residuals + Analysis cleanup | O1, O4, O7, O8, X1–X7 (PASR_Executor deleted), A2–A3 (Optimized/ deleted) |
+| S8 | Runtime state ownership | SessionState wiring, Events.mqh fixes |
+| S9 | Orchestrator residuals + Analysis cleanup | O1, O4, O7, O8, X1–X7, A2–A3 |
 | S10 | Signal layer audit (planned → executed S11) | SignalFilterPipeline, SignalManager wiring |
 | S11 | PipelineEngine + Orchestrator hardening | N01, N03, N04, N06, N07, BUG-S10-001–004 |
-| S12 | Trade/AI/Phase7/Dashboard audit + A1 decomposition | _(planned)_ |
+| S12 | Trade subfolder audit | TR-001 (ExitEngine), TR-002 (PositionManager), TR-003 (RiskManager), TR-004 (ExecutionManager), TR-005 (RecoveryManager). **TR-006 (CorrelationManager) OPEN** |
+| S13 | CorrelationManager migration + AI/Phase7/Dashboard audit | _(planned)_ |
 
 ---
 
@@ -189,9 +204,16 @@ orch.OnDeinit(reason);
 | `Core/EventBus.mqh` | — | S8 | ✅ Stable |
 | `Signal/SignalManager.mqh` | v4.02 | S11 | ✅ Stable |
 | `Signal/SignalFilterPipeline.mqh` | v1.02 | S11 | ✅ Stable |
+| `Trade/ExecutionManager.mqh` | v3.02 | S12 | ✅ Stable |
+| `Trade/RiskManager.mqh` | v2.02 | S12 | ✅ Stable |
+| `Trade/RecoveryManager.mqh` | v2.18 | S12 | ✅ Stable |
+| `Trade/ExitEngine.mqh` | v2.01 | S12 | ✅ Stable |
+| `Trade/PositionManager.mqh` | v3.00 | S12 | ✅ Stable |
+| `Trade/TradePlan.mqh` | — | S12 | ✅ Stable |
+| `Trade/RecoveryEngine.mqh` | — | S12 | ✅ Stable |
+| `Trade/CorrelationManager.mqh` | v1.0 | — | 🔴 TR-006 OPEN — compile error |
 | `Analysis/SRManager.mqh` | — | — | ⚠️ Audit needed (54KB) |
 | `Analysis/Pattern/*.mqh` | — | — | ⚠️ Audit needed |
-| `Trade/*.mqh` | — | — | 🔴 Not audited |
 | `AI/*.mqh` | — | — | 🔴 Not audited |
 | `Phase7/*.mqh` | — | — | 🔴 Not audited |
 | `Dashboard/*.mqh` | — | — | 🔴 Not audited |
