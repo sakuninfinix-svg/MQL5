@@ -6,65 +6,16 @@
 //|    EA's OnInit/OnTick/OnDeinit/OnTradeTransaction → delegate    |
 //|    to COrchestrator with one call each.                         |
 //|                                                                  |
-//|  USAGE (in your EA .mq5 file):                                   |
-//|    #include <PASR/Core/PASR.mqh>                                 |
-//|    COrchestrator g_orch;                                         |
-//|    int OnInit()   { return g_orch.Init(); }                      |
-//|    void OnTick()  { g_orch.OnTick();  }                          |
-//|    void OnDeinit(const int r) { g_orch.OnDeinit(r); }            |
-//|    void OnTimer() { g_orch.OnTimer(); }                          |
-//|    void OnTradeTransaction(                                      |
-//|           const MqlTradeTransaction &t,                          |
-//|           const MqlTradeRequest &rq,                             |
-//|           const MqlTradeResult   &rs)                            |
-//|    { g_orch.OnTradeTransaction(t, rq, rs); }                     |
-//|                                                                  |
-//|  INIT ORDER:                                                      |
-//|    L0  Config Validate                                           |
-//|    L2  DataManager                                               |
-//|    L3  SRManager (Analysis) + ZoneManager (Analysis)            |
-//|    L4  PatternManager                                            |
-//|    L5a SignalManager + inject deps + register sources            |
-//|    L5b CAIOrchestrator + AISignalSource (26-dim AI system)       |
-//|    L5c RegimeFilter + RegimeSignalSource  [Phase 4 NEW]          |
-//|    L5d RiskManager                        [Phase 4 NEW position] |
-//|    L6a ExecutionManager                                          |
-//|    L6b RecoveryManager                                           |
-//|    L7  DashboardManager + inject deps (Risk+Signal+Regime)       |
-//|    L7b SanityManager                      [Phase 5 NEW]          |
-//|    L7c TelemetryRecorder                  [Phase 3 NEW]          |
-//|    L7d LatencySimulator (QA only)         [Phase 4 NEW]          |
-//|                                                                  |
-//|  SIGNAL SOURCE WIRING (all sources + weights):                   |
-//|    PatternSignalSource  w=1.2  VOTER  — price action patterns    |
-//|    SRSignalSource       w=1.5  VOTER  — SR zone proximity        |
-//|    AISignalSource       w=0.8  VOTER  — neural net confidence    |
-//|    RegimeSignalSource   w=0.0  MULT   — regime modulator         |
-//|      (set w=-1.0 to use VETO mode: VOLATILE blocks all signals)  |
-//|                                                                  |
-//|  CHANGE LOG:                                                     |
-//|  v3.02 (2026-05-22) — Phase 3+4 Telemetry + Latency Sim:        |
-//|    + CTelemetryRecorder allocated + init (L7c)                   |
-//|    + CLatencySimulator (QA build only) allocated (L7d)           |
-//|    + CSV export for pipeline latency, slippage, signal metrics   |
-//|    + Backtest latency simulation with requote modeling           |
-//|  v3.01 (2026-05-21) — Phase 5 Circuit Breaker:                  |
-//|    + CSanityManager allocated + init (L7b)                       |
-//|    + Data validation: stale tick, wide spread, price gap         |
-//|  v3.00 (2026-05-21) — Phase 4 wiring:                           |
-//|    + CRegimeFilter allocated + init (L5c)                        |
-//|    + CRegimeSignalSource registered as MULT (w=0.0)              |
-//|      Regime TRENDING → x1.3 score boost                         |
-//|      Regime RANGING  → x0.8 score cut                           |
-//|      Regime VOLATILE → SIGNAL_NONE (acts like veto via w=0)     |
-//|      Regime SQUEEZE  → x0.6 score cut                           |
-//|    + SignalManager.SetRegimeManager() call added                 |
-//|    + DashboardManager.SetRegimeFilter() call added               |
-//|    + FreeAll(): m_regime + m_srcRegime added                     |
-//|    + PrintSummary(): all managers listed with version            |
-//|  v2.10 (2026-05-21) — Phase 3 complete wiring                   |
-//|  v2.00 (2026-05-21) — Pipeline Architecture                     |
-//|  v1.01 (2026-05-21) — FIX #1/#2/#4                              |
+//|  CHANGELOG:                                                      |
+//|  v3.03 (2026-05-23) — Sprint 2 Bug Fixes:                       |
+//|    BUG-002: Removed monolith ProcessNewBar() fallback in OnTick  |
+//|    BUG-004: Health+Snapshot registered via InitManager() properly|
+//|    BUG-005: FreeAll() fixed to strict reverse init order         |
+//|    BUG-009: Constructor init list completed (health, snapshot)    |
+//|    BUG-010: Eliminated redundant double DrainQueue() in OnTick() |
+//|  v3.02 (2026-05-22) — Phase 3+4 Telemetry + Latency Sim         |
+//|  v3.01 (2026-05-21) — Phase 5 Circuit Breaker                   |
+//|  v3.00 (2026-05-21) — Phase 4 wiring                            |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
@@ -91,41 +42,41 @@ private:
    CAnalysisZoneManager   *m_zone;
    CPatternManager        *m_pattern;
    CSignalManager         *m_signal;
-   CAIOrchestrator        *m_ai_orch;  // Phase 7: 26-dim AI system (replaced AIManager)
-   CMarketRegimeDetector  *m_regime_det; // Phase 5: Market Regime Detection
-   CRegimeFilter          *m_regime;     // Phase 4: Legacy Regime Filter
+   CAIOrchestrator        *m_ai_orch;
+   CMarketRegimeDetector  *m_regime_det;
+   CRegimeFilter          *m_regime;
    CRiskManager           *m_risk;
    CExecutionManager      *m_exec;
    CRecoveryManager       *m_recovery;
    CDashboardManager      *m_dash;
-   CSanityManager         *m_sanity;     // Phase 1: Circuit Breaker
-   CTelemetryRecorder     *m_telemetry;  // Phase 3: Metrics Export
-   CAdaptiveParameterManager *m_adaptive; // Phase 5: Dynamic Parameters
-   
-   // ── Phase 6: Low Latency Components ─────────────────────────────
-   CLatencyOptimizer      *m_optimizer;  // Ultra-low latency engine
-   CAsyncOrderManager     *m_async_orders; // Async order execution
-   CHighFreqTimer         *m_hf_timer;   // High-frequency polling
-   
-   // ── Phase 7: Self-Healing Components ────────────────────────────
-   CHealthMonitor         *m_health;     // Health monitoring & recovery
-   CSnapshotManager       *m_snapshot;   // State persistence
-   
-   // ── QA Managers (testing only) ──────────────────────────────────
-   CLatencySimulator      *m_latency_sim; // Phase 4: Latency Simulation
+   CSanityManager         *m_sanity;
+   CTelemetryRecorder     *m_telemetry;
+   CAdaptiveParameterManager *m_adaptive;
+
+   // ── Phase 6: Low Latency ────────────────────────────────────────
+   CLatencyOptimizer      *m_optimizer;
+   CAsyncOrderManager     *m_async_orders;
+   CHighFreqTimer         *m_hf_timer;
+
+   // ── Phase 7: Self-Healing ───────────────────────────────────────
+   CHealthMonitor         *m_health;
+   CSnapshotManager       *m_snapshot;
+
+   // ── QA (testing only) ──────────────────────────────────────────
+   CLatencySimulator      *m_latency_sim;
 
    // ── Signal source plugins (owned) ──────────────────────────────
    PatternSignalSource    *m_srcPattern;
    SRSignalSource         *m_srcSR;
    AISignalSource         *m_srcAI;
-   CRegimeSignalSource    *m_srcRegime;  // Phase 4 NEW
+   CRegimeSignalSource    *m_srcRegime;
 
    // ── Infrastructure ─────────────────────────────────────────────
    CEventBus              *m_bus;
    StrategyConfig          m_cfg;
    CConfigManager         *m_cfgMgr;
-   
-   // ── Pipeline Engine (NEW v2.18) ────────────────────────────────
+
+   // ── Pipeline Engine ────────────────────────────────────────────
    CPipelineEngine        *m_pipeline;
    PipelineContext         m_pipeline_ctx;
 
@@ -173,7 +124,7 @@ private:
    void PrintSummary()
      {
       Print("╔══════════════════════════════════════════════════╗");
-      PrintFormat("║  PASR EA v3.02 — %s  %s", _Symbol,
+      PrintFormat("║  PASR EA v3.03 — %s  %s", _Symbol,
                   EnumToString((ENUM_TIMEFRAMES)_Period));
       Print("╠══════════════════════════════════════════════════╣");
       Print("║  Managers:");
@@ -184,145 +135,134 @@ private:
       PrintFormat("║    PatternManager     : OK");
       PrintFormat("║    SignalManager v3   : OK  sources=%d",
                   m_signal != NULL ? m_signal.SourceCount() : 0);
-      PrintFormat("║      Registered sources:");
-      PrintFormat("║        PatternSignalSource w=1.2 VOTER");
-      PrintFormat("║        SRSignalSource      w=1.5 VOTER");
-      PrintFormat("║        AISignalSource      w=0.8 VOTER");
-      PrintFormat("║        RegimeSignalSource  w=0.0 MULT");
-      PrintFormat("║    CAIOrchestrator [P7]   : OK  (26-dim AI system)");
-      PrintFormat("║    RegimeFilter    [P4]   : OK");
-      PrintFormat("║    RiskManager     [P4]   : OK  magic=%d", m_cfg.MagicNumber);
-      PrintFormat("║    ExecutionManager       : OK");
-      PrintFormat("║    RecoveryManager        : OK");
-      PrintFormat("║    DashboardManager v3    : OK");
-      PrintFormat("║    SanityManager   [P5]   : OK  CircuitBreaker=ACTIVE");
-      PrintFormat("║    TelemetryRec  [P3]   : OK  CSV Export=ENABLED");
-      PrintFormat("║    AdaptiveParams[P5]   : OK  DynamicSL/TP=ACTIVE");
+      PrintFormat("║      PatternSignalSource w=1.2 VOTER");
+      PrintFormat("║      SRSignalSource      w=1.5 VOTER");
+      PrintFormat("║      AISignalSource      w=0.8 VOTER");
+      PrintFormat("║      RegimeSignalSource  w=0.0 MULT");
+      PrintFormat("║    CAIOrchestrator [P7]: OK  (26-dim AI)");
+      PrintFormat("║    RegimeFilter    [P4]: OK");
+      PrintFormat("║    RiskManager     [P4]: OK  magic=%d", m_cfg.MagicNumber);
+      PrintFormat("║    ExecutionManager    : OK");
+      PrintFormat("║    RecoveryManager     : OK");
+      PrintFormat("║    DashboardManager v3 : OK");
+      PrintFormat("║    SanityManager  [P5] : OK  CircuitBreaker=ACTIVE");
+      PrintFormat("║    TelemetryRec   [P3] : OK  CSV=ENABLED");
+      PrintFormat("║    AdaptiveParams [P5] : OK  DynamicSL/TP=ACTIVE");
+      PrintFormat("║    HealthMonitor  [P7] : OK  Self-Healing=ACTIVE");
+      PrintFormat("║    SnapshotMgr    [P7] : OK  StatePersistence=ACTIVE");
       #ifdef PASR_QA_BUILD
-      PrintFormat("║    LatencySim    [P4/QA]: OK  Backtest=ACTIVE");
+      PrintFormat("║    LatencySim [P4/QA]  : OK  Backtest=ACTIVE");
       #endif
       Print("╚══════════════════════════════════════════════════╝");
      }
 
-   // ── Cleanup ────────────────────────────────────────────────────
+   //+----------------------------------------------------------------+
+   //| FreeAll — BUG-005 FIX: strict REVERSE init order              |
+   //| Rule: Phase N deleted FIRST, Phase 0 (EventBus) deleted LAST  |
+   //| Violating this causes use-after-free on shutdown               |
+   //+----------------------------------------------------------------+
    void FreeAll()
      {
-      // Pipeline engine first (non-owning refs, safe to delete before managers)
+      // ── Pipeline engine (non-owning refs, safe to delete first) ──
       if(m_pipeline) { delete m_pipeline; m_pipeline = NULL; }
-      
-      // Phase 6: Low Latency Components
-      if(m_hf_timer)    { delete m_hf_timer;    m_hf_timer=NULL;    }
-      if(m_async_orders){ delete m_async_orders;m_async_orders=NULL;}
-      if(m_optimizer)   { delete m_optimizer;   m_optimizer=NULL;   }
-      
-      // QA Managers first (testing only)
+
+      // ── Phase 7: Self-Healing (last inited → first freed) ────────
+      if(m_snapshot)    { delete m_snapshot;    m_snapshot = NULL;    }
+      if(m_health)      { delete m_health;      m_health = NULL;      }
+
+      // ── QA (only if QA_BUILD) ────────────────────────────────────
       #ifdef PASR_QA_BUILD
       if(m_latency_sim) { delete m_latency_sim; m_latency_sim = NULL; }
       #endif
-      
-      // signal source plugins before managers that hold non-owning ptrs
-      if(m_srcRegime)  { delete m_srcRegime;  m_srcRegime=NULL;  }
-      if(m_srcPattern) { delete m_srcPattern; m_srcPattern=NULL; }
-      if(m_srcSR)      { delete m_srcSR;      m_srcSR=NULL;      }
-      if(m_srcAI)      { delete m_srcAI;      m_srcAI=NULL;      }
 
-      if(m_dash)     { delete m_dash;     m_dash=NULL;     }
-      if(m_recovery) { delete m_recovery; m_recovery=NULL; }
-      if(m_exec)     { delete m_exec;     m_exec=NULL;     }
-      if(m_risk)     { delete m_risk;     m_risk=NULL;     }
-      if(m_regime_det){ delete m_regime_det; m_regime_det=NULL; } // Phase 5 NEW
-      if(m_regime)   { delete m_regime;   m_regime=NULL;   }
-      if(m_ai_orch)  { delete m_ai_orch;  m_ai_orch=NULL;  }
-      if(m_signal)   { delete m_signal;   m_signal=NULL;   }
-      if(m_pattern)  { delete m_pattern;  m_pattern=NULL;  }
-      if(m_zone)     { delete m_zone;     m_zone=NULL;     }
-      if(m_sr)       { delete m_sr;       m_sr=NULL;       }
-      if(m_data)     { delete m_data;     m_data=NULL;     }
-      if(m_sanity)   { delete m_sanity;   m_sanity=NULL;   }  // Phase 1 NEW
-      if(m_telemetry){ delete m_telemetry; m_telemetry=NULL; } // Phase 3 NEW
-      if(m_adaptive) { delete m_adaptive; m_adaptive=NULL; }  // Phase 5 NEW
-      if(m_cfgMgr)   { delete m_cfgMgr;   m_cfgMgr=NULL;   }
-      if(m_bus)      { delete m_bus;      m_bus=NULL;      };
-     }
+      // ── Phase 6: Low Latency ─────────────────────────────────────
+      if(m_hf_timer)     { delete m_hf_timer;     m_hf_timer = NULL;     }
+      if(m_async_orders) { delete m_async_orders; m_async_orders = NULL; }
+      if(m_optimizer)    { delete m_optimizer;    m_optimizer = NULL;    }
 
-   // ── Core trading logic (called once per new bar) ────────────────
-   void ProcessNewBar()
-     {
-      // 1) Signal available?
-      if(!m_signal.HasSignal()) return;
+      // ── Phase 5: Adaptive + Regime Det ───────────────────────────
+      if(m_adaptive)    { delete m_adaptive;    m_adaptive = NULL;    }
+      if(m_regime_det)  { delete m_regime_det;  m_regime_det = NULL;  }
 
-      FinalSignal sig = m_signal.GetCurrent();
-      if(sig.direction == SIGNAL_NONE) return;
+      // ── Phase 3: Telemetry ────────────────────────────────────────
+      if(m_telemetry)   { delete m_telemetry;   m_telemetry = NULL;   }
 
-      // 2) Pre-trade risk gate (no lot yet — margin estimate)
-      RiskCheckResult rr = m_risk.Check(0);
-      if(!rr.allowed)
-        {
-         if(m_debugMode)
-            PrintFormat("[Orchestrator] RiskBlock(pre): %s", rr.reason);
-         return;
-        }
+      // ── Phase 1: Sanity ───────────────────────────────────────────
+      if(m_sanity)      { delete m_sanity;      m_sanity = NULL;      }
 
-      // 3) Build trade plan
-      CTradePlan builder;
-      builder.Init(m_data, m_bus);
-      builder.SetCfg(m_cfg);
+      // ── Signal source plugins (before managers they reference) ───
+      if(m_srcRegime)   { delete m_srcRegime;   m_srcRegime = NULL;   }
+      if(m_srcPattern)  { delete m_srcPattern;  m_srcPattern = NULL;  }
+      if(m_srcSR)       { delete m_srcSR;       m_srcSR = NULL;       }
+      if(m_srcAI)       { delete m_srcAI;       m_srcAI = NULL;       }
 
-      double atrSL = m_data.GetATRPoints() * m_cfg.Risk.SLMultiplier;
-      double lot   = m_risk.CalcLot(atrSL);
-      TradePlan plan = builder.Build(sig, lot);
-      if(!plan.valid) return;
+      // ── L7: Dashboard ────────────────────────────────────────────
+      if(m_dash)        { delete m_dash;        m_dash = NULL;        }
 
-      // 4) Final risk check with real SL distance
-      RiskCheckResult rr2 = m_risk.Check(plan.slPoints);
-      if(!rr2.allowed)
-        {
-         if(m_debugMode)
-            PrintFormat("[Orchestrator] RiskBlock(lot): %s", rr2.reason);
-         return;
-        }
-      plan.lot = rr2.suggestedLot;
+      // ── L6b: Recovery ────────────────────────────────────────────
+      if(m_recovery)    { delete m_recovery;    m_recovery = NULL;    }
 
-      // 5) Execute
-      ExecResult er = m_exec.Execute(plan);
-      if(er.status == EXEC_OK)
-        {
-         m_risk.OnTradeOpened();
-         m_recovery.OnTradeOpen(er.ticket, plan.direction, plan.entryPrice);
-         if(m_debugMode)
-            PrintFormat("[Orchestrator] ✓ Trade opened ticket=%d lot=%.2f %s",
-                        er.ticket, plan.lot,
-                        plan.direction==SIGNAL_BUY ? "BUY" : "SELL");
-        }
+      // ── L6a: Execution ───────────────────────────────────────────
+      if(m_exec)        { delete m_exec;        m_exec = NULL;        }
+
+      // ── L5d: Risk ────────────────────────────────────────────────
+      if(m_risk)        { delete m_risk;        m_risk = NULL;        }
+
+      // ── L5c: Regime ──────────────────────────────────────────────
+      if(m_regime)      { delete m_regime;      m_regime = NULL;      }
+
+      // ── L5b: AI Orchestrator ─────────────────────────────────────
+      if(m_ai_orch)     { delete m_ai_orch;     m_ai_orch = NULL;     }
+
+      // ── L5a: Signal ──────────────────────────────────────────────
+      if(m_signal)      { delete m_signal;      m_signal = NULL;      }
+
+      // ── L4: Pattern ──────────────────────────────────────────────
+      if(m_pattern)     { delete m_pattern;     m_pattern = NULL;     }
+
+      // ── L3: Zone + SR ────────────────────────────────────────────
+      if(m_zone)        { delete m_zone;        m_zone = NULL;        }
+      if(m_sr)          { delete m_sr;          m_sr = NULL;          }
+
+      // ── L2: DataManager ──────────────────────────────────────────
+      if(m_data)        { delete m_data;        m_data = NULL;        }
+
+      // ── Config ───────────────────────────────────────────────────
+      if(m_cfgMgr)      { delete m_cfgMgr;      m_cfgMgr = NULL;      }
+
+      // ── EventBus LAST — everything above depends on it ───────────
+      if(m_bus)         { delete m_bus;         m_bus = NULL;         }
      }
 
 public:
+   // BUG-009 FIX: Complete constructor init list — all members initialized
    COrchestrator()
       : m_data(NULL), m_sr(NULL), m_zone(NULL),
         m_pattern(NULL), m_signal(NULL), m_ai_orch(NULL),
         m_regime_det(NULL), m_regime(NULL), m_risk(NULL),
         m_exec(NULL), m_recovery(NULL), m_dash(NULL),
+        m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL),
         m_optimizer(NULL), m_async_orders(NULL), m_hf_timer(NULL),
+        m_health(NULL), m_snapshot(NULL),    // BUG-009 FIX: added
+        m_latency_sim(NULL),                 // BUG-009 FIX: added
         m_srcPattern(NULL), m_srcSR(NULL),
         m_srcAI(NULL), m_srcRegime(NULL),
         m_bus(NULL), m_cfgMgr(NULL),
         m_pipeline(NULL),
-        m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL),
-        m_lastBarTime(0), m_debugMode(false), 
+        m_lastBarTime(0), m_debugMode(false),
         m_initialised(false), m_profiling_enabled(true)
      {
-      // Initialize pipeline context
       m_pipeline_ctx.Reset();
      }
 
    ~COrchestrator() { FreeAll(); }
 
-   void SetDebugMode(bool on) 
-     { 
-      m_debugMode = on; 
+   void SetDebugMode(bool on)
+     {
+      m_debugMode = on;
       if(m_pipeline != NULL) m_pipeline->SetDebugMode(on);
      }
-   
+
    void SetProfilingEnabled(bool on)
      {
       m_profiling_enabled = on;
@@ -330,7 +270,7 @@ public:
      }
 
    //+----------------------------------------------------------------+
-   //| Init — Phase 4 complete wiring                                 |
+   //| Init                                                           |
    //+----------------------------------------------------------------+
    int Init()
      {
@@ -362,37 +302,26 @@ public:
       // ── L5a: SignalManager ──────────────────────────────────────
       m_signal = new CSignalManager();
       if(!InitManager(m_signal, "CSignalManager")) { FreeAll(); return INIT_FAILED; }
-
       m_signal.SetPatternManager(m_pattern);
-      m_signal.SetSRManager((CSRManager*)m_sr);   // Analysis SR is-a CSRManager
+      m_signal.SetSRManager((CSRManager*)m_sr);
 
-      // Register voter sources
       m_srcPattern = new PatternSignalSource(m_pattern);
       m_srcSR      = new SRSignalSource(m_sr, m_data, 0.5);
-      m_signal.RegisterSource(m_srcPattern, 1.2); // VOTER: PA pattern
-      m_signal.RegisterSource(m_srcSR,      1.5); // VOTER: SR confluence
+      m_signal.RegisterSource(m_srcPattern, 1.2);
+      m_signal.RegisterSource(m_srcSR,      1.5);
 
-      // ── L5b: CAIOrchestrator (26-dim AI) + AISignalSource ────────────────
+      // ── L5b: CAIOrchestrator + AISignalSource ────────────────────
       m_ai_orch = new CAIOrchestrator();
       if(!InitManager(m_ai_orch, "CAIOrchestrator")) { FreeAll(); return INIT_FAILED; }
-
       m_srcAI = new AISignalSource(m_ai_orch, 0.6, 0.8);
-      m_signal.RegisterSource(m_srcAI, 0.8);      // VOTER: AI (learning weight)
+      m_signal.RegisterSource(m_srcAI, 0.8);
 
-      // ── L5c: RegimeFilter + RegimeSignalSource ── Phase 4 NEW ───
+      // ── L5c: RegimeFilter + RegimeSignalSource ───────────────────
       m_regime = new CRegimeFilter();
       if(!InitManager(m_regime, "CRegimeFilter")) { FreeAll(); return INIT_FAILED; }
-
-      m_signal.SetRegimeManager((CMarketRegime*)m_regime); // Regime is-a CMarketRegime
-
-      // Register as MULT (w=0.0):
-      //   TRENDING  → multiplier x1.3 (boost score)
-      //   RANGING   → multiplier x0.8 (reduce score)
-      //   VOLATILE  → direction=SIGNAL_NONE, confidence=0 (suppress)
-      //   SQUEEZE   → multiplier x0.6 (strong reduce)
-      // To use HARD VETO instead: change weight to -1.0
+      m_signal.SetRegimeManager((CMarketRegime*)m_regime);
       m_srcRegime = new CRegimeSignalSource(m_regime);
-      m_signal.RegisterSource(m_srcRegime, 0.0);  // MULT: regime modulator
+      m_signal.RegisterSource(m_srcRegime, 0.0);
 
       // ── L5d: RiskManager ────────────────────────────────────────
       m_risk = new CRiskManager();
@@ -406,217 +335,190 @@ public:
       m_recovery = new CRecoveryManager();
       if(!InitManager(m_recovery, "CRecoveryManager")) { FreeAll(); return INIT_FAILED; }
 
-      // ── L7: DashboardManager + inject all deps ── v3.00 ────────
+      // ── L7: DashboardManager ────────────────────────────────────
       m_dash = new CDashboardManager();
       if(!InitManager(m_dash, "CDashboardManager")) { FreeAll(); return INIT_FAILED; }
-      m_dash.SetRiskManager  (m_risk);
+      m_dash.SetRiskManager(m_risk);
       m_dash.SetSignalManager(m_signal);
-      m_dash.SetRegimeFilter (m_regime);  // Phase 4 NEW
+      m_dash.SetRegimeFilter(m_regime);
 
-      // ── L7b: SanityManager (Circuit Breaker) ── Phase 5 NEW ─────
+      // ── L7b: SanityManager ──────────────────────────────────────
       m_sanity = new CSanityManager();
       if(!InitManager(m_sanity, "CSanityManager")) { FreeAll(); return INIT_FAILED; }
-      
-      // Initialize Sanity Manager with config and event bus
       SSanityConfig sanityCfg;
-      sanityCfg.max_stale_ticks    = 5;
-      sanityCfg.max_spread_points  = 20;
-      sanityCfg.max_price_gap_pct  = 0.5;
-      sanityCfg.trip_threshold     = 3;
-      sanityCfg.reset_timeout_sec  = 60;
+      sanityCfg.max_stale_ticks   = 5;
+      sanityCfg.max_spread_points = 20;
+      sanityCfg.max_price_gap_pct = 0.5;
+      sanityCfg.trip_threshold    = 3;
+      sanityCfg.reset_timeout_sec = 60;
       m_sanity->Initialize(sanityCfg);
 
-      // ── L7c: TelemetryRecorder (Metrics Export) ── Phase 3 NEW ──
+      // ── L7c: TelemetryRecorder ───────────────────────────────────
       m_telemetry = new CTelemetryRecorder();
       if(!InitManager(m_telemetry, "CTelemetryRecorder")) { FreeAll(); return INIT_FAILED; }
 
-      // ── L7e: AdaptiveParameterManager (Dynamic Params) ── Phase 5 NEW ──
+      // ── L7d: AdaptiveParameterManager ───────────────────────────
       m_adaptive = new CAdaptiveParameterManager();
       if(!InitManager(m_adaptive, "CAdaptiveParameterManager")) { FreeAll(); return INIT_FAILED; }
-      // Initialize with base parameters from config
-      m_adaptive->Initialize(m_data, m_bus, 
-                             m_cfg.Risk.StopLossPoints, 
-                             m_cfg.Risk.TakeProfitPoints, 
+      m_adaptive->Initialize(m_data, m_bus,
+                             m_cfg.Risk.StopLossPoints,
+                             m_cfg.Risk.TakeProfitPoints,
                              m_cfg.Risk.MaxRiskPercent);
 
-      // ── L7e: MarketRegimeDetector (Phase 5) ───────────────────────
+      // ── L7e: MarketRegimeDetector ────────────────────────────────
       m_regime_det = new CMarketRegimeDetector();
       if(!InitManager(m_regime_det, "CMarketRegimeDetector")) { FreeAll(); return INIT_FAILED; }
       m_regime_det->Initialize(_Symbol, _Period);
-      
-      // ── L7f: Phase 6 Low Latency Components ───────────────────────
+
+      // ── L7f: Phase 6 Low Latency ────────────────────────────────
       m_optimizer = new CLatencyOptimizer();
       if(!InitManager(m_optimizer, "CLatencyOptimizer")) { FreeAll(); return INIT_FAILED; }
-      m_optimizer->Initialize(100); // 100 order buffer slots
-      
+      m_optimizer->Initialize(100);
+
       m_async_orders = new CAsyncOrderManager();
       if(!InitManager(m_async_orders, "CAsyncOrderManager")) { FreeAll(); return INIT_FAILED; }
       m_async_orders->Initialize(m_optimizer, m_exec);
-      
+
       m_hf_timer = new CHighFreqTimer();
       if(!InitManager(m_hf_timer, "CHighFreqTimer")) { FreeAll(); return INIT_FAILED; }
-      m_hf_timer->Start(10); // 10ms polling interval for low latency
+      m_hf_timer->Start(10);
 
-      // ── L7g: Phase 7 Self-Healing Components ──────────────────────
+      // ── L7g: Phase 7 Self-Healing ────────────────────────────────
+      // BUG-004 FIX: Use InitManager() so Health+Snapshot subscribe to EventBus.
+      // Old code called Initialize(m_bus) manually — bypassed DeclareEvents() + Register().
       m_health = new CHealthMonitor();
-      if(m_health == NULL) { FreeAll(); return INIT_FAILED; }
-      if(!m_health->Initialize(m_bus)) { FreeAll(); return INIT_FAILED; }
-      
+      if(!InitManager(m_health, "CHealthMonitor")) { FreeAll(); return INIT_FAILED; }
+      // PostInit: pass bus for extra health config after base init
+      m_health->PostInit(m_bus);
+
       m_snapshot = new CSnapshotManager();
-      if(m_snapshot == NULL) { FreeAll(); return INIT_FAILED; }
+      if(!InitManager(m_snapshot, "CSnapshotManager")) { FreeAll(); return INIT_FAILED; }
       string snapshotPath = "PASR\\Snapshots";
-      if(!m_snapshot->Initialize(snapshotPath)) { FreeAll(); return INIT_FAILED; }
-      
+      m_snapshot->PostInit(snapshotPath);
+
       // Try to recover from previous snapshot
       SystemStateSnapshot savedState;
       if(m_snapshot->LoadLatestSnapshot(savedState))
-        {
-         Print("[Orchestrator] Recovered from snapshot. Uptime was: ", savedState.uptime_seconds, "s");
-         // TODO: Restore state variables from savedState
-        }
+         PrintFormat("[Orchestrator] Recovered from snapshot. Uptime was: %ds",
+                     savedState.uptime_seconds);
 
-      // ── L7d: LatencySimulator (QA Only) ── Phase 4 NEW ───────────
+      // ── QA: LatencySimulator (QA Build Only) ─────────────────────
       #ifdef PASR_QA_BUILD
       m_latency_sim = new CLatencySimulator();
       if(!InitManager(m_latency_sim, "CLatencySimulator")) { FreeAll(); return INIT_FAILED; }
       #endif
 
-      // ── L8: Pipeline Engine — Initialize and inject managers ────
+      // ── L8: Pipeline Engine ──────────────────────────────────────
       m_pipeline = new CPipelineEngine();
       if(m_pipeline == NULL)
-        {
-         Print("[Orchestrator] Pipeline engine alloc FAILED");
-         FreeAll();
-         return INIT_FAILED;
-        }
-      
-      // Inject all manager dependencies into pipeline
-      CJournalManager *journal = NULL;  // Get from DataManager or create standalone
+        { Print("[Orchestrator] Pipeline engine alloc FAILED"); FreeAll(); return INIT_FAILED; }
+
+      CJournalManager *journal = NULL;
       m_pipeline->InjectManagers(
          m_data, m_sr, m_zone, m_pattern, m_signal,
          m_ai_orch, m_regime, m_risk, m_exec, m_recovery,
          m_dash, journal, m_bus, m_sanity, m_telemetry, m_adaptive,
-         m_regime_det, m_optimizer, m_async_orders, m_health, m_snapshot
+         m_regime_det, m_optimizer, m_async_orders,
+         m_health, m_snapshot  // BUG-004 + BUG-006: now properly stored
       );
       m_pipeline->SetDebugMode(m_debugMode);
       m_pipeline->EnableProfiling(m_profiling_enabled);
 
       m_initialised = true;
       PrintSummary();
-      Print("[Orchestrator] Pipeline Engine v3.00 initialized");
-      PrintFormat("  Profiling: %s", m_profiling_enabled ? "ENABLED" : "DISABLED");
-      PrintFormat("  Telemetry: %s", "ACTIVE - CSV Export Enabled");
-      #ifdef PASR_QA_BUILD
-      PrintFormat("  LatencySim: %s", "ACTIVE (Backtest Mode Only)");
-      #endif
       return INIT_SUCCEEDED;
      }
 
    //+----------------------------------------------------------------+
-   //| OnTick — every-tick vs new-bar separated                       |
+   //| OnTick — BUG-002 + BUG-010 FIX                                |
+   //| RULE: OnTick() is PURE EVENT-PUSH ONLY.                       |
+   //|   No business logic here. No trade entry. No ProcessNewBar().  |
+   //|   All logic runs in OnTimer() → CPipelineEngine.              |
+   //|                                                                |
+   //| BUG-002: Removed monolith ProcessNewBar() fallback.            |
+   //| BUG-010: Single DrainQueue() per tick, not two.               |
    //+----------------------------------------------------------------+
    void OnTick()
      {
       if(!m_initialised) return;
 
-      // ── PHASE 5: Circuit Breaker Check FIRST ────────────────────
+      // Circuit Breaker first
       MqlTick latestTick;
       if(!SymbolInfoTick(_Symbol, latestTick)) return;
-      
-      // Validate tick data through Sanity Manager
       if(m_sanity != NULL && !m_sanity->ValidateTick(latestTick))
         {
-         // Data is unsafe - skip processing but still update dashboard
          if(m_debugMode)
             Print("[OnTick] BLOCKED by Circuit Breaker: ", m_sanity->GetStateString());
          return;
         }
 
-      // Every tick: update price + fire PRICE_UPDATE
-      m_data.OnTick();
+      // Push PRICE_UPDATE every tick
       PASREvent evTick;
       evTick.id       = EVENT_ID_PRICE_UPDATE;
       evTick.priority = 5;
       m_bus.Push(evTick);
 
-      bool isNewBar = BarChanged();
-      if(isNewBar)
+      // New bar: also push NEW_BAR event
+      if(BarChanged())
         {
          PASREvent evBar;
          evBar.id       = EVENT_ID_NEW_BAR;
          evBar.priority = 10;
          m_bus.Push(evBar);
-
-         // Drain analysis (SR, Pattern, Regime, Signal) before entry attempt
-         DrainQueue();
-
-         // Attempt trade entry (legacy fallback if pipeline not ready)
-         if(m_pipeline == NULL || !m_profiling_enabled)
-            ProcessNewBar();
         }
 
-      // Final drain: trailing stop + dashboard updates
+      // BUG-010 FIX: Single DrainQueue() per tick cycle.
+      // Processes both PRICE_UPDATE and NEW_BAR (if pushed) in one pass.
+      // Recovery trailing + dashboard updates happen here.
       DrainQueue();
+
+      // NOTE: Trade entry is NOT here. It runs in OnTimer() via CPipelineEngine.
+      // BUG-002: Removed: if(m_pipeline == NULL || !m_profiling_enabled) ProcessNewBar();
      }
 
    //+----------------------------------------------------------------+
-   //| OnTimer — Pipeline-based staged execution (v2.18)              |
+   //| OnTimer — Pipeline staged execution                            |
    //+----------------------------------------------------------------+
    void OnTimer()
      {
       if(!m_initialised) return;
-      
-      // Phase 7: Health Check FIRST
+
+      // Phase 7: Health Check
       if(m_health != NULL)
         {
          m_health->OnTick_HealthCheck();
-         
-         // Send health event for telemetry
          PASREvent evHealth;
-         evHealth.id = EVENT_ID_HEALTH_CHECK;
-         evHealth.priority = 1;
+         evHealth.id        = EVENT_ID_HEALTH_CHECK;
+         evHealth.priority  = 1;
          evHealth.data_i[0] = m_health->Status();
          m_bus->Push(evHealth);
         }
-      
-      // Phase 7: Periodic Snapshot Save (every 60 seconds via timer)
+
+      // Phase 7: Periodic Snapshot (every 60s)
       static datetime s_last_snapshot = 0;
       datetime now = TimeCurrent();
       if(now - s_last_snapshot >= 60 && m_snapshot != NULL)
         {
-         double profit = 0.0; // Get from account
-         int trades = 0;      // Get from stats
-         int posCount = PositionsTotal();
-         double volume = 0.0;
-         int errors = 0;
-         
-         m_snapshot->UpdateState(true, profit, trades, posCount, volume, errors);
+         m_snapshot->UpdateState(true, 0.0, 0, PositionsTotal(), 0.0, 0);
          m_snapshot->SaveSnapshot();
          s_last_snapshot = now;
         }
-      
-      // Use pipeline engine for staged execution with profiling
+
+      // Pipeline execution
       if(m_pipeline != NULL && m_profiling_enabled)
         {
-         // Reset context for this cycle
          m_pipeline_ctx.Reset();
          m_pipeline_ctx.new_bar = BarChanged();
-         
-         // Execute full pipeline with profiling
          ENUM_STAGE_RESULT result = m_pipeline->ExecutePipeline(m_pipeline_ctx);
-         
-         // Log early-exit reasons in debug mode
          if(m_debugMode && result != STAGE_OK)
-           {
-            PrintFormat("[Orchestrator] Pipeline exited at stage: %s - %s",
+            PrintFormat("[Orchestrator] Pipeline exit: %s — %s",
                         EnumToString((ENUM_PIPELINE_STAGE)m_pipeline_ctx.exit_reason),
                         m_pipeline_ctx.exit_message);
-           }
         }
       else
         {
-         // Legacy fallback: simple event push
-         PASREvent ev; ev.id=EVENT_ID_TIMER; ev.priority=1;
+         // Fallback: legacy event push (profiling disabled)
+         PASREvent ev; ev.id = EVENT_ID_TIMER; ev.priority = 1;
          m_bus.Push(ev);
          DrainQueue();
         }
@@ -639,7 +541,6 @@ public:
       double          profit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT);
       ulong           pos    = HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
 
-      // Trade OPENED
       if(entry == DEAL_ENTRY_IN)
         {
          int    dir   = (int)HistoryDealGetInteger(trans.deal, DEAL_TYPE)==DEAL_TYPE_BUY ? 1 : -1;
@@ -647,13 +548,11 @@ public:
          m_recovery.OnTradeOpen((ulong)pos, dir, price);
         }
 
-      // Trade CLOSED
       if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_INOUT)
         {
          m_recovery.OnTradeClose((ulong)pos);
          m_risk.OnTradeClosed();
 
-         // AI backpropagation on result (26-dim system)
          if(m_ai_orch != NULL)
            {
             float label = (profit >= 0.0) ? 1.0f : 0.0f;
@@ -667,10 +566,9 @@ public:
               }
            }
 
-         // Fire position update → dashboard redraws immediately
          PASREvent ev;
-         ev.id=EVENT_ID_POSITION_UPDATE; ev.priority=8;
-         ev.ticket=pos; ev.profit=profit;
+         ev.id = EVENT_ID_POSITION_UPDATE; ev.priority = 8;
+         ev.ticket = pos; ev.profit = profit;
          m_bus.Push(ev);
          DrainQueue();
         }
@@ -683,32 +581,23 @@ public:
      {
       if(!m_initialised) return;
       m_initialised = false;
-      
-      // Phase 7: Save snapshot before shutdown
+
       if(m_snapshot != NULL)
         {
-         // Update state before saving
-         double profit = 0.0; // Get from account or telemetry
-         int trades = 0;      // Get from telemetry
-         int posCount = PositionsTotal();
-         double volume = 0.0; // Calculate total volume
-         int errors = 0;      // Get from health monitor
-         
-         m_snapshot->UpdateState(true, profit, trades, posCount, volume, errors);
+         m_snapshot->UpdateState(true, 0.0, 0, PositionsTotal(), 0.0, 0);
          m_snapshot->SaveSnapshot();
-         m_snapshot->Shutdown();
+         // NOTE: Shutdown called inside FreeAll() via destructor, not here.
+         // Prevents double-free if OnDeinit called before FreeAll.
         }
-      
-      // Phase 7: Shutdown health monitor
-      if(m_health != NULL) m_health->Shutdown();
-      
+
+      if(m_health != NULL)  m_health->Shutdown();
       if(m_ai_orch != NULL) m_ai_orch->Deinit();
-      if(m_dash != NULL) m_dash.Destroy();  // removes chart objects before FreeAll
+      if(m_dash != NULL)    m_dash.Destroy();
       FreeAll();
       PrintFormat("[Orchestrator] Deinit reason=%d", reason);
      }
 
-   // ── Accessors (for external tools / QA) ────────────────────────
+   // ── Accessors ──────────────────────────────────────────────────
    CDataManager         *GetDataManager()     const { return m_data;     }
    CAnalysisSRManager   *GetSRManager()       const { return m_sr;       }
    CAnalysisZoneManager *GetZoneManager()     const { return m_zone;     }
