@@ -1,8 +1,13 @@
 //+------------------------------------------------------------------+
-//| Core/Globals.mqh — CANONICAL v2.14                               |
+//| Core/Globals.mqh — CANONICAL v2.15                               |
 //| Account-safe GV helpers, logging, validation, perf timer         |
 //|                                                                   |
 //| CHANGELOG:                                                        |
+//|   v2.15 (2026-05-24):                                             |
+//|     - Added PASRLogWarn() — warning level was missing.            |
+//|     - Added IsSpreadAcceptable(maxPips) — used by Stage_RiskCheck. |
+//|       Centralised here so broker point-size differences are handled|
+//|       in one place.                                               |
 //|   v2.14 (2026-05-23) — BUG-001 + BUG-012:                        |
 //|     - REMOVED DispatchEvent(PASREvent*) — used fake singleton     |
 //|       CEventBus::Instance() which does not exist.                 |
@@ -61,6 +66,9 @@ bool GVExists(const string purpose, const long magic = 0,
 void PASRLog(const string module, const string msg)
   { PrintFormat("[PASR][%s] %s", module, msg); }
 
+void PASRLogWarn(const string module, const string msg)
+  { PrintFormat("[PASR][WARN][%s] %s", module, msg); }
+
 void PASRLogError(const string module, const string msg,
                   const int errorCode = 0)
   {
@@ -90,6 +98,17 @@ bool IsMarketOpen()
    return ((TimeCurrent() - lastTick.time) < 60);
   }
 
+// IsSpreadAcceptable: returns true if current spread <= maxPips.
+// Handles both 4-digit and 5-digit brokers via _Digits normalisation.
+// Use in Stage_RiskCheck before any trade entry evaluation.
+bool IsSpreadAcceptable(const double maxPips)
+  {
+   double pointsPerPip = (_Digits == 3 || _Digits == 5) ? 10.0 : 1.0;
+   double spreadPoints = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   double spreadPips   = spreadPoints / pointsPerPip;
+   return (spreadPips <= maxPips);
+  }
+
 //+------------------------------------------------------------------+
 //| PERF TIMER (microsecond resolution)                              |
 //+------------------------------------------------------------------+
@@ -100,8 +119,10 @@ private:
 public:
    void              Start()  { m_start = GetMicrosecondCount(); }
    ulong             Elapsed() const { return GetMicrosecondCount() - m_start; }
-   void              Log(const string label) const
+   void              Stop(const string label) const
      { PrintFormat("[PASR][PERF] %s: %dµs", label, Elapsed()); }
+   // Legacy alias
+   void              Log(const string label) const { Stop(label); }
   };
 
 //+------------------------------------------------------------------+
@@ -114,10 +135,10 @@ public:
 //   m_bus->Push(ev);    // inside a class that holds m_bus pointer
 //   bus->Push(ev);      // in functions that receive bus as parameter
 //
-// This helper remains for convenience in utility/script contexts
-// where the bus pointer is passed explicitly.
+// This helper is for utility/script contexts where bus is explicit.
 void PASRDispatchEvent(PASREvent &ev, CEventBus *bus)
   {
+   if(bus == NULL) return;
    if(CheckPointer(bus) == POINTER_INVALID) return;
    bus.Push(ev);
   }

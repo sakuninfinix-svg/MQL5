@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "PASR Quant Team"
 #property link      "https://pasr.quant"
-#property version   "10.00"
+#property version   "10.01"
 #property description "Centralized state encapsulation for institutional architecture"
 
 #ifndef __PASR_TYPES_MQH__
@@ -67,8 +67,10 @@ struct STradingContext
    datetime          last_tick_time;      // For tick rate calculation
    #endif
    
-   //--- QA State (only if QA_BUILD defined)
-   #ifdef QA_BUILD
+   //--- QA State
+   // BUG-016 FIX: was #ifdef QA_BUILD — must match PASR_MODULAR.mq5
+   // which defines PASR_QA_BUILD (Sprint 1 fix). Changed throughout.
+   #ifdef PASR_QA_BUILD
    int               tick_counter;        // Tick counter for chaos
    bool              chaos_active;        // Chaos mode active
    double            normal_spread;       // Baseline spread
@@ -133,8 +135,8 @@ struct STradingContext
       last_tick_time     = 0;
       #endif
       
-      // QA State
-      #ifdef QA_BUILD
+      // QA State — BUG-016 FIX
+      #ifdef PASR_QA_BUILD
       tick_counter       = 0;
       chaos_active       = false;
       normal_spread      = 0.0;
@@ -145,7 +147,16 @@ struct STradingContext
    
    //--- Validation Helpers
    bool IsValid() const { return initialized && is_active; }
+
+   // CanTrade: standard entry — no open position.
    bool CanTrade() const { return is_active && !has_position && has_signal; }
+
+   // BUG-017: CanTradePartial() — allows second entry when first TP
+   // was hit (partial_done=true) but position is still open.
+   // Used by RecoveryManager and SignalManager for scale-in logic.
+   bool CanTradePartial() const
+     { return is_active && has_position && partial_done && has_signal; }
+
    bool HasOpenPosition() const { return has_position && open_ticket > 0; }
    
    //--- State Update Helpers
@@ -228,10 +239,15 @@ struct SInitResult
      }
    
    bool IsSuccess() const { return success; }
+
+   // BUG-018 FIX: Use string concatenation instead of StringFormat.
+   // StringFormat misparses if module/error_msg contain '%' characters
+   // (e.g. from file paths, percent-formatted values in error strings).
    string ToString() const
      {
       if(success) return "INIT_OK";
-      return StringFormat("INIT_FAILED@Phase%d:%s - %s", phase, module, error_msg);
+      return "INIT_FAILED@Phase" + IntegerToString((int)phase)
+             + ":" + module + " - " + error_msg;
      }
   };
 
