@@ -1,7 +1,7 @@
 # PASR — Price Action Support Resistance EA
 
-> **Architecture:** Pipeline Orchestration (migrated from Monolith v9, Sprint 1–15)
-> **Last updated:** Sprint 15 (2026-05-24)
+> **Architecture:** Pipeline Orchestration (migrated from Monolith v9, Sprint 1–16)
+> **Last updated:** Sprint 16 (2026-05-24)
 > **Compile target:** `Experts/PASR_MODULAR.mq5`
 
 ---
@@ -21,7 +21,7 @@ OnTimer() → DrainQueue()
               Stage  4: PatternRec       ← m_pattern->OnTick()
               Stage  5: RegimeDetect     ← m_regime_det->Evaluate()
               Stage  6: SignalGen        ← CSignalManager (4 sources, weighted vote)
-              Stage  7: AIInference      ← CAIOrchestrator (26-dim MLP/ONNX)
+              Stage  7: AIInference      ← CAIOrchestrator v2.02 (26-dim, real SGD, ensemble diversity)
               Stage  8: RiskCheck        ← CRiskManager + CCorrelationManager + IsSpreadAcceptable()
               Stage  9: AdaptiveParams   ← CAdaptiveParameterManager->OnNewBar()
               Stage 10: Execution        ← CExecutionManager + ticket capture
@@ -55,11 +55,11 @@ Include/PASR/
 │   └── PASR_SymbolManager.mqh
 │
 ├── Analysis/                ← Market analysis managers
-│   ├── SRManager.mqh        ← ⚠ 54KB — Sprint 16 decomposition target
+│   ├── SRManager.mqh        ← ⚠ 54KB — Sprint 17 decomposition target
 │   ├── ZoneManager.mqh      ← Supply/Demand zones
 │   ├── MarketRegimeDetector.mqh
 │   ├── AdaptiveParameterManager.mqh
-│   └── Pattern/             ← Candlestick pattern sub-module (audit pending S16)
+│   └── Pattern/             ← Candlestick pattern sub-module (audit pending S17)
 │
 ├── Signal/                  ← v4.02 — Signal generation & regime filtering
 │   ├── SignalManager.mqh    ← v4.02 — aggregator, 4 sources
@@ -75,22 +75,25 @@ Include/PASR/
 │   ├── TradePlan.mqh        ← struct TradePlan
 │   └── CorrelationManager.mqh ← ✅ v2.00 — IManager pipeline, S13
 │
-├── AI/                      ← ⚠ S14 Audited — 7 bugs found (AI-001..AI-007)
+├── AI/                      ← ✅ S16 Fully Audited — 7 bugs resolved
 │   ├── AITypes.mqh          ← Shared structs, zero deps
-│   ├── AIOrchestrator.mqh   ← v2.01 — top-level AI subsystem (IManager)
-│   ├── AIFeatureBuilder.mqh ← 26-dim feature eng, IManager, FIX#4 leakage guard
-│   ├── AIInference.mqh      ← MLP 26→64→32→1, random init (no ONNX yet)
-│   ├── AIEnsemble.mqh       ← Weighted ensemble, 2 models
-│   ├── AITrainer.mqh        ← Circular buffer, online retrain trigger
+│   ├── AIOrchestrator.mqh   ← v2.02 — AI-001,003,005 fixed; InjectContext, open-feat cache
+│   ├── AIFeatureBuilder.mqh ← v2.01 — AI-001,002,006 fixed; pending inject, 4x ATR, baseline shift
+│   ├── AIInference.mqh      ← v2.01 — AI-007 fixed; MathTanh(), seed param, SGDUpdate()
+│   ├── AIEnsemble.mqh       ← v2.01 — AI-004 fixed; seed table {42,137,271,919}, GetModel()
+│   ├── AITrainer.mqh        ← v2.01 — AI-003 fixed; RunSGD() via SetEnsemble() wiring
 │   ├── AICalibrationBridge.mqh
 │   ├── ConfidenceCalibrator.mqh
+│   ├── AISignalSource.mqh
+│   ├── ModelRegistry.mqh
+│   ├── ONNXBridge.mqh
 │   └── OnlineLearningGuard.mqh
 │
-├── Phase7/                  ← HealthMonitor, SnapshotManager, SessionState (audit pending S16)
-└── Dashboard/               ← Chart rendering, telemetry, journal (audit pending S16)
+├── Phase7/                  ← HealthMonitor, SnapshotManager, SessionState (audit pending S17)
+└── Dashboard/               ← Chart rendering, telemetry, journal (audit pending S17)
 
 Experts/
-├── PASR_MODULAR.mq5         ← ✅ EA entry point (confirmed path — root Experts/ folder)
+├── PASR_MODULAR.mq5         ← ✅ EA entry point v13.00 (confirmed path — root Experts/ folder)
 ├── PASR.mq5                 ← Legacy monolith (deprecated, do not extend)
 └── PASR/                    ← Reserved folder (empty / future multi-symbol variant)
 ```
@@ -114,26 +117,26 @@ Experts/
 
 | ID | Severity | File | Description | Target |
 |----|----------|------|-------------|--------|
-| **AI-001** | 🟠 HIGH | `AI/AIFeatureBuilder.mqh` | `InjectStructure()` / `InjectRegime()` memodifikasi `m_last_features[]` **setelah** `Build()` selesai — tapi `Build()` sudah copy ke `out.features` sebelum inject dipanggil. Artinya feature vector yang masuk ke `CAIInference::Forward()` **tidak pernah mengandung** injected structure/regime data. Pipeline: `Build(fv)` → `Vote(fv,...)` tapi inject dipanggil belakangan oleh orchestrator eksternal. Fix: `InjectStructure()` dan `InjectRegime()` harus dipanggil **sebelum** `Build()`, atau `Build()` harus menerima struct context. | S15 |
-| **AI-002** | 🔴 CRITICAL | `AI/AIFeatureBuilder.mqh` | `ATRRatio(int period)` menerima parameter `period` (3/5/10/20) tapi **mengabaikannya** — selalu menggunakan satu handle `m_hATR14`. Semua 4 ATR features (f[4]–f[7]) return nilai **identik**, bukan multi-period volatility. Fix: buat 4 handle ATR terpisah (periode 3, 5, 10, 20) atau gunakan `CopyBuffer` dengan period berbeda. | S15 |
-| **AI-003** | 🔴 CRITICAL | `AI/AITrainer.mqh` | `MaybeRetrain()` hanya print log dan reset counter — **tidak memanggil SGD update apapun** pada model weights. `m_lr` dideklarasi tapi tidak pernah digunakan. Trainer adalah **no-op**: online learning tidak terjadi. Fix: implementasi SGD weight update pada `CAIInference` model, atau dispatch `EVENT_AI_MODEL_UPDATED` via bus agar model pull weights baru. | S15 |
-| **AI-004** | 🟠 HIGH | `AI/AIEnsemble.mqh` | Dua model ensemble dibuat dengan `new CAIInference()` tapi keduanya dipanggil `Initialize(bus)` yang memanggil `InitRandomWeights()` dengan `MathSrand(42)` — **seed sama, weights identik**. Ensemble 2 model menghasilkan output yang persis sama, `agreement` selalu 1.0. Fix: set seed berbeda per model atau load weights berbeda per model. | S15 |
-| **AI-005** | 🟡 MEDIUM | `AI/AIOrchestrator.mqh` | `OnTradeResult()` memanggil `m_feat->GetLastFeatures()` untuk membuat training sample — tapi `GetLastFeatures()` return pointer ke `m_last_features[]` yang sudah berisi features dari **build terakhir**, bukan dari trade yang menghasilkan profit/loss ini. Jika ada beberapa bar antara entry dan exit, features sudah stale. Fix: cache `SAIFeatureVector` saat trade open (di `OnEvent(EVENT_ID_TRADE_OPEN)`), gunakan cached features saat trade close. | S15 |
-| **AI-006** | 🟡 MEDIUM | `AI/AIFeatureBuilder.mqh` | `GetIndicatorValue()` menerima `shift` parameter tapi fungsi internal `ATRRatio()` memanggil dengan `shift=0` — kemudian FIX#4 guard mengubah ke `shift=1`. Namun `UpdateBaselines()` juga memanggil `GetIndicatorValue(m_hATR14, 0, 0)` **tanpa** melewati guard karena dipanggil sebelum `m_useClosedBarsOnly` check. Baselines di-update dari bar yang masih open (current bar) — partial lookahead masih ada untuk baselines. Fix: gunakan `shift=1` eksplisit di `UpdateBaselines()`. | S15 |
-| **AI-007** | 🟡 MEDIUM | `AI/AIInference.mqh` | `Tanh()` implementasi manual: `(exp(2x)-1)/(exp(2x)+1)` menghitung `exp(2x)` **dua kali**. Untuk x > 350, `MathExp(2x)` overflow ke `INF` → `INF/INF = NaN` → output NaN masuk ke pipeline. MQL5 memiliki `MathTanh()` built-in. Fix: ganti dengan `return MathTanh(x)`. | S15 |
-| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | S16 |
-| **A5** | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | S16 |
-| **P7-?** | 🔴 TBD | `Phase7/*.mqh` | Phase7 subfolder belum diaudit | S16 |
-| **DS-?** | 🔴 TBD | `Dashboard/*.mqh` | Dashboard subfolder belum diaudit | S16 |
+| **A1** | 🟠 HIGH | `Analysis/SRManager.mqh` | 54KB monolith — perlu decomposition ke SRDetector + SRZoneStore + SRScorer | S17 |
+| **A5** | 🟠 HIGH | `Analysis/Pattern/*.mqh` | Pattern subfolder belum diaudit untuk IManager compliance | S17 |
+| **P7-?** | 🔴 TBD | `Phase7/*.mqh` | Phase7 subfolder belum diaudit | S17 |
+| **DS-?** | 🔴 TBD | `Dashboard/*.mqh` | Dashboard subfolder belum diaudit | S17 |
 
 ---
 
-### ✅ RESOLVED — Sprint 1–15
+### ✅ RESOLVED — Sprint 1–16
 
 | ID | Severity | File | Fix | Sprint |
 |----|----------|------|-----|--------|
-| **BUG-008** | 🟠 HIGH | `Experts/PASR_MODULAR.mq5` | File EA dikonfirmasi exist di `Experts/PASR_MODULAR.mq5` (root Experts/, bukan subfolder). README compile target dikoreksi dari `Experts/PASR/PASR_MODULAR.mq5` → `Experts/PASR_MODULAR.mq5`. Folder `Experts/PASR/` adalah reserved/empty. | S15 |
-| **TR-006** | 🔴 CRITICAL | `Trade/CorrelationManager.mqh` | Full migration v1.0 → v2.00: (A) `#include IManager.h` → `.mqh`. (B) class tidak extend IManager → `public IManager` explicit. (C) member fields `m_data`/`m_bus` ditambah. (D) `Initialize()` monolith → `Init(data,bus)` override. (E) `DeclareEvents()` ditambah: subscribe `EVENT_ID_NEW_BAR` + `EVENT_ID_TIMER`. (F) `OnEvent()` ditambah: NEW_BAR → `RefreshSymbolList()` + `UpdateMatrix()`, TIMER → staleness check. (G) `RefreshSymbolList()` baru: build tracked symbols dari open positions. (H) `OnTick(string)/OnTimer()/OnTrade()` monolith overrides dihapus. (I) `Shutdown()` guard double-free + `m_bus=NULL`. (J) `GetStats()` helper ditambah. Note: `TickCache.mqh` include dihapus — tidak dibutuhkan, `CopyClose()` digunakan langsung | S13 |
+| **AI-001** | 🟠 HIGH | `AI/AIFeatureBuilder.mqh` | `InjectStructure()`/`InjectRegime()` sekarang menulis ke **pending buffer** (`m_pending_*`). `Build()` apply pending buffer ke `f[]` sebelum copy-out — injection selalu masuk ke feature vector. `AIOrchestrator::InjectContext()` harus dipanggil sebelum `Predict()`. | S16 |
+| **AI-002** | 🔴 CRITICAL | `AI/AIFeatureBuilder.mqh` | `ATRRatio()` monolitik dihapus — diganti `ATRRatioByHandle(handle)`. Dibuat 4 handle terpisah: `m_hATR3`, `m_hATR5`, `m_hATR10`, `m_hATR20`. Feature f[4]–f[7] kini return nilai berbeda (genuine multi-period volatility). | S16 |
+| **AI-003** | 🔴 CRITICAL | `AI/AITrainer.mqh` + `AI/AIInference.mqh` | `MaybeRetrain()` memanggil `RunSGD(mini_batch)` yang melakukan real backprop via `CAIInference::SGDUpdate()`. `CAIInference` mendapat method `SGDUpdate()` baru (full backprop: output layer, hidden2, hidden1). `CAITrainer` menerima ensemble pointer via `SetEnsemble()`. `CAIOrchestrator::Initialize()` memanggil `m_trainer->SetEnsemble(m_ensemble)`. | S16 |
+| **AI-004** | 🟠 HIGH | `AI/AIEnsemble.mqh` | Seed table `AI_ENSEMBLE_SEEDS[] = {42, 137, 271, 919}` ditambah. Setiap `CAIInference` dibuat dengan seed berbeda via `new CAIInference(AI_ENSEMBLE_SEEDS[i])`. Weights Xavier-random kini unik per model. `agreement` tidak lagi selalu 1.0. | S16 |
+| **AI-005** | 🟡 MEDIUM | `AI/AIOrchestrator.mqh` | `m_open_features` (SAIFeatureVector) di-cache saat `EVENT_ID_TRADE_OPEN`. `OnTradeResult()` menggunakan cached features jika valid, fallback ke `GetLastFeatures()` jika tidak ada cached (posisi dibuka sebelum AI init). | S16 |
+| **AI-006** | 🟡 MEDIUM | `AI/AIFeatureBuilder.mqh` | `UpdateBaselines()` menggunakan `CopyBuffer(m_hATR14, 0, 1, 1, atrVal)` dan `iVolume(..., 1)` — explicit `shift=1`. Partial lookahead pada baselines dihilangkan. | S16 |
+| **AI-007** | 🟡 MEDIUM | `AI/AIInference.mqh` | `Tanh(double x)` diganti dari `(exp(2x)-1)/(exp(2x)+1)` ke `return MathTanh(x)`. Tidak ada double-`exp()`, tidak ada NaN pada x > 350. | S16 |
+| **BUG-008** | 🟠 HIGH | `Experts/PASR_MODULAR.mq5` | Path dikonfirmasi: `Experts/PASR_MODULAR.mq5` (root, bukan subfolder). README compile target dikoreksi. | S15 |
+| **TR-006** | 🔴 CRITICAL | `Trade/CorrelationManager.mqh` | Full migration v1.0 → v2.00: IManager extend, DeclareEvents(), OnEvent(), RefreshSymbolList(), Shutdown() double-free guard. | S13 |
 | **TR-001** | 🔴 CRITICAL | `Trade/ExitEngine.mqh` | Infinite loop emergency stop, IManager rewrite v2.01 | S12 |
 | **TR-002** | 🔴 CRITICAL | `Trade/PositionManager.mqh` | `m_data` always NULL, double-subscribe fix, rewrite v3.00 | S12 |
 | **TR-003** | 🔴 CRITICAL | `Trade/RiskManager.mqh` | Double-accumulation dailyLoss fix v2.02 | S12 |
@@ -184,9 +187,10 @@ Experts/
 | S11 | PipelineEngine + Orchestrator hardening | N01, N03, N04, N06, N07, BUG-S10-001–004 |
 | S12 | Trade subfolder audit | TR-001–005 resolved, TR-006 carried to S13 |
 | S13 | CorrelationManager migration | TR-006 resolved (v1.0 → v2.00 full IManager rewrite) |
-| S14 | AI subfolder audit | AI-001..AI-007 ditemukan (7 bugs): inject order, ATR multi-period, trainer no-op, ensemble seed, stale features, baseline lookahead, Tanh NaN overflow |
-| S15 | BUG-008 path confirmation + README sync | BUG-008 resolved — EA path dikonfirmasi `Experts/PASR_MODULAR.mq5` |
-| S16 | AI fixes (AI-001..AI-007) + Phase7 + Dashboard audit | _(planned)_ |
+| S14 | AI subfolder audit | AI-001..AI-007 ditemukan (7 bugs) |
+| S15 | BUG-008 path confirmation + README sync | BUG-008 resolved |
+| S16 | AI subfolder fixes | AI-001..AI-007 **resolved** — inject order, 4x ATR, real SGD, ensemble seeds, stale-feature cache, baseline shift=1, MathTanh() |
+| S17 | Phase7 + Dashboard audit + SRManager decomposition | _(planned)_ |
 
 ---
 
@@ -236,11 +240,11 @@ orch.OnDeinit(reason);
 | `Trade/TradePlan.mqh` | — | S12 | ✅ Stable |
 | `Trade/RecoveryEngine.mqh` | — | S12 | ✅ Stable |
 | `Trade/CorrelationManager.mqh` | v2.00 | S13 | ✅ Stable |
-| `AI/AIOrchestrator.mqh` | v2.01 | S14 | ⚠️ Bugs AI-001..AI-007 |
-| `AI/AIFeatureBuilder.mqh` | — | S14 | ⚠️ Bugs AI-001, AI-002, AI-006 |
-| `AI/AIInference.mqh` | — | S14 | ⚠️ Bug AI-007 |
-| `AI/AIEnsemble.mqh` | — | S14 | ⚠️ Bug AI-004 |
-| `AI/AITrainer.mqh` | — | S14 | ⚠️ Bug AI-003 (trainer no-op) |
+| `AI/AIOrchestrator.mqh` | v2.02 | S16 | ✅ Stable |
+| `AI/AIFeatureBuilder.mqh` | v2.01 | S16 | ✅ Stable |
+| `AI/AIInference.mqh` | v2.01 | S16 | ✅ Stable |
+| `AI/AIEnsemble.mqh` | v2.01 | S16 | ✅ Stable |
+| `AI/AITrainer.mqh` | v2.01 | S16 | ✅ Stable |
 | `AI/AITypes.mqh` | — | S14 | ✅ Clean |
 | `Experts/PASR_MODULAR.mq5` | v13.00 | S15 | ✅ Path confirmed |
 | `Analysis/SRManager.mqh` | — | — | ⚠️ Audit needed (54KB) |
