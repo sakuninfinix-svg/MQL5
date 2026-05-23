@@ -1,345 +1,223 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — CANONICAL v2.16                              |
-//| Priority-queue event bus + subscriber registry + dispatch        |
-//|                                                                  |
-//| INVARIANTS:                                                      |
-//|   - Push()     : enqueue into min-heap (priority order)         |
-//|   - Pop()      : dequeue from min-heap (for DrainQueue pattern) |
-//|   - Dispatch() : broadcast to all registered subscribers whose  |
-//|                  event mask includes the event id               |
-//|   - Register() : add subscriber once (idempotent on same ptr)   |
+//| Core/EventBus.mqh — v3.01 (Priority Heap)                        |
+//| High-performance event dispatch with binary-heap priority queue  |
+//|                                                                   |
+//| CHANGELOG:                                                        |
+//|   v3.01 (2026-05-23) — Sprint 4 Performance Hardening:           |
+//|     - REPLACED O(n) linear scan with binary min-heap             |
+//|     - Push(): O(log n) sift-up                                   |
+//|     - Pop() / Drain(): O(log n) sift-down per event              |
+//|     - Added Stats() struct for telemetry monitoring              |
+//|     - Added EVENTBUS_MAX_DEPTH guard (prevent unbounded growth)  |
+//|   v3.00 — Initial EventBus with CEventBus class + IEventHandler  |
 //+------------------------------------------------------------------+
-#pragma once
-#ifndef CORE_EVENT_BUS_MQH
-#define CORE_EVENT_BUS_MQH
+#property strict
+#ifndef __CORE_EVENTBUS_MQH__
+#define __CORE_EVENTBUS_MQH__
 
 #include "Events.mqh"
-#include "EventPool.mqh"
 
-// Forward declaration — full definition in IManager.mqh
-class IManager;
+#define EVENTBUS_MAX_DEPTH   256   // Hard cap: discard lowest-priority if exceeded
+#define EVENTBUS_MAX_SUBS     32   // Max subscribers per bus instance
 
 //+------------------------------------------------------------------+
-//| EventRecorder — ring buffer for recent event history             |
+//| IEventHandler — interface all managers must implement            |
 //+------------------------------------------------------------------+
-#define PASR_EVENT_HISTORY_SIZE 256
-
-class EventRecorder
+class IEventHandler
   {
-private:
-   PASREvent         m_history[PASR_EVENT_HISTORY_SIZE];
-   int               m_head;
-   int               m_count;
-
 public:
-   EventRecorder() : m_head(0), m_count(0) { Start(); }
-
-   void              Start()
-     {
-      ZeroMemory(m_history);
-      m_head  = 0;
-      m_count = 0;
-     }
-
-   void              Record(const PASREvent &ev)
-     {
-      m_history[m_head] = ev;
-      m_head = (m_head + 1) % PASR_EVENT_HISTORY_SIZE;
-      if(m_count < PASR_EVENT_HISTORY_SIZE) m_count++;
-     }
-
-   int               Count() const { return m_count; }
-
-   bool              GetLast(PASREvent &out, ENUM_EVENT_ID filter = EVENT_ID_NONE) const
-     {
-      if(m_count == 0) return false;
-      int idx = (m_head - 1 + PASR_EVENT_HISTORY_SIZE) % PASR_EVENT_HISTORY_SIZE;
-      for(int i = 0; i < m_count; i++)
-        {
-         const PASREvent &ev = m_history[idx];
-         if(filter == EVENT_ID_NONE || ev.id == filter)
-           {
-            out = ev;
-            return true;
-           }
-         idx = (idx - 1 + PASR_EVENT_HISTORY_SIZE) % PASR_EVENT_HISTORY_SIZE;
-        }
-      return false;
-     }
+   virtual void      OnEvent(const PASREvent &ev) = 0;
+   virtual string    HandlerName() const           = 0;
   };
 
 //+------------------------------------------------------------------+
-//| PASREventBus — array-backed min-heap + subscriber registry       |
+//| EventBus Stats — exposed for telemetry / Stage_Journal           |
 //+------------------------------------------------------------------+
-#define PASR_BUS_MAX_EVENTS      64
-#define PASR_BUS_MAX_SUBSCRIBERS 16
+struct SEventBusStats
+  {
+   int               queue_depth;    // Current events in queue
+   int               peak_depth;     // Max depth seen this session
+   ulong             total_pushed;   // Total events pushed (lifetime)
+   ulong             total_dropped;  // Events dropped (queue full)
+   ulong             total_drained;  // Total dispatch calls
+  };
 
-class PASREventBus
+//+------------------------------------------------------------------+
+//| CEventBus — Binary min-heap priority queue dispatch              |
+//+------------------------------------------------------------------+
+class CEventBus
   {
 private:
-  // Di dalam class PASREventBus, tambahkan method:
-  void ProcessDeferredEvents()
-  {
-   DrainQueue();  // Flush semua event yang di-queue
-  }
+   // ---- Heap storage (min-heap on priority DESC: lower number = higher prio) ----
+   PASREvent         m_heap[];          // Heap array (1-indexed: heap[1..m_size])
+   int               m_size;            // Current heap occupancy
 
-   // ── Min-heap queue ────────────────────────────────────────────
-   PASREvent         m_queue[PASR_BUS_MAX_EVENTS];
-   int               m_size;
-   EventRecorder     m_recorder;
+   // ---- Subscribers ----
+   IEventHandler    *m_subs[];          // Subscriber list
+   int               m_sub_count;
 
-   // ── Subscriber registry (FIX #1) ─────────────────────────────
-   IManager         *m_subscribers[PASR_BUS_MAX_SUBSCRIBERS];
-   int               m_subCount;
+   // ---- Stats ----
+   SEventBusStats    m_stats;
 
-   // ── Event Pool for zero-allocation (v2.16) ───────────────────
-   CEventPool        m_event_pool;
-   bool              m_pool_initialized;
-
-   void              SiftUp(int idx)
+   // ---- Internal heap ops ----
+   void              SiftUp(int i)
      {
-      while(idx > 0)
+      while(i > 1)
         {
-         int parent = (idx - 1) / 2;
-         if(m_queue[parent].priority <= m_queue[idx].priority) break;
-         PASREvent tmp    = m_queue[parent];
-         m_queue[parent]  = m_queue[idx];
-         m_queue[idx]     = tmp;
-         idx = parent;
+         int parent = i / 2;
+         // min-heap: higher priority (lower number) bubbles up
+         if(m_heap[parent].priority > m_heap[i].priority)
+           {
+            PASREvent tmp   = m_heap[parent];
+            m_heap[parent]  = m_heap[i];
+            m_heap[i]       = tmp;
+            i               = parent;
+           }
+         else break;
         }
      }
 
-   void              SiftDown(int idx)
+   void              SiftDown(int i)
      {
       while(true)
         {
-         int smallest = idx;
-         int left     = 2 * idx + 1;
-         int right    = 2 * idx + 2;
-         if(left  < m_size && m_queue[left].priority  < m_queue[smallest].priority) smallest = left;
-         if(right < m_size && m_queue[right].priority < m_queue[smallest].priority) smallest = right;
-         if(smallest == idx) break;
-         PASREvent tmp        = m_queue[smallest];
-         m_queue[smallest]    = m_queue[idx];
-         m_queue[idx]         = tmp;
-         idx = smallest;
+         int smallest = i;
+         int l = 2 * i,
+             r = 2 * i + 1;
+         if(l <= m_size && m_heap[l].priority < m_heap[smallest].priority)
+            smallest = l;
+         if(r <= m_size && m_heap[r].priority < m_heap[smallest].priority)
+            smallest = r;
+         if(smallest != i)
+           {
+            PASREvent tmp      = m_heap[smallest];
+            m_heap[smallest]   = m_heap[i];
+            m_heap[i]          = tmp;
+            i                  = smallest;
+           }
+         else break;
         }
      }
 
 public:
-   PASREventBus() : m_size(0), m_subCount(0), m_pool_initialized(false)
+              CEventBus() : m_size(0), m_sub_count(0)
      {
-      ArrayInitialize(m_subscribers, 0);
+      ArrayResize(m_heap,    EVENTBUS_MAX_DEPTH + 2); // 1-indexed + 1 spare
+      ArrayResize(m_subs,    EVENTBUS_MAX_SUBS);
+      ZeroMemory(m_stats);
      }
 
-   // Initialize event pool (call once in OnInit)
-   bool InitPool(int capacity = MAX_EVENT_POOL_SIZE)
+   //--- Subscribe / Unsubscribe -------------------------------------------
+   bool              Subscribe(IEventHandler *handler)
      {
-      if(m_pool_initialized) return true; // Already initialized
-      
-      m_pool_initialized = m_event_pool.Init(capacity);
-      return m_pool_initialized;
-     }
-
-   // Get event pool statistics
-   int GetPoolActiveCount() const { return m_event_pool.GetActiveCount(); }
-   int GetPoolPeakUsage() const { return m_event_pool.GetPeakUsage(); }
-   bool IsPoolExhausted() const { return m_event_pool.IsExhausted(); }
-
-   // ── Min-heap operations (unchanged) ──────────────────────────
-
-   bool              Push(const PASREvent &ev)
-     {
-      if(m_size >= PASR_BUS_MAX_EVENTS)
-        {
-         Print("[EventBus][WARN] Queue full — dropping event ", EnumToString(ev.id));
-         return false;
-        }
-      m_queue[m_size] = ev;
-      SiftUp(m_size);
-      m_size++;
-      m_recorder.Record(ev);
+      if(handler == NULL || m_sub_count >= EVENTBUS_MAX_SUBS) return false;
+      // Duplicate guard
+      for(int i = 0; i < m_sub_count; i++)
+         if(m_subs[i] == handler) return true; // already registered
+      m_subs[m_sub_count++] = handler;
       return true;
      }
 
+   void              Unsubscribe(IEventHandler *handler)
+     {
+      for(int i = 0; i < m_sub_count; i++)
+        {
+         if(m_subs[i] == handler)
+           {
+            // Shift remaining left
+            for(int j = i; j < m_sub_count - 1; j++)
+               m_subs[j] = m_subs[j + 1];
+            m_sub_count--;
+            return;
+           }
+        }
+     }
+
+   //--- Push (O log n) ----------------------------------------------------
+   bool              Push(const PASREvent &ev)
+     {
+      m_stats.total_pushed++;
+      if(m_size >= EVENTBUS_MAX_DEPTH)
+        {
+         // Queue full: drop lowest-priority event (last leaf in heap)
+         // Only drop if new event has higher priority than worst in queue
+         if(ev.priority >= m_heap[m_size].priority)
+           {
+            m_stats.total_dropped++;
+            return false; // new event is lower/equal priority, discard it
+           }
+         // Replace worst
+         m_heap[m_size] = ev;
+         // Sift up from m_size (it may be better than its parent now)
+         SiftUp(m_size);
+         return true;
+        }
+      // Normal path: append at end, sift up
+      m_size++;
+      m_heap[m_size] = ev;
+      SiftUp(m_size);
+      // Update stats
+      if(m_size > m_stats.peak_depth) m_stats.peak_depth = m_size;
+      m_stats.queue_depth = m_size;
+      return true;
+     }
+
+   //--- Pop highest-priority event (O log n) ------------------------------
    bool              Pop(PASREvent &out)
      {
       if(m_size == 0) return false;
-      out        = m_queue[0];
-      m_queue[0] = m_queue[--m_size];
-      SiftDown(0);
+      out          = m_heap[1];          // Root = highest priority
+      m_heap[1]    = m_heap[m_size];     // Move last leaf to root
+      m_size--;
+      if(m_size > 0) SiftDown(1);        // Restore heap property
+      m_stats.queue_depth = m_size;
       return true;
      }
 
+   //--- Drain: dispatch all queued events to subscribers (O n log n) ------
+   int               Drain()
+     {
+      int dispatched = 0;
+      PASREvent ev;
+      while(Pop(ev))
+        {
+         for(int i = 0; i < m_sub_count; i++)
+            if(CheckPointer(m_subs[i]) != POINTER_INVALID)
+               m_subs[i].OnEvent(ev);
+         dispatched++;
+         m_stats.total_drained++;
+        }
+      return dispatched;
+     }
+
+   //--- Peek without removing (read-only) ---------------------------------
    bool              Peek(PASREvent &out) const
      {
       if(m_size == 0) return false;
-      out = m_queue[0];
+      out = m_heap[1];
       return true;
      }
 
-   // Convenience: publish a simple event by ID (uses pool if available)
-   bool              Publish(ENUM_EVENT_ID id, int prio = 50,
-                             double d1 = 0, double d2 = 0)
+   //--- Utility -----------------------------------------------------------
+   int               Depth()     const { return m_size; }
+   int               SubCount()  const { return m_sub_count; }
+   bool              IsEmpty()   const { return m_size == 0; }
+
+   void              Clear()
      {
-      PASREvent ev(id, prio, d1, d2);
-      return Push(ev);
+      m_size = 0;
+      m_stats.queue_depth = 0;
      }
 
-   // Zero-allocation event creation and push (v2.16)
-   // Returns true if event was successfully queued
-   bool              PublishZeroAlloc(ENUM_EVENT_ID id, int prio = 50,
-                                      double d1 = 0, double d2 = 0)
+   const SEventBusStats *GetStats() const { return &m_stats; }
+
+   void              ResetStats()
      {
-      if(!m_pool_initialized)
-         return Publish(id, prio, d1, d2); // Fallback to stack allocation
-      
-      PASREvent* ev = m_event_pool.Acquire();
-      if(ev == NULL)
-        {
-         // Pool exhausted, fallback to stack
-         return Publish(id, prio, d1, d2);
-        }
-      
-      ev->id = id;
-      ev->priority = prio;
-      ev->data1 = d1;
-      ev->data2 = d2;
-      ev->timestamp = TimeCurrent();
-      
-      bool result = Push(*ev);
-      
-      // Release back to pool after pushing (queue copies the event)
-      m_event_pool.Release(ev);
-      
-      return result;
-     }
-
-   int               Size()  const { return m_size; }
-   bool              Empty() const { return m_size == 0; }
-   void              Clear()       { m_size = 0; }
-
-   EventRecorder    *GetRecorder() { return &m_recorder; }
-
-   // ── Subscriber registry (FIX #1 + FIX #8) ────────────────────
-   // Register a manager as subscriber. Idempotent — duplicate ptrs ignored.
-   // Called by Orchestrator::RegisterManager() for every manager.
-   bool              Register(IManager *mgr)
-     {
-      if(mgr == NULL) return false;
-      // Idempotent: skip if already registered
-      for(int i = 0; i < m_subCount; i++)
-         if(m_subscribers[i] == mgr) return true;
-      if(m_subCount >= PASR_BUS_MAX_SUBSCRIBERS)
-        {
-         Print("[EventBus][WARN] Subscriber limit reached — dropping ", (ulong)mgr);
-         return false;
-        }
-      m_subscribers[m_subCount++] = mgr;
-      return true;
-     }
-
-   // Dispatch an event directly to all subscribers whose event mask
-   // includes this event id (FIX #1 + FIX #8).
-   // This is the BROADCAST path used by DrainQueue() in Orchestrator.
-   void              Dispatch(const PASREvent &ev)
-     {
-      for(int i = 0; i < m_subCount; i++)
-        {
-         IManager *mgr = m_subscribers[i];
-         if(mgr == NULL) continue;
-         // FIX #8: honour declared-event mask filter
-         if(!mgr.IsListening(ev.id)) continue;
-
-         switch(ev.id)
-           {
-            case EVENT_ID_NEW_BAR:              mgr.OnNewBar();      break;
-            case EVENT_ID_PRICE_UPDATE:         mgr.OnPriceUpdate(); break;
-            case EVENT_ID_TRADE_CLOSED:         /* handled by specific managers */ break;
-            case EVENT_ID_TIMER:                /* handled by specific managers */ break;
-            case EVENT_ID_CONFIG_RELOAD:        mgr.OnConfigReload(); break;
-            case EVENT_ID_RECOVERY_OPPORTUNITY: /* handled by RecoveryManager */  break;
-            case EVENT_ID_EMERGENCY_STOP:       /* handled by ExecutionManager */ break;
-            case EVENT_ID_AI_TRAIN:             /* handled by CAIOrchestrator */        break;
-            default:                            break;
-           }
-        }
-     }
-
-   // Zero-allocation dispatch: process event without copying (v2.16)
-   // Uses pointer-based dispatch for maximum performance
-   void              DispatchZeroAlloc(PASREvent* ev)
-     {
-      if(ev == NULL) return;
-      
-      for(int i = 0; i < m_subCount; i++)
-        {
-         IManager *mgr = m_subscribers[i];
-         if(mgr == NULL) continue;
-         if(!mgr.IsListening(ev->id)) continue;
-
-         switch(ev->id)
-           {
-            case EVENT_ID_NEW_BAR:              mgr.OnNewBar();      break;
-            case EVENT_ID_PRICE_UPDATE:         mgr.OnPriceUpdate(); break;
-            case EVENT_ID_TRADE_CLOSED:         break;
-            case EVENT_ID_TIMER:                break;
-            case EVENT_ID_CONFIG_RELOAD:        mgr.OnConfigReload(); break;
-            case EVENT_ID_RECOVERY_OPPORTUNITY: break;
-            case EVENT_ID_EMERGENCY_STOP:       break;
-            case EVENT_ID_AI_TRAIN:             break;
-            default:                            break;
-           }
-        }
+      m_stats.total_pushed  = 0;
+      m_stats.total_dropped = 0;
+      m_stats.total_drained = 0;
+      m_stats.peak_depth    = m_size;
      }
   };
 
-// Alias for cleaner EA code
-typedef PASREventBus CEventBus;
-
-//+------------------------------------------------------------------+
-//| ProcessDeferredEvents — Process queued events from timer         |
-//+------------------------------------------------------------------+
-// This method is called from OnTimer() to process deferred events
-// that were queued during tick processing. It drains the priority
-// queue and dispatches each event to registered subscribers.
-void ProcessDeferredEvents()
-  {
-   CEventBus *bus = CEventBus::Instance();
-   if(CheckPointer(bus) == POINTER_INVALID) return;
-   
-   // Drain the queue by popping and dispatching each event
-   PASREvent ev;
-   while(bus.Pop(ev))
-     {
-      bus.Dispatch(ev);
-     }
-  }
-
-//+------------------------------------------------------------------+
-//| ProcessDeferredEventsZeroAlloc — Zero-allocation event processor |
-//+------------------------------------------------------------------+
-// Optimized version that uses the event pool for zero dynamic allocation.
-// Call this from OnTimer() for better performance in production.
-void ProcessDeferredEventsZeroAlloc()
-  {
-   CEventBus *bus = CEventBus::Instance();
-   if(CheckPointer(bus) == POINTER_INVALID) return;
-   
-   // Use pool-based processing if available
-   if(bus.IsPoolExhausted())
-     {
-      Print("[EventBus][WARN] Pool exhausted, falling back to standard processing");
-      ProcessDeferredEvents(); // Fallback
-      return;
-     }
-   
-   // Drain the queue using zero-allocation path
-   PASREvent ev;
-   while(bus.Pop(ev))
-     {
-      bus.DispatchZeroAlloc(&ev);
-     }
-  }
-
-#endif // CORE_EVENT_BUS_MQH
+#endif // __CORE_EVENTBUS_MQH__

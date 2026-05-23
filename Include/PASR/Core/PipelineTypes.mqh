@@ -1,235 +1,157 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineTypes.mqh — CANONICAL v1.00                         |
-//| Pipeline architecture types for staged processing                |
-//|                                                                  |
-//| PURPOSE: Define pipeline stages, context passing, profiling      |
-//|                                                                  |
-//| ARCHITECTURE:                                                    |
-//|   • Stage enum for ordered execution                             |
-//|   • PipelineContext for data flow between stages                 |
-//|   • StageMetrics for per-stage performance tracking              |
-//|   • PipelineResult for early-exit short-circuiting               |
-//|                                                                  |
-//| USAGE:                                                           |
-//|   Replace monolithic OnTimer() with staged pipeline              |
-//|   Each stage is independent, testable, profileable               |
-//|                                                                  |
+//| Core/PipelineTypes.mqh — v1.02 (Stage Timeout)                   |
+//| Shared types, enums, and PipelineContext for CPipelineEngine      |
+//|                                                                   |
+//| CHANGELOG:                                                        |
+//|   v1.02 (2026-05-23) — Sprint 4:                                 |
+//|     - Added STAGE_TIMEOUT to ENUM_STAGE_RESULT                   |
+//|     - Added STAGE_TIMEOUT_US constant (50ms default)             |
+//|     - Added positions_count cache field to PipelineContext        |
+//|   v1.01 — PipelineContext with exec_result.ticket field          |
+//|   v1.00 — Initial pipeline types                                 |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_PIPELINE_TYPES_MQH__
 #define __CORE_PIPELINE_TYPES_MQH__
 
 #include "PASR.Types.mqh"
+#include "Events.mqh"
+
+//--- Stage timeout: abort any stage exceeding this (microseconds)
+#define STAGE_TIMEOUT_US   50000   // 50ms hard limit per stage
 
 //+------------------------------------------------------------------+
-//| Pipeline Stage Enum — Ordered execution phases                   |
-//+------------------------------------------------------------------+
-enum ENUM_PIPELINE_STAGE
-  {
-   STAGE_NONE          = 0,   // Invalid / not started
-   STAGE_DATA_SYNC     = 1,   // Sync market data, update prices
-   STAGE_ANALYSIS_SR   = 2,   // Update Support/Resistance zones
-   STAGE_ANALYSIS_ZONE = 3,   // Update Supply/Demand zones
-   STAGE_PATTERN_REC   = 4,   // Pattern recognition
-   STAGE_REGIME_DET    = 5,   // Market regime detection
-   STAGE_SIGNAL_GEN    = 6,   // Generate signals from all sources
-   STAGE_AI_INFERENCE  = 7,   // AI scoring and veto
-   STAGE_RISK_CHECK    = 8,   // Pre-trade risk gates
-   STAGE_EXECUTION     = 9,   // Order execution
-   STAGE_POSITION_MGMT = 10,  // Active position management (BE, trail)
-   STAGE_RECOVERY      = 11,  // Recovery engine for fakeouts
-   STAGE_DASHBOARD     = 12,  // UI updates
-   STAGE_JOURNAL       = 13,  // Logging and metrics
-   STAGE_COUNT         = 14   // Total stages (for loops)
-  };
-
-//+------------------------------------------------------------------+
-//| Stage Execution Result                                           |
+//| Stage execution result codes                                     |
 //+------------------------------------------------------------------+
 enum ENUM_STAGE_RESULT
   {
-   STAGE_OK            = 0,   // Continue to next stage
-   STAGE_SKIP          = 1,   // Skip remaining stages (normal exit)
-   STAGE_ABORT         = 2,   // Abort pipeline (error / circuit breaker)
-   STAGE_RETRY         = 3    // Retry this stage (transient error)
+   STAGE_OK      = 0,   // Stage completed successfully
+   STAGE_SKIP    = 1,   // Stage skipped (manager NULL or condition not met)
+   STAGE_WARN    = 2,   // Stage completed with non-fatal warning
+   STAGE_FAIL    = 3,   // Stage failed, pipeline should abort this cycle
+   STAGE_TIMEOUT = 4    // Stage exceeded STAGE_TIMEOUT_US — watchdog abort
   };
 
 //+------------------------------------------------------------------+
-//| Per-Stage Performance Metrics                                    |
+//| Execution result (filled by Stage_Execution)                     |
 //+------------------------------------------------------------------+
-struct StageMetrics
+struct SExecResult
   {
-   ulong   stage_id;           // ENUM_PIPELINE_STAGE
-   ulong   start_time_us;      // Start timestamp (microseconds)
-   ulong   elapsed_us;         // Execution time (microseconds)
-   bool    executed;           // Was stage executed this cycle?
-   bool    skipped;            // Was stage skipped?
-   bool    aborted;            // Did stage abort the pipeline?
-   int     retry_count;        // Number of retries attempted
-   
-   void Reset()
-     {
-      stage_id = 0;
-      start_time_us = 0;
-      elapsed_us = 0;
-      executed = false;
-      skipped = false;
-      aborted = false;
-      retry_count = 0;
-     }
-     
-   void Start()
-     {
-      start_time_us = GetMicrosecondCount();
-      executed = true;
-     }
-     
-   void Stop()
-     {
-      if(start_time_us > 0)
-         elapsed_us = GetMicrosecondCount() - start_time_us;
-     }
+   bool              executed;      // Was an order sent?
+   ulong             ticket;        // Order ticket (0 if not executed)
+   double            fill_price;    // Actual fill price
+   double            slippage_pts;  // Slippage in points
+   int               retcode;       // MT5 return code
+   string            comment;       // Debug comment
+
+               SExecResult() : executed(false), ticket(0),
+                               fill_price(0.0), slippage_pts(0.0),
+                               retcode(0), comment("") {}
   };
 
 //+------------------------------------------------------------------+
-//| Pipeline-Wide Performance Report                                 |
+//| Risk check result (filled by Stage_RiskCheck)                    |
 //+------------------------------------------------------------------+
-struct PipelineReport
+struct SRiskResult
   {
-   StageMetrics  stage_metrics[STAGE_COUNT];
-   ulong         total_elapsed_us;
-   ulong         cycle_count;
-   ulong         last_cycle_time;
-   double        avg_cycle_time_ms;
-   int           abort_count;
-   int           skip_count;
-   
-   void Reset()
-     {
-      for(int i = 0; i < STAGE_COUNT; i++)
-         stage_metrics[i].Reset();
-      total_elapsed_us = 0;
-      cycle_count = 0;
-      last_cycle_time = 0;
-      avg_cycle_time_ms = 0.0;
-      abort_count = 0;
-      skip_count = 0;
-     }
-     
-   void RecordCycle(ulong elapsed_us, ENUM_STAGE_RESULT result)
-     {
-      cycle_count++;
-      last_cycle_time = elapsed_us;
-      
-      // Running average (exponential moving average)
-      double current_ms = elapsed_us / 1000.0;
-      avg_cycle_time_ms = (avg_cycle_time_ms * 0.95) + (current_ms * 0.05);
-      
-      if(result == STAGE_ABORT) abort_count++;
-      if(result == STAGE_SKIP)  skip_count++;
-     }
-     
-   string ToString() const
-     {
-      string report = StringFormat("Pipeline Report [cycles=%d avg=%.2fms]\n",
-                                   cycle_count, avg_cycle_time_ms);
-      for(int i = 1; i < STAGE_COUNT; i++)
-        {
-         const StageMetrics &m = stage_metrics[i];
-         if(m.executed || m.skipped)
-           {
-            string status = m.executed ? "EXEC" : (m.skipped ? "SKIP" : "----");
-            report += StringFormat("  %-18s: %s %6dµs\n",
-                                   EnumToString((ENUM_PIPELINE_STAGE)i),
-                                   status, m.elapsed_us);
-           }
-        }
-      return report;
-     }
+   bool              allowed;       // Is trade allowed?
+   double            lot_size;      // Computed lot size
+   double            sl_price;      // Computed SL
+   double            tp_price;      // Computed TP
+   string            block_reason;  // If !allowed, why
+
+               SRiskResult() : allowed(false), lot_size(0.0),
+                               sl_price(0.0), tp_price(0.0), block_reason("") {}
   };
 
 //+------------------------------------------------------------------+
-//| Pipeline Context — Data passed between stages                    |
+//| AI inference result (filled by Stage_AIInference)                |
+//+------------------------------------------------------------------+
+struct SAIResult
+  {
+   double            score;         // AI confidence [-1.0 .. +1.0]
+   double            drift_index;   // Model drift indicator [0..1]
+   bool              model_healthy; // False = drift too high, skip AI
+   string            model_name;    // Which model was used
+
+               SAIResult() : score(0.0), drift_index(0.0),
+                             model_healthy(true), model_name("") {}
+  };
+
+//+------------------------------------------------------------------+
+//| Pipeline execution context — shared state across all stages      |
 //+------------------------------------------------------------------+
 struct PipelineContext
   {
-   // Input data (populated by early stages)
-   datetime          bar_time;           // Current bar timestamp
-   double            bid;                // Current bid price
-   double            ask;                // Current ask price
-   double            atr_points;         // ATR in points
-   ENUM_MARKET_REGIME regime;            // Detected market regime
-   ENUM_TRADING_SESSION session;         // Trading session
-   
-   // Signal data (populated by signal generation stage)
-   FinalSignal       signal;             // Aggregated signal
-   double            ai_score;           // AI confidence score
-   double            drift_score;        // AI drift score
-   bool              ai_veto;            // AI veto flag
-   
-   // Trade plan (populated by risk check stage)
-   TradePlan         plan;               // Built trade plan
-   RiskCheckResult   risk_result;        // Risk check result
-   
-   // Execution result (populated by execution stage)
-   ExecResult        exec_result;        // Execution outcome
-   
-   // Position management state
-   bool              has_position;       // Open position exists
-   ulong             position_ticket;    // Active position ticket
-   double            position_pnl;       // Floating P&L
-   
-   // Control flags
-   bool              new_bar;            // New bar detected
-   bool              market_open;        // Market is open
-   bool              trading_allowed;    // Circuit breakers allow trading
-   
-   // Early-exit reason (for debugging)
-   ENUM_STAGE_RESULT exit_reason;        // Why pipeline exited
-   string            exit_message;       // Human-readable reason
-   
-   void Reset()
+   // ---- Tick data (filled by Stage_DataSync) ----
+   double            bid;
+   double            ask;
+   double            spread_pts;
+   double            atr;           // Current ATR value
+   datetime          bar_time;      // Time of last closed bar
+   bool              new_bar;       // True = bar boundary crossed
+
+   // ---- Signal (filled by Stage_SignalGen) ----
+   ENUM_SIGNAL_TYPE  signal;        // SIGNAL_BUY / SIGNAL_SELL / SIGNAL_NONE
+   double            signal_strength; // Confluence score [0..1]
+
+   // ---- Regime (filled by Stage_RegimeDet) ----
+   ENUM_MARKET_REGIME regime;
+   double            regime_confidence;
+
+   // ---- Trade plan (filled by Stage_AdaptiveParams) ----
+   struct STradePlan
      {
-      bar_time = 0;
-      bid = 0;
-      ask = 0;
-      atr_points = 0;
-      regime = REGIME_UNKNOWN;
-      session = SESSION_OFF;
-      ZeroMemory(signal);
-      ai_score = 0.0;
-      drift_score = 0.0;
-      ai_veto = false;
-      ZeroMemory(plan);
-      ZeroMemory(risk_result);
-      ZeroMemory(exec_result);
-      has_position = false;
-      position_ticket = 0;
-      position_pnl = 0.0;
-      new_bar = false;
-      market_open = false;
-      trading_allowed = true;
-      exit_reason = STAGE_OK;
-      exit_message = "";
-     }
-     
-   bool ShouldContinue() const
-     {
-      return (exit_reason == STAGE_OK && trading_allowed);
-     }
-     
-   void Abort(const string reason)
-     {
-      exit_reason = STAGE_ABORT;
-      exit_message = reason;
-      trading_allowed = false;
-     }
-     
-   void Skip(const string reason)
-     {
-      exit_reason = STAGE_SKIP;
-      exit_message = reason;
-     }
+      ENUM_SIGNAL_TYPE direction;
+      double           entryPrice;
+      double           sl;
+      double           tp;
+      double           lot;
+     } plan;
+
+   // ---- Risk result (filled by Stage_RiskCheck) ----
+   SRiskResult       risk_result;
+
+   // ---- AI result (filled by Stage_AIInference) ----
+   SAIResult         ai_result;
+
+   // ---- Execution result (filled by Stage_Execution) ----
+   SExecResult       exec_result;
+
+   // ---- Position cache (filled by Stage_PositionMgmt) ----
+   // Sprint 4: cache PositionsTotal() once per cycle to avoid
+   // redundant MT5 terminal API calls across Stage_Recovery etc.
+   int               positions_count; // Cached result of PositionsTotal()
+   ulong             position_ticket; // First open position matching magic
+
+   // ---- Cycle metadata ----
+   datetime          cycle_start_time;
+   int               stages_executed;
+   int               stages_skipped;
+   int               stages_failed;
+   int               stages_timeout;  // Sprint 4: count watchdog triggers
+
+               PipelineContext() :
+                  bid(0), ask(0), spread_pts(0), atr(0),
+                  bar_time(0), new_bar(false),
+                  signal(SIGNAL_NONE), signal_strength(0),
+                  regime(REGIME_UNKNOWN), regime_confidence(0),
+                  positions_count(-1), position_ticket(0),
+                  cycle_start_time(0),
+                  stages_executed(0), stages_skipped(0),
+                  stages_failed(0), stages_timeout(0)
+                { ZeroMemory(plan); }
+  };
+
+//+------------------------------------------------------------------+
+//| Stage profiling record (one per stage per cycle)                 |
+//+------------------------------------------------------------------+
+struct SStageMetric
+  {
+   string            name;           // Stage name
+   ulong             elapsed_us;     // Execution time in microseconds
+   ENUM_STAGE_RESULT result;         // Stage outcome
+   bool              timed_out;      // True if watchdog triggered
   };
 
 #endif // __CORE_PIPELINE_TYPES_MQH__
