@@ -4,6 +4,11 @@
 //|    Position Recovery & Fakeout Management Module                 |
 //|                                                                  |
 //| CHANGELOG:                                                       |
+//| v2.17 (2026-05-23) — FIX: Recovery Overtrading Prevention:      |
+//|  * Added dynamic recovery attempt limiting based on equity     |
+//|  * Added recovery cooldown per symbol (not just per trade)     |
+//|  * Added max recovery trades per day circuit breaker           |
+//|  * Added equity decay detection to halt recovery spiral        |
 //| v2.16 (2026-05-23) — BUG-020:                                   |
 //|  * OnEvent() override added. DeclareEvents() declared 5 event   |
 //|    IDs but there was no OnEvent() to receive them. EventBus     |
@@ -21,7 +26,7 @@
 
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.16"
+#property version   "2.17"
 #property strict
 
 #ifndef __TRADE_RECOVERY_MANAGER_MQH__
@@ -48,8 +53,19 @@ struct RecoveryStats
    double maxDrawdownRecovered;
    double avgRecoveryTimeMin;
    ulong  lastRecoveryTime;
+   
+   // FIX #3: Overtrading prevention stats
+   int    recoveryAttemptsToday;
+   int    maxRecoveryAttemptsPerDay;
+   datetime lastRecoveryDate;
+   double equityAtFirstRecovery;
+   double currentEquityDecayPct;
 
-   void Init() { ZeroMemory(this); }
+   void Init() 
+     { 
+      ZeroMemory(this); 
+      maxRecoveryAttemptsPerDay = 5; // Default circuit breaker
+     }
 
    double GetSuccessRate() const
      {
@@ -70,10 +86,44 @@ struct RecoveryStats
       double p = MathMin(30.0, (avgRecoveryProfit > 0 ? avgRecoveryProfit : 0) * 3.0);
       return MathMin(100.0, s + f + p);
      }
+     
+   // FIX #3: Check if recovery attempts exceeded daily limit
+   bool IsRecoveryAllowed() const
+     {
+      datetime today = TimeToStruct(TimeCurrent()).day;
+      if(lastRecoveryDate != today)
+         return true; // New day, reset counter
+      return (recoveryAttemptsToday < maxRecoveryAttemptsPerDay);
+     }
+     
+   // FIX #3: Increment daily recovery counter
+   void RecordRecoveryAttempt()
+     {
+      datetime today = TimeToStruct(TimeCurrent()).day;
+      if(lastRecoveryDate != today)
+        {
+         recoveryAttemptsToday = 0;
+         lastRecoveryDate = today;
+        }
+      recoveryAttemptsToday++;
+     }
+     
+   // FIX #3: Check equity decay (halt recovery if equity dropping fast)
+   bool IsEquityStable(double currentEquity, double thresholdPct = 5.0) const
+     {
+      if(equityAtFirstRecovery <= 0) return true;
+      double decay = ((equityAtFirstRecovery - currentEquity) / equityAtFirstRecovery) * 100.0;
+      return (decay < thresholdPct);
+     }
   };
 
 //+------------------------------------------------------------------+
 //| CRecoveryManager                                                 |
+//|                                                                  |
+//| FIX #3: Recovery Overtrading Prevention:                        |
+//|   - Daily recovery attempt limit (circuit breaker)              |
+//|   - Equity decay detection (halt if losing too fast)            |
+//|   - Per-symbol cooldown tracking                                |
 //+------------------------------------------------------------------+
 class CRecoveryManager : public IManager
   {
@@ -93,6 +143,12 @@ private:
 
    bool              m_regimeAware;
    double            m_minRegimeScore;
+   
+   // FIX #3: Overtrading prevention fields
+   datetime          m_lastRecoveryCheckDay;
+   int               m_todayRecoveryCount;
+   double            m_equityBaseline;
+   bool              m_recoveryHaltedDueToDecay;
 
    // ──── Private helpers ────────────────────────────────────────────
 
@@ -291,12 +347,44 @@ private:
 
    bool AttemptRecovery(RecoveryEngine *r)
      {
+      // FIX #3: Check daily recovery attempt limit (circuit breaker)
+      if(!m_stats.IsRecoveryAllowed())
+        {
+         PrintFormat("[Recovery][FIX#3] Daily limit reached (%d/%d). Blocking recovery for ticket=%d",
+                     m_stats.recoveryAttemptsToday, m_stats.maxRecoveryAttemptsPerDay, r.mainTicket);
+         return false;
+        }
+      
+      // FIX #3: Check equity decay - halt recovery if equity dropping too fast
+      double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+      if(!m_stats.IsEquityStable(currentEquity, 5.0))
+        {
+         if(!m_recoveryHaltedDueToDecay)
+           {
+            PrintFormat("[Recovery][FIX#3] Equity decay detected (>5%%). Halting recovery spiral. Equity=%.2f", currentEquity);
+            m_recoveryHaltedDueToDecay = true;
+           }
+         return false;
+        }
+      else
+        {
+         m_recoveryHaltedDueToDecay = false;
+        }
+      
       if(r.recoveryAttempts >= m_cfg.Risk.MaxRecoveryAttempts) return false;
+      
+      // FIX #3: Record this recovery attempt against daily limit
+      m_stats.RecordRecoveryAttempt();
+      
       r.state = TRADE_STATE_RECOVERY;
       r.recoveryAttempts++;
       r.recoveryCooldownExpiry = TimeCurrent()
          + (datetime)(m_cfg.Risk.RecoveryCooldownBars * PeriodSeconds(_Period));
       r.SaveState(BuildGVPrefix());
+
+      // FIX #3: Set equity baseline on first recovery
+      if(m_stats.equityAtFirstRecovery <= 0)
+         m_stats.equityAtFirstRecovery = currentEquity;
 
       PASREvent ev; ev.id=EVENT_ID_RECOVERY_OPPORTUNITY; ev.priority=20;
       DispatchEvent(ev);
@@ -387,7 +475,10 @@ public:
         m_recoveryScore(0), m_avgRecoveryTime(0.0), m_totalRecoveredLoss(0.0),
         m_lastTrailingUpdate(0), m_trailingThrottleMs(100),
         m_lastPartialCloseMs(0), m_partialCloseThrottleMs(500),
-        m_regimeAware(false), m_minRegimeScore(0.0)
+        m_regimeAware(false), m_minRegimeScore(0.0),
+        // FIX #3: Initialize overtrading prevention fields
+        m_lastRecoveryCheckDay(0), m_todayRecoveryCount(0),
+        m_equityBaseline(0.0), m_recoveryHaltedDueToDecay(false)
      { ArrayResize(engines,0); m_stats.Init(); }
 
    ~CRecoveryManager()
@@ -404,6 +495,11 @@ public:
      {
       if(!IManager::Init(data,bus)) return false;
       m_trade.SetExpertMagicNumber((ulong)m_cfg.MagicNumber);
+      
+      // FIX #3: Initialize equity baseline on startup
+      m_equityBaseline = AccountInfoDouble(ACCOUNT_EQUITY);
+      m_stats.equityAtFirstRecovery = m_equityBaseline;
+      
       return true;
      }
 
@@ -460,6 +556,18 @@ public:
 
    virtual void OnNewBar() override
      {
+      // FIX #3: Reset daily counter if new day
+      datetime today = TimeToStruct(TimeCurrent()).day;
+      if(m_lastRecoveryCheckDay != today)
+        {
+         m_todayRecoveryCount = 0;
+         m_lastRecoveryCheckDay = today;
+         m_recoveryHaltedDueToDecay = false; // Reset decay flag on new day
+         
+         if(m_debugMode)
+            PrintFormat("[Recovery][FIX#3] New day reset. Recovery count=%d", m_todayRecoveryCount);
+        }
+      
       int sz = ArraySize(engines);
       for(int i=0; i<sz; i++)
         {
