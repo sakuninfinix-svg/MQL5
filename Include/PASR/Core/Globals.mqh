@@ -1,6 +1,15 @@
 //+------------------------------------------------------------------+
-//| Core/Globals.mqh — CANONICAL v2.13                               |
+//| Core/Globals.mqh — CANONICAL v2.14                               |
 //| Account-safe GV helpers, logging, validation, perf timer         |
+//|                                                                   |
+//| CHANGELOG:                                                        |
+//|   v2.14 (2026-05-23) — BUG-001 + BUG-012:                        |
+//|     - REMOVED DispatchEvent(PASREvent*) — used fake singleton     |
+//|       CEventBus::Instance() which does not exist.                 |
+//|       Replace all callers with: bus->Push(ev) directly.           |
+//|     - FIXED GVKey(): _MagicNumber is NOT a built-in MQL5 var.     |
+//|       Caller MUST pass explicit magic (e.g. InpMagic).            |
+//|       magic=0 default is intentional for scripts without magic.   |
 //+------------------------------------------------------------------+
 #pragma once
 #ifndef CORE_GLOBALS_MQH
@@ -10,14 +19,19 @@
 //| ACCOUNT-SAFE GLOBALVARIABLE KEY HELPER                           |
 //| Format: {login}_{symbol}_{magic}_{purpose}                       |
 //| Prevents collision: live+demo same magic on same terminal        |
+//|                                                                   |
+//| USAGE: GVKey("peak_equity", InpMagic)                            |
+//|   Always pass your EA's magic number explicitly.                 |
+//|   magic=0 is allowed for utility scripts with no magic number.   |
 //+------------------------------------------------------------------+
 string GVKey(const string purpose, const long magic = 0,
              const string symbol = "")
   {
    string acct = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
    string sym  = (symbol == "") ? _Symbol : symbol;
-   string mag  = (magic  == 0)  ? IntegerToString(_MagicNumber)
-                                 : IntegerToString(magic);
+   // BUG-012 FIX: _MagicNumber is NOT a MQL5 built-in.
+   // Caller must supply the magic explicitly (default 0 for scripts).
+   string mag  = IntegerToString(magic);
    return acct + "_" + sym + "_" + mag + "_" + purpose;
   }
 
@@ -91,22 +105,21 @@ public:
   };
 
 //+------------------------------------------------------------------+
-//| GLOBAL EVENT DISPATCHER HELPER                                   |
+//| EVENT DISPATCH — EXPLICIT BUS PARAMETER                          |
 //+------------------------------------------------------------------+
-// Helper function for EA scripts to dispatch events to EventBus
-// This wraps the EventBus::Push() call for convenience
-void DispatchEvent(PASREvent *ev)
+// BUG-001 FIX: Removed DispatchEvent(PASREvent*) that used the fake
+// singleton CEventBus::Instance(). CEventBus has NO static Instance().
+//
+// MIGRATION: Replace all DispatchEvent(&ev) calls with:
+//   m_bus->Push(ev);    // inside a class that holds m_bus pointer
+//   bus->Push(ev);      // in functions that receive bus as parameter
+//
+// This helper remains for convenience in utility/script contexts
+// where the bus pointer is passed explicitly.
+void PASRDispatchEvent(PASREvent &ev, CEventBus *bus)
   {
-   if(CheckPointer(ev) == POINTER_INVALID) return;
-   
-   CEventBus *bus = CEventBus::Instance();
-   if(CheckPointer(bus) != POINTER_INVALID)
-      bus.Push(*ev);
-   else
-   {
-      // Event deleted after push in Push() method, but if bus is invalid, delete here
-      delete ev;
-   }
+   if(CheckPointer(bus) == POINTER_INVALID) return;
+   bus.Push(ev);
   }
 
 #endif // CORE_GLOBALS_MQH
