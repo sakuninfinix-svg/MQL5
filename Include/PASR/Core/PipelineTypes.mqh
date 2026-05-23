@@ -1,8 +1,13 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineTypes.mqh — v1.04 (Sprint 9 — Full Context Fix)    |
+//| Core/PipelineTypes.mqh — v1.05 (Sprint 11 — BUG-N05 fix)       |
 //| Shared types, enums, and PipelineContext for CPipelineEngine     |
 //|                                                                  |
 //| CHANGELOG:                                                       |
+//|   v1.05 (2026-05-23) Sprint 11:                                  |
+//|    BUG-N05: Added max_session_dd field to PipelineContext.       |
+//|             ExecutePipeline SessionDD gate was hardcoded 5.0.    |
+//|             Orchestrator::OnTimer() injects cfg value each cycle.|
+//|             Reset() preserves max_session_dd (like health_status)|
 //|   v1.04 (2026-05-23) Sprint 9 — 19 compile/runtime fixes:       |
 //|    T1/T9:  SExecResult: added status (ENUM_EXEC_STATUS) field    |
 //|    T2/T11: SRiskResult: added suggestedLot+reason aliases        |
@@ -220,6 +225,7 @@ ENUM_TRADING_SESSION DetectSession()
 //|   has_position/position_pnl      → Stage_PositionMgmt ONLY      |
 //|   health_status                  → Orchestrator pre-loop         |
 //|   session_dd/daily_pnl           → Orchestrator pre-loop         |
+//|   max_session_dd                 → Orchestrator pre-loop (cfg)   |
 //+------------------------------------------------------------------+
 struct PipelineContext
   {
@@ -278,9 +284,13 @@ struct PipelineContext
    double            position_pnl;  // T8: floating PnL of current position
 
    // ── Runtime State (injected by Orchestrator pre-loop) ─────────
-   int               health_status;  // S7-004: 0=OK 1=WARN 2=CRIT 3=DEAD
-   double            session_dd;     // current drawdown % from CSessionState
-   double            daily_pnl;      // daily PnL from CSessionState
+   int               health_status;    // S7-004: 0=OK 1=WARN 2=CRIT 3=DEAD
+   double            session_dd;       // current drawdown % from CSessionState
+   double            daily_pnl;        // daily PnL from CSessionState
+   // BUG-N05 FIX: was hardcoded 5.0 in ExecutePipeline().
+   // Orchestrator injects cfg value (Risk.MaxDailyDrawdownPct) each cycle.
+   // Default 5.0 retained for safety if Orchestrator omits the inject.
+   double            max_session_dd;   // max allowed DD% — injected from StrategyConfig
 
    // ── Pipeline meta ─────────────────────────────────────────────
    ENUM_STAGE_RESULT exit_reason;    // T10: result of last stage that caused exit
@@ -298,6 +308,9 @@ struct PipelineContext
 
    //+---------------------------------------------------------------+
    //| T17: Reset — called by Orchestrator at start of each cycle   |
+   //| NOTE: health_status, session_dd, daily_pnl, max_session_dd   |
+   //|       are NOT reset here — they are injected by Orchestrator  |
+   //|       in OnTimer() before ExecutePipeline() is called.        |
    //+---------------------------------------------------------------+
    void Reset()
      {
@@ -314,7 +327,8 @@ struct PipelineContext
       ZeroMemory(exec_result);
       positions_count = -1; position_ticket = 0;
       has_position    = false; position_pnl = 0;
-      // health_status / session_dd / daily_pnl preserved — injected by Orchestrator
+      // health_status / session_dd / daily_pnl / max_session_dd
+      // preserved — injected by Orchestrator::OnTimer() pre-loop
       exit_reason     = STAGE_OK; exit_message = "";
       cycle_start_time = TimeCurrent();
       stages_executed = stages_skipped = stages_failed = stages_timeout = 0;
