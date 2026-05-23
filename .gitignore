@@ -1,8 +1,43 @@
 ```
-# Compiled/Meta files
+# Compiled and build artifacts
+*.mqh
+*.mq4
 *.mq5
+*.ex4
+*.ex5
+*.fxf
+*.gsc
+*.os
+*.osc
+*.csp
+*.cs4
+*.cs5
+*.cgi
+*.eng
+*.hst
+*.csv
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+*.~*
+.DS_Store
+Thumbs.db
 
-# Editor/IDE files
+# Dependencies
+lib/
+Libraries/
+
+# Build outputs
+tester/
+testers/
+Profiles/
+profiles/
+Backups/
+backups/
+
+# Editor/IDE
 .vscode/
 .idea/
 *.swp
@@ -11,53 +46,10 @@
 
 # Logs
 *.log
+*.txt
 
 # Environment
 .env
 .env.local
 *.env.*
-
-# Dependencies
-node_modules/
-venv/
-.venv/
-__pycache__/
-*.egg-info/
-dist/
-build/
-target/
-.gradle/
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Coverage
-coverage/
-htmlcov/
-.coverage
-
-# Compressed files
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
 ```

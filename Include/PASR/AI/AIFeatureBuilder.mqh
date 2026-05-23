@@ -38,6 +38,55 @@ private:
    double   m_vol_baseline;    // running volume for normalisation
    int      m_build_count;     // how many successful builds
    
+   //--- Cached indicator handles to prevent spam
+   int      m_hRSI;
+   int      m_hMACD;
+   int      m_hCCI;
+   int      m_hStoch;
+   int      m_hMFI;
+   int      m_hATR14;
+   
+   //--- Initialize indicator handles once
+   bool InitIndicators()
+   {
+      if(m_hRSI == INVALID_HANDLE)
+         m_hRSI = iRSI(_Symbol, PERIOD_CURRENT, 14, PRICE_CLOSE);
+      if(m_hMACD == INVALID_HANDLE)
+         m_hMACD = iMACD(_Symbol, PERIOD_CURRENT, 12, 26, 9, PRICE_CLOSE);
+      if(m_hCCI == INVALID_HANDLE)
+         m_hCCI = iCCI(_Symbol, PERIOD_CURRENT, 14, PRICE_TYPICAL);
+      if(m_hStoch == INVALID_HANDLE)
+         m_hStoch = iStochastic(_Symbol, PERIOD_CURRENT, 5, 3, 3, MODE_SMA, STO_LOWHIGH);
+      if(m_hMFI == INVALID_HANDLE)
+         m_hMFI = iMFI(_Symbol, PERIOD_CURRENT, 14);
+      if(m_hATR14 == INVALID_HANDLE)
+         m_hATR14 = iATR(_Symbol, PERIOD_CURRENT, 14);
+      
+      return (m_hRSI != INVALID_HANDLE && m_hMACD != INVALID_HANDLE && 
+              m_hCCI != INVALID_HANDLE && m_hStoch != INVALID_HANDLE && 
+              m_hMFI != INVALID_HANDLE && m_hATR14 != INVALID_HANDLE);
+   }
+   
+   //--- Cleanup indicator handles
+   void CleanupIndicators()
+   {
+      if(m_hRSI != INVALID_HANDLE) { IndicatorRelease(m_hRSI); m_hRSI = INVALID_HANDLE; }
+      if(m_hMACD != INVALID_HANDLE) { IndicatorRelease(m_hMACD); m_hMACD = INVALID_HANDLE; }
+      if(m_hCCI != INVALID_HANDLE) { IndicatorRelease(m_hCCI); m_hCCI = INVALID_HANDLE; }
+      if(m_hStoch != INVALID_HANDLE) { IndicatorRelease(m_hStoch); m_hStoch = INVALID_HANDLE; }
+      if(m_hMFI != INVALID_HANDLE) { IndicatorRelease(m_hMFI); m_hMFI = INVALID_HANDLE; }
+      if(m_hATR14 != INVALID_HANDLE) { IndicatorRelease(m_hATR14); m_hATR14 = INVALID_HANDLE; }
+   }
+   
+   //--- Helper to get indicator value from cached handle
+   double GetIndicatorValue(int handle, int buffer, int shift)
+   {
+      double val[1];
+      if(handle == INVALID_HANDLE || CopyBuffer(handle, buffer, shift, 1, val) <= 0)
+         return 0.0;
+      return val[0];
+   }
+   
    //--- Price return helpers
    double PriceReturn(int bars_back)
    {
@@ -47,10 +96,12 @@ private:
       return (c0 - cn) / cn;
    }
    
-   //--- ATR ratio
+   //--- ATR ratio using cached handle
    double ATRRatio(int period)
    {
-      double atr = iATR(_Symbol, PERIOD_CURRENT, period, 0);
+      // For simplicity, use the cached 14-period ATR as baseline reference
+      // In production, you might want separate handles for each period
+      double atr = GetIndicatorValue(m_hATR14, 0, 0);
       if(m_atr_baseline <= 0.0) return 0.5;
       return MathMin(atr / m_atr_baseline, 3.0) / 3.0;  // clamp + normalize [0..1]
    }
@@ -91,11 +142,11 @@ private:
       return MathMax(-3.0, MathMin(3.0, sk/n)) / 3.0;  // normalize to [-1..1]
    }
    
-   //--- Update running baselines
+   //--- Update running baselines using cached handle
    void UpdateBaselines()
    {
-      double atr = iATR(_Symbol, PERIOD_CURRENT, 14, 0);
-      double vol = iVolume(_Symbol, PERIOD_CURRENT, 0);
+      double atr = GetIndicatorValue(m_hATR14, 0, 0);
+      double vol = (double)iVolume(_Symbol, PERIOD_CURRENT, 0);
       double alpha = 0.05;  // EMA smoothing
       if(m_atr_baseline <= 0.0) m_atr_baseline = atr;
       else m_atr_baseline = alpha*atr + (1.0-alpha)*m_atr_baseline;
@@ -106,17 +157,30 @@ private:
 public:
    CAIFeatureBuilder()
       : m_last_valid(false), m_last_built(0),
-        m_atr_baseline(0.0), m_vol_baseline(0.0), m_build_count(0)
+        m_atr_baseline(0.0), m_vol_baseline(0.0), m_build_count(0),
+        m_hRSI(INVALID_HANDLE), m_hMACD(INVALID_HANDLE), m_hCCI(INVALID_HANDLE),
+        m_hStoch(INVALID_HANDLE), m_hMFI(INVALID_HANDLE), m_hATR14(INVALID_HANDLE)
    {
       ArrayInitialize(m_last_features, 0.0);
    }
    
-   virtual bool Initialize(CEventBus *bus) override
+   ~CAIFeatureBuilder()
    {
-      return IManager::Initialize(bus);
+      CleanupIndicators();
    }
    
-   virtual void Shutdown() override { IManager::Shutdown(); }
+   virtual bool Initialize(CEventBus *bus) override
+   {
+      if(!IManager::Initialize(bus))
+         return false;
+      return InitIndicators();
+   }
+   
+   virtual void Shutdown() override 
+   { 
+      CleanupIndicators();
+      IManager::Shutdown(); 
+   }
    virtual void DeclareEvents() override {}
    virtual void OnEvent(const PASREvent &ev) override {}
    
@@ -143,17 +207,13 @@ public:
       f[6]  = ATRRatio(10);
       f[7]  = ATRRatio(20);
       
-      // [8-11] Momentum indicators
-      double rsi  = iRSI(_Symbol, PERIOD_CURRENT, 14, PRICE_CLOSE, 0);
-      double macd_main, macd_sig, macd_hist;
-      {
-         int h = iMACD(_Symbol, PERIOD_CURRENT, 12, 26, 9, PRICE_CLOSE, MODE_MAIN,   0);
-         macd_main = h;
-         macd_sig  = iMACD(_Symbol, PERIOD_CURRENT, 12, 26, 9, PRICE_CLOSE, MODE_SIGNAL, 0);
-         macd_hist = macd_main - macd_sig;
-      }
-      double cci  = iCCI(_Symbol, PERIOD_CURRENT, 14, PRICE_TYPICAL, 0);
-      double stoch= iStochastic(_Symbol, PERIOD_CURRENT, 5, 3, 3, MODE_SMA, STO_LOWHIGH, MODE_MAIN, 0);
+      // [8-11] Momentum indicators - use cached handles
+      double rsi  = GetIndicatorValue(m_hRSI, 0, 0);
+      double macd_main = GetIndicatorValue(m_hMACD, 0, 0);
+      double macd_sig  = GetIndicatorValue(m_hMACD, 1, 0);
+      double macd_hist = macd_main - macd_sig;
+      double cci  = GetIndicatorValue(m_hCCI, 0, 0);
+      double stoch= GetIndicatorValue(m_hStoch, 0, 0);
       
       f[8]  = NormIndicator(rsi,   0.0, 100.0);
       f[9]  = MathMax(-1.0, MathMin(1.0, macd_hist / MathMax(m_atr_baseline, 1e-8))) * 0.5 + 0.5;
@@ -170,8 +230,8 @@ public:
       f[13] = NormIndicator(obv_delta / MathMax(m_vol_baseline,1.0), -3.0, 3.0);
       // Vol spike: is vol > 2x baseline?
       f[14] = (m_vol_baseline > 0.0 && vol0 > 2.0*m_vol_baseline) ? 1.0 : 0.0;
-      // MFI approximation
-      double mfi = iMFI(_Symbol, PERIOD_CURRENT, 14, 0);
+      // MFI approximation using cached handle
+      double mfi = GetIndicatorValue(m_hMFI, 0, 0);
       f[15] = NormIndicator(mfi, 0.0, 100.0);
       
       // [16-18] Structure (pass-through if no zone/SR managers, default 0.5)

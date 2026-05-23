@@ -74,10 +74,68 @@ private:
    ulong             m_structure_exits;
    ulong             m_fade_exits;
    
+   // Cached indicator handles to prevent spam
+   int               m_hATR;
+   int               m_hRSI;
+   
    // Static buffers for zero-allocation
    double            m_highs[CHANDELIER_PERIOD];
    double            m_lows[CHANDELIER_PERIOD];
    double            m_atr_values[50];
+   
+   //--- Initialize indicator handles once
+   bool InitIndicators()
+   {
+      if(m_hATR == INVALID_HANDLE)
+         m_hATR = iATR(_Symbol, PERIOD_CURRENT, CHANDELIER_PERIOD);
+      if(m_hRSI == INVALID_HANDLE)
+         m_hRSI = iRSI(_Symbol, PERIOD_CURRENT, 14, PRICE_CLOSE);
+      
+      return (m_hATR != INVALID_HANDLE && m_hRSI != INVALID_HANDLE);
+   }
+   
+   //--- Cleanup indicator handles
+   void CleanupIndicators()
+   {
+      if(m_hATR != INVALID_HANDLE) { IndicatorRelease(m_hATR); m_hATR = INVALID_HANDLE; }
+      if(m_hRSI != INVALID_HANDLE) { IndicatorRelease(m_hRSI); m_hRSI = INVALID_HANDLE; }
+   }
+   
+   //--- Helper to get ATR value from cached handle
+   double GetATRValue(int period)
+   {
+      // For now use the cached handle; in production you might want multiple handles per period
+      if(m_hATR == INVALID_HANDLE) return 0.0;
+      
+      double atrBuffer[1];
+      if(CopyBuffer(m_hATR, 0, 0, 1, atrBuffer) <= 0)
+         return 0.0;
+      
+      return atrBuffer[0];
+   }
+   
+   //--- Helper to get RSI values from cached handle
+   bool GetRSIValues(double &current, double &prev)
+   {
+      if(m_hRSI == INVALID_HANDLE)
+      {
+         current = 0.0;
+         prev = 0.0;
+         return false;
+      }
+      
+      double rsiBuffer[2];
+      if(CopyBuffer(m_hRSI, 0, 0, 2, rsiBuffer) < 2)
+      {
+         current = 0.0;
+         prev = 0.0;
+         return false;
+      }
+      
+      current = rsiBuffer[0];
+      prev = rsiBuffer[1];
+      return true;
+   }
    
 public:
    CExitEngine();
@@ -117,6 +175,8 @@ CExitEngine::CExitEngine()
    m_time_exits = 0;
    m_structure_exits = 0;
    m_fade_exits = 0;
+   m_hATR = INVALID_HANDLE;
+   m_hRSI = INVALID_HANDLE;
 }
 
 //+------------------------------------------------------------------+
@@ -124,6 +184,7 @@ CExitEngine::CExitEngine()
 //+------------------------------------------------------------------+
 CExitEngine::~CExitEngine()
 {
+   CleanupIndicators();
    Shutdown();
 }
 
@@ -139,6 +200,13 @@ bool CExitEngine::Initialize()
    Print("[EXIT] Chandelier Period: ", CHANDELIER_PERIOD);
    Print("[EXIT] Time Exit Threshold: ", TIME_EXIT_BARS, " bars");
    Print("[EXIT] Profit Fade RSI Threshold: ", PROFIT_FADE_THRESHOLD);
+   
+   // Initialize cached indicator handles
+   if(!InitIndicators())
+   {
+      Print("[EXIT] Failed to initialize indicator handles");
+      return false;
+   }
    
    m_initialized = true;
    
@@ -279,10 +347,9 @@ bool CExitEngine::CheckChandelierExit(
 double CExitEngine::CalculateChandelierLevel(const string symbol, ENUM_ORDER_TYPE pos_type)
 {
    // Get highest high or lowest low for lookback period
-   double highs[], lows[], atr[];
+   double highs[], lows[];
    ArraySetAsSeries(highs, true);
    ArraySetAsSeries(lows, true);
-   ArraySetAsSeries(atr, true);
    
    int copied_high = CopyHigh(symbol, PERIOD_CURRENT, 0, CHANDELIER_PERIOD, highs);
    int copied_low = CopyLow(symbol, PERIOD_CURRENT, 0, CHANDELIER_PERIOD, lows);
@@ -290,19 +357,10 @@ double CExitEngine::CalculateChandelierLevel(const string symbol, ENUM_ORDER_TYP
    if(copied_high < CHANDELIER_PERIOD || copied_low < CHANDELIER_PERIOD)
       return 0.0;
    
-   // Get ATR
-   int handle_atr = iATR(symbol, PERIOD_CURRENT, CHANDELIER_PERIOD);
-   if(handle_atr == INVALID_HANDLE) return 0.0;
-   
-   if(CopyBuffer(handle_atr, 0, 0, 1, atr) < 1)
-   {
-      IndicatorRelease(handle_atr);
+   // Get ATR from cached handle (no spam)
+   double current_atr = GetATRValue(CHANDELIER_PERIOD);
+   if(current_atr <= 0.0)
       return 0.0;
-   }
-   
-   IndicatorRelease(handle_atr);
-   
-   double current_atr = atr[0];
    
    if(pos_type == ORDER_TYPE_BUY)
    {
@@ -401,23 +459,10 @@ bool CExitEngine::CheckStructureBreak(const string symbol, ENUM_ORDER_TYPE pos_t
 //+------------------------------------------------------------------+
 bool CExitEngine::CheckProfitFade(const string symbol, ENUM_ORDER_TYPE pos_type)
 {
-   // Use RSI to detect momentum exhaustion
-   int rsi_handle = iRSI(symbol, PERIOD_CURRENT, 14, PRICE_CLOSE);
-   if(rsi_handle == INVALID_HANDLE) return false;
-   
-   double rsi_buffer[];
-   ArraySetAsSeries(rsi_buffer, true);
-   
-   if(CopyBuffer(rsi_handle, 0, 0, 2, rsi_buffer) < 2)
-   {
-      IndicatorRelease(rsi_handle);
+   // Use RSI from cached handle (no spam)
+   double current_rsi, prev_rsi;
+   if(!GetRSIValues(current_rsi, prev_rsi))
       return false;
-   }
-   
-   IndicatorRelease(rsi_handle);
-   
-   double current_rsi = rsi_buffer[0];
-   double prev_rsi = rsi_buffer[1];
    
    if(pos_type == ORDER_TYPE_BUY)
    {

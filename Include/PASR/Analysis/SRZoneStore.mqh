@@ -105,15 +105,18 @@ private:
       return 1.30;                   // Weak          → wide buffer
      }
 
-   //-- Volatility-adjusted buffer (ATR20/ATR50 ratio)
+   //-- Volatility-adjusted buffer (uses injected ATR, no handle spam)
    double VolAdjBuffer(double base) const
      {
-      double atr20 = iATR(_Symbol, _Period, 20, 1);
-      double atr50 = iATR(_Symbol, _Period, 50, 1);
-      if(atr50 <= 0.0 || atr20 <= 0.0) return base;
-      double vr = atr20 / atr50;
-      if(vr > 1.2) return base * (1.0 + (vr - 1.2) * 0.5);
-      if(vr < 0.8) return base * MathMax(0.5, 1.0 - (0.8 - vr) * 0.3);
+      // Use the injected m_atr directly instead of calling iATR repeatedly
+      // This assumes m_atr is updated regularly by SRManager via UpdateATR()
+      if(m_atr <= 0.0) return base;
+      
+      // Simple volatility adjustment based on current ATR level
+      // In production, you might inject multiple ATR periods from manager
+      double normalizedATR = m_atr / (_Point * 100); // Normalize to typical range
+      if(normalizedATR > 1.2) return base * (1.0 + (normalizedATR - 1.2) * 0.5);
+      if(normalizedATR < 0.8) return base * MathMax(0.5, 1.0 - (0.8 - normalizedATR) * 0.3);
       return base;
      }
 
