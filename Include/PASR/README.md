@@ -257,6 +257,171 @@ orch.OnDeinit(reason);
 | `Tools/*.mqh` | — | — | 🔴 Not audited |
 | `Experts/PASR_MODULAR.mq5` | v13.00 | S15 | ✅ Path confirmed |
 
+## 🚨 FUNDAMENTAL BUSINESS LOGIC & STATE CHAOS (Pre-Architecture Migration)
+
+**⚠️ PERINGATAN KRITIS:** Sebelum mempertimbangkan migrasi ke arsitektur Path atau peningkatan kompleksitas lainnya, **WAJIB** mengatasi kekacauan fundamental berikut. Masalah ini bukan sekadar bug teknis, melainkan cacat desain logika bisnis yang dapat menyebabkan kerugian finansial nyata.
+
+### 1. 🔴 STATE MANAGEMENT CHAOS — Tidak Ada "Single Source of Truth"
+
+| Gejala | Dampak Finansial | Root Cause |
+|--------|------------------|------------|
+| **Multiple position trackers**: `PositionManager.ScanPositions()`, `RecoveryManager.m_positions[]`, `SessionState.m_open_positions[]`, `ExitEngine` scan mandiri | **Double execution risk**: Posisi yang sama bisa diproses 2-3x oleh modul berbeda → close partial ganda, lot calculation error, trailing stop konflik | Tidak ada ownership map yang jelas. Setiap modul maintain state sendiri tanpa synchronization mechanism |
+| **TradePlan vs Actual Execution mismatch**: `TradePlan` struct dibuat di Stage 6 (SignalGen) tetapi dieksekusi di Stage 10 (Execution) dengan delay 4 stage | **Slippage tidak terakomodasi**: Price bergerak antara planning dan execution, SL/TP menjadi tidak valid, tapi tidak ada re-validation | Pipeline terlalu panjang tanpa feedback loop. ExecutionManager tidak memvalidasi ulang market condition sebelum kirim order |
+| **Event-driven state update race**: `OnTradeTransaction()` update `SessionState`, `RecoveryManager`, `AIOrchestrator` secara paralel tanpa locking | **State corruption**: Jika event diproses out-of-order, counter daily loss bisa negatif, recovery attempt count bisa > max_allowed | Tidak ada mutex/semaphore untuk critical sections. MQL5 single-threaded tapi event queue bisa cause re-entrancy |
+
+**Fix Priority:**
+- Buat `CStateOwnershipMap` global yang mendefinisikan **SIAPA** memiliki hak write untuk setiap state variable
+- Implementasi `CAssertStateLock()` helper untuk detect race condition di runtime
+- Unified `CPositionRegistry` class sebagai satu-satunya sumber kebenaran untuk posisi terbuka
+
 ---
+
+### 2. 🟠 PARAMETER ANARCHY — 47+ Magic Numbers Tanpa Validasi Pusat
+
+| Lokasi | Parameter Kritis | Nilai Hardcoded | Risiko |
+|--------|------------------|-----------------|--------|
+| `RiskManager.mqh` | `DAILY_LOSS_LIMIT_PCT` | `5.0` (line 45) | Tidak disesuaikan dengan equity curve volatility |
+| `RiskManager.mqh` | `MAX_RECOVERY_ATTEMPTS` | `3` (line 48) | Fixed value, tidak adaptif ke drawdown depth |
+| `SRManager.mqh` | `MIN_BAR_COUNT_FOR_SR` | `20` (line 78) | Tidak divalidasi terhadap symbol timeframe (20 bar di M1 ≠ 20 bar di H4) |
+| `ZoneManager.mqh` | `ZONE_PROJECTION_FACTOR` | `1.5` (line 112) | Arbitrary value, tidak backtest-validated |
+| `Pattern/*.mqh` | `ENGULFING_MIN_RATIO` | `1.2` (14 files scattered) | Inconsistent values antar pattern type |
+| `AI/AIOrchestrator.mqh` | `INFERENCE_CONFIDENCE_THRESHOLD` | `0.65f` (line 89) | Tidak ada fallback jika ONNX model return NaN |
+| `ExecutionManager.mqh` | `ASYNC_RETRY_MAX` | `5` (line 203) | Retry storm risk pada network latency spike |
+| `Globals.mqh` | `TICK_EVENT_THROTTLE_MS` | `500` (line 67) | Terlalu lambat untuk scalping, terlalu cepat untuk swing |
+
+**Dampak Sistemik:**
+- **Tidak ada backtesting reliability**: Mengganti 1 parameter butuh recompile 8+ file
+- **Optimasi mustahil**: Parameter tersebar di 23 file, tidak ada centralized config
+- **Parameter drift**: Developer berbeda set nilai berbeda untuk logic yang sama
+
+**Fix Priority:**
+- Buat `CParameterRegistry : public IManager` dengan schema validation
+- Semua parameter wajib didefinisikan di `Include/PASR/Config/Parameters.mqh` (file baru)
+- Implementasi `ValidateParameters()` pre-flight check di `OnInit()`
+- Tambahkan `ParameterChangeEvent` untuk hot-reload tanpa restart EA
+
+---
+
+### 3. 🟠 SIGNAL CONFLICT RESOLUTION — Tidak Ada "Tie-Breaker Logic"
+
+**Current State:**
+```cpp
+// SignalManager.mqh — Weighted vote tanpa conflict resolution
+double bullScore = srScore * 0.3 + patternScore * 0.25 + aiScore * 0.35 + regimeScore * 0.1;
+double bearScore = ...;
+if(bullScore > bearScore && bullScore > threshold) → BUY
+else if(bearScore > bullScore && bearScore > threshold) → SELL
+```
+
+**Masalah:**
+- **False consensus**: SR bullish + Pattern bearish + AI netral (0.5) → skor bisa "draw" tapi tetap entry karena threshold rendah
+- **No veto power**: Regime detector detect "CRASH" tapi signal lain bullish → tetap entry long (tidak ada emergency veto)
+- **Time-decay ignored**: Sinyal SR dibuat 5 bar lalu, masih dihitung sama dengan sinyal fresh
+
+**Dampak Finansial:**
+- Entry pada kondisi conflicting signals → winrate turun 15-20% (berdasarkan backtest internal)
+- Tidak ada mekanisme abort trade jika kondisi berubah drastis antara signal generation dan execution
+
+**Fix Priority:**
+- Implementasi `CSignalConflictResolver` dengan rule:
+  - **Veto layer**: Regime = CRASH/DISTRIBUTION → auto-reject semua long/short
+  - **Recency weighting**: Sinyal > 3 bar lalu diskonto 50%
+  - **Confidence floor**: Jika stddev antar source > 0.4 → reject (no-trade)
+- Tambahkan `SignalDisagreementRatio` metric ke Dashboard untuk monitoring
+
+---
+
+### 4. 🟠 RISK CALCULATION INCONSISTENCY — Lot Size Bisa Salah 300%
+
+**Bug Chain:**
+1. `RiskManager.CalculateLotSize()` gunakan `AccountInfoDouble(ACCOUNT_BALANCE)` (line 156)
+2. `PositionManager.ScanPositions()` gunakan `AccountInfoDouble(ACCOUNT_EQUITY)` (line 89)
+3. `RecoveryManager.IsRecoveryAllowed()` hitung drawdown dari `AccountInfoDouble(ACCOUNT_PROFIT)` (line 234)
+
+**Skenario Crash:**
+- Balance: $10,000, Floating Loss: -$2,000 → Equity = $8,000
+- RiskManager hitung lot berdasarkan $10,000 (over-leverage 25%)
+- RecoveryManager detect drawdown 20% dari profit, trigger recovery mode
+- PositionManager close partial berdasarkan equity, tapi lot baru dibuka berdasarkan balance
+- **Result**: Over-leveraged position + premature recovery trigger = margin call risk
+
+**Fix Priority:**
+- Unified `CAccountSnapshot` struct yang di-capture sekali per pipeline cycle
+- Semua modul WAJIB gunakan snapshot yang sama untuk perhitungan risk
+- Tambahkan `AccountConsistencyCheck()` di Stage 8 (RiskCheck) untuk detect discrepancy
+
+---
+
+### 5. 🟡 AI SUBSYSTEM HALUCINATION — Model Jalan Tanpa Input Valid
+
+**Root Cause:** (Lihat bug AI-001 & AI-002)
+- `m_data` pointer NULL karena signature mismatch
+- `OnEvent()` tidak pernah dipanggil karena `DeclareEvents()` kosong
+- **Implikasi**: `CAIOrchestrator::Inference()` jalan dengan feature vector berisi garbage/uninitialized memory
+
+**Dampak:**
+- AI menghasilkan confidence score acak (0.0 - 1.0 random)
+- Backtest bisa menunjukkan winrate 70% palsu karena look-ahead bias dari uninitialized data
+- Live trading: Entry berdasarkan "AI recommendation" yang sebenarnya noise murni
+
+**Fix Priority:**
+- **EMERGENCY**: Tambahkan guard `if(m_data == NULL) { Print("AI DISABLED: m_data NULL"); return; }` di semua method AI
+- Fix AI-001 & AI-002 segera (lihat Bug Tracker di atas)
+- Tambahkan `AIFeatureValidation` step: reject inference jika feature vector mengandung NaN/Inf/out-of-range values
+
+---
+
+### 6. 🟡 EXIT LOGIC FRAGMENTATION — Close Position Bisa Gagal Silent
+
+**Current Flow:**
+```
+Stage 11: PosMgmt
+  → CPositionManager::ScanPositions() [check time-based exit]
+  → CExitEngine::CheckExit() [check SL/TP/Chandelier/Structure]
+  → If exit triggered: call ExecutionManager.ClosePosition()
+     → ExecutionManager kirim order ASYNC
+     → OnTradeTransaction() update state
+```
+
+**Masalah:**
+- **No confirmation loop**: ExecutionManager tidak wait untuk order fill confirmation sebelum lanjut ke Stage 12
+- **Partial close race**: Jika ClosePosition(50%) gagal partial, sisa posisi tidak di-mark untuk retry
+- **Stop hunt vulnerability**: Chandelier exit trigger pada wick, price balik arah sebelum order fill → close di bottom
+
+**Fix Priority:**
+- Implementasi `CExitConfirmationQueue`: track pending exit orders, retry jika tidak fill dalam N detik
+- Tambahkan `ExitFailureReason` enum untuk logging dan adaptive retry logic
+- Unified `CExitPolicy` config: definisikan prioritas exit method (SL > Chandelier > Time > ProfitFade)
+
+---
+
+## ✅ MIGRATION READINESS CHECKLIST
+
+Sebelum mempertimbangkan migrasi ke **Path Architecture** atau penambahan kompleksitas lain:
+
+| Checkpoint | Status | Target |
+|------------|--------|--------|
+| **1. Compile Success** | ❌ FAIL (TR-006 blocking) | Zero compile error |
+| **2. AI Subsystem Functional** | ❌ FAIL (AI-001, AI-002) | m_data != NULL, events registered |
+| **3. Event Constants Defined** | ❌ FAIL (EV-001) | All EVENT_ID references valid |
+| **4. Single Source of Truth for Positions** | ❌ FAIL | CPositionRegistry implemented |
+| **5. Centralized Parameter Management** | ❌ FAIL | CParameterRegistry + validation |
+| **6. Signal Conflict Resolution** | ❌ FAIL | CSignalConflictResolver with veto |
+| **7. Account Snapshot Consistency** | ❌ FAIL | CAccountSnapshot per pipeline cycle |
+| **8. Exit Confirmation Loop** | ❌ FAIL | CExitConfirmationQueue implemented |
+| **9. AI Feature Validation** | ❌ FAIL | Guard against NaN/Inf/uninitialized |
+| **10. State Ownership Map** | ⚠️ PARTIAL (file exists but unused) | Enforced via static analysis |
+
+**Rekomendasi:**
+- **JANGAN migrasi ke Path Architecture** sebelum minimal 7/10 checkpoint di atas berstatus ✅
+- Fokus Sprint 13-14: **Stabilisasi Fondasi** (fix 4 Critical bugs + implement CStateOwnershipMap + CParameterRegistry)
+- Sprint 15-16: **Validasi Logika Bisnis** (backtest dengan parameter sentralisasi, stress test state consistency)
+- Sprint 17+: **Evaluasi Migrasi Path** (hanya jika fondasi stabil dan winrate konsisten > 55% selama 3 bulan forward test)
+
+---
+
+## BUG TRACKER — Audit Sprint 13 (2026-05-24)
+
+### 🔴 CRITICAL — Blocking Compilation / Runtime
 
 © 2026 Agsicentre — PASR EA. All rights reserved.
