@@ -1,253 +1,248 @@
-# PASR MODULAR EA - Institutional Documentation
+# PASR Modular EA — Project Context
 
-## Overview
-**PASR (Price Action Support Resistance)** is an institutional-grade MQL5 Expert Advisor built on OOP Divide & Conquer architecture with async execution, structural stops, and dynamic portfolio risk management.
-
-## Version
-- **Current Version:** 10.00 — Institutional Grade
-- **Model:** PASR - Institutional Multi-Strategy System
-- **Magic Number:** 20260521
-- **Architecture:** Dual-Path Low-Latency + OOP Modules
-
-## Institutional Features (v10.00)
-
-### Core Upgrades from Retail to Institutional
-
-| Feature | Retail Mode (v9.00) | Institutional Mode (v10.00) |
-|---------|---------------------|----------------------------|
-| **Stop Loss** | Fixed ATR multiplier | Structural (Swing High/Low) + Buffer |
-| **Position Sizing** | Fixed lot or % risk | Volatility-adjusted + Pyramid scaling |
-| **Risk Management** | Static % per trade | Dynamic correlation-weighted portfolio |
-| **Execution** | Standard order send | Async queue + Smart retry + Dynamic slippage |
-| **Exit Logic** | Fixed TP/SL + Trailing | Chandelier + Structure break + Momentum fade |
-| **Scalability** | 30-40 pairs | 80-100+ pairs |
-| **Latency** | 0.5-1ms/tick | <0.3ms/tick |
-
-### Key Institutional Modules
-
-#### 1. Structural Stop Loss (`InpStructSL`)
-- Uses swing highs/lows instead of arbitrary ATR multiples
-- Adds buffer based on market volatility (ATR)
-- Trails based on market structure breaks, not fixed points
-- More resilient to noise and stop hunts
-
-#### 2. Volatility-Adjusted Sizing (`InpVolatilityAdj`)
-- Automatically reduces position size in high volatility regimes
-- Increases size in low volatility (when risk is controlled)
-- Maintains constant risk exposure across market conditions
-
-#### 3. Pyramid Scaling (`InpPyramidLevels`, `InpPyramidSpacing`)
-- Scale into winning positions in tranches (default: 3 levels)
-- Spacing based on ATR (default: 0.5 ATR between levels)
-- Each tranche has independent risk management
-- Improves R:R on strong trending moves
-
-#### 4. Circuit Breakers
-- **Daily Loss Halt**: Stops trading if daily loss > X% (default: 3%)
-- **Global Drawdown Halt**: Emergency stop at max DD (default: 10%)
-- **Max Trades Per Day**: Prevents overtrading
-- **Correlation Check**: Blocks trades if portfolio correlation > threshold
-
-#### 5. Advanced Execution Engine
-- **Async Mode**: Non-blocking order submission
-- **Smart Retry**: Exponential backoff on failed orders (default: 3 attempts)
-- **Dynamic Slippage**: Adjusts slippage tolerance based on volatility
-- **Queue Management**: Max 20 concurrent orders to prevent overload
-
-## Architecture
-
-### Core Design Principles
-1. **Divide & Conquer**: Modular separation of concerns
-2. **OOP Architecture**: Full object-oriented design with class instances
-3. **Async Execution**: Non-blocking order management via queue
-4. **Multi-Symbol Support**: Scalable to 80-100 currency pairs
-5. **Dual-Path Processing**: Tick (low-latency) vs Bar (heavy processing)
-6. **Institutional Mode**: Conditional compilation for advanced features
-
-### Compilation Flags
-```cpp
-#define QA_BUILD          // Enable stress testing & chaos engineering
-#define PERF_METRICS      // Enable performance counters
-#define OOP_ARCHITECTURE  // Enable OOP divide & conquer architecture
-#define INST_MODE         // Enable Institutional Mode features (NEW v10.00)
-```
-
-### Key Modules
-
-#### Core Modules (`/Include/PASR/Core/`)
-- **PASR_Executor.mqh**: Async order execution with smart retry logic
-  - Exponential backoff retry mechanism
-  - Dynamic slippage control based on volatility
-  - Queue management (max 20 concurrent orders)
-  - Execution statistics tracking (latency, fill rate, retries)
-  
-- **PASR_SymbolManager.mqh**: Multi-symbol orchestration
-  - Load balancing with round-robin selection
-  - Correlation-aware trading (dynamic portfolio risk)
-  - Per-symbol performance metrics
-  - Auto-rebalancing based on latency/market status
-
-- **Config/Manager.mqh**: Configuration management
-- **EventBus.mqh**: Event-driven communication
-- **Events.mqh**: Event definitions and handling
-- **Globals.mqh**: Global singleton declarations
-- **IManager.mqh**: Abstract base class for all managers
-
-#### Analysis Modules (`/Include/PASR/Analysis/`)
-- **SRManager.mqh**: Support/Resistance detection with structural swings
-- **PatternDetector**: Candlestick pattern recognition
-- **ZoneManager.mqh**: Supply/Demand zone management
-- **MarketRegime.mqh**: Market condition analysis (volatility regimes)
-  - ONNXBridge for external model integration
-  - Confidence calibration
-
-#### Trade Modules (`/Include/PASR/Trade/`)
-- **RiskManager.mqh**: Position sizing and risk control
-- **PositionManager.mqh**: Trade management (BE, Trailing Stop)
-- **ExecutionManager.mqh**: Order execution logic
-- **RecoveryEngine.mqh**: Drawdown recovery system
-- **CorrelationManager.mqh**: Portfolio correlation control
-
-#### Infrastructure (`/Include/PASR/Infra/`)
-- **DataManager.mqh**: Historical data management
-- **StateManager.mqh**: EA state persistence
-- **AdaptiveConfig.mqh**: Dynamic configuration
-- **JournalManager.mqh**: Logging and audit trail
-- **PerformanceReport.mqh**: Metrics and reporting
-
-#### UI (`/Include/PASR/UI/`)
-- **DashboardManager.mqh**: Real-time trading dashboard
-
-## Performance Characteristics
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| Tick Latency | < 0.3ms | Ultra-low latency path |
-| CPU Usage | 60% lower | vs procedural architecture |
-| Multi-pair Scaling | 80-100 pairs | With stable performance |
-| Execution Reliability | 99.5%+ | Smart retry logic |
-| Portfolio Risk | Dynamic | Correlation-adjusted |
-
-## Compilation Flags
-
-```mql5
-#define QA_BUILD          // Enable stress testing & chaos engineering
-#define PERF_METRICS      // Enable performance counters
-#define OOP_ARCHITECTURE  // Enable OOP divide & conquer architecture
-```
-
-## File Structure
-
-```
-MQL5/
-├── Experts/
-│   └── PASR_MODULAR.mq5          # Main EA file (v9.00)
-└── Include/
-    └── PASR/
-        ├── Core/                  # Core OOP modules
-        │   ├── Config/            # Configuration management
-        │   │   ├── Manager.mqh
-        │   │   ├── Types.mqh
-        │   │   └── Validator.mqh
-        │   ├── PASR_Executor.mqh  # Async executor
-        │   ├── PASR_SymbolManager.mqh
-        │   ├── EventBus.mqh
-        │   ├── Events.mqh
-        │   ├── Globals.mqh
-        │   └── IManager.mqh
-        ├── Analysis/              # Market analysis
-        │   ├── SRManager.mqh
-        │   ├── ZoneManager.mqh
-        │   └── Pattern/
-        ├── Signal/                # Signal generation
-        │   ├── SignalManager.mqh
-        │   └── AI/                # AI/ML modules
-        ├── Trade/                 # Trade management
-        │   ├── RiskManager.mqh
-        │   ├── PositionManager.mqh
-        │   └── CorrelationManager.mqh
-        ├── Infra/                 # Infrastructure
-        │   ├── DataManager.mqh
-        │   ├── StateManager.mqh
-        │   └── JournalManager.mqh
-        ├── Data/                  # Data management
-        ├── UI/                    # User interface
-        ├── Tools/                 # Utility tools
-        └── QA/                    # Testing & validation
-```
-
-## Key Features
-
-### 1. Dual-Path Processing
-- **OnTick Path**: Ultra-low latency (<0.3ms) for critical operations
-  - Spread monitoring
-  - Position management (BE, Trailing)
-  - Recovery monitoring
-  - Executor queue processing
-  
-- **OnTimer Path** (1-second heartbeat): Heavy processing
-  - New bar detection
-  - SR recalculation
-  - Pattern recognition
-  - Signal generation
-  - AI inference
-
-### 2. Smart Execution
-- Asynchronous order processing
-- Smart retry with exponential backoff
-- Dynamic slippage based on volatility
-- Execution queue management (max 20 concurrent)
-
-### 3. Multi-Symbol Orchestration
-- Load balancing across symbols
-- Correlation-aware position sizing
-- Per-symbol latency monitoring
-- Auto-rebalancing based on market status
-
-### 4. Risk Management
-- Dynamic position sizing
-- Correlation-adjusted exposure
-- Drawdown recovery system
-- Portfolio-level risk controls
-
-## Usage
-
-### Installation
-1. Copy `PASR_MODULAR.mq5` to `MQL5/Experts/`
-2. Copy entire `PASR` folder to `MQL5/Include/`
-3. Compile in MetaEditor
-
-### Configuration
-Configure via EA input parameters:
-- Symbol list and timeframes
-- Risk parameters (lot size, max drawdown)
-- Strategy settings (SR sensitivity, patterns)
-- AI model selection (if enabled)
-
-### Recommended Setup
-- Timeframe: M15-H1
-- Pairs: Major + Crosses (20-50 pairs optimal)
-- Broker: ECN with low latency
-- VPS: Recommended for production
-
-## Development Status
-
-- ✅ OOP Architecture implemented
-- ✅ Async Executor module complete
-- ✅ Symbol Manager with load balancing
-- ✅ Dual-path tick/bar processing
-- ✅ Header cleanup (v9.00)
-- ✅ Config module path fixed
-- 🔄 AI integration (ongoing optimization)
-- 📊 Advanced analytics (planned)
-
-## Support & Documentation
-
-- GitHub: https://github.com/sakuninfinix-svg/MQL5
-- Module Documentation: See `_README.mqh` in each subfolder
-- QA Tests: Available in `/Include/PASR/QA/`
+> PASR = Price Action Support Resistance
+> Repository: `sakuninfinix-svg/MQL5`
+> Main compile target: `Experts/PASR_MODULAR.mq5`
+> Primary include root: `Include/PASR/`
 
 ---
 
-**Last Updated:** May 2026  
-**Version:** 9.00
+## Purpose
+
+`README_PASR.md` menjelaskan konteks proyek PASR secara ringkas dan realistis. Dokumen ini bukan bug tracker, bukan audit report panjang, dan bukan klaim production-readiness.
+
+Untuk detail panjang, gunakan:
+
+- `Include/PASR/README.md` — ringkasan dokumentasi PASR di dalam folder include.
+- `Include/PASR/dokumentasi.md` — dokumentasi detail, sprint history, dan issue mapping.
+- `Include/PASR/docs/fundamental-business-logic-audit.md` — audit risiko fundamental business logic.
+- GitHub Issues — sumber utama bug aktif, backlog, dan rencana refactor.
+
+---
+
+## Current Architecture Direction
+
+PASR saat ini diarahkan ke arsitektur **Pipeline Orchestration**:
+
+```text
+OnTick()
+  -> push price/update event
+  -> detect new-bar flag ringan
+
+OnTimer()
+  -> drain EventBus queue
+  -> execute ordered pipeline stages
+  -> drain EventBus queue again
+
+OnTradeTransaction()
+  -> update trade/recovery/session/AI feedback paths
+```
+
+Target desain:
+
+1. `OnTick()` tetap ringan.
+2. Analisis berat berjalan pada timer/new-bar pipeline.
+3. `COrchestrator` menjadi coordinator utama lifecycle manager.
+4. Manager berkomunikasi lewat `CEventBus` dan kontrak interface yang jelas.
+5. State trading tidak tersebar tanpa owner.
+6. Bug aktif tidak disimpan di README, tetapi di GitHub Issues.
+
+---
+
+## Runtime Pipeline
+
+Pipeline detail dapat berubah, tetapi arah besarnya adalah:
+
+| Stage | Area | Responsibility |
+|------:|------|----------------|
+| 01 | DataSync | Sinkronisasi price/indicator/cache data |
+| 02 | AnalysisSR | Support/resistance analysis |
+| 03 | AnalysisZone | Supply/demand zone update |
+| 04 | PatternRec | Candlestick pattern recognition |
+| 05 | RegimeDetect | Market regime/session/volatility detection |
+| 06 | SignalGen | Confluence and signal generation |
+| 07 | AIInference | AI confidence/filtering path |
+| 08 | RiskCheck | Risk, spread, drawdown, correlation checks |
+| 09 | AdaptiveParams | Adaptive parameter policy |
+| 10 | Execution | Order planning/execution |
+| 11 | PosMgmt | Break-even, trailing, position scan, exit checks |
+| 12 | Recovery | Fakeout/recovery logic |
+| 13 | Dashboard | UI/HUD updates |
+| 14 | Journal | Journal, telemetry, reports |
+
+---
+
+## Repository Layout
+
+```text
+MQL5/
+├── Experts/
+│   ├── PASR_MODULAR.mq5       # Main modular EA target
+│   └── PASR.mq5               # Legacy monolith, do not extend
+│
+└── Include/PASR/
+    ├── Core/                  # EventBus, Events, IManager, Orchestrator, Pipeline
+    ├── Analysis/              # SR, Zone, MarketRegime, AdaptiveParameter, Pattern
+    ├── Signal/                # SignalManager, signal filters/sources
+    ├── Trade/                 # Execution, Risk, Recovery, Exit, Position, Correlation
+    ├── AI/                    # AI orchestration, features, inference, trainer, model registry
+    ├── Infra/                 # Data, state, telemetry, journal, sanity, health, adaptive config
+    ├── Data/                  # Data-related modules, pending audit
+    ├── QA/                    # Test and QA utilities, pending audit
+    ├── Tools/                 # Utility scripts/tools, pending audit
+    ├── UI/                    # Dashboard/UI modules, pending audit
+    ├── docs/                  # Long-form technical notes
+    ├── README.md              # PASR include-level README
+    └── dokumentasi.md         # Detailed PASR documentation
+```
+
+---
+
+## Build Flags
+
+Current documented flags:
+
+```cpp
+#define PASR_QA_BUILD    // Enable QA/stress modules when supported
+#define PASR_DEBUG       // Verbose/debug logging when supported
+```
+
+Old flags that should not be used as current contract:
+
+```cpp
+QA_BUILD
+OOP_ARCHITECTURE
+PERF_METRICS
+```
+
+Remaining cleanup for legacy `PERF_METRICS` is tracked in Issue #181.
+
+---
+
+## Current Open Work
+
+The active tracker is GitHub Issues. Important groups:
+
+### Compile and architecture blockers
+
+| Issue | Scope |
+|------:|-------|
+| #180 | Restore `Core/PASR.mqh` as real master include |
+| #181 | Remove legacy `PERF_METRICS` from `PASR_MODULAR.mq5` |
+| #182 | Fix `DataManager` / `IDataManager` contract |
+| #183 | Harden `AdaptiveConfig` dependencies and validation |
+| #196 | Full compile and QA status check |
+
+### Fundamental business logic risks
+
+| Issue | Scope |
+|------:|-------|
+| #187 | Single source of truth for position/runtime state |
+| #188 | Centralized parameter registry and validation |
+| #189 | Signal conflict resolver and veto logic |
+| #190 | Single account snapshot for risk calculation |
+| #191 | AI feature validation and fail-safe inference |
+| #192 | Exit confirmation queue and unified exit policy |
+
+### Audit and refactor follow-ups
+
+| Issue | Scope |
+|------:|-------|
+| #193–#195 | Sprint 10 signal/risk/execution/AI audits |
+| #197–#202 | Optimization follow-ups from v1.20 summary |
+| #203–#214 | Architecture/audit report follow-ups |
+
+---
+
+## Production Readiness Note
+
+PASR should be treated as **active development / research-grade** until compile blockers, state ownership, risk consistency, AI validation, and exit confirmation are confirmed stable.
+
+Do not interpret older claims such as “institutional-grade,” “80–100 pairs,” “<0.3ms/tick,” or “99.5% execution reliability” as verified current guarantees unless supported by reproducible benchmark and forward-test evidence.
+
+---
+
+## Development Policy
+
+- README files should stay short and useful.
+- Long explanations belong in `dokumentasi.md` or `Include/PASR/docs/`.
+- Active work belongs in GitHub Issues.
+- Historical audit files should be migrated to Issues/docs, then removed when obsolete.
+- Do not close an issue until the fix is present in code or explicitly marked obsolete.
+- Prefer small, reviewable fixes over broad rewrites.
+
+---
+
+## Quick Start for Development
+
+1. Open `Experts/PASR_MODULAR.mq5` in MetaEditor.
+2. Compile with `#property strict` enabled.
+3. Resolve compile blockers first: #180, #181, #182, #183.
+4. Run/verify QA once compile is stable: #196.
+5. Only after the compile path is stable, continue deeper refactor work.
+
+Minimal intended EA lifecycle:
+
+```cpp
+#include <PASR/Core/PASR.mqh>
+
+COrchestrator orch;
+
+int OnInit()
+  {
+   // Build/load StrategyConfig here.
+   if(orch.Init(cfg) != INIT_SUCCEEDED)
+      return INIT_FAILED;
+
+   EventSetTimer(1);
+   return INIT_SUCCEEDED;
+  }
+
+void OnTick()
+  {
+   orch.OnTick();
+  }
+
+void OnTimer()
+  {
+   orch.OnTimer();
+  }
+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
+  {
+   orch.OnTradeTransaction(trans, request, result);
+  }
+
+void OnDeinit(const int reason)
+  {
+   orch.OnDeinit(reason);
+  }
+```
+
+---
+
+## Recommended Work Order
+
+1. Fix current compile blockers.
+2. Confirm master include and interface contracts.
+3. Validate risk/account/position state ownership.
+4. Validate AI feature inputs and fallback behavior.
+5. Validate exit confirmation and order lifecycle.
+6. Audit pending modules: `Data`, `QA`, `UI`, `Tools`.
+7. Add benchmarks only after compile and runtime path are stable.
+8. Consider multi-symbol expansion last.
+
+---
+
+## Related Documentation
+
+- `Include/PASR/README.md`
+- `Include/PASR/dokumentasi.md`
+- `Include/PASR/docs/fundamental-business-logic-audit.md`
+- GitHub Issues #98, #180–#214
+
+---
+
+© 2026 Agsicentre — PASR EA. All rights reserved.
