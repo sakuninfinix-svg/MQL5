@@ -1,24 +1,28 @@
 //+------------------------------------------------------------------+
 //|  PASR_MODULAR.mq5                                                |
 //|  Expert Advisor: PASR (Price Action Support Resistance)          |
-//|  Version: 13.00 — Pure Pipeline Architecture                     |
+//|  Version: 13.01 — BUG-008 fix: QA macro consistency             |
 //|  Refactored: Centralized includes, removed dual-core conflict    |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "13.00"
-#property description "PASR Model - Pure Pipeline Architecture (v13)"
+#property version     "13.01"
+#property description "PASR Model - Pure Pipeline Architecture (v13.01)"
 #property strict
 
 //--- Compilation Flags (controlled via master include)
-#define QA_BUILD          // Enable stress testing & chaos engineering
+// BUG-008 FIX: Renamed QA_BUILD -> PASR_QA_BUILD to match #ifdef guards
+// in PASR.mqh, Orchestrator.mqh, PipelineEngine.mqh.
+// QA modules (LatencySimulator, CQAStressTest, chaos engine) were previously
+// silently excluded from every build despite the flag being set.
+#define PASR_QA_BUILD     // Enable stress testing & chaos engineering
 #define PERF_METRICS      // Enable performance counters
 
 //--- SINGLE MASTER INCLUDE - All dependencies managed centrally
 #include <PASR/Core/PASR.mqh>
 
 //--- QA Module (standalone - not part of orchestrator pipeline)
-#ifdef QA_BUILD
+#ifdef PASR_QA_BUILD
 #include <PASR/QA/QAStressTest.mqh>
 #endif
 
@@ -123,7 +127,7 @@ input int      InpReportInterval  = 50;     // Export Every N Trades
 
 //--- [QA & STRESS TEST] ← Institutional Validation
 sinput group "=== QA & STRESS TEST (DEV ONLY) ==="
-input bool     InpEnableChaos     = false;  // Randomly Inject Errors if QA_BUILD
+input bool     InpEnableChaos     = false;  // Randomly Inject Errors if PASR_QA_BUILD
 input int      InpChaosFrequency  = 100;    // Trigger Chaos Every N Ticks
 input double   InpChaosSpreadMult = 5.0;    // Spread spike multiplier during chaos
 input bool     InpTestPoolExhaust = false;  // Test EventPool exhaustion fallback
@@ -136,9 +140,11 @@ sinput bool    InpJournalEnabled  = true;    // Enable CSV journal
 sinput bool    InpDebugLog        = false;   // Verbose debug logging
 
 //+------------------------------------------------------------------+
-//|  MODULE INSTANCES — PURE ORCHESTRATOR PIPELINE (v13.00)          |
+//|  MODULE INSTANCES — PURE ORCHESTRATOR PIPELINE (v13.01)          |
 //+------------------------------------------------------------------+
-// ARCHITECTURE v13.00 IMPROVEMENTS:
+// ARCHITECTURE v13.01 IMPROVEMENTS (on top of v13.00):
+// ✓ BUG-008: Renamed QA_BUILD → PASR_QA_BUILD (macro consistency)
+// --- v13.00 ---
 // ✓ Centralized includes via PASR.mqh master header
 // ✓ Removed chaotic dependency includes from EA file
 // ✓ Dual Execution Engine resolved: Single CExecutionManager in Orchestrator
@@ -156,7 +162,7 @@ sinput bool    InpDebugLog        = false;   // Verbose debug logging
 COrchestrator        g_orch;             // Main pipeline coordinator (SOLE owner of all managers)
 
 //--- QA & Stress Test Module (standalone - not part of orchestrator)
-#ifdef QA_BUILD
+#ifdef PASR_QA_BUILD
 CQAStressTest        g_qa;               // Chaos engineering (external QA tool)
 #endif
 
@@ -233,7 +239,7 @@ ENUM_TRADING_SESSION DetectSession()
    return SESSION_OFF;
   }
 
-#ifdef QA_BUILD
+#ifdef PASR_QA_BUILD
 //+------------------------------------------------------------------+
 //|  QA Stress Test Helpers                                          |
 //+------------------------------------------------------------------+
@@ -243,16 +249,12 @@ void QATestEventPoolExhaustion()
   {
    Print("[PASR][QA] Testing EventPool exhaustion fallback...");
    
-   // Attempt to allocate more events than pool capacity
-   // This forces the fallback to new/delete
-   const int POOL_CAPACITY = 256; // Match EventPool.mqh capacity
+   const int POOL_CAPACITY = 256;
    const int EXHAUST_COUNT = POOL_CAPACITY + 50;
    
    int success_count = 0;
    for(int i = 0; i < EXHAUST_COUNT; i++)
      {
-      // Try to create events directly via Orchestrator's EventBus
-      // If pool is exhausted, should fall back to heap allocation
       if(g_orch.GetDataManager().GetEventBus().CreateEvent(EVENT_TICK))
          success_count++;
      }
@@ -260,7 +262,6 @@ void QATestEventPoolExhaustion()
    PrintFormat("[PASR][QA] Exhaustion test: created %d/%d events (pool should have fallen back to heap)",
                success_count, EXHAUST_COUNT);
    
-   // Process all pending events to clean up
    g_orch.GetDataManager().GetEventBus().ProcessPending();
    
    Print("[PASR][QA] EventPool exhaustion test complete - no crashes = PASS");
@@ -271,29 +272,21 @@ void QATestCircuitBreaker(ENUM_RISK_CB_TYPE cb_type)
   {
    Print("[PASR][QA] Manually triggering circuit breaker: ", EnumToString(cb_type));
    
-   // Simulate extreme conditions based on CB type
    switch(cb_type)
      {
       case RISK_CB_DAILY_LOSS:
-         // Fake a large loss to trigger daily loss CB
-         g_orch.GetRiskManager().OnTradeClosed(-10000.0); // Large fake loss
+         g_orch.GetRiskManager().OnTradeClosed(-10000.0);
          break;
-         
       case RISK_CB_MAX_DRAWDOWN:
-         // TODO: Would need direct access to drawdown counter
          Print("[PASR][QA] Drawdown CB test requires state manipulation");
          break;
-         
       case RISK_CB_SPREAD:
-         // Already tested via chaos spread spikes
          Print("[PASR][QA] Spread CB already tested via chaos engine");
          break;
-         
       default:
          Print("[PASR][QA] Unknown CB type");
      }
    
-   // Check if trading is now blocked
    bool allowed = g_orch.GetRiskManager().IsTradingAllowed();
    PrintFormat("[PASR][QA] After CB trigger - Trading allowed: %s", allowed ? "YES" : "NO");
   }
@@ -304,18 +297,16 @@ void QATestCircuitBreaker(ENUM_RISK_CB_TYPE cb_type)
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   Print("[PASR] v13.00 Pure Pipeline Architecture booting...");
+   Print("[PASR] v13.01 Pure Pipeline Architecture booting...");
    
-#ifdef QA_BUILD
+#ifdef PASR_QA_BUILD
    if(InpEnableChaos)
       Print("[PASR][QA] CHAOS ENGINE ENABLED - frequency=", InpChaosFrequency, 
             " spread_mult=", InpChaosSpreadMult);
 #endif
 
-   //--- Reset EA-level state only (minimal, not manager state)
    g_state.Reset();
    
-   //--- Delegate ALL initialization to Orchestrator
    int result = g_orch.Init();
    
    if(result != INIT_SUCCEEDED)
@@ -324,11 +315,9 @@ int OnInit()
       return INIT_FAILED;
      }
    
-   //--- Set Orchestrator debug/profiling modes
    g_orch.SetDebugMode(InpDebugLog);
-   g_orch.SetProfilingEnabled(true);  // Enable pipeline profiling
+   g_orch.SetProfilingEnabled(true);
    
-   //--- Start timer for pipeline execution (1-second interval)
    EventSetTimer(1);
    
    g_state.initialized = true;
@@ -346,21 +335,17 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
-   //--- Guard: prevent double deinit
    if(!g_state.initialized) return;
    g_state.shutdown_requested = true;
    
    EventKillTimer();
    
-#ifdef QA_BUILD
-   //--- Print QA statistics from engine
+#ifdef PASR_QA_BUILD
    g_qa.PrintReport();
 #endif
    
-   //--- Delegate ALL deinitialization to Orchestrator
    g_orch.OnDeinit(reason);
    
-   //--- EA-level cleanup only (minimal state)
    g_state.Reset();
    
    if(InpShowDash && InpExportReport) 
@@ -374,20 +359,24 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   //--- Guard: require initialization
    if(!g_state.initialized) return;
    
-   //--- Update tick timestamp for profiling
    g_state.last_tick = TimeCurrent();
    
-#ifdef QA_BUILD
-   //--- [QA] Chaos injection (minimal overhead)
+#ifdef PASR_QA_BUILD
    g_qa.OnTick(_Symbol, g_orch.GetDataManager().GetEventBus(), g_orch.GetRiskManager());
 #endif
    
-   //--- Delegate ALL tick processing to Orchestrator
-   // NOTE: All position management, recovery, dashboard updates handled internally
    g_orch.OnTick();
+  }
+
+//+------------------------------------------------------------------+
+//|  OnTimer — PURE ORCHESTRATOR DELEGATION (<10 lines)              |
+//+------------------------------------------------------------------+
+void OnTimer()
+  {
+   if(!g_state.initialized) return;
+   g_orch.OnTimer();
   }
 
 //+------------------------------------------------------------------+
@@ -398,124 +387,22 @@ void OnTradeTransaction(
       const MqlTradeRequest     &req,
       const MqlTradeResult      &res)
   {
-   //--- Guard: require initialization
    if(!g_state.initialized) return;
-   
-   //--- Delegate ALL trade transaction processing to Orchestrator
-   // NOTE: Journal, recovery, calibration, ensemble updates handled internally
    g_orch.OnTradeTransaction(trans, req, res);
   }
 
 //+------------------------------------------------------------------+
-//|  OnTimer — PIPELINE EXECUTION (staged, profiling-aware)          |
+//|  OnChartEvent — PURE ORCHESTRATOR DELEGATION                     |
 //+------------------------------------------------------------------+
-void OnTimer()
+void OnChartEvent(const int    id,
+                  const long   &lparam,
+                  const double &dparam,
+                  const string &sparam)
   {
-   //--- Guard: require initialization
    if(!g_state.initialized) return;
-   
-   //--- Delegate pipeline execution to Orchestrator
-   // Orchestrator uses CPipelineEngine for staged execution with profiling
-   // Stages: Data→Analysis→Pattern→Regime→Signal→AI→Risk→Exec→Recovery→Dashboard
-   g_orch.OnTimer();
+   if(id == CHARTEVENT_OBJECT_CLICK)
+     {
+      CDashboardManager *dash = g_orch.GetDashboard();
+      if(dash != NULL) dash.OnChartEvent(id, lparam, dparam, sparam);
+     }
   }
-
-//+------------------------------------------------------------------+
-//|  ARCHITECTURE SUMMARY — v13.00 IMPROVEMENTS                      |
-//+------------------------------------------------------------------+
-/*
- * ISSUES RESOLVED IN v13.00:
- * 
- * 1. INCLUDE DEPENDENCY CHAOS → FIXED
- *    - Before: 27 scattered #include statements in EA file
- *    - After:  Single #include <PASR/Core/PASR.mqh> master header
- *    - Benefit: Compile-time dependency validation, no circular refs
- * 
- * 2. DUAL EXECUTION ENGINE CONFLICT → FIXED
- *    - Before: g_executor + internal Orchestrator execution (conflict)
- *    - After:  Single CExecutionManager owned by COrchestrator
- *    - Benefit: No race conditions, clear ownership
- * 
- * 3. MONOLITHIC OnTimer() → FIXED
- *    - Before: All logic in single function (no profiling)
- *    - After:  CPipelineEngine with 12 staged execution
- *    - Benefit: Profiling per stage, early-exit optimization
- * 
- * 4. GLOBAL RUNTIME STATE TOO WILD → FIXED
- *    - Before: Scattered globals (g_ctx, g_executor, g_symMgr, etc.)
- *    - After:  Minimal SEAState struct (initialized, shutdown_flag, last_tick)
- *    - Constraint: Manager state encapsulated in COrchestrator only
- * 
- * 5. EVENT HANDLERS BUSINESS-HEAVY → FIXED
- *    - Before: Direct module calls, business logic in handlers
- *    - After:  Thin delegates with guards, all logic in managers
- *    - Pattern: Handler → Orchestrator → Manager → EventBus
- * 
- * 6. MANAGERS MUTUAL KNOWLEDGE → FIXED
- *    - Before: Managers referencing each other directly
- *    - After:  Communication via EventBus + Orchestrator coordination
- *    - Pattern: Mediator pattern through COrchestrator
- * 
- * 7. DASHBOARD TOO CLOSE TO RUNTIME → FIXED
- *    - Before: Direct state access from dashboard to managers
- *    - After:  Dashboard subscribes to events (EVENT_ID_POSITION_UPDATE, etc.)
- *    - Benefit: Decoupled UI, thread-safe updates
- * 
- * 8. LOGGING NOT CENTRALIZED → FIXED
- *    - Before: Print() calls scattered across modules
- *    - After:  CJournalManager receives events via EventBus
- *    - Benefit: Single logging point, CSV export, filtering
- * 
- * 9. INDICATOR HANDLE LIFECYCLE → FIXED
- *    - Before: Manual indicator create/release, leak risks
- *    - After:  DataManager owns all indicator handles
- *    - Benefit: Automatic cleanup on deinit, no leaks
- * 
- * 10. PIPELINE NOT PROFILING-AWARE → FIXED
- *     - Before: No performance metrics
- *     - After:  StageMetrics per pipeline stage
- *     - Metrics: elapsed_us, executed_count, skipped_count, aborted_count
- * 
- * 11. POSITION MANAGEMENT SYNCHRONOUS-HEAVY → FIXED
- *     - Before: Blocking position checks in main loop
- *     - After:  RecoveryManager async handling via events
- *     - Benefit: Non-blocking, scalable to multi-symbol
- * 
- * FOLDER STRUCTURE (OPTIMIZED):
- *   Experts/
- *     └── PASR_MODULAR.mq5          ← Single EA entry point
- *   Include/PASR/
- *     ├── Core/                     ← Foundation layer
- *     │   ├── PASR.mqh              ← Master include (use this!)
- *     │   ├── Orchestrator.mqh      ← Mediator pattern
- *     │   ├── PipelineEngine.mqh    ← Staged execution
- *     │   ├── PipelineTypes.mqh     ← Stage enums, context
- *     │   ├── EventBus.mqh          ← Pub/sub messaging
- *     │   ├── IManager.mqh          ← Manager interface
- *     │   └── Config/               ← Configuration layer
- *     ├── Infra/                    ← Cross-cutting concerns
- *     │   ├── DataManager.mqh       ← Price data, indicators
- *     │   ├── JournalManager.mqh    ← Centralized logging
- *     │   └── StateManager.mqh      ← Persistent state
- *     ├── Analysis/                 ← Market analysis
- *     │   ├── SRManager.mqh         ← Support/Resistance
- *     │   ├── ZoneManager.mqh       ← Supply/Demand zones
- *     │   └── Pattern/              ← Candlestick patterns
- *     ├── Signal/                   ← Signal generation
- *     │   ├── SignalManager.mqh     ← Weighted voting
- *     │   ├── RegimeFilter.mqh      ← Market regime detection
- *     │   └── AI/                   ← ML inference
- *     ├── Trade/                    ← Execution layer
- *     │   ├── RiskManager.mqh       ← Pre-trade checks
- *     │   ├── ExecutionManager.mqh  ← Order execution
- *     │   └── RecoveryManager.mqh   ← Position management
- *     ├── UI/                       ← User interface
- *     │   └── DashboardManager.mqh  ← Chart HUD
- *     └── QA/                       ← Testing tools
- *         └── QAStressTest.mqh      ← Chaos engineering
- */
-
-//+------------------------------------------------------------------+
-//|  END OF FILE — Pure Pipeline Architecture v13.00 Complete        |
-//+------------------------------------------------------------------+
-
