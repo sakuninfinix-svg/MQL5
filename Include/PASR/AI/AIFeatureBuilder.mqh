@@ -3,6 +3,7 @@
 //| 26-dimensional feature engineering for PASR AI subsystem        |
 //| Sprint 10: Path fix ../Core/ -> ../../Core/                      |
 //|            Path fix ../Data/ -> ../../Data/                      |
+//| FIX #4: AI Feature Leakage Prevention - Strict bar indexing     |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_FEATURE_BUILDER_MQH__
@@ -25,6 +26,8 @@
 //|   [22-23] Time (hour-norm, day-of-week-norm)                    |
 //|   [24]    Z-score (20-bar price z-score)                        |
 //|   [25]    Skew (20-bar return skewness)                         |
+//|                                                                  |
+//| FIX #4: All features use shift>=1 to prevent lookahead bias     |
 //+------------------------------------------------------------------+
 class CAIFeatureBuilder : public IManager
 {
@@ -45,6 +48,9 @@ private:
    int      m_hStoch;
    int      m_hMFI;
    int      m_hATR14;
+   
+   //--- FIX #4: Feature leakage guard - ensure we only use closed bars
+   bool     m_useClosedBarsOnly;  // Force shift>=1 for all features
    
    //--- Initialize indicator handles once
    bool InitIndicators()
@@ -78,20 +84,26 @@ private:
       if(m_hATR14 != INVALID_HANDLE) { IndicatorRelease(m_hATR14); m_hATR14 = INVALID_HANDLE; }
    }
    
-   //--- Helper to get indicator value from cached handle
+   //--- Helper to get indicator value from cached handle - FIX #4: Enforce closed bar shift
    double GetIndicatorValue(int handle, int buffer, int shift)
    {
+      // FIX #4: Force shift>=1 if using closed bars mode to prevent lookahead
+      if(m_useClosedBarsOnly && shift < 1)
+         shift = 1;
+      
       double val[1];
       if(handle == INVALID_HANDLE || CopyBuffer(handle, buffer, shift, 1, val) <= 0)
          return 0.0;
       return val[0];
    }
    
-   //--- Price return helpers
+   //--- Price return helpers - FIX #4: Use closed bars only (shift>=1)
    double PriceReturn(int bars_back)
    {
-      double c0 = iClose(_Symbol, PERIOD_CURRENT, 0);
-      double cn = iClose(_Symbol, PERIOD_CURRENT, bars_back);
+      // FIX #4: Always use shift>=1 to avoid using incomplete current bar
+      int shift = m_useClosedBarsOnly ? MathMax(1, bars_back) : bars_back;
+      double c0 = iClose(_Symbol, PERIOD_CURRENT, 1);  // Always use closed bar
+      double cn = iClose(_Symbol, PERIOD_CURRENT, shift);
       if(cn == 0.0) return 0.0;
       return (c0 - cn) / cn;
    }
@@ -113,11 +125,12 @@ private:
       return MathMax(0.0, MathMin(1.0, (val - mn) / (mx - mn)));
    }
    
-   //--- Z-score of close over n bars
+   //--- Z-score of close over n bars - FIX #4: Use closed bars only
    double ZScore(int n)
    {
       double arr[]; ArraySetAsSeries(arr, true);
-      if(CopyClose(_Symbol, PERIOD_CURRENT, 0, n, arr) < n) return 0.0;
+      // FIX #4: Start from shift=1 (closed bar), not 0 (current incomplete bar)
+      if(CopyClose(_Symbol, PERIOD_CURRENT, 1, n, arr) < n) return 0.0;
       double mean = 0.0, sq = 0.0;
       for(int i=0; i<n; i++) mean += arr[i];
       mean /= n;
@@ -127,11 +140,12 @@ private:
       return (arr[0] - mean) / sd;
    }
    
-   //--- Return skewness over n bars
+   //--- Return skewness over n bars - FIX #4: Use closed bars only
    double ReturnSkew(int n)
    {
       double arr[]; ArraySetAsSeries(arr, true);
-      if(CopyClose(_Symbol, PERIOD_CURRENT, 0, n+1, arr) < n+1) return 0.0;
+      // FIX #4: Start from shift=1, need n+1 bars for n returns
+      if(CopyClose(_Symbol, PERIOD_CURRENT, 1, n+1, arr) < n+1) return 0.0;
       double ret[]; ArrayResize(ret, n);
       for(int i=0; i<n; i++) ret[i] = (arr[i]-arr[i+1]) / MathMax(arr[i+1], 1e-10);
       double mean=0.0, sd=0.0, sk=0.0;
@@ -142,11 +156,11 @@ private:
       return MathMax(-3.0, MathMin(3.0, sk/n)) / 3.0;  // normalize to [-1..1]
    }
    
-   //--- Update running baselines using cached handle
+   //--- Update running baselines using cached handle - FIX #4: Use closed bars
    void UpdateBaselines()
    {
-      double atr = GetIndicatorValue(m_hATR14, 0, 0);
-      double vol = (double)iVolume(_Symbol, PERIOD_CURRENT, 0);
+      double atr = GetIndicatorValue(m_hATR14, 0, 0);  // Indicator handles already use closed bar data
+      double vol = (double)iVolume(_Symbol, PERIOD_CURRENT, 1);  // FIX #4: Use closed bar volume
       double alpha = 0.05;  // EMA smoothing
       if(m_atr_baseline <= 0.0) m_atr_baseline = atr;
       else m_atr_baseline = alpha*atr + (1.0-alpha)*m_atr_baseline;
@@ -159,7 +173,8 @@ public:
       : m_last_valid(false), m_last_built(0),
         m_atr_baseline(0.0), m_vol_baseline(0.0), m_build_count(0),
         m_hRSI(INVALID_HANDLE), m_hMACD(INVALID_HANDLE), m_hCCI(INVALID_HANDLE),
-        m_hStoch(INVALID_HANDLE), m_hMFI(INVALID_HANDLE), m_hATR14(INVALID_HANDLE)
+        m_hStoch(INVALID_HANDLE), m_hMFI(INVALID_HANDLE), m_hATR14(INVALID_HANDLE),
+        m_useClosedBarsOnly(true)  // FIX #4: Default to safe mode (no lookahead)
    {
       ArrayInitialize(m_last_features, 0.0);
    }
@@ -220,13 +235,13 @@ public:
       f[10] = NormIndicator(cci,  -200.0, 200.0);
       f[11] = NormIndicator(stoch,  0.0, 100.0);
       
-      // [12-15] Volume
-      double vol0 = (double)iVolume(_Symbol, PERIOD_CURRENT, 0);
-      double vol1 = (double)iVolume(_Symbol, PERIOD_CURRENT, 1);
+   //--- Volume features - FIX #4: Use closed bars only
+      double vol0 = (double)iVolume(_Symbol, PERIOD_CURRENT, 1);  // Closed bar volume
+      double vol1 = (double)iVolume(_Symbol, PERIOD_CURRENT, 2);  // Previous bar volume
       double vol_ratio = (vol1 > 0.0) ? vol0 / vol1 : 1.0;
       f[12] = NormIndicator(vol_ratio, 0.0, 5.0);
-      // OBV delta approximation
-      double obv_delta = (iClose(_Symbol,PERIOD_CURRENT,0) > iClose(_Symbol,PERIOD_CURRENT,1)) ? vol0 : -vol0;
+      // OBV delta approximation - FIX #4: Use closed bars
+      double obv_delta = (iClose(_Symbol,PERIOD_CURRENT,1) > iClose(_Symbol,PERIOD_CURRENT,2)) ? vol0 : -vol0;
       f[13] = NormIndicator(obv_delta / MathMax(m_vol_baseline,1.0), -3.0, 3.0);
       // Vol spike: is vol > 2x baseline?
       f[14] = (m_vol_baseline > 0.0 && vol0 > 2.0*m_vol_baseline) ? 1.0 : 0.0;
