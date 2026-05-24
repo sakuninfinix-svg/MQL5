@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.05                                    |
+//| Trade/RiskManager.mqh — v2.06                                    |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -125,22 +125,24 @@ public:
       if(m_lotStep <= 0) m_lotStep = 0.01;
       m_peakEquity   = AccountEquity();
       m_lastResetDay = ServerDateMidnight();
-      PrintFormat("[Risk] v2.05 Init OK: risk=%.1f%% daily=%.1f%% maxTrades=%d",
-                  m_riskPct, m_dailyLossPct, m_maxOpenTrades);
+      SyncOpenTradesFromBroker();
+      PrintFormat("[Risk] v2.06 Init OK: risk=%.1f%% daily=%.1f%% maxTrades=%d open=%d",
+                  m_riskPct, m_dailyLossPct, m_maxOpenTrades, m_openTrades);
       return true;
      }
 
    virtual string HandlerName() const override { return "RiskManager"; }
 
    virtual void OnNewBar() override
-     { CheckDailyReset(); double eq = AccountEquity(); if(eq > m_peakEquity) m_peakEquity = eq; }
+     { CheckDailyReset(); SyncOpenTradesFromBroker(); double eq = AccountEquity(); if(eq > m_peakEquity) m_peakEquity = eq; }
 
    virtual void OnEvent(const PASREvent &ev) override
      {
       switch(ev.id)
         {
          case EVENT_ID_POSITION_UPDATE:
-            // EventBus is the single accumulation path for realized P&L.
+            if(ev.data1 == 1.0)
+               SyncOpenTradesFromBroker();
             if(ev.profit != 0.0)
               {
                m_dailyLoss += ev.profit;
@@ -265,18 +267,16 @@ public:
      }
 
    void OnTradeOpened()
-     { m_openTrades++; if(m_debugMode) PrintFormat("[Risk] Opened. Open=%d", m_openTrades); }
+     { SyncOpenTradesFromBroker(); if(m_debugMode) PrintFormat("[Risk] Opened. Open=%d", m_openTrades); }
 
    void OnTradeClosed(double profit = 0)
      {
-      m_openTrades = MathMax(0, m_openTrades - 1);
+      SyncOpenTradesFromBroker();
       if(profit < 0) m_consecLoss++; else m_consecLoss = 0;
 
       if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
         { m_circuitBroken = true; PrintFormat("[Risk] CIRCUIT BREAKER: %d consec losses.", m_consecLoss); }
 
-      // m_dailyLoss is updated by EVENT_ID_POSITION_UPDATE. Use projected value
-      // here so a direct OnTradeClosed(profit) cannot miss the breaker window.
       CheckDailyLossBreaker(m_dailyLoss + profit);
      }
 
