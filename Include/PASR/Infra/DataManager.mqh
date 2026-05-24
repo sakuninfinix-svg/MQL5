@@ -2,6 +2,9 @@
 //|                                     Infra/DataManager.mqh        |
 //|                          Copyright 2026, Agsicentre              |
 //+------------------------------------------------------------------+
+//| v2.01 (2026-05-24)                                                |
+//|   BUG-DM01: Daily profit baseline now resets at the start of     |
+//|             each new server-date and includes floating P&L.      |
 //| v2.00 (2026-05-24) — Sprint 20                                    |
 //|   DM-001: OnBar() datetime cast from TimeToStruct() is wrong —   |
 //|           TimeToStruct() returns bool not datetime. Fixed to use  |
@@ -33,29 +36,44 @@ private:
    double    m_startBalance;
    int       m_consecutiveLosses;
    datetime  m_lastScavengeTime;
-   datetime  m_lastDashboardUpdate;  // DM-002 FIX: keep as datetime (seconds)
+   datetime  m_lastDashboardUpdate;
 
    int       m_atrHandle;
    datetime  m_lastATRUpdate;
    datetime  m_lastTickEventTime;
    int       m_tickEventCount;
 
-   string    m_todayStr;  // DM-001 FIX: cache today's date string
+   string    m_todayStr;
 
    static const int  SCAVENGE_INTERVAL_SEC    = 300;
-   static const int  DASHBOARD_THROTTLE_SEC   = 1;    // DM-002: seconds, not ms
+   static const int  DASHBOARD_THROTTLE_SEC   = 1;
    static const int  ATR_UPDATE_INTERVAL_SEC  = 300;
-   static const int  TICK_EVENT_THROTTLE_SEC  = 1;    // simplified: 1 tick-event/sec max
+   static const int  TICK_EVENT_THROTTLE_SEC  = 1;
+
+   double FloatingPnL() const
+     {
+      double floating = 0.0;
+      int total = PositionsTotal();
+      for(int i = total - 1; i >= 0; i--)
+        {
+         ulong ticket = PositionGetTicket(i);
+         if(ticket == 0) continue;
+         if(!PositionSelectByTicket(ticket)) continue;
+         floating += PositionGetDouble(POSITION_PROFIT);
+        }
+      return floating;
+     }
 
 public:
    DataManager()
      : m_atrPoints(0.0), m_dailyProfit(0.0),
+       m_startBalance(AccountInfoDouble(ACCOUNT_BALANCE)),
        m_consecutiveLosses(0),
        m_lastScavengeTime(0), m_lastDashboardUpdate(0),
        m_atrHandle(INVALID_HANDLE), m_lastATRUpdate(0),
        m_lastTickEventTime(0), m_tickEventCount(0),
        m_todayStr("")
-     { m_startBalance = AccountInfoDouble(ACCOUNT_BALANCE); }
+     {}
 
    ~DataManager() { ReleaseATRHandle(); }
 
@@ -63,7 +81,7 @@ public:
      {
       if(!IManager::Init(data, bus)) return false;
       m_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
-      m_todayStr     = TimeToString(TimeCurrent(), TIME_DATE);  // DM-001
+      m_todayStr     = TimeToString(TimeCurrent(), TIME_DATE);
       RefreshDailyProfit();
       InitializeATRHandle();
       return true;
@@ -78,20 +96,26 @@ public:
 
       if(now - m_lastScavengeTime > SCAVENGE_INTERVAL_SEC)
         { ScavengeOldGVs(); m_lastScavengeTime = now; }
+
+      RefreshDailyProfit();
      }
 
-   // DM-001 FIX: compare date strings, not cast bool→datetime
    virtual void OnBar(const MqlRates &bar) override
      {
       string barDate = TimeToString(bar.time, TIME_DATE);
       if(barDate != m_todayStr)
         {
-         m_dailyProfit = 0.0;
-         m_todayStr    = barDate;  // DM-001: update cached date
+         m_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+         m_dailyProfit  = 0.0;
+         m_todayStr     = barDate;
+         if(m_debugMode)
+            PrintFormat("[DataManager] New day baseline reset: startBalance=%.2f", m_startBalance);
         }
+      RefreshDailyProfit();
      }
 
-   virtual void OnTrade(const MqlTradeTransaction &trans) override {}
+   virtual void OnTrade(const MqlTradeTransaction &trans) override
+     { RefreshDailyProfit(); }
 
    double   GetATRPoints()         const { return m_atrPoints;         }
    double   GetDailyProfit()       const { return m_dailyProfit;       }
@@ -102,9 +126,10 @@ public:
      { m_consecutiveLosses = (profit < 0) ? m_consecutiveLosses+1 : 0; }
 
    void RefreshDailyProfit()
-     { m_dailyProfit = AccountInfoDouble(ACCOUNT_BALANCE) - m_startBalance; }
+     {
+      m_dailyProfit = (AccountInfoDouble(ACCOUNT_BALANCE) - m_startBalance) + FloatingPnL();
+     }
 
-   // DM-002 FIX: compare datetime seconds only
    bool ShouldUpdateDashboard()
      {
       datetime now = TimeCurrent();
@@ -113,7 +138,6 @@ public:
       return false;
      }
 
-   // DM-003 FIX: use GlobalVariableTime() which returns actual creation/modify time
    void ScavengeOldGVs()
      {
       string prefix = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_PASR_";
@@ -122,7 +146,6 @@ public:
         {
          string name = GlobalVariableName(i);
          if(StringFind(name, prefix) != 0) continue;
-         // DM-003 FIX: GlobalVariableTime() returns last set time of the variable
          datetime varTime = GlobalVariableTime(name);
          if(varTime > 0 && TimeCurrent() - varTime > 7*24*3600)
             GlobalVariableDelete(name);
