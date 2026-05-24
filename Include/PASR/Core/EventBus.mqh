@@ -1,8 +1,12 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — v3.02 (Sprint 11 API Unification)           |
+//| Core/EventBus.mqh — v3.03                                       |
 //| High-performance event dispatch with binary-heap priority queue  |
 //|                                                                  |
 //| CHANGELOG:                                                       |
+//|   v3.03 (2026-05-24):                                           |
+//|     BUG-C04: Dispatch() and Drain() now respect handler          |
+//|              IsListening(event_id) filters. IEventHandler adds   |
+//|              default IsListening() returning true.               |
 //|   v3.02 (2026-05-23) — Sprint 11 API Unification:               |
 //|     BUG-N06: Register() alias added (= Subscribe()) so          |
 //|              Orchestrator::RegisterManager() compiles cleanly.  |
@@ -34,6 +38,7 @@ class IEventHandler
 public:
    virtual void      OnEvent(const PASREvent &ev) = 0;
    virtual string    HandlerName() const           = 0;
+   virtual bool      IsListening(ENUM_EVENT_ID id) const { return true; }
   };
 
 //+------------------------------------------------------------------+
@@ -95,6 +100,16 @@ private:
         }
      }
 
+   void RouteEvent(const PASREvent &ev)
+     {
+      for(int i = 0; i < m_sub_count; i++)
+        {
+         if(m_subs[i] == NULL) continue;
+         if(!m_subs[i].IsListening(ev.id)) continue;
+         m_subs[i].OnEvent(ev);
+        }
+     }
+
 public:
    CEventBus() : m_size(0), m_sub_count(0)
      {
@@ -103,7 +118,6 @@ public:
       ZeroMemory(m_stats);
      }
 
-   //--- Subscribe / Register (Register is canonical alias) ----------------
    bool Subscribe(IEventHandler *handler)
      {
       if(handler == NULL || m_sub_count >= EVENTBUS_MAX_SUBS) return false;
@@ -113,8 +127,6 @@ public:
       return true;
      }
 
-   // BUG-N06 FIX: Register() alias — Orchestrator::RegisterManager() calls
-   // m_bus.Register(mgr); this alias maps it to Subscribe() cleanly.
    bool Register(IEventHandler *handler) { return Subscribe(handler); }
 
    void Unsubscribe(IEventHandler *handler)
@@ -128,7 +140,6 @@ public:
            }
      }
 
-   //--- Push O(log n) -----------------------------------------------------
    bool Push(const PASREvent &ev)
      {
       m_stats.total_pushed++;
@@ -148,7 +159,6 @@ public:
       return true;
      }
 
-   //--- Pop O(log n) ------------------------------------------------------
    bool Pop(PASREvent &out)
      {
       if(m_size == 0) return false;
@@ -160,34 +170,25 @@ public:
       return true;
      }
 
-   //--- Dispatch single event to all subscribers (BUG-N01 helper) --------
-   // Called by Stage_AnalysisSR after Push() to immediately deliver
-   // EVENT_ID_NEW_BAR to SR manager within the same pipeline cycle.
    void Dispatch(const PASREvent &ev)
      {
-      for(int i = 0; i < m_sub_count; i++)
-         if(m_subs[i] != NULL)
-            m_subs[i].OnEvent(ev);
+      RouteEvent(ev);
       m_stats.total_drained++;
      }
 
-   //--- Drain all queued events O(n log n) --------------------------------
    int Drain()
      {
       int dispatched = 0;
       PASREvent ev;
       while(Pop(ev))
         {
-         for(int i = 0; i < m_sub_count; i++)
-            if(m_subs[i] != NULL)
-               m_subs[i].OnEvent(ev);
+         RouteEvent(ev);
          dispatched++;
          m_stats.total_drained++;
         }
       return dispatched;
      }
 
-   //--- Peek without removing ---------------------------------------------
    bool Peek(PASREvent &out) const
      {
       if(m_size == 0) return false;
@@ -195,7 +196,6 @@ public:
       return true;
      }
 
-   //--- Utility -----------------------------------------------------------
    int  Depth()    const { return m_size; }
    int  SubCount() const { return m_sub_count; }
    bool IsEmpty()  const { return m_size == 0; }
