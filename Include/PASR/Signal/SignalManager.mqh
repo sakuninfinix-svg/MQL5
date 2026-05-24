@@ -1,16 +1,6 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalManager.mqh — v4.02 (BUG-S10-004 FIXED)           |
-//| Signal orchestration using modular components                    |
-//|                                                                  |
-//| FIX v4.02:                                                       |
-//|  BUG-S10-004 — RunCompletePipeline() call in DetectSignalCore() |
-//|    used old 9-arg signature; updated to v1.02 11-arg signature   |
-//|    (support + resistance now explicit params).                   |
-//|                                                                  |
-//| Previous fixes:                                                  |
-//|  BUG-021 — EventBus::Instance() removed → m_bus direct         |
-//|  BUG-023 — DeclareEvents() uses EVENT_ID_* constants only       |
-//|  BUG-026 — CSignalConfig::Init() deferred to PostInit()         |
+//| Signal/SignalManager.mqh — v4.03                                |
+//| Signal orchestration using canonical PASREvent model             |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_SIGNAL_MANAGER_MQH__
@@ -27,14 +17,10 @@
 #include "../Data/SRStruct.mqh"
 #include "../Data/RegimeTypes.mqh"
 
-// Forward declarations
 class CPatternManager;
 class CSRManager;
 class CMarketRegime;
 
-//+------------------------------------------------------------------+
-//| Market Data Cache (from ZoneUpdate events)                       |
-//+------------------------------------------------------------------+
 struct SignalMarketData
   {
    double atrPoints;
@@ -44,12 +30,16 @@ struct SignalMarketData
    double supBufferMult, resBufferMult;
    int    supHtfAlign, resHtfAlign;
 
-   void Reset() { ZeroMemory(this); }
+   void Reset()
+     {
+      atrPoints=0.0; support=0.0; resistance=0.0;
+      htfSupport=0.0; htfResistance=0.0;
+      isSupBroken=false; isResBroken=false;
+      supBufferMult=1.0; resBufferMult=1.0;
+      supHtfAlign=0; resHtfAlign=0;
+     }
   };
 
-//+------------------------------------------------------------------+
-//| CSignalManager — v4.02                                          |
-//+------------------------------------------------------------------+
 class CSignalManager : public IManager
   {
 private:
@@ -75,7 +65,7 @@ private:
      {
       ArraySetAsSeries(outRates, true);
       int copied = CopyRates(_Symbol, _Period, shiftStart, count, outRates);
-      return (copied > 0);
+      return (copied >= count);
      }
 
    void EnsureConfigReady()
@@ -92,19 +82,26 @@ private:
    void DispatchSignalEvent(SignalDecision &decision, double atrPoints,
                             double support, double resistance)
      {
-      if(CheckPointer(m_bus) == POINTER_INVALID)
+      if(m_bus == NULL)
         {
          if(m_debugMode) Print("[SignalManager] m_bus NULL, cannot dispatch signal");
          return;
         }
-      SignalGeneratedEvent *sigEvent = new SignalGeneratedEvent(
-         decision, atrPoints, support, resistance
-      );
-      if(CheckPointer(sigEvent) == POINTER_INVALID) return;
-      m_bus.Push(sigEvent);
+
+      PASREvent ev;
+      ev.id       = EVENT_SIGNAL_GENERATED;
+      ev.priority = 40;
+      ev.data1    = decision.signalPrice;
+      ev.data2    = atrPoints;
+      ev.tag      = StringFormat("%s|support=%.5f|resistance=%.5f|pattern=%d|shift=%d|%s",
+                    decision.orderType == ORDER_TYPE_BUY ? "BUY" : "SELL",
+                    support, resistance, (int)decision.patternType,
+                    decision.signalShift, decision.reason);
+      ev.ticket   = (ulong)decision.orderType;
+      m_bus.Push(ev);
      }
 
-   void ProcessSignalOnNewBar(NewBarEvent *e)
+   void ProcessSignalOnNewBar(datetime barOpenTime)
      {
       double atrPoints     = m_marketData.atrPoints;
       double support       = m_marketData.support;
@@ -188,12 +185,10 @@ private:
            { reason = "Zone broken"; continue; }
 
          FilterResult filterResult;
-         // BUG-S10-004 FIX: pass support + resistance explicitly (new v1.02 signature)
          if(!m_filterPipeline.RunCompletePipeline(
                shift, dir, zonePrice, signalPrice,
                atrPoints, htfSupport, htfResistance,
-               currentBufMult,
-               support, resistance,   // <-- new args (was missing, caused compile error)
+               currentBufMult, support, resistance,
                filterResult, rates))
            {
             reason = filterResult.reason;
@@ -234,22 +229,32 @@ private:
       return false;
      }
 
+   void ApplyZoneUpdate(const PASREvent &ev)
+     {
+      // Canonical lightweight mapping:
+      // data1 = ATR points, data2 = support, tag can optionally carry resistance.
+      if(ev.data1 > 0.0) m_marketData.atrPoints = ev.data1;
+      if(ev.data2 > 0.0) m_marketData.support = ev.data2;
+      double res = StringToDouble(ev.tag);
+      if(res > 0.0) m_marketData.resistance = res;
+     }
+
 public:
    CSignalManager()
-      : IManager(),
-        m_pattern(NULL), m_sr(NULL), m_regime(NULL),
-        m_signalPending(false),
-        m_lastProcessedBar(0),
-        m_hasNewTick(false),
-        m_configReady(false)
+      : IManager(), m_pattern(NULL), m_sr(NULL), m_regime(NULL),
+        m_signalPending(false), m_lastProcessedBar(0),
+        m_hasNewTick(false), m_configReady(false)
      {
       m_marketData.Reset();
      }
+
+   virtual string HandlerName() const override { return "SignalManager"; }
 
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
       EnsureConfigReady();
+      if(m_bus != NULL) m_bus.Subscribe(this);
       return true;
      }
 
@@ -257,6 +262,7 @@ public:
      {
       m_signalPending = false;
       m_cooldownMgr.Clear();
+      IManager::Deinit();
      }
 
    void SetPatternManager(CPatternManager *p) { m_pattern = p; }
@@ -264,9 +270,7 @@ public:
    void SetRegimeManager(CMarketRegime *r)     { m_regime  = r; }
 
    bool RegisterSource(ISignalSource *src, double weight = 1.0)
-     {
-      return m_aggregator.RegisterSource(src, weight);
-     }
+     { return m_aggregator.RegisterSource(src, weight); }
 
    int SourceCount() const { return m_aggregator.SourceCount(); }
 
@@ -280,26 +284,27 @@ public:
       AddEvent(EVENT_ID_HEARTBEAT);
      }
 
-   virtual void OnPriceUpdate(PriceUpdateEvent *e) override
+   virtual void OnPriceUpdate() override
      {
-      if(CheckPointer(e) == POINTER_INVALID) return;
-      m_cachedTick = e.tick;
+      SymbolInfoTick(_Symbol, m_cachedTick);
       m_hasNewTick = true;
      }
 
-   virtual void OnNewBar(NewBarEvent *e) override
+   virtual void OnNewBar() override
      {
-      if(CheckPointer(e) == POINTER_INVALID || !m_initialized) return;
-      if(e.barOpenTime == m_lastProcessedBar) return;
-      if(!m_hasNewTick) return;
+      if(!m_initialized) return;
+      datetime barOpenTime = iTime(_Symbol, _Period, 0);
+      if(barOpenTime == 0 || barOpenTime == m_lastProcessedBar) return;
+      if(!m_hasNewTick) OnPriceUpdate();
       EnsureConfigReady();
-      ProcessSignalOnNewBar(e);
-      m_lastProcessedBar = e.barOpenTime;
+      ProcessSignalOnNewBar(barOpenTime);
+      m_lastProcessedBar = barOpenTime;
       m_hasNewTick = false;
      }
 
-   virtual void OnConfigReload(ConfigReloadEvent *e) override
+   virtual void OnConfigReload() override
      {
+      IManager::OnConfigReload();
       m_config.Init();
       m_aggregator.Init(m_config);
       m_filterPipeline.Init(m_config);
@@ -308,41 +313,36 @@ public:
       m_configReady = true;
      }
 
-   virtual void OnEmergencyStop(EmergencyStopEvent *e) override
+   virtual void OnEvent(const PASREvent &ev) override
      {
-      m_signalPending = false;
-      if(m_config.GetDebugMode()) Log("Emergency Stop: Clearing pending signals.");
-     }
-
-   virtual void OnHeartbeat(HeartbeatEvent *e) override
-     {
-      m_cooldownMgr.CleanupExpired();
-     }
-
-   virtual void OnCustomEvent(Event *e) override
-     {
-      if(e == NULL) return;
-      if(e.Id() == EVENT_ID_ZONE_UPDATE)
+      switch(ev.id)
         {
-         ZoneUpdateEvent *ze = (ZoneUpdateEvent*)e;
-         m_marketData.atrPoints     = ze.atrPoints;
-         m_marketData.support       = ze.support;
-         m_marketData.resistance    = ze.resistance;
-         m_marketData.htfSupport    = ze.htfSupport;
-         m_marketData.htfResistance = ze.htfResistance;
-         m_marketData.isSupBroken   = ze.isSupBroken;
-         m_marketData.isResBroken   = ze.isResBroken;
-         m_marketData.supBufferMult = ze.supBufferMult;
-         m_marketData.resBufferMult = ze.resBufferMult;
-         m_marketData.supHtfAlign   = ze.supHtfAlign;
-         m_marketData.resHtfAlign   = ze.resHtfAlign;
+         case EVENT_ID_PRICE_UPDATE:
+            OnPriceUpdate();
+            break;
+         case EVENT_ID_NEW_BAR:
+            OnNewBar();
+            break;
+         case EVENT_ID_CONFIG_RELOAD:
+            OnConfigReload();
+            break;
+         case EVENT_ID_ZONE_UPDATE:
+            ApplyZoneUpdate(ev);
+            break;
+         case EVENT_ID_EMERGENCY_STOP:
+            m_signalPending = false;
+            if(m_config.GetDebugMode()) Log("Emergency Stop: Clearing pending signals.");
+            break;
+         case EVENT_ID_HEARTBEAT:
+            m_cooldownMgr.CleanupExpired();
+            break;
+         default:
+            break;
         }
      }
 
    void NotifyPatternFailure(bool isBuy, double zonePrice)
-     {
-      m_cooldownMgr.RegisterFailure(isBuy, zonePrice);
-     }
+     { m_cooldownMgr.RegisterFailure(isBuy, zonePrice); }
 
    bool HasPendingSignal(SignalDecision &outSignal)
      {
