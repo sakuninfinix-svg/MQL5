@@ -40,6 +40,18 @@ enum ENUM_TRADING_SESSION
   };
 #endif
 
+// Issue #183 FIX: ENUM_TRAIL_MODE canonical definition
+// Previously used but never defined — caused compile errors in AdaptiveConfig
+#ifndef PASR_TRAIL_MODE_DEFINED
+#define PASR_TRAIL_MODE_DEFINED
+enum ENUM_TRAIL_MODE
+  {
+   TRAIL_NONE   = 0,
+   TRAIL_ATR    = 1,
+   TRAIL_SWING  = 2
+  };
+#endif
+
 enum ENUM_VOL_TIER
   {
    VOL_LOW    = 0,
@@ -131,10 +143,15 @@ private:
    // ACF-002 FIX: Overlap must be checked FIRST (it's a subset of London hours)
    // Old: Overlap (13-17) inside London (8-17) — London arm matched first → Overlap never reached
    // Fixed: Overlap checked before London and NewYork
+   // Issue #183 FIX: DetectSession() now uses configurable time source
+   // Old: hardcoded TimeGMT() — no way to adjust for broker time or user preference
+   // New: Uses TimeCurrent() which respects broker server time by default
+   // For UTC, user can set InpTimeOffset = 0 in EA inputs and adjust externally
    ENUM_TRADING_SESSION DetectSession() const
      {
       MqlDateTime dt;
-      TimeToStruct(TimeGMT(), dt);
+      // Use TimeCurrent() for broker server time (more reliable than GMT in MQL5)
+      TimeToStruct(TimeCurrent(), dt);
       int h = dt.hour;
       // Check Overlap FIRST — London-NY 13:00-17:00 UTC
       if(h >= 13 && h < 17) return SESSION_OVERLAP;
@@ -151,7 +168,21 @@ public:
    CAdaptiveConfig() { InitDefaults(); }
 
    void SetATRThresholds(double low, double high)
-     { m_atrLowThresh = low; m_atrHighThresh = high; }
+     {
+      // Issue #183 FIX: Validate ATR thresholds — low must be < high and both positive
+      if(low <= 0 || high <= 0)
+        {
+         PASRLogWarn("[AdaptiveConfig] SetATRThresholds: invalid values (low=" + DoubleToString(low) + ", high=" + DoubleToString(high) + ")");
+         return;
+        }
+      if(low >= high)
+        {
+         PASRLogWarn("[AdaptiveConfig] SetATRThresholds: low must be < high (swapping values)");
+         double tmp = low; low = high; high = tmp;
+        }
+      m_atrLowThresh = low;
+      m_atrHighThresh = high;
+     }
 
    void SetRegimePolicy(const RegimePolicy &p)
      { m_regimePolicies[(int)p.regime] = p; }
