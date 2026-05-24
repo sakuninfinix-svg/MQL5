@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Analysis/SRDetector.mqh — v1.0.0                                 |
+//| Analysis/SRDetector.mqh — v1.0.1                                 |
 //| Responsibility: PIVOT DETECTION ONLY                             |
 //|                                                                   |
 //| Pure calculation layer — no IManager, no EventBus, no side       |
@@ -8,6 +8,14 @@
 //|                                                                   |
 //| Owned by:  CAnalysisSRManager (SRManager.mqh)                    |
 //| Feeds:     CSRZoneStore via SRManager.OnNewBar()                  |
+//|                                                                   |
+//| CHANGELOG:                                                       |
+//|   v1.0.1 (2026-05-24):                                           |
+//|     BUG-I07: FindNearestSwing() previously returned the best      |
+//|              price extremum in the scan window, not the nearest   |
+//|              confirmed pivot from startBar. Fixed to return the   |
+//|              first confirmed pivot. Old extremum behavior kept as |
+//|              FindBestSwing().                                    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_SR_DETECTOR_MQH__
@@ -86,6 +94,22 @@ private:
       return true;
      }
 
+   bool IsConfirmedPivotInBuffer(const double &buf[], int i, bool findHigh) const
+     {
+      double val = buf[i];
+      bool   ok  = true;
+
+      // Bars closer to the current bar side
+      for(int j = 1; j <= m_leftBars && ok; j++)
+         ok = findHigh ? buf[i - j] < val : buf[i - j] > val;
+
+      // Bars farther to the history side
+      for(int j = 1; j <= m_rightBars && ok; j++)
+         ok = findHigh ? buf[i + j] < val : buf[i + j] > val;
+
+      return ok;
+     }
+
 public:
    CSRDetector()
       : m_leftBars(SR_LEFT_BARS),
@@ -135,8 +159,11 @@ public:
      }
 
    //+---------------------------------------------------------------+
-   //| FindNearestSwing() — locate nearest swing point from startBar |
-   //| Returns bar index of best swing, or -1 if none found.         |
+   //| FindNearestSwing() — locate nearest confirmed pivot           |
+   //|                                                               |
+   //| Returns the first confirmed pivot found from startBar toward  |
+   //| older bars, or -1 if none found. This matches the method name |
+   //| and is suitable for nearest swing SL/reference placement.     |
    //+---------------------------------------------------------------+
    int FindNearestSwing(bool findHigh, int startBar, int maxBars) const
      {
@@ -146,9 +173,44 @@ public:
       if(startBar >= totalBars) return -1;
 
       int scanLimit = MathMin(maxBars, totalBars - startBar - 1);
-      if(scanLimit <= 0) return -1;
+      if(scanLimit <= m_leftBars + m_rightBars) return -1;
 
-      // Batch-fetch OHLC via CopyHigh/CopyLow for performance
+      double buf[];
+      ArraySetAsSeries(buf, true);
+
+      int copied = findHigh
+                   ? CopyHigh(_Symbol, _Period, startBar, scanLimit, buf)
+                   : CopyLow(_Symbol, _Period, startBar, scanLimit, buf);
+
+      if(copied != scanLimit) return -1;
+
+      for(int i = m_rightBars; i < scanLimit - m_leftBars; i++)
+        {
+         if(IsConfirmedPivotInBuffer(buf, i, findHigh))
+            return startBar + i;
+        }
+
+      return -1;
+     }
+
+   //+---------------------------------------------------------------+
+   //| FindBestSwing() — locate strongest price extremum pivot       |
+   //|                                                               |
+   //| Keeps the old FindNearestSwing() behavior intentionally:      |
+   //| highest confirmed swing high or lowest confirmed swing low in |
+   //| the scan window. Use this when the desired intent is extremum |
+   //| selection, not nearest pivot selection.                       |
+   //+---------------------------------------------------------------+
+   int FindBestSwing(bool findHigh, int startBar, int maxBars) const
+     {
+      if(startBar < 0 || maxBars <= 0) return -1;
+
+      int totalBars = (int)Bars(_Symbol, _Period);
+      if(startBar >= totalBars) return -1;
+
+      int scanLimit = MathMin(maxBars, totalBars - startBar - 1);
+      if(scanLimit <= m_leftBars + m_rightBars) return -1;
+
       double buf[];
       ArraySetAsSeries(buf, true);
 
@@ -159,23 +221,14 @@ public:
       if(copied != scanLimit) return -1;
 
       int    swingBar  = -1;
-      double bestValue = findHigh ? 0.0 : DBL_MAX;
+      double bestValue = findHigh ? -DBL_MAX : DBL_MAX;
 
       for(int i = m_rightBars; i < scanLimit - m_leftBars; i++)
         {
+         if(!IsConfirmedPivotInBuffer(buf, i, findHigh))
+            continue;
+
          double val = buf[i];
-         bool   ok  = true;
-
-         // Left confirmation
-         for(int j = 1; j <= m_leftBars && ok; j++)
-            ok = findHigh ? buf[i - j] < val : buf[i - j] > val;
-
-         // Right confirmation
-         for(int j = 1; j <= m_rightBars && ok; j++)
-            ok = findHigh ? buf[i + j] < val : buf[i + j] > val;
-
-         if(!ok) continue;
-
          if((findHigh && val > bestValue) || (!findHigh && val < bestValue))
            {
             bestValue = val;
