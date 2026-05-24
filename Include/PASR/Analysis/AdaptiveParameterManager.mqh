@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Analysis/AdaptiveParameterManager.mqh — v3.01                    |
+//| Analysis/AdaptiveParameterManager.mqh — v3.02                    |
 //| Dynamic SL/TP/lot sizing based on canonical market regime.        |
 //+------------------------------------------------------------------+
 #property strict
@@ -50,17 +50,26 @@ private:
       double entry_mult;
       int    max_pos;
      };
-   SRegimeProfile m_profiles[8];
 
-   int RegimeIndex(EMarketRegime regime) const
+   SRegimeProfile ProfileForRegime(EMarketRegime regime) const
      {
-      int idx = (int)regime;
-      return (idx >= 0 && idx < 8) ? idx : 0;
+      SRegimeProfile p;
+      switch(regime)
+        {
+         case REGIME_RANGE:      p = {0.8, 1.2, 1.0, 0.9, 5}; break;
+         case REGIME_TREND_UP:
+         case REGIME_TREND_DOWN: p = {1.5, 2.0, 1.2, 0.8, 2}; break;
+         case REGIME_VOLATILE:   p = {2.0, 1.5, 0.5, 0.8, 1}; break;
+         case REGIME_CRASH:      p = {3.0, 1.0, 0.1, 0.95, 0}; break;
+         case REGIME_SQUEEZE:    p = {0.7, 1.0, 0.6, 0.9, 2}; break;
+         default:                p = {1.0, 1.0, 1.0, 1.0, 3}; break;
+        }
+      return p;
      }
 
    void ApplyRegimeMultipliers(const SDynamicParams &params, EMarketRegime regime)
      {
-      SRegimeProfile &p = m_profiles[RegimeIndex(regime)];
+      SRegimeProfile p = ProfileForRegime(regime);
       m_config.StopLossPoints      = m_baseSL   * params.sl_multiplier  * p.sl_mult;
       m_config.TakeProfitPoints    = m_baseTP   * params.tp_multiplier  * p.tp_mult;
       m_config.TrailingStopPoints  = m_config.StopLossPoints * 0.5;
@@ -83,7 +92,6 @@ private:
    void PublishRegimeChange(EMarketRegime regime)
      {
       if(m_bus == NULL) return;
-
       PASREvent ev;
       ev.id       = EVENT_ID_ADAPTIVE_UPDATE;
       ev.priority = 3;
@@ -103,18 +111,6 @@ private:
         }
      }
 
-   void InitProfiles()
-     {
-      for(int i = 0; i < 8; i++)
-         m_profiles[i] = {1.0, 1.0, 1.0, 1.0, 3};
-      m_profiles[(int)REGIME_RANGE]      = {0.8, 1.2, 1.0, 0.9, 5};
-      m_profiles[(int)REGIME_TREND_UP]   = {1.5, 2.0, 1.2, 0.8, 2};
-      m_profiles[(int)REGIME_TREND_DOWN] = {1.5, 2.0, 1.2, 0.8, 2};
-      m_profiles[(int)REGIME_VOLATILE]   = {2.0, 1.5, 0.5, 0.8, 1};
-      m_profiles[(int)REGIME_CRASH]      = {3.0, 1.0, 0.1, 0.95, 0};
-      m_profiles[(int)REGIME_SQUEEZE]    = {0.7, 1.0, 0.6, 0.9, 2};
-     }
-
 public:
    CAdaptiveParameterManager()
       : IManager(), m_regimeDetector(NULL),
@@ -123,38 +119,27 @@ public:
      {
       ZeroMemory(m_config);
       m_config.CurrentRegime = REGIME_UNKNOWN;
-      InitProfiles();
      }
 
    virtual string HandlerName() const override { return "AdaptiveParameterManager"; }
 
    virtual void DeclareEvents() override
-     {
-      AddEvent(EVENT_ID_NEW_BAR);
-      AddEvent(EVENT_ID_CONFIG_RELOAD);
-     }
+     { AddEvent(EVENT_ID_NEW_BAR); AddEvent(EVENT_ID_CONFIG_RELOAD); }
 
    virtual void OnNewBar() override { UpdateParameters(); }
 
    virtual void OnEvent(const PASREvent &ev) override
      {
       if(ev.id == EVENT_ID_NEW_BAR)
-        {
-         if(m_cfgDirty) RefreshConfig();
-         OnNewBar();
-        }
-      if(ev.id == EVENT_ID_CONFIG_RELOAD)
-         m_cfgDirty = true;
+        { if(m_cfgDirty) RefreshConfig(); OnNewBar(); }
+      if(ev.id == EVENT_ID_CONFIG_RELOAD) m_cfgDirty = true;
      }
 
    bool Initialize(CMarketRegimeDetector *regimeDetector,
                    double baseSL=20.0, double baseTP=40.0, double baseRisk=1.0)
      {
       if(regimeDetector == NULL)
-        {
-         Print("[AdaptiveParams] ERROR: regimeDetector is NULL");
-         return false;
-        }
+        { Print("[AdaptiveParams] ERROR: regimeDetector is NULL"); return false; }
       m_regimeDetector = regimeDetector;
       m_baseSL = (baseSL > 0) ? baseSL : 20.0;
       m_baseTP = (baseTP > 0) ? baseTP : 40.0;
@@ -173,25 +158,13 @@ public:
       return Initialize(regimeDetector, baseSL, baseTP, baseRisk);
      }
 
-   void SetRegimeProfile(EMarketRegime regime,
-                         double slMult, double tpMult,
-                         double riskMult, double entryMult, int maxPos)
-     {
-      m_profiles[RegimeIndex(regime)] = {slMult, tpMult, riskMult, entryMult, maxPos};
-      m_cacheValid = false;
-     }
-
    bool UpdateParameters()
      {
       if(m_regimeDetector == NULL)
-        {
-         m_cacheValid = false;
-         return false;
-        }
+        { m_cacheValid = false; return false; }
 
       datetime curBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-      if(curBarTime == m_lastBarTime && m_cacheValid)
-         return true;
+      if(curBarTime == m_lastBarTime && m_cacheValid) return true;
 
       EMarketRegime detectedRegime = m_regimeDetector.Detect(_Symbol, PERIOD_CURRENT, (DataManager*)m_data);
       const SDynamicParams &params = m_regimeDetector.GetParams();
@@ -205,8 +178,7 @@ public:
       m_cacheValid = true;
       PublishRegimeChange(detectedRegime);
 
-      if(m_debugMode)
-         PrintFormat("[AdaptiveParams] %s", ExportConfigToString());
+      if(m_debugMode) PrintFormat("[AdaptiveParams] %s", ExportConfigToString());
       return true;
      }
 
@@ -217,10 +189,7 @@ public:
    int           GetMaxPositions()   const { return m_cacheValid ? m_config.MaxOpenPositions    : 1;          }
    EMarketRegime GetRegime()         const { return m_config.CurrentRegime; }
 
-   string GetRegimeName() const
-     {
-      return MarketRegimeName(m_config.CurrentRegime);
-     }
+   string GetRegimeName() const { return MarketRegimeName(m_config.CurrentRegime); }
 
    string ExportConfigToString() const
      {
@@ -234,4 +203,4 @@ public:
 
 typedef CAdaptiveParameterManager AdaptiveParameterManager;
 
-#endif // __ANALYSIS_ADAPTIVE_PARAMETER_MANAGER_MQH__
+#endif
