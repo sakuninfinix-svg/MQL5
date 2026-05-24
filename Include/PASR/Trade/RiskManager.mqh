@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.04                                    |
+//| Trade/RiskManager.mqh — v2.05                                    |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -70,6 +70,17 @@ private:
       return spread <= m_maxSpreadPts;
      }
 
+   void CheckDailyLossBreaker(double projectedDailyLoss)
+     {
+      double bal = AccountBalance();
+      if(bal <= 0 || m_dailyLossPct <= 0) return;
+      if((-projectedDailyLoss / bal * 100.0) >= m_dailyLossPct)
+        {
+         m_circuitBroken = true;
+         Print("[Risk] CIRCUIT BREAKER: daily loss limit.");
+        }
+     }
+
    bool ReadConfig()
      {
       if(m_data == NULL) { Print("[Risk] ERROR: DataManager NULL"); return false; }
@@ -114,7 +125,7 @@ public:
       if(m_lotStep <= 0) m_lotStep = 0.01;
       m_peakEquity   = AccountEquity();
       m_lastResetDay = ServerDateMidnight();
-      PrintFormat("[Risk] v2.04 Init OK: risk=%.1f%% daily=%.1f%% maxTrades=%d",
+      PrintFormat("[Risk] v2.05 Init OK: risk=%.1f%% daily=%.1f%% maxTrades=%d",
                   m_riskPct, m_dailyLossPct, m_maxOpenTrades);
       return true;
      }
@@ -129,7 +140,12 @@ public:
       switch(ev.id)
         {
          case EVENT_ID_POSITION_UPDATE:
-            if(ev.profit != 0.0) m_dailyLoss += ev.profit;
+            // EventBus is the single accumulation path for realized P&L.
+            if(ev.profit != 0.0)
+              {
+               m_dailyLoss += ev.profit;
+               CheckDailyLossBreaker(m_dailyLoss);
+              }
             { double eq = AccountEquity(); if(eq > m_peakEquity) m_peakEquity = eq; }
             break;
          case EVENT_ID_NEW_BAR:       OnNewBar();    break;
@@ -255,12 +271,28 @@ public:
      {
       m_openTrades = MathMax(0, m_openTrades - 1);
       if(profit < 0) m_consecLoss++; else m_consecLoss = 0;
+
       if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
         { m_circuitBroken = true; PrintFormat("[Risk] CIRCUIT BREAKER: %d consec losses.", m_consecLoss); }
-      double bal = AccountBalance();
-      if(bal > 0 && m_dailyLossPct > 0)
-         if((-m_dailyLoss / bal * 100.0) >= m_dailyLossPct)
-           { m_circuitBroken = true; Print("[Risk] CIRCUIT BREAKER: daily loss limit."); }
+
+      // m_dailyLoss is updated by EVENT_ID_POSITION_UPDATE. Use projected value
+      // here so a direct OnTradeClosed(profit) cannot miss the breaker window.
+      CheckDailyLossBreaker(m_dailyLoss + profit);
+     }
+
+   void SyncOpenTradesFromBroker()
+     {
+      int count = 0;
+      long magic = m_cfg.MagicNumber;
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+        {
+         ulong ticket = PositionGetTicket(i);
+         if(ticket == 0) continue;
+         if(!PositionSelectByTicket(ticket)) continue;
+         if(magic > 0 && PositionGetInteger(POSITION_MAGIC) != magic) continue;
+         count++;
+        }
+      m_openTrades = count;
      }
 
    void ResetCircuit()  { m_circuitBroken = false; m_consecLoss = 0; Print("[Risk] Circuit reset."); }
