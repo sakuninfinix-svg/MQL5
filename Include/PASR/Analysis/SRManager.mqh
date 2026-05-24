@@ -94,9 +94,34 @@ public:
 
    //== IManager overrides ==========================================+
 
+   virtual bool Init(IDataManager *data, CEventBus *bus) override
+     {
+      if(!IManager::Init(data, bus)) return false;
+      m_store.SetDataManager(data);
+      return true;
+     }
+
+   virtual void Deinit() override
+     {
+      m_store.Clear();
+      IManager::Deinit();
+     }
+
+   virtual bool IsHealthy() const override
+     {
+      return IManager::IsHealthy() && m_store.IsValid();
+     }
+
+   virtual void OnPriceUpdate() override
+     {
+      // Price update hook for intra-bar zone proximity checks
+      // Can be used for real-time zone break detection
+     }
+
    virtual void DeclareEvents() override
      {
       AddEvent(EVENT_ID_NEW_BAR);
+      AddEvent(EVENT_ID_PRICE_UPDATE);
       AddEvent(EVENT_ID_CONFIG_RELOAD);
      }
 

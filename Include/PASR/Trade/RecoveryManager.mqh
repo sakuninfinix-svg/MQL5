@@ -126,10 +126,12 @@ private:
       for(int i=0;i<sz;i++)
         {
          RecoveryEngine *r=engines[i];
-         if(CheckPointer(r)!=POINTER_INVALID && r.active) engines[keep++]=r;
-         else { if(CheckPointer(r)!=POINTER_INVALID) { delete r; engines[i]=NULL; } }
+         if(CheckPointer(r)!=POINTER_INVALID && r.active) 
+           { engines[keep++]=r; engines[i]=NULL; }
+         else 
+           { if(CheckPointer(r)!=POINTER_INVALID) { delete r; engines[i]=NULL; } }
         }
-      if(keep!=sz) ArrayResize(engines,keep);
+      ArrayResize(engines,keep);
      }
 
    void CloseActivePosition(RecoveryEngine *r, const string reason)
