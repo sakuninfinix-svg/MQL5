@@ -265,6 +265,32 @@ public:
       const MqlTradeTransaction &trans,
       const MqlTradeRequest     &request,
       const MqlTradeResult      &result);
+
+   //+----------------------------------------------------------------+
+   //| Getter Methods — for QA/SmokeTest and external access          |
+   //+----------------------------------------------------------------+
+   CDataManager*       GetDataManager()    const { return m_data; }
+   CAnalysisSRManager* GetSRManager()      const { return m_sr; }
+   CAnalysisZoneManager* GetZoneManager()  const { return m_zone; }
+   CPatternManager*    GetPatternManager() const { return m_pattern; }
+   CSignalManager*     GetSignalManager()  const { return m_signal; }
+   CAIOrchestrator*    GetAIOrchestrator() const { return m_ai_orch; }
+   CMarketRegimeDetector* GetRegimeDetector() const { return m_regime_det; }
+   CRegimeFilter*      GetRegimeFilter()   const { return m_regime; }
+   CRiskManager*       GetRiskManager()    const { return m_risk; }
+   CExecutionManager*  GetExecManager()    const { return m_exec; }
+   CRecoveryManager*   GetRecoveryManager()const { return m_recovery; }
+   CDashboardManager*  GetDashboard()      const { return m_dash; }
+   CSanityManager*     GetSanityManager()  const { return m_sanity; }
+   CTelemetryRecorder* GetTelemetry()      const { return m_telemetry; }
+   CJournalManager*    GetJournalManager() const { return m_journal; }
+   CAdaptiveParameterManager* GetAdaptiveManager() const { return m_adaptive; }
+   CHealthMonitor*     GetHealthMonitor()  const { return m_health; }
+   CSnapshotManager*   GetSnapshotManager()const { return m_snapshot; }
+   CSessionState*      GetSessionState()   const { return m_session; }
+   CLatencySimulator*  GetLatencySimulator() const { return m_latency_sim; }
+   CEventBus*          GetEventBus()       const { return m_bus; }
+   CPipelineEngine*    GetPipelineEngine() const { return m_pipeline; }
   };
 
 //+------------------------------------------------------------------+
