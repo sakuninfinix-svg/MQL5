@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/JournalManager.mqh — v2.01                                 |
+//| Infra/JournalManager.mqh — v2.02                                 |
 //| Per-trade CSV journal + in-memory performance analytics.         |
 //+------------------------------------------------------------------+
 #property strict
@@ -15,6 +15,18 @@
 #include "../Signal/AI/AITypes.mqh"
 #include "../Signal/AI/AIFeatureBuilder.mqh"
 #include "../Trade/TradePlan.mqh"
+
+#ifndef PASR_TRADING_SESSION_DEFINED
+#define PASR_TRADING_SESSION_DEFINED
+enum ENUM_TRADING_SESSION
+  {
+   SESSION_ASIAN    = 0,
+   SESSION_LONDON   = 1,
+   SESSION_NEWYORK  = 2,
+   SESSION_OVERLAP  = 3,
+   SESSION_OFF      = 4
+  };
+#endif
 
 #define JOURNAL_BUF_SIZE    500
 #define JOURNAL_DAILY_SIZE   30
@@ -309,7 +321,6 @@ public:
    void LogEntry(const PipelineContext &ctx)
      {
       if(!m_initialized) return;
-      // Pipeline bar-level journal hook. Trade-close detail remains handled by OnPositionClosed/EventBus.
       if(m_debugMode)
          PASRLogInfo("Journal", StringFormat("Pipeline ctx: signal=%d ai=%.3f regime=%s",
                      (int)ctx.signal.direction, ctx.ai_score, MarketRegimeName(ctx.regime)));
