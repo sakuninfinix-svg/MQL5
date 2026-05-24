@@ -1,12 +1,14 @@
 //+------------------------------------------------------------------+
-//| Infra/AdaptiveConfig.mqh — v2.00                                  |
+//| Infra/AdaptiveConfig.mqh — v2.01                                  |
 //| Adaptive parameter engine: regime + session + volatility policy.  |
 //|                                                                   |
+//| v2.01 (2026-05-24)                                                |
+//|   S21-006..009: Define ENUM_TRAIL_MODE, validate ATR thresholds, |
+//|                  add enum range guards to setters, avoid          |
+//|                  hardcoded GMT session source.                    |
 //| v2.00 (2026-05-24) — Sprint 20                                    |
 //|   ACF-001: ENUM_MARKET_REGIME + ENUM_TRADING_SESSION defined here |
-//|            — canonical source to prevent re-definition conflicts  |
-//|   ACF-002: DetectSession() overlap logic fixed — SESSION_OVERLAP  |
-//|            was shadowed by SESSION_LONDON (same h>=8 && h<17 arm) |
+//|   ACF-002: DetectSession() overlap logic fixed.                   |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __INFRA_ADAPTIVE_CONFIG_MQH__
@@ -14,9 +16,6 @@
 
 #include "../Core/IManager.mqh"
 
-// ── Canonical enum declarations — include this file for regime/session enums
-// ACF-001: these enums live here; MarketRegimeDetector.mqh MUST include this
-// file (or forward-include guard) to avoid double-declaration.
 #ifndef PASR_MARKET_REGIME_DEFINED
 #define PASR_MARKET_REGIME_DEFINED
 enum ENUM_MARKET_REGIME
@@ -40,8 +39,6 @@ enum ENUM_TRADING_SESSION
   };
 #endif
 
-// Issue #183 FIX: ENUM_TRAIL_MODE canonical definition
-// Previously used but never defined — caused compile errors in AdaptiveConfig
 #ifndef PASR_TRAIL_MODE_DEFINED
 #define PASR_TRAIL_MODE_DEFINED
 enum ENUM_TRAIL_MODE
@@ -112,6 +109,12 @@ private:
    double        m_atrLowThresh;
    double        m_atrHighThresh;
 
+   bool IsValidRegime(ENUM_MARKET_REGIME r) const
+     { return ((int)r >= 0 && (int)r < 4); }
+
+   bool IsValidSession(ENUM_TRADING_SESSION s) const
+     { return ((int)s >= 0 && (int)s < 5); }
+
    void InitDefaults()
      {
       m_regimePolicies[REGIME_TRENDING] = { REGIME_TRENDING, 1.5, 3.0, 0.55, 2, TRAIL_ATR,   0.5, 1.0 };
@@ -140,26 +143,14 @@ private:
       return VOL_NORMAL;
      }
 
-   // ACF-002 FIX: Overlap must be checked FIRST (it's a subset of London hours)
-   // Old: Overlap (13-17) inside London (8-17) — London arm matched first → Overlap never reached
-   // Fixed: Overlap checked before London and NewYork
-   // Issue #183 FIX: DetectSession() now uses configurable time source
-   // Old: hardcoded TimeGMT() — no way to adjust for broker time or user preference
-   // New: Uses TimeCurrent() which respects broker server time by default
-   // For UTC, user can set InpTimeOffset = 0 in EA inputs and adjust externally
    ENUM_TRADING_SESSION DetectSession() const
      {
       MqlDateTime dt;
-      // Use TimeCurrent() for broker server time (more reliable than GMT in MQL5)
       TimeToStruct(TimeCurrent(), dt);
       int h = dt.hour;
-      // Check Overlap FIRST — London-NY 13:00-17:00 UTC
       if(h >= 13 && h < 17) return SESSION_OVERLAP;
-      // London: 08:00-13:00 UTC (non-overlap portion)
       if(h >=  8 && h < 13) return SESSION_LONDON;
-      // New York: 17:00-22:00 UTC (non-overlap portion)
       if(h >= 17 && h < 22) return SESSION_NEWYORK;
-      // Asian: 00:00-08:00 UTC
       if(h >=  0 && h <  8) return SESSION_ASIAN;
       return SESSION_OFF;
      }
@@ -169,15 +160,14 @@ public:
 
    void SetATRThresholds(double low, double high)
      {
-      // Issue #183 FIX: Validate ATR thresholds — low must be < high and both positive
       if(low <= 0 || high <= 0)
         {
-         PASRLogWarn("[AdaptiveConfig] SetATRThresholds: invalid values (low=" + DoubleToString(low) + ", high=" + DoubleToString(high) + ")");
+         PrintFormat("[AdaptiveConfig] Invalid ATR thresholds low=%.2f high=%.2f", low, high);
          return;
         }
       if(low >= high)
         {
-         PASRLogWarn("[AdaptiveConfig] SetATRThresholds: low must be < high (swapping values)");
+         PrintFormat("[AdaptiveConfig] Swapping ATR thresholds low=%.2f high=%.2f", low, high);
          double tmp = low; low = high; high = tmp;
         }
       m_atrLowThresh = low;
@@ -185,14 +175,30 @@ public:
      }
 
    void SetRegimePolicy(const RegimePolicy &p)
-     { m_regimePolicies[(int)p.regime] = p; }
+     {
+      if(!IsValidRegime(p.regime))
+        {
+         PrintFormat("[AdaptiveConfig] Ignored invalid regime policy index=%d", (int)p.regime);
+         return;
+        }
+      m_regimePolicies[(int)p.regime] = p;
+     }
 
    void SetSessionPolicy(const SessionPolicy &p)
-     { m_sessionPolicies[(int)p.session] = p; }
+     {
+      if(!IsValidSession(p.session))
+        {
+         PrintFormat("[AdaptiveConfig] Ignored invalid session policy index=%d", (int)p.session);
+         return;
+        }
+      m_sessionPolicies[(int)p.session] = p;
+     }
 
    EffectivePolicy GetEffectivePolicy(ENUM_MARKET_REGIME regime,
                                       double atrPoints) const
      {
+      if(!IsValidRegime(regime)) regime = REGIME_RANGING;
+
       ENUM_TRADING_SESSION session = DetectSession();
       ENUM_VOL_TIER        volTier = ClassifyATR(atrPoints);
 
