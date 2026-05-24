@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/Orchestrator.mqh — v3.08                                    |
+//| Core/Orchestrator.mqh — v3.09                                    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property strict
@@ -27,6 +27,7 @@ private:
    CRegimeFilter             *m_regime;
    CRiskManager              *m_risk;
    CExecutionManager         *m_exec;
+   CExitEngine               *m_exit;
    CRecoveryManager          *m_recovery;
    CDashboardManager         *m_dash;
    CSanityManager            *m_sanity;
@@ -92,7 +93,7 @@ public:
    COrchestrator()
       : m_data(NULL), m_sr(NULL), m_zone(NULL), m_pattern(NULL),
         m_signal(NULL), m_ai_orch(NULL), m_regime_det(NULL),
-        m_regime(NULL), m_risk(NULL), m_exec(NULL), m_recovery(NULL),
+        m_regime(NULL), m_risk(NULL), m_exec(NULL), m_exit(NULL), m_recovery(NULL),
         m_dash(NULL), m_sanity(NULL), m_telemetry(NULL), m_journal(NULL),
         m_adaptive(NULL), m_optimizer(NULL), m_async_orders(NULL),
         m_hf_timer(NULL), m_health(NULL), m_snapshot(NULL), m_session(NULL),
@@ -175,6 +176,7 @@ public:
    CRegimeFilter*      GetRegimeFilter()   const { return m_regime; }
    CRiskManager*       GetRiskManager()    const { return m_risk; }
    CExecutionManager*  GetExecManager()    const { return m_exec; }
+   CExitEngine*        GetExitEngine()     const { return m_exit; }
    CRecoveryManager*   GetRecoveryManager()const { return m_recovery; }
    CDashboardManager*  GetDashboard()      const { return m_dash; }
    CSanityManager*     GetSanityManager()  const { return m_sanity; }
@@ -207,6 +209,7 @@ void COrchestrator::FreeAll()
    if(m_telemetry != NULL) { delete m_telemetry; m_telemetry = NULL; }
    if(m_dash != NULL) { m_dash.Destroy(); delete m_dash; m_dash = NULL; }
    if(m_recovery != NULL) { delete m_recovery; m_recovery = NULL; }
+   if(m_exit != NULL) { delete m_exit; m_exit = NULL; }
    if(m_exec != NULL) { delete m_exec; m_exec = NULL; }
    if(m_risk != NULL) { delete m_risk; m_risk = NULL; }
    if(m_ai_orch != NULL) { m_ai_orch.Deinit(); delete m_ai_orch; m_ai_orch = NULL; }
