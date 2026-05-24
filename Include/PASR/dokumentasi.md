@@ -166,23 +166,25 @@ Include/PASR/
 
 ---
 
-## 6. Open Work — Dipindahkan ke GitHub Issues
+## 6. Open Work — GitHub Issues Status
 
-| README ID | GitHub Issue | Scope |
-|-----------|--------------|-------|
-| S21-001 | #180 | Restore `Core/PASR.mqh` master include |
-| S21-002 | #181 | Remove legacy `PERF_METRICS` from `PASR_MODULAR.mq5` |
-| S21-003, S21-004, S21-005, INF-7 | #182 | Fix `DataManager` / `IDataManager` contract and initialization |
-| S21-006, S21-007, S21-008, S21-009, INF-10 | #183 | Harden `AdaptiveConfig` dependencies and validation |
-| A1 | #184 | Decompose `Analysis/SRManager.mqh` monolith |
-| A5 | #185 | Audit `Analysis/Pattern` module for `IManager` compliance |
-| DATA-?, QA-?, UI-?, TOOLS-? | #186 | Audit pending PASR folders |
+| README ID | GitHub Issue | Scope | Status |
+|-----------|--------------|-------|--------|
+| S21-001 | #180 | Restore `Core/PASR.mqh` master include | ✅ CLOSED |
+| S21-002 | #181 | Remove legacy `PERF_METRICS` from `PASR_MODULAR.mq5` | ✅ CLOSED |
+| S21-003, S21-004, S21-005, INF-7 | #182 | Fix `DataManager` / `IDataManager` contract and initialization | ✅ CLOSED |
+| S21-006, S21-007, S21-008, S21-009, INF-10 | #183 | Harden `AdaptiveConfig` dependencies and validation | ✅ CLOSED |
+| A1 | #184 | Decompose `Analysis/SRManager.mqh` monolith | ✅ CLOSED |
+| A5 | #185 | Audit `Analysis/Pattern` module for `IManager` compliance | ✅ CLOSED |
+| DATA-?, QA-?, UI-?, TOOLS-? | #186 | Audit pending PASR folders | ✅ CLOSED |
 
 ---
 
-## 7. Detail Open Issues
+## 7. Detail Open Issues (Historical Reference)
 
-### #180 — Restore `Core/PASR.mqh` master include
+### #180 — Restore `Core/PASR.mqh` master include [RESOLVED]
+
+Status: **CLOSED**
 
 Masalah:
 
@@ -199,9 +201,14 @@ Arahan fix:
 - Pastikan include ordering stabil.
 - Pastikan user cukup include satu file: `<PASR/Core/PASR.mqh>`.
 
+Hasil:
+- `Include/PASR/Core/PASR.mqh` v1.00 kini menjadi master include lengkap dengan 10 layer dependency.
+
 ---
 
-### #181 — Remove legacy `PERF_METRICS`
+### #181 — Remove legacy `PERF_METRICS` [RESOLVED]
+
+Status: **CLOSED**
 
 Masalah:
 
@@ -213,9 +220,15 @@ Arahan fix:
 - Gunakan flag canonical bila masih butuh performance metrics.
 - Samakan semua conditional compilation dengan dokumentasi.
 
+Hasil:
+- `PERF_METRICS` dihapus dari `PASR_MODULAR.mq5`.
+- Diganti dengan `PASR_QA_BUILD` untuk QA/stress testing.
+
 ---
 
-### #182 — Fix `DataManager` / `IDataManager` contract
+### #182 — Fix `DataManager` / `IDataManager` contract [RESOLVED]
+
+Status: **CLOSED**
 
 Masalah yang digabung:
 
@@ -232,9 +245,15 @@ Arahan fix:
 - Pastikan method yang dioverride benar-benar ada di interface.
 - Rapikan constructor initializer list.
 
+Hasil:
+- Kontrak `IDataManager` telah diperbaiki.
+- `DataManager` kini comply dengan interface canonical.
+
 ---
 
-### #183 — Harden `AdaptiveConfig`
+### #183 — Harden `AdaptiveConfig` [RESOLVED]
+
+Status: **CLOSED**
 
 Masalah yang digabung:
 
@@ -250,9 +269,15 @@ Arahan fix:
 - Validasi threshold ATR.
 - Tentukan sumber waktu sesi yang canonical: UTC, broker time, atau configurable offset.
 
+Hasil:
+- `AdaptiveConfig.mqh` v2.00 telah mendefinisikan enum canonical.
+- Validasi threshold dan session detection telah diperbaiki.
+
 ---
 
-### #184 — Decompose `SRManager.mqh`
+### #184 — Decompose `SRManager.mqh` [RESOLVED]
+
+Status: **CLOSED**
 
 Masalah:
 
@@ -260,17 +285,25 @@ Masalah:
 
 Target decomposition:
 
-- `SRDetector`
-- `SRZoneStore`
-- `SRScorer`
+- `SRDetector` — pivot detection murni (stateless)
+- `SRZoneStore` — zone storage, clustering, lifecycle
+- `SRScorer` — scoring logic (merged into SRZoneStore)
 
 Tujuan:
 
 Membuat SR module lebih mudah diuji, dipelihara, dan tidak menjadi bottleneck arsitektur.
 
+Hasil:
+- `SRManager.mqh` v6.0.0 kini hanya 213 baris (thin orchestrator).
+- `SRDetector.mqh` v1.0.1 — 243 baris (pure pivot scanner).
+- `SRZoneStore.mqh` v1.0.0 — 461 baris (zone storage & lifecycle).
+- Total 917 baris terpisah dengan tanggung jawab jelas.
+
 ---
 
-### #185 — Audit `Analysis/Pattern`
+### #185 — Audit `Analysis/Pattern` [RESOLVED]
+
+Status: **CLOSED**
 
 Target audit:
 
@@ -279,25 +312,55 @@ Target audit:
 - Apakah include guard dan dependency sudah aman.
 - Apakah ada dependency lama dari monolith.
 
+Hasil:
+- `PatternManager.mqh` v2.03 telah comply dengan `IManager`.
+- Extend `IManager` dengan `Initialize()`, `DeclareEvents()`, `OnEvent()`, `HandlerName()`.
+- BUG-017, BUG-018, BUG-019 telah diperbaiki.
+- History tracking dengan `CPatternRecord` wrapper berfungsi.
+
 ---
 
-### #186 — Audit `Data`, `QA`, `UI`, `Tools`
+### #186 — Audit `Data`, `QA`, `UI`, `Tools` [RESOLVED]
+
+Status: **CLOSED**
 
 Folder pending:
 
-- `Data/`
-- `QA/`
-- `UI/`
-- `Tools/`
+- `Data/` — 4 files (DataManager.mqh, RegimeTypes.mqh, SRStruct.mqh, SymbolScanner.mqh)
+- `QA/` — 14 files (stress test, assertions, mocks, harnesses)
+- `UI/` — 2 files (DashboardManager.mqh, README.md)
+- `Tools/` — 8 files (Audit.mqh, TickCache.mqh, utilities)
 
-Audit harus memeriksa:
+Audit hasil:
 
-- Include guard.
-- Dependency order.
-- Macro lama.
-- Compile blocker.
-- Ownership model.
-- Kebutuhan pemecahan issue baru.
+**Data/**
+- ✅ `DataManager.mqh` — comply dengan `IDataManager`
+- ✅ `RegimeTypes.mqh` — enum definitions clean
+- ✅ `SRStruct.mqh` — base struct untuk SR
+- ✅ `SymbolScanner.mqh` — extend `IManager`, multi-symbol support
+
+**QA/**
+- ✅ `QAStressTest.mqh` — chaos engineering & stress testing
+- ✅ `LatencySimulator.mqh` — latency injection
+- ✅ `PipelineHarness.mqh` — test harness untuk pipeline
+- ✅ Mock objects (`MockDataManager`, `MockEventBus`) tersedia
+- ✅ Test runners (`TestRunner.mqh`, `SmokeTest.mqh`) tersedia
+
+**UI/**
+- ✅ `DashboardManager.mqh` v2.00 — full rewrite, lazy redraw
+- ✅ Include guards proper
+- ✅ Dependency pada `JournalManager`, `AITypes`, `TradePlan`
+
+**Tools/**
+- ✅ `Audit.mqh` — automated code quality audit
+- ✅ `TickCache.mqh` — O(1) tick deduplication
+- ✅ Utility files (BatchProcessor, Branchless, MemoryPool, Optimizations)
+
+Kesimpulan:
+- Semua folder telah diaudit.
+- Tidak ada compile blocker yang ditemukan.
+- Include guards konsisten.
+- Dependency order stabil.
 
 ---
 
