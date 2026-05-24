@@ -16,7 +16,8 @@
 // QA modules (LatencySimulator, CQAStressTest, chaos engine) were previously
 // silently excluded from every build despite the flag being set.
 #define PASR_QA_BUILD     // Enable stress testing & chaos engineering
-#define PERF_METRICS      // Enable performance counters
+// Issue #181 FIX: PERF_METRICS removed — legacy flag no longer used.
+// Performance metrics now handled via canonical TelemetryRecorder/PerformanceReport.
 
 //--- SINGLE MASTER INCLUDE - All dependencies managed centrally
 #include <PASR/Core/PASR.mqh>
