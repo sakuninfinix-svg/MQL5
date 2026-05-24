@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| ExitEngine.mqh                                             v2.01 |
+//| ExitEngine.mqh                                             v2.02 |
 //| Copyright (C) 2026, PASR Trading System                          |
 //| https://pasr.trading                                             |
 //|                                                                  |
@@ -10,6 +10,11 @@
 //| - Profit Fade Exit (momentum exhaustion)                        |
 //|                                                                  |
 //| CHANGELOG:                                                       |
+//|   v2.02 (2026-05-24) Sprint 3A:                                 |
+//|     BUG-T06: CalculateChandelierLevel() used CopyHigh/CopyLow   |
+//|              from bar 0, including the active unfinished candle. |
+//|              Fix: use start=1 so Chandelier highest/lowest is   |
+//|              calculated from closed bars only.                  |
 //|   v2.01 (2026-05-24) Sprint 3A:                                 |
 //|     BUG-T12: OnEvent(EMERGENCY_STOP) was re-dispatching the     |
 //|              same event → infinite loop until queue overflow.   |
@@ -150,7 +155,7 @@ public:
          return false;
         }
       m_initialized = true;
-      PrintFormat("[Exit] v2.01 Init OK — Chandelier ATR=%.1f Period=%d",
+      PrintFormat("[Exit] v2.02 Init OK — Chandelier ATR=%.1f Period=%d",
                   CHANDELIER_ATR_MULT, CHANDELIER_PERIOD);
       return true;
      }
@@ -264,8 +269,13 @@ public:
       double highs[], lows[];
       ArraySetAsSeries(highs, true);
       ArraySetAsSeries(lows, true);
-      if(CopyHigh(symbol, PERIOD_CURRENT, 0, CHANDELIER_PERIOD, highs) < CHANDELIER_PERIOD) return 0.0;
-      if(CopyLow (symbol, PERIOD_CURRENT, 0, CHANDELIER_PERIOD, lows)  < CHANDELIER_PERIOD) return 0.0;
+
+      // BUG-T06 FIX: use start=1 so the active unfinished candle is excluded.
+      // Chandelier should be based on the last N closed bars to keep the level
+      // stable during the current bar and avoid intrabar spike distortion.
+      if(CopyHigh(symbol, PERIOD_CURRENT, 1, CHANDELIER_PERIOD, highs) < CHANDELIER_PERIOD) return 0.0;
+      if(CopyLow (symbol, PERIOD_CURRENT, 1, CHANDELIER_PERIOD, lows)  < CHANDELIER_PERIOD) return 0.0;
+
       double current_atr = GetATRValue();
       if(current_atr <= 0.0) return 0.0;
 
