@@ -2,23 +2,10 @@
 //|                                   Trade/RecoveryManager.mqh      |
 //|                          Copyright 2026, Agsicentre             |
 //|    Position Recovery & Fakeout Management Module                 |
-//|                                                                  |
-//| CHANGELOG:                                                       |
-//| v2.18 (2026-05-24) — BUG-T07:                                   |
-//|  * IsRecoveryAllowed() used TimeToStruct().day (day-of-month     |
-//|    1-31) as the daily key. On 1st of different months the same   |
-//|    number recurs, resetting counter incorrectly.                 |
-//|    Fixed: midnight-floor datetime as unique daily key, matching  |
-//|    the RiskManager::CheckDailyReset() pattern.                  |
-//|  * RecordRecoveryAttempt() same fix.                            |
-//|  * OnNewBar() daily reset: same fix (was .day comparison).      |
-//| v2.17 (2026-05-23) — Recovery overtrading prevention.           |
-//| v2.16 (2026-05-23) — BUG-020: OnEvent() added.                 |
 //+------------------------------------------------------------------+
-
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.18"
+#property version   "2.19"
 #property strict
 
 #ifndef __TRADE_RECOVERY_MANAGER_MQH__
@@ -44,7 +31,7 @@ struct RecoveryStats
    ulong  lastRecoveryTime;
    int    recoveryAttemptsToday;
    int    maxRecoveryAttemptsPerDay;
-   datetime lastRecoveryDate;        // BUG-T07 FIX: midnight-floor datetime
+   datetime lastRecoveryDate;
    double equityAtFirstRecovery;
    double currentEquityDecayPct;
 
@@ -65,9 +52,6 @@ struct RecoveryStats
       return MathMin(100.0,s+f+p);
      }
 
-   // BUG-T07 FIX: Use midnight-floor datetime as unique day key.
-   // TimeToStruct().day returns day-of-month (1-31);
-   // on 1st of every month the counter reset incorrectly.
    bool IsRecoveryAllowed() const
      {
       datetime today=(datetime)((long)TimeCurrent()-(long)TimeCurrent()%86400);
@@ -75,7 +59,6 @@ struct RecoveryStats
       return (recoveryAttemptsToday<maxRecoveryAttemptsPerDay);
      }
 
-   // BUG-T07 FIX: Same midnight-floor key used when recording attempts.
    void RecordRecoveryAttempt()
      {
       datetime today=(datetime)((long)TimeCurrent()-(long)TimeCurrent()%86400);
@@ -126,9 +109,9 @@ private:
       for(int i=0;i<sz;i++)
         {
          RecoveryEngine *r=engines[i];
-         if(CheckPointer(r)!=POINTER_INVALID && r.active) 
+         if(CheckPointer(r)!=POINTER_INVALID && r.active)
            { engines[keep++]=r; engines[i]=NULL; }
-         else 
+         else
            { if(CheckPointer(r)!=POINTER_INVALID) { delete r; engines[i]=NULL; } }
         }
       ArrayResize(engines,keep);
@@ -139,6 +122,7 @@ private:
       if(CheckPointer(r)==POINTER_INVALID || r.state==TRADE_STATE_DONE) return;
       bool wasRecovered=(r.recoveryAttempts>0 && r.state==TRADE_STATE_RECOVERY);
       double profitPoints=0.0;
+      ulong closedTicket=r.mainTicket;
       if(PositionSelectByTicket(r.mainTicket))
         {
          double closePrice=(r.direction==1)?SymbolInfoDouble(_Symbol,SYMBOL_BID):SymbolInfoDouble(_Symbol,SYMBOL_ASK);
@@ -164,11 +148,12 @@ private:
            }
         }
       r.ClearGVs(BuildGVPrefix()); r.Reset(); r.active=false;
-      // Dispatch position update — profit field intentionally NOT set here
-      // because the actual realised profit is retrieved by OnTradeTransaction,
-      // not from the broker response at close time. RiskManager v2.01 guards
-      // against zeroed ev.profit updates (BUG-T06 fix).
-      PASREvent ev; ev.id=EVENT_ID_POSITION_UPDATE; ev.priority=10; ev.profit=0.0;
+      PASREvent ev;
+      ev.id       = EVENT_ID_POSITION_UPDATE;
+      ev.priority = 10;
+      ev.ticket   = closedTicket;
+      ev.data1    = 1.0;     // close/update marker: RiskManager syncs open count from broker
+      ev.profit   = 0.0;     // realised P&L comes from trade transaction path
       DispatchEvent(ev);
      }
 
@@ -238,8 +223,7 @@ private:
    bool AttemptRecovery(RecoveryEngine *r)
      {
       if(!m_stats.IsRecoveryAllowed())
-        { PrintFormat("[Recovery][LIMIT] Daily limit %d/%d. Blocking ticket=%d",
-                      m_stats.recoveryAttemptsToday,m_stats.maxRecoveryAttemptsPerDay,r.mainTicket); return false; }
+        { PrintFormat("[Recovery][LIMIT] Daily limit %d/%d. Blocking ticket=%d",m_stats.recoveryAttemptsToday,m_stats.maxRecoveryAttemptsPerDay,r.mainTicket); return false; }
       double currentEquity=AccountInfoDouble(ACCOUNT_EQUITY);
       if(!m_stats.IsEquityStable(currentEquity,5.0))
         { if(!m_recoveryHaltedDueToDecay)
@@ -262,8 +246,7 @@ private:
    void CheckRecoveryTimeout(RecoveryEngine *r)
      {
       if(r.recoveryAttempts>=m_cfg.Risk.MaxRecoveryAttempts)
-        { PrintFormat("[Recovery] MaxAttempts %d ticket=%d",m_cfg.Risk.MaxRecoveryAttempts,r.mainTicket);
-          r.ClearGVs(BuildGVPrefix()); r.Reset(); return; }
+        { PrintFormat("[Recovery] MaxAttempts %d ticket=%d",m_cfg.Risk.MaxRecoveryAttempts,r.mainTicket); r.ClearGVs(BuildGVPrefix()); r.Reset(); return; }
       if(r.state!=TRADE_STATE_NORMAL) return;
       if(!PositionSelectByTicket(r.mainTicket)) return;
       ENUM_POSITION_TYPE ptype=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
@@ -273,8 +256,7 @@ private:
       if(!slHit) return;
       if(r.recoveryCooldownExpiry>0 && TimeCurrent()<r.recoveryCooldownExpiry) return;
       if(m_cfg.Risk.RecoveryEnabled && r.recoveryAttempts<m_cfg.Risk.MaxRecoveryAttempts)
-        { r.recoveryCooldownExpiry=TimeCurrent()+(datetime)(m_cfg.Risk.RecoveryCooldownBars*PeriodSeconds(_Period));
-          r.lastKnownATR=m_data.GetATRPoints(); r.SaveState(BuildGVPrefix()); AttemptRecovery(r); }
+        { r.recoveryCooldownExpiry=TimeCurrent()+(datetime)(m_cfg.Risk.RecoveryCooldownBars*PeriodSeconds(_Period)); r.lastKnownATR=m_data.GetATRPoints(); r.SaveState(BuildGVPrefix()); AttemptRecovery(r); }
       else { r.ClearGVs(BuildGVPrefix()); r.state=TRADE_STATE_DONE; r.Reset(); }
      }
 
@@ -289,13 +271,7 @@ private:
      {
       int sz=ArraySize(engines);
       for(int i=0;i<sz;i++)
-        {
-         RecoveryEngine *r=engines[i];
-         if(CheckPointer(r)==POINTER_INVALID||!r.active) continue;
-         if(r.state!=TRADE_STATE_RECOVERY) continue;
-         if(r.recoveryCooldownExpiry>0&&TimeCurrent()<r.recoveryCooldownExpiry) continue;
-         if(m_debugMode) PrintFormat("[Recovery] Opportunity ticket=%d",r.mainTicket);
-        }
+        { RecoveryEngine *r=engines[i]; if(CheckPointer(r)==POINTER_INVALID||!r.active) continue; if(r.state!=TRADE_STATE_RECOVERY) continue; if(r.recoveryCooldownExpiry>0&&TimeCurrent()<r.recoveryCooldownExpiry) continue; if(m_debugMode) PrintFormat("[Recovery] Opportunity ticket=%d",r.mainTicket); }
      }
 
    void OnEmergencyStop()
@@ -364,12 +340,9 @@ public:
 
    virtual void OnNewBar() override
      {
-      // BUG-T07 FIX: midnight-floor datetime as unique daily key
       datetime today=(datetime)((long)TimeCurrent()-(long)TimeCurrent()%86400);
       if(m_lastRecoveryCheckDay!=today)
-        { m_todayRecoveryCount=0; m_lastRecoveryCheckDay=today;
-          m_recoveryHaltedDueToDecay=false;
-          if(m_debugMode) PrintFormat("[Recovery] New day reset. Count=%d",m_todayRecoveryCount); }
+        { m_todayRecoveryCount=0; m_lastRecoveryCheckDay=today; m_recoveryHaltedDueToDecay=false; if(m_debugMode) PrintFormat("[Recovery] New day reset. Count=%d",m_todayRecoveryCount); }
       int sz=ArraySize(engines);
       for(int i=0;i<sz;i++)
         {
