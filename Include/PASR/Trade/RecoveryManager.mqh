@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.19"
+#property version   "2.20"
 #property strict
 
 #ifndef __TRADE_RECOVERY_MANAGER_MQH__
@@ -78,6 +78,7 @@ class CRecoveryManager : public IManager
   {
 private:
    RecoveryEngine   *engines[];
+   ulong             m_fakeoutPendingTickets[];
    CTrade            m_trade;
    int               m_recoveryScore;
    double            m_avgRecoveryTime;
@@ -93,6 +94,33 @@ private:
    int               m_todayRecoveryCount;
    double            m_equityBaseline;
    bool              m_recoveryHaltedDueToDecay;
+
+   bool IsFakeoutPending(ulong ticket) const
+     {
+      for(int i=0;i<ArraySize(m_fakeoutPendingTickets);i++)
+         if(m_fakeoutPendingTickets[i]==ticket) return true;
+      return false;
+     }
+
+   void MarkFakeoutPending(ulong ticket)
+     {
+      if(ticket==0 || IsFakeoutPending(ticket)) return;
+      int n=ArraySize(m_fakeoutPendingTickets);
+      ArrayResize(m_fakeoutPendingTickets,n+1);
+      m_fakeoutPendingTickets[n]=ticket;
+     }
+
+   void ClearFakeoutPending(ulong ticket)
+     {
+      int n=ArraySize(m_fakeoutPendingTickets);
+      for(int i=0;i<n;i++)
+        {
+         if(m_fakeoutPendingTickets[i]!=ticket) continue;
+         for(int j=i;j<n-1;j++) m_fakeoutPendingTickets[j]=m_fakeoutPendingTickets[j+1];
+         ArrayResize(m_fakeoutPendingTickets,n-1);
+         return;
+        }
+     }
 
    int FindEngineIndex(ulong ticket) const
      {
@@ -121,6 +149,7 @@ private:
      {
       if(CheckPointer(r)==POINTER_INVALID || r.state==TRADE_STATE_DONE) return;
       bool wasRecovered=(r.recoveryAttempts>0 && r.state==TRADE_STATE_RECOVERY);
+      bool fakeoutPending=IsFakeoutPending(r.mainTicket);
       double profitPoints=0.0;
       ulong closedTicket=r.mainTicket;
       if(PositionSelectByTicket(r.mainTicket))
@@ -144,6 +173,8 @@ private:
                    m_stats.avgRecoveryTimeMin=(prev>0)?((m_avgRecoveryTime*prev)+rm)/(double)(prev+1):rm;
                    m_avgRecoveryTime=m_stats.avgRecoveryTimeMin; }
               }
+            if(fakeoutPending && profitPoints>0) m_stats.fakeoutsRecovered++;
+            ClearFakeoutPending(closedTicket);
             if(m_debugMode) PrintFormat("[Recovery] Closed %d: %s profit=%.2fpts",r.mainTicket,reason,profitPoints);
            }
         }
@@ -152,8 +183,8 @@ private:
       ev.id       = EVENT_ID_POSITION_UPDATE;
       ev.priority = 10;
       ev.ticket   = closedTicket;
-      ev.data1    = 1.0;     // close/update marker: RiskManager syncs open count from broker
-      ev.profit   = 0.0;     // realised P&L comes from trade transaction path
+      ev.data1    = 1.0;
+      ev.profit   = 0.0;
       DispatchEvent(ev);
      }
 
@@ -170,7 +201,6 @@ private:
       double slDistance=(ptype==POSITION_TYPE_BUY)?(curPrice-slPrice):(slPrice-curPrice);
       double threshold=atrPoints*m_cfg.Risk.SLMultiplier*0.4;
       if(slDistance>=threshold) return false;
-      double rawConf=MathMax(0.0,MathMin(1.0,1.0-(slDistance/threshold)));
       int level=MathMin(3,r.recoveryAttempts+1);
       if(level<2) return false;
       double slAdjust=atrPoints*m_cfg.Risk.SLMultiplier*0.5;
@@ -180,7 +210,14 @@ private:
       if(!slValid) return false;
       double curTP=PositionGetDouble(POSITION_TP);
       if(m_trade.PositionModify(r.mainTicket,newSL,curTP))
-        { r.lastKnownATR=atrvalue; r.recoveryAttempts++; m_stats.fakeoutsDetected++; m_stats.fakeoutsRecovered++; r.SaveState(BuildGVPrefix()); return true; }
+        {
+         r.lastKnownATR=atrvalue;
+         r.recoveryAttempts++;
+         m_stats.fakeoutsDetected++;
+         MarkFakeoutPending(r.mainTicket);
+         r.SaveState(BuildGVPrefix());
+         return true;
+        }
       return false;
      }
 
@@ -246,7 +283,7 @@ private:
    void CheckRecoveryTimeout(RecoveryEngine *r)
      {
       if(r.recoveryAttempts>=m_cfg.Risk.MaxRecoveryAttempts)
-        { PrintFormat("[Recovery] MaxAttempts %d ticket=%d",m_cfg.Risk.MaxRecoveryAttempts,r.mainTicket); r.ClearGVs(BuildGVPrefix()); r.Reset(); return; }
+        { PrintFormat("[Recovery] MaxAttempts %d ticket=%d",m_cfg.Risk.MaxRecoveryAttempts,r.mainTicket); ClearFakeoutPending(r.mainTicket); r.ClearGVs(BuildGVPrefix()); r.Reset(); return; }
       if(r.state!=TRADE_STATE_NORMAL) return;
       if(!PositionSelectByTicket(r.mainTicket)) return;
       ENUM_POSITION_TYPE ptype=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
@@ -257,7 +294,7 @@ private:
       if(r.recoveryCooldownExpiry>0 && TimeCurrent()<r.recoveryCooldownExpiry) return;
       if(m_cfg.Risk.RecoveryEnabled && r.recoveryAttempts<m_cfg.Risk.MaxRecoveryAttempts)
         { r.recoveryCooldownExpiry=TimeCurrent()+(datetime)(m_cfg.Risk.RecoveryCooldownBars*PeriodSeconds(_Period)); r.lastKnownATR=m_data.GetATRPoints(); r.SaveState(BuildGVPrefix()); AttemptRecovery(r); }
-      else { r.ClearGVs(BuildGVPrefix()); r.state=TRADE_STATE_DONE; r.Reset(); }
+      else { ClearFakeoutPending(r.mainTicket); r.ClearGVs(BuildGVPrefix()); r.state=TRADE_STATE_DONE; r.Reset(); }
      }
 
    void CheckExpiryAndForcedClose(RecoveryEngine *r)
@@ -291,13 +328,14 @@ public:
         m_regimeAware(false), m_minRegimeScore(0.0),
         m_lastRecoveryCheckDay(0), m_todayRecoveryCount(0),
         m_equityBaseline(0.0), m_recoveryHaltedDueToDecay(false)
-     { ArrayResize(engines,0); m_stats.Init(); }
+     { ArrayResize(engines,0); ArrayResize(m_fakeoutPendingTickets,0); m_stats.Init(); }
 
    ~CRecoveryManager()
      {
       int sz=ArraySize(engines);
       for(int i=0;i<sz;i++) if(CheckPointer(engines[i])!=POINTER_INVALID) delete engines[i];
       ArrayResize(engines,0);
+      ArrayResize(m_fakeoutPendingTickets,0);
      }
 
    virtual string HandlerName() const override { return "RecoveryManager"; }
@@ -349,7 +387,7 @@ public:
          RecoveryEngine *r=engines[i];
          if(CheckPointer(r)==POINTER_INVALID||!r.active) continue;
          if(r.state!=TRADE_STATE_NORMAL) continue;
-         if(!PositionSelectByTicket(r.mainTicket)) { r.ClearGVs(BuildGVPrefix()); r.Reset(); r.active=false; continue; }
+         if(!PositionSelectByTicket(r.mainTicket)) { ClearFakeoutPending(r.mainTicket); r.ClearGVs(BuildGVPrefix()); r.Reset(); r.active=false; continue; }
          double atrValue=m_data.GetATRPoints();
          MqlTick tick; SymbolInfoTick(_Symbol,tick);
          if(!DetectAndHandleFakeout(r,tick,atrValue)) CheckRecoveryTimeout(r);
@@ -368,7 +406,7 @@ public:
         {
          RecoveryEngine *r=engines[i];
          if(CheckPointer(r)==POINTER_INVALID||!r.active) continue;
-         if(!PositionSelectByTicket(r.mainTicket)) { r.Reset(); r.active=false; continue; }
+         if(!PositionSelectByTicket(r.mainTicket)) { ClearFakeoutPending(r.mainTicket); r.Reset(); r.active=false; continue; }
          ProcessTrailingAndPartial(r,tick,atrValue);
          CheckExpiryAndForcedClose(r);
         }
@@ -394,7 +432,8 @@ public:
    void OnTradeClose(ulong ticket)
      {
       int idx=FindEngineIndex(ticket);
-      if(idx<0) return;
+      if(idx<0) { ClearFakeoutPending(ticket); return; }
+      ClearFakeoutPending(ticket);
       engines[idx].ClearGVs(BuildGVPrefix()); engines[idx].Reset(); engines[idx].active=false;
      }
 
