@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v1.02                                  |
+//| Core/PipelineEngine.mqh — v1.03                                  |
 //| Full 14-stage pipeline implementation.                           |
 //+------------------------------------------------------------------+
 #property strict
@@ -216,6 +216,8 @@ private:
       if(SkipIfNull(m_recovery, "Recovery") == STAGE_SKIP) return STAGE_SKIP;
       m_stage_timer.Start();
       m_recovery.OnPriceUpdate();
+      if(ctx.new_bar)
+         m_recovery.OnNewBar();
       if(m_profiling_enabled) m_stage_timer.Log("Stage12_Recovery");
       return STAGE_OK;
      }
