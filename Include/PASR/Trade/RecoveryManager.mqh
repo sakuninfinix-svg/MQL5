@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.20"
+#property version   "2.21"
 #property strict
 
 #ifndef __TRADE_RECOVERY_MANAGER_MQH__
@@ -126,7 +126,7 @@ private:
      {
       int sz=ArraySize(engines);
       for(int i=0;i<sz;i++)
-        if(CheckPointer(engines[i])!=POINTER_INVALID && engines[i].active && engines[i].mainTicket==ticket)
+        if(engines[i]!=NULL && engines[i].active && engines[i].mainTicket==ticket)
            return i;
       return -1;
      }
@@ -137,17 +137,17 @@ private:
       for(int i=0;i<sz;i++)
         {
          RecoveryEngine *r=engines[i];
-         if(CheckPointer(r)!=POINTER_INVALID && r.active)
+         if(r!=NULL && r.active)
            { engines[keep++]=r; engines[i]=NULL; }
          else
-           { if(CheckPointer(r)!=POINTER_INVALID) { delete r; engines[i]=NULL; } }
+           { if(r!=NULL) { delete r; engines[i]=NULL; } }
         }
       ArrayResize(engines,keep);
      }
 
    void CloseActivePosition(RecoveryEngine *r, const string reason)
      {
-      if(CheckPointer(r)==POINTER_INVALID || r.state==TRADE_STATE_DONE) return;
+      if(r==NULL || r.state==TRADE_STATE_DONE) return;
       bool wasRecovered=(r.recoveryAttempts>0 && r.state==TRADE_STATE_RECOVERY);
       bool fakeoutPending=IsFakeoutPending(r.mainTicket);
       double profitPoints=0.0;
@@ -190,7 +190,7 @@ private:
 
    bool DetectAndHandleFakeout(RecoveryEngine *r, const MqlTick &tick, double atrvalue)
      {
-      if(CheckPointer(r)==POINTER_INVALID || !r.active) return false;
+      if(r==NULL || !r.active) return false;
       if(!PositionSelectByTicket(r.mainTicket)) return false;
       ENUM_POSITION_TYPE ptype=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       double curPrice=(ptype==POSITION_TYPE_BUY)?tick.bid:tick.ask;
@@ -223,7 +223,7 @@ private:
 
    void ProcessTrailingAndPartial(RecoveryEngine *r, const MqlTick &tick, double atrvalue)
      {
-      if(!m_cfg.Risk.UseTrailingStop || !r.active) return;
+      if(r==NULL || !m_cfg.Risk.UseTrailingStop || !r.active) return;
       if(!PositionSelectByTicket(r.mainTicket)) return;
       ENUM_POSITION_TYPE ptype=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       double openPrice=PositionGetDouble(POSITION_PRICE_OPEN);
@@ -259,6 +259,7 @@ private:
 
    bool AttemptRecovery(RecoveryEngine *r)
      {
+      if(r==NULL) return false;
       if(!m_stats.IsRecoveryAllowed())
         { PrintFormat("[Recovery][LIMIT] Daily limit %d/%d. Blocking ticket=%d",m_stats.recoveryAttemptsToday,m_stats.maxRecoveryAttemptsPerDay,r.mainTicket); return false; }
       double currentEquity=AccountInfoDouble(ACCOUNT_EQUITY);
@@ -282,6 +283,7 @@ private:
 
    void CheckRecoveryTimeout(RecoveryEngine *r)
      {
+      if(r==NULL) return;
       if(r.recoveryAttempts>=m_cfg.Risk.MaxRecoveryAttempts)
         { PrintFormat("[Recovery] MaxAttempts %d ticket=%d",m_cfg.Risk.MaxRecoveryAttempts,r.mainTicket); ClearFakeoutPending(r.mainTicket); r.ClearGVs(BuildGVPrefix()); r.Reset(); return; }
       if(r.state!=TRADE_STATE_NORMAL) return;
@@ -299,6 +301,7 @@ private:
 
    void CheckExpiryAndForcedClose(RecoveryEngine *r)
      {
+      if(r==NULL) return;
       int maxDays=m_cfg.Risk.MaxTradeDurationDays;
       if(maxDays<=0||r.entryTime==0) return;
       if(TimeCurrent()>r.entryTime+(datetime)(maxDays*86400)) CloseActivePosition(r,"MaxDurationExpiry");
@@ -308,7 +311,7 @@ private:
      {
       int sz=ArraySize(engines);
       for(int i=0;i<sz;i++)
-        { RecoveryEngine *r=engines[i]; if(CheckPointer(r)==POINTER_INVALID||!r.active) continue; if(r.state!=TRADE_STATE_RECOVERY) continue; if(r.recoveryCooldownExpiry>0&&TimeCurrent()<r.recoveryCooldownExpiry) continue; if(m_debugMode) PrintFormat("[Recovery] Opportunity ticket=%d",r.mainTicket); }
+        { RecoveryEngine *r=engines[i]; if(r==NULL||!r.active) continue; if(r.state!=TRADE_STATE_RECOVERY) continue; if(r.recoveryCooldownExpiry>0&&TimeCurrent()<r.recoveryCooldownExpiry) continue; if(m_debugMode) PrintFormat("[Recovery] Opportunity ticket=%d",r.mainTicket); }
      }
 
    void OnEmergencyStop()
@@ -316,7 +319,7 @@ private:
       PrintFormat("[Recovery] EMERGENCY STOP. Closing %d engines.",GetActiveEngineCount());
       int sz=ArraySize(engines);
       for(int i=sz-1;i>=0;i--)
-        { RecoveryEngine *r=engines[i]; if(CheckPointer(r)!=POINTER_INVALID&&r.active) CloseActivePosition(r,"EmergencyStop"); }
+        { RecoveryEngine *r=engines[i]; if(r!=NULL&&r.active) CloseActivePosition(r,"EmergencyStop"); }
       CompactEngines();
      }
 
@@ -333,7 +336,11 @@ public:
    ~CRecoveryManager()
      {
       int sz=ArraySize(engines);
-      for(int i=0;i<sz;i++) if(CheckPointer(engines[i])!=POINTER_INVALID) delete engines[i];
+      for(int i=0;i<sz;i++)
+        {
+         if(engines[i]!=NULL)
+           { delete engines[i]; engines[i]=NULL; }
+        }
       ArrayResize(engines,0);
       ArrayResize(m_fakeoutPendingTickets,0);
      }
@@ -385,7 +392,7 @@ public:
       for(int i=0;i<sz;i++)
         {
          RecoveryEngine *r=engines[i];
-         if(CheckPointer(r)==POINTER_INVALID||!r.active) continue;
+         if(r==NULL||!r.active) continue;
          if(r.state!=TRADE_STATE_NORMAL) continue;
          if(!PositionSelectByTicket(r.mainTicket)) { ClearFakeoutPending(r.mainTicket); r.ClearGVs(BuildGVPrefix()); r.Reset(); r.active=false; continue; }
          double atrValue=m_data.GetATRPoints();
@@ -405,7 +412,7 @@ public:
       for(int i=ArraySize(engines)-1;i>=0;i--)
         {
          RecoveryEngine *r=engines[i];
-         if(CheckPointer(r)==POINTER_INVALID||!r.active) continue;
+         if(r==NULL||!r.active) continue;
          if(!PositionSelectByTicket(r.mainTicket)) { ClearFakeoutPending(r.mainTicket); r.Reset(); r.active=false; continue; }
          ProcessTrailingAndPartial(r,tick,atrValue);
          CheckExpiryAndForcedClose(r);
@@ -444,7 +451,7 @@ public:
 
    RecoveryStats GetStats()             const { return m_stats; }
    int           GetActiveEngineCount() const
-     { int cnt=0,sz=ArraySize(engines); for(int i=0;i<sz;i++) if(CheckPointer(engines[i])!=POINTER_INVALID&&engines[i].active) cnt++; return cnt; }
+     { int cnt=0,sz=ArraySize(engines); for(int i=0;i<sz;i++) if(engines[i]!=NULL&&engines[i].active) cnt++; return cnt; }
   };
 
 typedef CRecoveryManager RecoveryManager;
