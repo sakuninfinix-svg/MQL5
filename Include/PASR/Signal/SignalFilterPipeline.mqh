@@ -1,16 +1,6 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalFilterPipeline.mqh — v1.02                         |
+//| Signal/SignalFilterPipeline.mqh — v1.03                         |
 //| Modular filter pipeline for signal validation                    |
-//|                                                                  |
-//| FIX v1.02:                                                       |
-//|  BUG-S10-001 — RunCompletePipeline() used undefined `support`   |
-//|    and `resistance` variables; compile error on all builds.      |
-//|    Fixed: pass explicit zonePrice + oppositeZone params.         |
-//|  BUG-S10-002 — RunCustomFilters() was never called from         |
-//|    RunCompletePipeline(); custom filters were silently ignored.  |
-//|    Fixed: custom filter pass appended at end of pipeline.        |
-//|  BUG-S10-003 — MTF filter received rates[shift].close as        |
-//|    referencePrice; should use signalPrice for zone proximity.    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_FILTER_PIPELINE_MQH__
@@ -20,9 +10,6 @@
 #include "../Data/SRStruct.mqh"
 #include "SignalConfig.mqh"
 
-//+------------------------------------------------------------------+
-//| Filter Result Structure                                          |
-//+------------------------------------------------------------------+
 struct FilterResult
   {
    bool   passed;
@@ -44,9 +31,6 @@ struct FilterResult
      }
   };
 
-//+------------------------------------------------------------------+
-//| IFilter — Interface for pluggable custom filters                 |
-//+------------------------------------------------------------------+
 class IFilter
   {
 public:
@@ -55,15 +39,17 @@ public:
                         ENUM_SIGNAL_DIR dir, FilterResult &result) = 0;
   };
 
-//+------------------------------------------------------------------+
-//| CSignalFilterPipeline — v1.02                                    |
-//+------------------------------------------------------------------+
 class CSignalFilterPipeline
   {
 private:
    const CSignalConfig *m_config;
    CArrayObj            m_customFilters;
    string               m_currentFilterReason;
+
+   bool HasRateIndex(const MqlRates &rates[], int index) const
+     {
+      return (index >= 0 && index < ArraySize(rates));
+     }
 
 public:
    CSignalFilterPipeline() : m_config(NULL), m_currentFilterReason("") {}
@@ -77,13 +63,13 @@ public:
 
    string GetCurrentReason() const { return m_currentFilterReason; }
 
-   //--- Filter 1: Zone Touch
    bool PassZoneTouchFilter(int shift, int dir, double zonePrice,
                             double atrPoints, double dynamicMult,
                             FilterResult &result, const MqlRates &rates[])
      {
       m_currentFilterReason = "";
       if(m_config == NULL) { result.Reject("ZoneTouch","Config not initialized"); return false; }
+      if(!HasRateIndex(rates, shift)) { result.Reject("ZoneTouch","Insufficient candle data"); return false; }
 
       double extreme   = (dir == 1) ? rates[shift].low : rates[shift].high;
       double zoneWidth = (atrPoints * dynamicMult) * _Point;
@@ -100,12 +86,19 @@ public:
       return true;
      }
 
-   //--- Filter 2: Context / Momentum
    bool PassContextFilter(int shift, double atrPoints, FilterResult &result,
                           const MqlRates &rates[], int dir)
      {
       m_currentFilterReason = "";
       if(m_config == NULL) { result.Reject("Context","Config not initialized"); return false; }
+
+      int sz = ArraySize(rates);
+      if(shift < 0 || shift >= sz)
+        {
+         result.Reject("Context","Insufficient candle data");
+         m_currentFilterReason = "Insufficient candle data";
+         return false;
+        }
 
       double o = rates[shift].open,  h = rates[shift].high;
       double l = rates[shift].low,   c = rates[shift].close;
@@ -128,13 +121,16 @@ public:
 
       double threshold = atrPoints * m_config.GetMomentumThresholdATR() * _Point;
       int    pushCount = 0;
-      int    sz        = ArraySize(rates);
 
-      for(int i = 1; i <= 3 && (shift + i + 1) < sz; i++)
+      for(int i = 1; i <= 3; i++)
         {
-         double curO  = rates[shift+i].open,  curC  = rates[shift+i].close;
-         double curH  = rates[shift+i].high,  curL  = rates[shift+i].low;
-         double prevH = rates[shift+i+1].high, prevL = rates[shift+i+1].low;
+         int curIdx  = shift + i;
+         int prevIdx = curIdx + 1;
+         if(prevIdx >= sz) break;
+
+         double curO  = rates[curIdx].open,  curC  = rates[curIdx].close;
+         double curH  = rates[curIdx].high,  curL  = rates[curIdx].low;
+         double prevH = rates[prevIdx].high, prevL = rates[prevIdx].low;
          double curBody = MathAbs(curO - curC);
 
          bool isPush = (dir == 1) ?
@@ -152,8 +148,6 @@ public:
       return true;
      }
 
-   //--- Filter 3: MTF Quality
-   // BUG-S10-003 FIX: referencePrice = signalPrice (not rates[shift].close)
    bool PassMTFFilter(int dir, double referencePrice,
                       double htfSupport, double htfResistance,
                       double atrPoints, int &bias, FilterResult &result)
@@ -165,8 +159,8 @@ public:
       if(m_config.GetUseMTF())
         {
          double zone          = (atrPoints * m_config.GetATRBufferMult()) * _Point;
-         bool nearHtfSupport  = (referencePrice <= htfSupport    + zone);
-         bool nearHtfResist   = (referencePrice >= htfResistance - zone);
+         bool nearHtfSupport  = (htfSupport > 0.0 && referencePrice <= htfSupport + zone);
+         bool nearHtfResist   = (htfResistance > 0.0 && referencePrice >= htfResistance - zone);
 
          if(nearHtfSupport  && !nearHtfResist)  bias =  1;
          else if(nearHtfResist && !nearHtfSupport) bias = -1;
@@ -189,17 +183,19 @@ public:
       return false;
      }
 
-   //--- Filter 4: Opportunity / R:R
-   // BUG-S10-001 FIX: receive explicit zonePrice + oppositeZone instead of bare
-   // `support`/`resistance` symbols that were undefined in calling scope.
    bool PassOpportunityFilter(int dir, double atrPoints,
                               double zonePrice, double oppositeZone,
                               double signalPrice, FilterResult &result)
      {
       m_currentFilterReason = "";
       if(m_config == NULL) { result.Reject("Opportunity","Config not initialized"); return false; }
+      if(oppositeZone <= 0.0)
+        {
+         result.passed = true;
+         result.reason = "No opposite zone; opportunity neutral";
+         return true;
+        }
 
-      // target = the zone on the opposite side of the trade
       double target     = oppositeZone;
       double profitDist = (dir == 1) ? (target - signalPrice) : (signalPrice - target);
       double minTPDist  = (atrPoints * m_config.GetMinTPDistanceATR()) * _Point;
@@ -213,42 +209,35 @@ public:
       return true;
      }
 
-   //--- Run Complete Pipeline
-   // BUG-S10-001 FIX: receive support + resistance explicitly; resolve to
-   //   zonePrice / oppositeZone based on direction before calling filters.
-   // BUG-S10-002 FIX: RunCustomFilters() now called as final pass.
-   // BUG-S10-003 FIX: signalPrice passed to MTF filter (was rates[shift].close).
    bool RunCompletePipeline(int shift, int dir, double zonePrice,
                             double signalPrice, double atrPoints,
                             double htfSupport, double htfResistance,
                             double dynamicMult,
-                            double support, double resistance,   // BUG-S10-001 FIX
+                            double support, double resistance,
                             FilterResult &result,
                             const MqlRates &rates[])
      {
       result.Clear();
+      if(!HasRateIndex(rates, shift))
+        {
+         result.Reject("Pipeline", "Insufficient candle data");
+         return false;
+        }
 
-      // Resolve opposite-zone for R:R check
       double oppositeZone = (dir == 1) ? resistance : support;
 
-      // 1. Zone Touch Filter
       if(!PassZoneTouchFilter(shift, dir, zonePrice, atrPoints, dynamicMult, result, rates))
          return false;
-
-      // 2. Context / Momentum Filter
       if(!PassContextFilter(shift, atrPoints, result, rates, dir))
          return false;
 
-      // 3. MTF Quality Filter — BUG-S10-003: use signalPrice not rates[].close
       int bias = 0;
       if(!PassMTFFilter(dir, signalPrice, htfSupport, htfResistance, atrPoints, bias, result))
          return false;
 
-      // 4. Opportunity / R:R Filter — BUG-S10-001: pass resolved oppositeZone
       if(!PassOpportunityFilter(dir, atrPoints, zonePrice, oppositeZone, signalPrice, result))
          return false;
 
-      // 5. Custom Filters — BUG-S10-002: was never called before
       ENUM_SIGNAL_DIR sigDir = (dir == 1) ? SIGNAL_BUY : SIGNAL_SELL;
       if(!RunCustomFilters(shift, rates, atrPoints, sigDir, result))
          return false;
@@ -258,7 +247,6 @@ public:
       return true;
      }
 
-   //--- Run Custom Filters
    bool RunCustomFilters(int shift, const MqlRates &rates[], double atrPoints,
                          ENUM_SIGNAL_DIR dir, FilterResult &result)
      {
