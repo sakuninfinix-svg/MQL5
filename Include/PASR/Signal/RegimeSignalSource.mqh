@@ -1,6 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/RegimeSignalSource.mqh — v1.01                            |
-//| ISignalSource plugin: regime-based signal gate / suppressor.     |
+//| Signal/RegimeSignalSource.mqh — v1.02                            |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_REGIME_SOURCE_MQH__
@@ -44,32 +43,20 @@ public:
         {
          out.direction  = SIGNAL_NONE;
          out.confidence = 0.0;
-         out.reason     = StringFormat("RegimeVeto:%s(ADX=%.1f)", MarketRegimeName(r), m_regime.GetADX());
+         out.reason     = StringFormat("RegimeGate:%s(ADX=%.1f)", MarketRegimeName(r), m_regime.GetADX());
          return true;
         }
 
       double confMult = 1.0;
       switch(r)
         {
+         case REGIME_RANGE:      confMult = 1.1; break;
          case REGIME_TREND_UP:
-         case REGIME_TREND_DOWN:
-            confMult = 1.3;
-            break;
-         case REGIME_RANGE:
-            confMult = 0.8;
-            break;
-         case REGIME_SQUEEZE:
-            confMult = 0.7;
-            break;
-         case REGIME_VOLATILE:
-            confMult = 0.2;
-            break;
-         case REGIME_CRASH:
-            confMult = 0.0;
-            break;
-         default:
-            confMult = 1.0;
-            break;
+         case REGIME_TREND_DOWN: confMult = 0.7; break;
+         case REGIME_SQUEEZE:    confMult = 0.5; break;
+         case REGIME_VOLATILE:   confMult = 0.2; break;
+         case REGIME_CRASH:      confMult = 0.0; break;
+         default:                confMult = 1.0; break;
         }
 
       out.direction  = SIGNAL_NONE;
@@ -82,4 +69,4 @@ public:
      { return m_regime ? m_regime.GetRegime() : REGIME_UNKNOWN; }
   };
 
-#endif // __SIGNAL_REGIME_SOURCE_MQH__
+#endif
