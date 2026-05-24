@@ -2,35 +2,30 @@
 //|                                     Infra/DataManager.mqh        |
 //|                          Copyright 2026, Agsicentre              |
 //+------------------------------------------------------------------+
+//| v2.02 (2026-05-24)                                                |
+//|   S21-003..005 / BUG-C01:                                        |
+//|     - DataManager is now CDataManager.                           |
+//|     - Explicitly implements IDataManager and IManager.           |
+//|     - Bootstraps with self-reference when data == NULL.          |
+//|     - Provides canonical config accessors used by IManager.      |
 //| v2.01 (2026-05-24)                                                |
 //|   BUG-DM01: Daily profit baseline now resets at the start of     |
 //|             each new server-date and includes floating P&L.      |
 //| v2.00 (2026-05-24) — Sprint 20                                    |
-//|   DM-001: OnBar() datetime cast from TimeToStruct() is wrong —   |
-//|           TimeToStruct() returns bool not datetime. Fixed to use  |
-//|           direct date string comparison via TimeToString()        |
-//|   DM-002: ShouldUpdateDashboard() — m_lastDashboardUpdate is     |
-//|           datetime (seconds) but compared to GetMicrosecondCount  |
-//|           (microseconds). Fixed to use TimeCurrent() comparison.  |
-//|   DM-003: ScavengeOldGVs() — GlobalVariableGet(name+"_time")     |
-//|           reads a GV named "MYVAR_time" which does not exist;     |
-//|           time is NOT stored per-variable this way in MQL5.       |
-//|           Fixed: use GlobalVariableTime() built-in instead.       |
+//|   DM-001..003: date reset, dashboard throttle, GV scavenging.    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __INFRA_DATAMANAGER_MQH__
 #define __INFRA_DATAMANAGER_MQH__
 
 #include "../Core/IManager.mqh"
-#include "../Core/EventBus.mqh"
-#include "../Core/Events.mqh"
 #include "../Core/Globals.mqh"
 
-class IDataManager;
-
-class DataManager : public IDataManager
+class CDataManager : public IManager, public IDataManager
   {
 private:
+   StrategyConfig m_config;
+
    double    m_atrPoints;
    double    m_dailyProfit;
    double    m_startBalance;
@@ -65,8 +60,9 @@ private:
      }
 
 public:
-   DataManager()
-     : m_atrPoints(0.0), m_dailyProfit(0.0),
+   CDataManager()
+     : IManager(),
+       m_atrPoints(0.0), m_dailyProfit(0.0),
        m_startBalance(AccountInfoDouble(ACCOUNT_BALANCE)),
        m_consecutiveLosses(0),
        m_lastScavengeTime(0), m_lastDashboardUpdate(0),
@@ -75,16 +71,32 @@ public:
        m_todayStr("")
      {}
 
-   ~DataManager() { ReleaseATRHandle(); }
+   ~CDataManager() { ReleaseATRHandle(); }
+
+   virtual string HandlerName() const override { return "DataManager"; }
 
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
-      if(!IManager::Init(data, bus)) return false;
+      // DataManager is the root IDataManager provider. During bootstrap the
+      // orchestrator may pass data == NULL, so use self-reference.
+      IDataManager *provider = (data == NULL) ? (IDataManager*)this : data;
+      if(!IManager::Init(provider, bus)) return false;
+
+      // Ensure base cache mirrors the canonical local config.
+      m_cfg = m_config;
+      m_cfgDirty = false;
+
       m_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
       m_todayStr     = TimeToString(TimeCurrent(), TIME_DATE);
       RefreshDailyProfit();
       InitializeATRHandle();
       return true;
+     }
+
+   virtual void Deinit() override
+     {
+      ReleaseATRHandle();
+      IManager::Deinit();
      }
 
    virtual void OnTick() override
@@ -117,10 +129,23 @@ public:
    virtual void OnTrade(const MqlTradeTransaction &trans) override
      { RefreshDailyProfit(); }
 
-   double   GetATRPoints()         const { return m_atrPoints;         }
-   double   GetDailyProfit()       const { return m_dailyProfit;       }
-   double   GetStartBalance()      const { return m_startBalance;      }
-   int      GetConsecutiveLosses() const { return m_consecutiveLosses; }
+   virtual const StrategyConfig *GetConfig() const override
+     { return &m_config; }
+
+   virtual void GetConfigCache(StrategyConfig &out) const override
+     { out = m_config; }
+
+   virtual void SetConfig(const StrategyConfig &cfg) override
+     {
+      m_config = cfg;
+      m_cfg    = cfg;
+      m_cfgDirty = false;
+     }
+
+   virtual double GetATRPoints() const override         { return m_atrPoints;         }
+   virtual double GetDailyProfit() const override       { return m_dailyProfit;       }
+   virtual double GetStartBalance() const override      { return m_startBalance;      }
+   virtual int    GetConsecutiveLosses() const override { return m_consecutiveLosses; }
 
    void UpdateConsecutiveLosses(double profit)
      { m_consecutiveLosses = (profit < 0) ? m_consecutiveLosses+1 : 0; }
@@ -176,6 +201,9 @@ public:
          m_atrPoints = buf[0];
      }
   };
+
+// Backward-compatible alias for older references.
+class DataManager : public CDataManager {};
 
 #endif // __INFRA_DATAMANAGER_MQH__
 //+------------------------------------------------------------------+
