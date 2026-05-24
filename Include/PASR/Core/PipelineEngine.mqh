@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v1.03                                  |
+//| Core/PipelineEngine.mqh — v1.04                                  |
 //| Full 14-stage pipeline implementation.                           |
 //+------------------------------------------------------------------+
 #property strict
@@ -23,6 +23,7 @@ private:
    CRegimeFilter             *m_regime;
    CRiskManager              *m_risk;
    CExecutionManager         *m_exec;
+   CExitEngine               *m_exit;
    CRecoveryManager          *m_recovery;
    CDashboardManager         *m_dash;
    CJournalManager           *m_journal;
@@ -204,9 +205,39 @@ private:
 
    ENUM_STAGE_RESULT Stage_PosMgmt(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_exec, "PosMgmt") == STAGE_SKIP) return STAGE_SKIP;
+      if(SkipIfNull(m_exit, "PosMgmt") == STAGE_SKIP) return STAGE_SKIP;
       m_stage_timer.Start();
-      m_exec.ManagePositions();
+
+      CTrade trade;
+      long cfgMagic = (m_data != NULL && m_data.GetConfig() != NULL) ? m_data.GetConfig().MagicNumber : 0;
+      if(cfgMagic > 0) trade.SetExpertMagicNumber(cfgMagic);
+
+      for(int i = PositionsTotal() - 1; i >= 0; i--)
+        {
+         ulong ticket = PositionGetTicket(i);
+         if(ticket == 0) continue;
+         if(!PositionSelectByTicket(ticket)) continue;
+
+         long magic = PositionGetInteger(POSITION_MAGIC);
+         if(cfgMagic > 0 && magic != cfgMagic) continue;
+
+         string sym = PositionGetString(POSITION_SYMBOL);
+         ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+         ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+         double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         double curPrice = (orderType == ORDER_TYPE_BUY)
+                           ? SymbolInfoDouble(sym, SYMBOL_BID)
+                           : SymbolInfoDouble(sym, SYMBOL_ASK);
+
+         ExitSignal sig = m_exit.CheckExit(sym, orderType, entryPrice, curPrice);
+         if(sig.reason == EXIT_NONE) continue;
+
+         bool closed = trade.PositionClose(ticket);
+         if(m_debug_mode)
+            PrintFormat("[PosMgmt] Exit %I64u reason=%d closed=%s desc=%s",
+                        ticket, (int)sig.reason, closed ? "true" : "false", sig.description);
+        }
+
       if(m_profiling_enabled) m_stage_timer.Log("Stage11_PosMgmt");
       return STAGE_OK;
      }
@@ -249,7 +280,7 @@ private:
 public:
    CPipelineEngine()
       : m_data(NULL), m_sr(NULL), m_zone(NULL), m_pattern(NULL), m_signal(NULL),
-        m_ai_orch(NULL), m_regime(NULL), m_risk(NULL), m_exec(NULL),
+        m_ai_orch(NULL), m_regime(NULL), m_risk(NULL), m_exec(NULL), m_exit(NULL),
         m_recovery(NULL), m_dash(NULL), m_journal(NULL), m_bus(NULL),
         m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL), m_regime_det(NULL),
         m_optimizer(NULL), m_async_orders(NULL), m_health(NULL), m_snapshot(NULL),
@@ -266,11 +297,12 @@ public:
       CEventBus *bus, CSanityManager *sanity, CTelemetryRecorder *telemetry,
       CAdaptiveParameterManager *adaptive, CMarketRegimeDetector *regime_det,
       CLatencyOptimizer *optimizer=NULL, CAsyncOrderManager *async_orders=NULL,
-      CHealthMonitor *health=NULL, CSnapshotManager *snapshot=NULL)
+      CHealthMonitor *health=NULL, CSnapshotManager *snapshot=NULL,
+      CExitEngine *exit_engine=NULL)
      {
       m_data=data; m_sr=sr; m_zone=zone; m_pattern=pattern; m_signal=signal;
       m_ai_orch=ai_orch; m_regime=regime; m_risk=risk; m_exec=exec;
-      m_recovery=recovery; m_dash=dash; m_journal=journal; m_bus=bus;
+      m_exit=exit_engine; m_recovery=recovery; m_dash=dash; m_journal=journal; m_bus=bus;
       m_sanity=sanity; m_telemetry=telemetry; m_adaptive=adaptive;
       m_regime_det=regime_det; m_optimizer=optimizer; m_async_orders=async_orders;
       m_health=health; m_snapshot=snapshot;
