@@ -7,23 +7,15 @@
 //|    to COrchestrator with one call each.                         |
 //|                                                                  |
 //|  CHANGELOG:                                                      |
-//|  v3.06 (2026-05-23) — Sprint 11 Core fixes:                     |
-//|    BUG-N03: OnDeinit() called m_health->Shutdown() then         |
-//|             FreeAll() deleted m_health again (double-shutdown).  |
-//|             Fix: all manual Shutdown/Deinit/Destroy calls in     |
-//|             OnDeinit() removed. FreeAll() is sole owner of      |
-//|             teardown. OnDeinit() only stops timer + logs.        |
-//|    BUG-N06: RegisterManager() did not guard m_bus == NULL.      |
-//|             If bus was not yet initialised, m_bus.Register()    |
-//|             would crash. Fix: early-return if m_bus is NULL.    |
-//|    DrainQueue() simplified: delegates to m_bus.Drain() which    |
-//|             is the canonical O(n log n) heap drain.             |
-//|  v3.05 (2026-05-23) — Sprint 9: O1/O4/O7/O8 fixes              |
-//|  v3.04 (2026-05-23) — Sprint 8: SessionState wiring            |
-//|  v3.03 (2026-05-23) — Sprint 2: BUG-002/004/005/009/010        |
-//|  v3.02 (2026-05-22) — Phase 3+4 Telemetry + Latency Sim         |
-//|  v3.01 (2026-05-21) — Phase 5 Circuit Breaker                   |
-//|  v3.00 (2026-05-21) — Phase 4 wiring                            |
+//|  v3.07 (2026-05-24):                                            |
+//|    BUG-C02: RegisterManager() now uses HandlerName(), matching   |
+//|             IManager/IEventHandler contract.                     |
+//|    BUG-NEW-01: OnTimer() now drains ExecutionManager retry queue.|
+//|    BUG-NEW-05: OnDeinit() no longer calls FreeAll(); destructor  |
+//|                is sole teardown owner, matching BUG-N03 intent.  |
+//|    Added SetDebugMode() and SetProfilingEnabled() accessors used |
+//|    by PASR_MODULAR.mq5.                                         |
+//|  v3.06 (2026-05-23) — Sprint 11 Core fixes.                     |
 //+------------------------------------------------------------------+
 
 #property copyright "Copyright 2026, Agsicentre"
@@ -33,18 +25,13 @@
 #define __CORE_ORCHESTRATOR_MQH__
 
 #ifdef __CORE_PASR_MASTER_MQH__
-  // OK — included via PASR.mqh
 #else
   #error "Include <PASR/Core/PASR.mqh> instead of Orchestrator.mqh directly."
 #endif
 
-//+------------------------------------------------------------------+
-//| COrchestrator                                                    |
-//+------------------------------------------------------------------+
 class COrchestrator
   {
 private:
-   // ── Managers (owned, heap-allocated) ────────────────────────────
    CDataManager              *m_data;
    CAnalysisSRManager        *m_sr;
    CAnalysisZoneManager      *m_zone;
@@ -62,31 +49,25 @@ private:
    CJournalManager           *m_journal;
    CAdaptiveParameterManager *m_adaptive;
 
-   // ── Phase 6: Low Latency ────────────────────────────────────────
    CLatencyOptimizer         *m_optimizer;
    CAsyncOrderManager        *m_async_orders;
    CHighFreqTimer            *m_hf_timer;
 
-   // ── Phase 7: Self-Healing + Runtime State ───────────────────────
    CHealthMonitor            *m_health;
    CSnapshotManager          *m_snapshot;
    CSessionState             *m_session;
 
-   // ── QA ──────────────────────────────────────────────────────────
    CLatencySimulator         *m_latency_sim;
 
-   // ── Signal source plugins ───────────────────────────────────────
    PatternSignalSource       *m_srcPattern;
    SRSignalSource            *m_srcSR;
    AISignalSource            *m_srcAI;
    CRegimeSignalSource       *m_srcRegime;
 
-   // ── Infrastructure ──────────────────────────────────────────────
    CEventBus                 *m_bus;
    StrategyConfig             m_cfg;
    CConfigManager            *m_cfgMgr;
 
-   // ── Pipeline Engine ─────────────────────────────────────────────
    CPipelineEngine           *m_pipeline;
    PipelineContext            m_pipeline_ctx;
 
@@ -94,11 +75,8 @@ private:
    bool       m_debugMode;
    bool       m_initialised;
    bool       m_profiling_enabled;
-   bool       m_new_bar_flag;  // O7: atomic flag — set OnTick, consumed OnTimer
+   bool       m_new_bar_flag;
 
-   //+----------------------------------------------------------------+
-   //| BarChanged — private, called ONLY from OnTick()                |
-   //+----------------------------------------------------------------+
    bool BarChanged()
      {
       datetime t = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
@@ -106,25 +84,19 @@ private:
       return false;
      }
 
-   //+----------------------------------------------------------------+
-   //| RegisterManager                                                |
-   //| BUG-N06 FIX: Guard against m_bus == NULL before calling        |
-   //|              m_bus.Register(). Without this guard, if bus      |
-   //|              allocation failed, the call would crash.          |
-   //+----------------------------------------------------------------+
    void RegisterManager(IManager *mgr)
      {
-      if(mgr  == NULL) return;
+      if(mgr == NULL) return;
       if(m_bus == NULL)
         {
          Print("[Orchestrator] RegisterManager: m_bus is NULL — cannot register ",
-               mgr.ManagerName());
+               mgr.HandlerName());
          return;
         }
       mgr.DeclareEvents();
       if(!m_bus.Register(mgr))
          PrintFormat("[Orchestrator] WARNING: m_bus.Register() failed for %s",
-                     mgr.ManagerName());
+                     mgr.HandlerName());
      }
 
    bool InitManager(IManager *mgr, const string name)
@@ -138,11 +110,6 @@ private:
       return true;
      }
 
-   //+----------------------------------------------------------------+
-   //| DrainQueue — delegates to CEventBus::Drain()                  |
-   //| Sprint 11: simplified; m_bus.Drain() is canonical O(n log n). |
-   //| Orchestrator::OnEvent() is wired separately via Subscribe().   |
-   //+----------------------------------------------------------------+
    void DrainQueue()
      {
       if(m_bus == NULL) return;
@@ -151,8 +118,6 @@ private:
 
    void PrintSummary();
    void FreeAll();
-
-   // ── Event handler (system events: HALT, RECOVER, CRITICAL) ──────
    void OnEvent(const PASREvent &ev);
 
 public:
@@ -175,15 +140,12 @@ public:
 
    ~COrchestrator() { FreeAll(); }
 
-   //+----------------------------------------------------------------+
-   //| Init — wire all managers, build pipeline                       |
-   //+----------------------------------------------------------------+
    int Init(const StrategyConfig &cfg);
 
-   //+----------------------------------------------------------------+
-   //| OnTick — pure event-push, no logic execution here             |
-   //| Sets m_new_bar_flag atomically; pipeline runs in OnTimer().    |
-   //+----------------------------------------------------------------+
+   void SetDebugMode(bool enable) { m_debugMode = enable; }
+   void SetProfilingEnabled(bool enable) { m_profiling_enabled = enable; }
+   bool IsProfilingEnabled() const { return m_profiling_enabled; }
+
    void OnTick()
      {
       if(!m_initialised) return;
@@ -194,7 +156,6 @@ public:
 
       if(BarChanged()) m_new_bar_flag = true;
 
-      // Push price-update event; pipeline reads ctx.bid/ask from DataSync
       if(m_bus != NULL)
         {
          PASREvent evTick;
@@ -204,38 +165,29 @@ public:
         }
      }
 
-   //+----------------------------------------------------------------+
-   //| OnTimer — execute full pipeline each timer interval            |
-   //+----------------------------------------------------------------+
    void OnTimer()
      {
       if(!m_initialised || m_pipeline == NULL) return;
 
-      // Consume and reset the atomic new-bar flag set by OnTick()
-      bool isNewBar          = m_new_bar_flag;
-      m_new_bar_flag         = false;
+      bool isNewBar  = m_new_bar_flag;
+      m_new_bar_flag = false;
 
-      // Prepare pipeline context
       m_pipeline_ctx.Reset();
       m_pipeline_ctx.new_bar = isNewBar;
 
-      // Inject runtime state from owned sub-systems
       if(m_health  != NULL) m_pipeline_ctx.health_status = m_health.GetStatus();
       if(m_session != NULL)
         {
          m_pipeline_ctx.session_dd  = m_session.GetDrawdownPct();
          m_pipeline_ctx.daily_pnl   = m_session.GetDailyPnL();
         }
-      // BUG-N05 fix (PipelineTypes v1.05): inject configured DD limit
-      m_pipeline_ctx.max_session_dd = m_cfg.Risk.MaxDailyDrawdownPct;
+      m_pipeline_ctx.max_session_dd = m_cfg.Risk.MaxDailyLossPct;
 
-      // Drain any tick-path events before pipeline starts
       DrainQueue();
+      if(m_exec != NULL) m_exec.ProcessRetryQueue();
 
-      // Execute pipeline
       ENUM_STAGE_RESULT result = m_pipeline.ExecutePipeline(m_pipeline_ctx);
 
-      // Drain any events generated during pipeline execution
       DrainQueue();
 
       if(m_debugMode && result == STAGE_ABORT)
@@ -243,22 +195,12 @@ public:
                      m_pipeline_ctx.exit_message);
      }
 
-   //+----------------------------------------------------------------+
-   //| OnDeinit — BUG-N03 FIX                                        |
-   //| Previous version called m_health->Shutdown(), m_ai_orch->Deinit|
-   //| and m_dash->Destroy() manually here, then FreeAll() ran again  |
-   //| and deleted/shutdown the same objects a second time.           |
-   //| Fix: OnDeinit() only stops the timer and logs. FreeAll() owns  |
-   //| ALL teardown — called once via ~COrchestrator() destructor or  |
-   //| explicitly from EA OnDeinit().                                 |
-   //+----------------------------------------------------------------+
    void OnDeinit(const int reason)
      {
       EventKillTimer();
+      m_initialised = false;
       if(m_debugMode)
          PrintFormat("[Orchestrator] OnDeinit reason=%d", reason);
-      FreeAll();
-      m_initialised = false;
      }
 
    void OnTradeTransaction(
@@ -266,9 +208,6 @@ public:
       const MqlTradeRequest     &request,
       const MqlTradeResult      &result);
 
-   //+----------------------------------------------------------------+
-   //| Getter Methods — for QA/SmokeTest and external access          |
-   //+----------------------------------------------------------------+
    CDataManager*       GetDataManager()    const { return m_data; }
    CAnalysisSRManager* GetSRManager()      const { return m_sr; }
    CAnalysisZoneManager* GetZoneManager()  const { return m_zone; }
@@ -293,13 +232,8 @@ public:
    CPipelineEngine*    GetPipelineEngine() const { return m_pipeline; }
   };
 
-//+------------------------------------------------------------------+
-//| FreeAll — reverse-init order teardown                            |
-//| Phase 7 (last init) deleted first; EventBus deleted last.        |
-//+------------------------------------------------------------------+
 void COrchestrator::FreeAll()
   {
-   // ── Phase 7 (Self-healing — last init, first free) ─────────────
    if(m_snapshot != NULL)
      { m_snapshot.Shutdown(); delete m_snapshot; m_snapshot = NULL; }
    if(m_health   != NULL)
@@ -307,21 +241,17 @@ void COrchestrator::FreeAll()
    if(m_session  != NULL)
      { delete m_session;  m_session  = NULL; }
 
-   // ── Phase 6 (Low-latency) ───────────────────────────────────────
    if(m_hf_timer     != NULL) { delete m_hf_timer;     m_hf_timer     = NULL; }
    if(m_async_orders != NULL) { delete m_async_orders; m_async_orders = NULL; }
    if(m_optimizer    != NULL) { delete m_optimizer;    m_optimizer    = NULL; }
 
-   // ── Signal sources ──────────────────────────────────────────────
    if(m_srcRegime  != NULL) { delete m_srcRegime;  m_srcRegime  = NULL; }
    if(m_srcAI      != NULL) { delete m_srcAI;      m_srcAI      = NULL; }
    if(m_srcSR      != NULL) { delete m_srcSR;      m_srcSR      = NULL; }
    if(m_srcPattern != NULL) { delete m_srcPattern; m_srcPattern = NULL; }
 
-   // ── Pipeline engine (non-owning refs inside; safe to delete) ────
    if(m_pipeline   != NULL) { delete m_pipeline;   m_pipeline   = NULL; }
 
-   // ── Managers (reverse init order) ───────────────────────────────
    if(m_adaptive   != NULL) { delete m_adaptive;   m_adaptive   = NULL; }
    if(m_journal    != NULL) { delete m_journal;    m_journal    = NULL; }
    if(m_telemetry  != NULL) { delete m_telemetry;  m_telemetry  = NULL; }
@@ -338,16 +268,12 @@ void COrchestrator::FreeAll()
    if(m_sr         != NULL) { delete m_sr;         m_sr         = NULL; }
    if(m_sanity     != NULL) { delete m_sanity;     m_sanity     = NULL; }
 
-   // ── QA ──────────────────────────────────────────────────────────
    if(m_latency_sim != NULL) { delete m_latency_sim; m_latency_sim = NULL; }
 
-   // ── Config ──────────────────────────────────────────────────────
    if(m_cfgMgr != NULL) { delete m_cfgMgr; m_cfgMgr = NULL; }
 
-   // ── Data manager ────────────────────────────────────────────────
    if(m_data != NULL) { delete m_data; m_data = NULL; }
 
-   // ── EventBus — deleted LAST (all managers subscribed to it) ─────
    if(m_bus != NULL) { delete m_bus; m_bus = NULL; }
   }
 
