@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.06                                    |
+//| Trade/RiskManager.mqh — v2.07                                    |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -44,15 +44,29 @@ private:
    datetime ServerDateMidnight() const
      { return StringToTime(TimeToString(TimeCurrent(), TIME_DATE)); }
 
+   bool IsMaxDDActive() const
+     {
+      if(m_peakEquity <= 0.0 || m_maxDDPct <= 0.0) return false;
+      double ddPct = (1.0 - AccountEquity() / m_peakEquity) * 100.0;
+      return ddPct >= m_maxDDPct;
+     }
+
    void CheckDailyReset()
      {
       datetime today = ServerDateMidnight();
       if(today > m_lastResetDay)
         {
-         m_dailyLoss = 0;
+         m_dailyLoss = 0.0;
          m_lastResetDay = today;
-         m_circuitBroken = false;
-         if(m_debugMode) Print("[Risk] Daily P&L reset.");
+         bool ddStillActive = IsMaxDDActive();
+         if(!ddStillActive)
+           {
+            m_circuitBroken = false;
+            m_consecLoss = 0;
+            PrintFormat("[Risk] Daily reset: circuit cleared at %s", TimeToString(TimeCurrent()));
+           }
+         else if(m_debugMode)
+            Print("[Risk] Daily reset: circuit kept because MaxDD is still active.");
         }
      }
 
@@ -126,7 +140,7 @@ public:
       m_peakEquity   = AccountEquity();
       m_lastResetDay = ServerDateMidnight();
       SyncOpenTradesFromBroker();
-      PrintFormat("[Risk] v2.06 Init OK: risk=%.1f%% daily=%.1f%% maxTrades=%d open=%d",
+      PrintFormat("[Risk] v2.07 Init OK: risk=%.1f%% daily=%.1f%% maxTrades=%d open=%d",
                   m_riskPct, m_dailyLossPct, m_maxOpenTrades, m_openTrades);
       return true;
      }
@@ -141,8 +155,7 @@ public:
       switch(ev.id)
         {
          case EVENT_ID_POSITION_UPDATE:
-            if(ev.data1 == 1.0)
-               SyncOpenTradesFromBroker();
+            if(ev.data1 == 1.0) SyncOpenTradesFromBroker();
             if(ev.profit != 0.0)
               {
                m_dailyLoss += ev.profit;
@@ -169,12 +182,8 @@ public:
          if(dlPct <= -m_dailyLossPct)
            { r.reason = StringFormat("DailyLoss(%.1f%%>=%.1f%%)", -dlPct, m_dailyLossPct); return r; }
         }
-      if(m_peakEquity > 0 && m_maxDDPct > 0)
-        {
-         double ddPct = (1.0 - AccountEquity() / m_peakEquity) * 100.0;
-         if(ddPct >= m_maxDDPct)
-           { r.reason = StringFormat("MaxDD(%.1f%%>=%.1f%%)", ddPct, m_maxDDPct); return r; }
-        }
+      if(IsMaxDDActive())
+        { r.reason = StringFormat("MaxDD(%.1f%%>=%.1f%%)", GetDrawdownPct(), m_maxDDPct); return r; }
       if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
         { r.reason = StringFormat("ConsecLoss(%d>=%d)", m_consecLoss, m_maxConsecLoss); return r; }
       if(!SpreadOK())
@@ -202,24 +211,14 @@ public:
      {
       SRiskResult out;
       if(signal.direction == SIGNAL_NONE)
-        {
-         out.SetResult(false, 0.0, "NoSignal");
-         return out;
-        }
-
+        { out.SetResult(false, 0.0, "NoSignal"); return out; }
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
       if(ask <= 0 || bid <= 0 || point <= 0)
-        {
-         out.SetResult(false, 0.0, "InvalidPrice");
-         return out;
-        }
-
+        { out.SetResult(false, 0.0, "InvalidPrice"); return out; }
       double entry = signal.entryPrice;
-      if(entry <= 0.0)
-         entry = (signal.direction == SIGNAL_BUY) ? ask : bid;
-
+      if(entry <= 0.0) entry = (signal.direction == SIGNAL_BUY) ? ask : bid;
       double slPoints = signal.slPoints;
       if(slPoints <= 0.0)
         {
@@ -227,28 +226,17 @@ public:
          if(atrPts <= 0.0) atrPts = 100.0;
          slPoints = atrPts * m_cfg.Risk.SLMultiplier;
         }
-
       double tpPoints = signal.tpPoints;
       if(tpPoints <= 0.0)
          tpPoints = slPoints * MathMax(1.0, m_cfg.Risk.TPMultiplier / MathMax(0.1, m_cfg.Risk.SLMultiplier));
-
       RiskCheckResult base = Check(slPoints);
       out.SetResult(base.allowed, base.suggestedLot, base.reason);
       if(!base.allowed) return out;
-
-      double sl = 0.0;
-      double tp = 0.0;
+      double sl = 0.0, tp = 0.0;
       if(signal.direction == SIGNAL_BUY)
-        {
-         sl = NormalizePrice(entry - slPoints * point);
-         tp = NormalizePrice(entry + tpPoints * point);
-        }
+        { sl = NormalizePrice(entry - slPoints * point); tp = NormalizePrice(entry + tpPoints * point); }
       else
-        {
-         sl = NormalizePrice(entry + slPoints * point);
-         tp = NormalizePrice(entry - tpPoints * point);
-        }
-
+        { sl = NormalizePrice(entry + slPoints * point); tp = NormalizePrice(entry - tpPoints * point); }
       out.SetPrices(entry, sl, tp, (ulong)m_cfg.MagicNumber);
       return out;
      }
@@ -256,8 +244,8 @@ public:
    double CalcLot(double slPoints) const
      {
       if(slPoints <= 0) return m_minLot;
-      double equity = AccountEquity();
-      double riskAmount = equity * m_riskPct / 100.0;
+      double basis = MathMin(AccountBalance(), AccountEquity());
+      double riskAmount = basis * m_riskPct / 100.0;
       double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
       double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
       if(tickValue <= 0 || tickSize <= 0) return m_minLot;
@@ -273,10 +261,8 @@ public:
      {
       SyncOpenTradesFromBroker();
       if(profit < 0) m_consecLoss++; else m_consecLoss = 0;
-
       if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
         { m_circuitBroken = true; PrintFormat("[Risk] CIRCUIT BREAKER: %d consec losses.", m_consecLoss); }
-
       CheckDailyLossBreaker(m_dailyLoss + profit);
      }
 
@@ -298,12 +284,12 @@ public:
    void ResetCircuit()  { m_circuitBroken = false; m_consecLoss = 0; Print("[Risk] Circuit reset."); }
 
    bool   IsCircuitBroken() const { return m_circuitBroken; }
-   int    GetOpenTrades()   const { return m_openTrades;    }
-   int    GetConsecLoss()   const { return m_consecLoss;    }
-   double GetDailyLoss()    const { return m_dailyLoss;     }
+   int    GetOpenTrades()   const { return m_openTrades; }
+   int    GetConsecLoss()   const { return m_consecLoss; }
+   double GetDailyLoss()    const { return m_dailyLoss; }
    double GetDailyLossPct() const
      { double b = AccountBalance(); return (b > 0) ? (-m_dailyLoss / b * 100.0) : 0; }
-   double GetDrawdownPct()  const
+   double GetDrawdownPct() const
      { return (m_peakEquity > 0) ? (1.0 - AccountEquity() / m_peakEquity) * 100.0 : 0; }
    bool IsTradingAllowed() const { return !m_circuitBroken && Check(0).allowed; }
    bool IsTradingAllowed(const string) const { return IsTradingAllowed(); }
