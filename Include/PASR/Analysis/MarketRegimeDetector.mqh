@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Analysis/MarketRegimeDetector.mqh — v2.02                        |
+//| Analysis/MarketRegimeDetector.mqh — v2.03                        |
 //| Canonical EMarketRegime detector                                 |
 //+------------------------------------------------------------------+
 #property strict
@@ -30,6 +30,9 @@ private:
    int              m_atr_period;
    int              m_adx_period;
    int              m_vol_lookback;
+   int              m_bb_period;
+   double           m_bb_deviation;
+   double           m_squeeze_thresh;
    double           m_vol_low_thresh;
    double           m_vol_high_thresh;
    double           m_trend_strength_thresh;
@@ -39,6 +42,8 @@ private:
    double           m_last_di_plus;
    double           m_last_di_minus;
    double           m_avg_atr;
+   double           m_last_bb_bandwidth;
+   double           m_avg_bb_bandwidth;
    datetime         m_last_update;
    ulong            m_update_count;
    EMarketRegime    m_prev_regime;
@@ -72,15 +77,46 @@ private:
       int count = MathMax(1, m_vol_lookback);
       double buf[];
       ArrayResize(buf, count);
-      if(CopyBuffer(h, 0, 1, count, buf) > 0)
+      int copied = CopyBuffer(h, 0, 1, count, buf);
+      if(copied > 0)
         {
          double sum = 0.0;
-         int n = ArraySize(buf);
-         for(int i = 0; i < n; i++) sum += buf[i];
-         avgAtr = (n > 0) ? sum / n : atr;
+         for(int i = 0; i < copied; i++) sum += buf[i];
+         avgAtr = sum / copied;
         }
       IndicatorRelease(h);
       return ok;
+     }
+
+   bool ReadBBBandwidth(const string symbol, ENUM_TIMEFRAMES tf, double &currentBW, double &avgBW) const
+     {
+      currentBW = 0.0; avgBW = 0.0;
+      int h = iBands(symbol, tf, m_bb_period, 0, m_bb_deviation, PRICE_CLOSE);
+      if(h == INVALID_HANDLE) return false;
+      int count = MathMax(2, m_vol_lookback);
+      double upper[], lower[], base[];
+      ArrayResize(upper, count);
+      ArrayResize(lower, count);
+      ArrayResize(base, count);
+      int cu = CopyBuffer(h, UPPER_BAND, 1, count, upper);
+      int cl = CopyBuffer(h, LOWER_BAND, 1, count, lower);
+      int cb = CopyBuffer(h, BASE_LINE, 1, count, base);
+      IndicatorRelease(h);
+      int n = MathMin(cu, MathMin(cl, cb));
+      if(n <= 0) return false;
+      double sum = 0.0;
+      int valid = 0;
+      for(int i = 0; i < n; i++)
+        {
+         if(base[i] <= 0.0) continue;
+         double bw = (upper[i] - lower[i]) / base[i];
+         if(i == 0) currentBW = bw;
+         sum += bw;
+         valid++;
+        }
+      if(valid <= 0) return false;
+      avgBW = sum / valid;
+      return currentBW > 0.0 && avgBW > 0.0;
      }
 
 public:
@@ -92,6 +128,9 @@ public:
       m_atr_period = 14;
       m_adx_period = 14;
       m_vol_lookback = 50;
+      m_bb_period = 20;
+      m_bb_deviation = 2.0;
+      m_squeeze_thresh = 0.5;
       m_vol_low_thresh = 0.5;
       m_vol_high_thresh = 2.0;
       m_trend_strength_thresh = 25.0;
@@ -101,6 +140,8 @@ public:
       m_last_di_plus = 0;
       m_last_di_minus = 0;
       m_avg_atr = 0;
+      m_last_bb_bandwidth = 0;
+      m_avg_bb_bandwidth = 0;
       ResetToDefault();
      }
 
@@ -115,6 +156,14 @@ public:
       m_vol_high_thresh = volHighThresh;
       m_trend_strength_thresh = trendThresh;
       m_crash_thresh = crashThresh;
+      m_last_update = 0;
+     }
+
+   void SetSqueezeParameters(int bbPeriod, double bbDeviation, double squeezeThreshold)
+     {
+      m_bb_period = MathMax(2, bbPeriod);
+      m_bb_deviation = (bbDeviation > 0.0) ? bbDeviation : 2.0;
+      m_squeeze_thresh = (squeezeThreshold > 0.0) ? squeezeThreshold : 0.5;
       m_last_update = 0;
      }
 
@@ -148,11 +197,16 @@ public:
       if(!ReadADX(symbol, tf, adx, diPlus, diMinus))
          return m_current_regime;
 
+      double bbNow = 0.0, bbAvg = 0.0;
+      ReadBBBandwidth(symbol, tf, bbNow, bbAvg);
+
       m_last_atr = atr;
       m_last_adx = adx;
       m_last_di_plus = diPlus;
       m_last_di_minus = diMinus;
       m_avg_atr = avgAtr;
+      m_last_bb_bandwidth = bbNow;
+      m_avg_bb_bandwidth = bbAvg;
       m_last_update = currentBarTime;
       m_update_count++;
 
@@ -185,15 +239,14 @@ public:
    EMarketRegime GetRegime() const { return m_current_regime; }
 
    string GetRegimeName(EMarketRegime regime) const
-     {
-      return MarketRegimeName(regime);
-     }
+     { return MarketRegimeName(regime); }
 
    string ExportRegimeInfo() const
      {
-      return StringFormat("Regime=%s|VolRatio=%.2f|ADX=%.1f|Momentum=%.2f|Risk=%.1f%%",
+      return StringFormat("Regime=%s|VolRatio=%.2f|ADX=%.1f|Momentum=%.2f|BB=%.4f/%.4f|Risk=%.1f%%",
                           GetRegimeName(m_current_regime), m_params.volatility_ratio,
                           m_params.trend_strength, m_params.momentum_score,
+                          m_last_bb_bandwidth, m_avg_bb_bandwidth,
                           m_params.risk_percent * 100.0);
      }
 
@@ -208,6 +261,10 @@ private:
       double momScore = m_params.momentum_score;
       if(volRatio > m_crash_thresh) return REGIME_CRASH;
       if(volRatio > m_vol_high_thresh) return REGIME_VOLATILE;
+      if(adx <= m_trend_strength_thresh &&
+         m_last_bb_bandwidth > 0.0 && m_avg_bb_bandwidth > 0.0 &&
+         m_last_bb_bandwidth < m_squeeze_thresh * m_avg_bb_bandwidth)
+         return REGIME_SQUEEZE;
       if(adx > m_trend_strength_thresh)
         {
          if(momScore > 5.0) return REGIME_TREND_UP;
@@ -264,10 +321,10 @@ private:
    void AdjustParamsForSqueeze()
      {
       m_params.regime_name = "SQUEEZE";
-      m_params.sl_multiplier = 0.7;
-      m_params.tp_multiplier = 1.0;
-      m_params.risk_percent = 0.6;
-      m_params.entry_threshold = 0.6;
+      m_params.sl_multiplier = 1.2;
+      m_params.tp_multiplier = 1.5;
+      m_params.risk_percent = 0.5;
+      m_params.entry_threshold = 0.9;
       m_params.max_positions = 2;
      }
 
