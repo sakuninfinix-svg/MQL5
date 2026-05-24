@@ -1,13 +1,6 @@
 //+------------------------------------------------------------------+
-//|                                             SanityManager.mqh    |
-//|                                 Copyright © 2024, PASR System    |
-//|                                       Senior Quant Architecture  |
-//+------------------------------------------------------------------+
-//| v2.00 (2026-05-24) — Sprint 20                                    |
-//|   SAN-001: Added EventBus subscribe for SYSTEM events             |
-//|   SAN-002: CheckFreshness() now tracks stale seconds properly     |
-//|   SAN-003: CheckPriceGap() uses tick.bid (not tick.last for Forex)|
-//|   SAN-004: SendEvent() now carries msg in PASREvent.tag field     |
+//| Infra/SanityManager.mqh — v2.01                                  |
+//| Runtime tick sanity and circuit breaker                          |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __INFRA_SANITY_MANAGER_MQH__
@@ -27,7 +20,7 @@ enum ENUM_CIRCUIT_STATE
 
 struct SSanityConfig
   {
-   int      max_stale_sec;         // SAN-002: seconds without tick before stale
+   int      max_stale_sec;
    int      max_spread_points;
    double   max_price_gap_pct;
    int      trip_threshold;
@@ -42,7 +35,7 @@ private:
    int                m_consecutive_errors;
    datetime           m_last_tick_time;
    datetime           m_trip_time;
-   double             m_last_bid;          // SAN-003: track bid, not last-price
+   double             m_last_bid;
 
 public:
    CSanityManager() : IManager()
@@ -51,57 +44,43 @@ public:
       m_consecutive_errors = 0;
       m_last_tick_time     = 0;
       m_trip_time          = 0;
-      m_last_bid           = 0.0;          // SAN-003 FIX
+      m_last_bid           = 0.0;
 
-      m_config.max_stale_sec      = 30;    // SAN-002 FIX: renamed + meaningful
+      m_config.max_stale_sec      = 30;
       m_config.max_spread_points  = 20;
       m_config.max_price_gap_pct  = 0.5;
       m_config.trip_threshold     = 3;
       m_config.reset_timeout_sec  = 60;
      }
 
-   ~CSanityManager() {}
+   virtual string HandlerName() const override { return "SanityManager"; }
 
-   // SAN-001 FIX: subscribe to EventBus after Init
+   virtual void DeclareEvents() override
+     { AddEvent(EVENT_ID_SYSTEM_INFO); }
+
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
-
-      if(m_bus != NULL)
-        {
-         // Listen for external circuit-reset commands (e.g. from HealthMonitor)
-         m_bus.Subscribe(this, EVENT_ID_SYSTEM_INFO);
-        }
-
-      PASRLogInfo(StringFormat("[SANITY] v2.00 — trip=%d reset=%ds stale=%ds",
+      if(m_bus != NULL) m_bus.Subscribe(this);
+      PASRLogInfo(StringFormat("[SANITY] v2.01 — trip=%d reset=%ds stale=%ds",
                               m_config.trip_threshold,
                               m_config.reset_timeout_sec,
                               m_config.max_stale_sec));
       return true;
      }
 
-   virtual void OnTick() override {}
-
    virtual void OnEvent(const PASREvent &event) override
      {
-      // Receive external reset command via EVENT_ID_SYSTEM_INFO
-      if(event.id == EVENT_ID_SYSTEM_INFO)
+      if(event.id == EVENT_ID_SYSTEM_INFO && StringFind(event.comment, "CIRCUIT_RESET") >= 0)
         {
-         if(StringFind(event.tag, "CIRCUIT_RESET") >= 0)
-           {
-            ResetCircuit();
-            PASRLogInfo("[SANITY] External circuit reset received.");
-           }
+         ResetCircuit();
+         PASRLogInfo("[SANITY] External circuit reset received.");
         }
      }
-
-   virtual void OnDeinit(const int reason) override {}
-   virtual string GetName() const override { return "SanityManager"; }
 
    bool Configure(const SSanityConfig &cfg)
      { m_config = cfg; return true; }
 
-   // --- CORE: Validate incoming tick ---
    bool ValidateTick(const MqlTick &tick)
      {
       if(m_state == CIRCUIT_OPEN)
@@ -112,21 +91,22 @@ public:
       bool  is_valid = true;
       string reason  = "";
 
-      if(!CheckFreshness(tick.time))                // SAN-002
+      if(!CheckFreshness(tick.time))
         { reason = "STALE_DATA"; is_valid = false; }
 
       if(is_valid && !CheckSpread(tick.ask, tick.bid))
         { reason = "WIDE_SPREAD"; is_valid = false; }
 
-      if(is_valid && !CheckPriceGap(tick.bid))      // SAN-003 FIX: bid not last
+      if(is_valid && !CheckPriceGap(tick.bid))
         { reason = "PRICE_GAP"; is_valid = false; }
 
       if(is_valid) { OnSuccess(); return true; }
-      else         { OnFailure(reason); return false; }
+      OnFailure(reason);
+      return false;
      }
 
-   ENUM_CIRCUIT_STATE GetState()      const { return m_state; }
-   bool               IsTradingAllowed() const
+   ENUM_CIRCUIT_STATE GetState() const { return m_state; }
+   bool IsTradingAllowed() const
      { return (m_state == CIRCUIT_CLOSED || m_state == CIRCUIT_HALF_OPEN); }
 
    string GetStateString() const
@@ -141,10 +121,9 @@ public:
      }
 
    void ResetCircuit()
-     { m_state=CIRCUIT_CLOSED; m_consecutive_errors=0; }
+     { m_state = CIRCUIT_CLOSED; m_consecutive_errors = 0; }
 
 private:
-   // SAN-002 FIX: actual staleness check using seconds elapsed
    bool CheckFreshness(datetime tick_time)
      {
       if(tick_time == 0) return false;
@@ -165,11 +144,10 @@ private:
       return (spread <= m_config.max_spread_points);
      }
 
-   // SAN-003 FIX: use bid (valid for Forex), not tick.last (always 0 in Forex)
    bool CheckPriceGap(double bid)
      {
       if(m_last_bid == 0.0) { m_last_bid = bid; return true; }
-      if(bid <= 0.0)        return false;
+      if(bid <= 0.0) return false;
       double change_pct = MathAbs((bid - m_last_bid) / m_last_bid) * 100.0;
       m_last_bid = bid;
       return (change_pct <= m_config.max_price_gap_pct);
@@ -218,17 +196,15 @@ private:
       PASRLogInfo(msg);
      }
 
-   // SAN-004 FIX: carry message in event.tag so subscribers can read it
    void SendEvt(ENUM_EVENT_ID id, const string &msg)
      {
       if(m_bus == NULL) return;
       PASREvent evt;
       evt.id       = id;
       evt.priority = 50;
-      evt.tag      = msg;              // SAN-004 FIX: payload in tag
+      evt.comment  = msg;
       m_bus.Push(evt);
      }
   };
 
 #endif // __INFRA_SANITY_MANAGER_MQH__
-//+------------------------------------------------------------------+
