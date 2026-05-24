@@ -1,15 +1,14 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.02                                    |
+//| Trade/RiskManager.mqh — v2.03                                    |
 //| Copyright 2026, Agsicentre                                       |
 //|                                                                  |
 //| CHANGELOG:                                                       |
+//|   v2.03 (2026-05-24):                                           |
+//|     BUG-T05: Daily reset now uses server-date midnight via       |
+//|              StringToTime(TimeToString(TimeCurrent(),DATE))      |
+//|              instead of UTC modulo arithmetic.                   |
 //|   v2.02 (2026-05-24) Sprint 3B:                                 |
 //|     BUG-T13: OnTradeClosed() removed m_dailyLoss accumulation.  |
-//|     EventBus path (OnEvent POSITION_UPDATE) is the single        |
-//|     source of truth for dailyLoss. OnTradeClosed() keeps        |
-//|     openTrades, consecLoss, and circuit-breaker logic only.     |
-//|     Previously both paths accumulated — double-counting every   |
-//|     closed trade's P&L against the daily loss limit.            |
 //|   v2.01 (2026-05-24) — BUG-T06:                                |
 //|     OnEvent(POSITION_UPDATE): only update dailyLoss when         |
 //|     ev.profit != 0.0 to prevent silent P&L corruption.          |
@@ -53,13 +52,20 @@ private:
    double AccountEquity()     const { return ::AccountInfoDouble(ACCOUNT_EQUITY);      }
    double AccountFreeMargin() const { return ::AccountInfoDouble(ACCOUNT_MARGIN_FREE); }
 
+   datetime ServerDateMidnight() const
+     {
+      return StringToTime(TimeToString(TimeCurrent(), TIME_DATE));
+     }
+
    void CheckDailyReset()
      {
-      datetime now   = TimeCurrent();
-      datetime today = (datetime)((long)now - (long)now % 86400);
+      datetime today = ServerDateMidnight();
       if(today > m_lastResetDay)
-        { m_dailyLoss = 0; m_lastResetDay = today;
-          if(m_debugMode) Print("[Risk] Daily P&L reset."); }
+        {
+         m_dailyLoss = 0;
+         m_lastResetDay = today;
+         if(m_debugMode) Print("[Risk] Daily P&L reset.");
+        }
      }
 
    double NormaliseLot(double raw) const
@@ -111,8 +117,8 @@ public:
       m_maxLot       = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
       m_lotStep      = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
       m_peakEquity   = AccountEquity();
-      m_lastResetDay = (datetime)((long)TimeCurrent() - (long)TimeCurrent() % 86400);
-      PrintFormat("[Risk] v2.02 Init OK: risk=%.1f%% maxDD=%.1f%% daily=%.1f%% maxTrades=%d",
+      m_lastResetDay = ServerDateMidnight();
+      PrintFormat("[Risk] v2.03 Init OK: risk=%.1f%% maxDD=%.1f%% daily=%.1f%% maxTrades=%d",
                   m_riskPct, m_maxDDPct, m_dailyLossPct, m_maxOpenTrades);
       return true;
      }
@@ -127,10 +133,6 @@ public:
       switch(ev.id)
         {
          case EVENT_ID_POSITION_UPDATE:
-            // BUG-T06 FIX (v2.01): Only accumulate dailyLoss when profit field
-            // is explicitly set. Dispatchers MUST set ev.profit to realised P&L.
-            // BUG-T13 FIX (v2.02): This is now the SINGLE accumulation path.
-            // OnTradeClosed() no longer updates m_dailyLoss — see below.
             if(ev.profit != 0.0)
                m_dailyLoss += ev.profit;
             { double eq = AccountEquity(); if(eq > m_peakEquity) m_peakEquity = eq; }
@@ -190,16 +192,10 @@ public:
      { m_openTrades++;
        if(m_debugMode) PrintFormat("[Risk] Opened. Open=%d", m_openTrades); }
 
-   // BUG-T13 FIX: Removed m_dailyLoss += profit from here.
-   // OnEvent(EVENT_ID_POSITION_UPDATE) is now the single accumulation path.
-   // This method only handles: openTrades counter, consecLoss, circuit-breaker.
-   // IMPORTANT: callers dispatching POSITION_UPDATE after a close MUST set
-   // ev.profit to the realised P&L so OnEvent() can accumulate correctly.
    void OnTradeClosed(double profit = 0)
      {
       m_openTrades = MathMax(0, m_openTrades - 1);
       if(profit < 0) m_consecLoss++; else m_consecLoss = 0;
-      // dailyLoss NOT accumulated here — EventBus path handles it (BUG-T13)
       if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
         { m_circuitBroken = true;
           PrintFormat("[Risk] CIRCUIT BREAKER: %d consec losses.", m_consecLoss); }
