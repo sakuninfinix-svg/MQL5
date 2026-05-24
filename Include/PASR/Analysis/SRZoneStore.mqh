@@ -456,6 +456,22 @@ public:
          if(IsZoneValid(m_zones[i])) n++;
       return n;
      }
+
+   // BUG-SR-001 FIX: Add Clear() method for proper cleanup in Deinit()
+   void Clear()
+     {
+      m_count = 0;
+      m_atr = 0.0;
+      m_clusterTol = 0.0;
+      for(int i = 0; i < SRZ_MAX_ZONES; i++)
+         m_zones[i].Init();
+     }
+
+   // BUG-SR-002 FIX: Add IsValid() method for health check
+   bool IsValid() const
+     {
+      return (m_count >= 0 && m_count <= SRZ_MAX_ZONES);
+     }
   };
 
 #endif // __ANALYSIS_SR_ZONE_STORE_MQH__
