@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/OrchestratorInit.mqh — v1.00                                |
+//| Core/OrchestratorInit.mqh — v1.01                                |
 //| Out-of-class COrchestrator method implementations                 |
 //+------------------------------------------------------------------+
 #property strict
@@ -37,6 +37,19 @@ int COrchestrator::Init(const StrategyConfig &cfg)
      }
    RegisterManager(m_data);
 
+   m_exit = new CExitEngine();
+   if(m_exit == NULL)
+     {
+      Print("[Orchestrator] ExitEngine allocation failed");
+      FreeAll();
+      return INIT_FAILED;
+     }
+   if(!InitManager(m_exit, "ExitEngine"))
+     {
+      FreeAll();
+      return INIT_FAILED;
+     }
+
    m_pipeline = new CPipelineEngine();
    if(m_pipeline == NULL)
      {
@@ -52,7 +65,7 @@ int COrchestrator::Init(const StrategyConfig &cfg)
                              m_recovery, m_dash, m_journal, m_bus,
                              m_sanity, m_telemetry, m_adaptive,
                              m_regime_det, m_optimizer, m_async_orders,
-                             m_health, m_snapshot);
+                             m_health, m_snapshot, m_exit);
 
    m_lastBarTime  = (datetime)SeriesInfoInteger(_Symbol, _Period, SERIES_LASTBAR_DATE);
    m_new_bar_flag = false;
