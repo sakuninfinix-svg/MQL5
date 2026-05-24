@@ -1,13 +1,6 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalAggregator.mqh — v1.01 (BUG-024 FIXED)             |
+//| Signal/SignalAggregator.mqh — v1.02                              |
 //| Signal aggregation with voting, veto, and multiplier logic       |
-//|                                                                  |
-//| FIX v1.01:                                                       |
-//|  BUG-024 — Aggregate() processed sources in raw iteration order. |
-//|    A VETO source registered after a VOTER was silently ignored.  |
-//|    Fixed: explicit two-pass algorithm:                           |
-//|      Pass 1: all VETO sources first (can short-circuit immediately)|
-//|      Pass 2: MULT + VOTER sources in registration order          |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_AGGREGATOR_MQH__
@@ -63,9 +56,9 @@ public:
      {
       m_source = src;
       m_weight = weight;
-      if(weight > 0.0)      m_type = SOURCE_TYPE_VOTER;
+      if(weight > 0.0)       m_type = SOURCE_TYPE_VOTER;
       else if(weight == 0.0) m_type = SOURCE_TYPE_MULT;
-      else                   m_type = SOURCE_TYPE_VETO;
+      else                  m_type = SOURCE_TYPE_VETO;
      }
 
    ISignalSource   *GetSource() const { return m_source; }
@@ -100,6 +93,9 @@ private:
    string  m_bullSources;
    string  m_bearSources;
    bool    m_vetoActive;
+   bool    m_vetoBuy;
+   bool    m_vetoSell;
+   string  m_vetoReason;
 
    void ResetState()
      {
@@ -112,19 +108,57 @@ private:
       m_bullSources      = "";
       m_bearSources      = "";
       m_vetoActive       = false;
+      m_vetoBuy          = false;
+      m_vetoSell         = false;
+      m_vetoReason       = "";
      }
 
    bool ProcessVetoSource(CRegisteredSource *reg, const SignalResult &result)
      {
+      string name = (reg != NULL && reg.GetSource() != NULL) ? reg.GetSource().Name() : "VETO";
+
       if(result.direction == SIGNAL_NONE)
         {
          m_vetoActive = true;
+         m_vetoReason = StringFormat("%s:%s", name, result.reason);
          if(m_config != NULL && m_config.GetDebugMode())
-            PrintFormat("[SignalAgg] VETO by %s: %s",
-                       reg.GetSource().Name(), result.reason);
+            PrintFormat("[SignalAgg] VETO by %s: %s", name, result.reason);
          return false;
         }
+
+      if(result.direction == SIGNAL_BUY)
+        {
+         m_vetoSell = true;
+         if(m_vetoReason == "") m_vetoReason = StringFormat("%s:BUY", name);
+        }
+      else if(result.direction == SIGNAL_SELL)
+        {
+         m_vetoBuy = true;
+         if(m_vetoReason == "") m_vetoReason = StringFormat("%s:SELL", name);
+        }
       return true;
+     }
+
+   void ApplyContraVeto(AggregatedSignal &agg)
+     {
+      if(agg.direction == SIGNAL_BUY && m_vetoBuy)
+        {
+         agg.Clear();
+         agg.time = TimeCurrent();
+         agg.vetoed = true;
+         m_vetoActive = true;
+         if(m_config != NULL && m_config.GetDebugMode())
+            PrintFormat("[SignalAgg] CONTRA-VETO BUY: %s", m_vetoReason);
+        }
+      else if(agg.direction == SIGNAL_SELL && m_vetoSell)
+        {
+         agg.Clear();
+         agg.time = TimeCurrent();
+         agg.vetoed = true;
+         m_vetoActive = true;
+         if(m_config != NULL && m_config.GetDebugMode())
+            PrintFormat("[SignalAgg] CONTRA-VETO SELL: %s", m_vetoReason);
+        }
      }
 
    void ProcessMultiplierSource(CRegisteredSource *reg, const SignalResult &result)
@@ -132,8 +166,7 @@ private:
       if(result.confidence > 0.0)
          m_multiplierFactor *= result.confidence;
       if(m_config != NULL && m_config.GetDebugMode())
-         PrintFormat("[SignalAgg] MULT %s: x%.2f (%s)",
-                    reg.GetSource().Name(), result.confidence, result.reason);
+         PrintFormat("[SignalAgg] MULT %s: x%.2f (%s)", reg.GetSource().Name(), result.confidence, result.reason);
      }
 
    void ProcessVoterSource(CRegisteredSource *reg, const SignalResult &result)
@@ -155,7 +188,7 @@ private:
      }
 
 public:
-   CSignalAggregator() : m_config(NULL), m_vetoActive(false) { ResetState(); }
+   CSignalAggregator() : m_config(NULL), m_vetoActive(false), m_vetoBuy(false), m_vetoSell(false) { ResetState(); }
 
    void Init(const CSignalConfig &config)
      {
@@ -174,14 +207,12 @@ public:
       if(reg == NULL) return false;
       m_sources.Add(reg);
       if(m_config != NULL && m_config.GetDebugMode())
-         PrintFormat("[SignalAgg] Registered: %s (w=%.1f %s)",
-                    source.Name(), weight, reg.GetTypeString());
+         PrintFormat("[SignalAgg] Registered: %s (w=%.1f %s)", source.Name(), weight, reg.GetTypeString());
       return true;
      }
 
    int SourceCount() const { return m_sources.Total(); }
 
-   // BUG-024 FIX: explicit two-pass aggregation — VETO first, then MULT+VOTER
    AggregatedSignal Aggregate()
      {
       AggregatedSignal agg;
@@ -189,7 +220,6 @@ public:
       agg.time = TimeCurrent();
       ResetState();
 
-      // ── Pass 1: VETO sources (can short-circuit immediately) ──────────
       for(int i = 0; i < m_sources.Total(); i++)
         {
          CRegisteredSource *reg = (CRegisteredSource*)m_sources.At(i);
@@ -202,11 +232,10 @@ public:
          if(!ProcessVetoSource(reg, result))
            {
             agg.vetoed = true;
-            return agg;  // short-circuit on first veto
+            return agg;
            }
         }
 
-      // ── Pass 2: MULT sources (weight the confidence) ──────────────────
       for(int i = 0; i < m_sources.Total(); i++)
         {
          CRegisteredSource *reg = (CRegisteredSource*)m_sources.At(i);
@@ -218,7 +247,6 @@ public:
          ProcessMultiplierSource(reg, result);
         }
 
-      // ── Pass 3: VOTER sources ─────────────────────────────────────────
       for(int i = 0; i < m_sources.Total(); i++)
         {
          CRegisteredSource *reg = (CRegisteredSource*)m_sources.At(i);
@@ -236,8 +264,7 @@ public:
       double normBear = (m_bearScore / m_totalVoterWeight) * m_multiplierFactor;
 
       if(m_config != NULL && m_config.GetDebugMode())
-         PrintFormat("[SignalAgg] Scores BUY=%.3f SELL=%.3f (x%.2f mult)",
-                    normBull, normBear, m_multiplierFactor);
+         PrintFormat("[SignalAgg] Scores BUY=%.3f SELL=%.3f (x%.2f mult)", normBull, normBear, m_multiplierFactor);
 
       int    minConfluence = (m_config != NULL) ? m_config.GetMinConfluence() : 2;
       double minScore      = (m_config != NULL) ? m_config.GetMinScore()      : 0.45;
@@ -263,12 +290,14 @@ public:
          agg.urgency             = m_scorer.GetUrgencyLevel(normBear);
         }
 
+      ApplyContraVeto(agg);
       return agg;
      }
 
    bool   IsVetoActive()         const { return m_vetoActive;       }
    double GetTotalVoterWeight()  const { return m_totalVoterWeight; }
    double GetMultiplierFactor()  const { return m_multiplierFactor; }
+   string GetVetoReason()        const { return m_vetoReason;       }
   };
 
 #endif // __SIGNAL_AGGREGATOR_MQH__
