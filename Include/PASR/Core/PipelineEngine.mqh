@@ -1,6 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v1.04                                  |
-//| Full 14-stage pipeline implementation.                           |
+//| Core/PipelineEngine.mqh — v1.05                                  |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_PIPELINE_ENGINE_MQH__
@@ -225,11 +224,12 @@ private:
          ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
          ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
          double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+         datetime entryTime = (datetime)PositionGetInteger(POSITION_TIME);
          double curPrice = (orderType == ORDER_TYPE_BUY)
                            ? SymbolInfoDouble(sym, SYMBOL_BID)
                            : SymbolInfoDouble(sym, SYMBOL_ASK);
 
-         ExitSignal sig = m_exit.CheckExit(sym, orderType, entryPrice, curPrice);
+         ExitSignal sig = m_exit.CheckExit(sym, orderType, entryPrice, curPrice, entryTime);
          if(sig.reason == EXIT_NONE) continue;
 
          bool closed = trade.PositionClose(ticket);
