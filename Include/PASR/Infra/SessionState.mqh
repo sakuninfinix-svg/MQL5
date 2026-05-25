@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/SessionState.mqh — v1.02                                   |
+//| Infra/SessionState.mqh — v1.03                                   |
 //| SINGLE SOURCE OF TRUTH untuk semua session/equity state          |
 //+------------------------------------------------------------------+
 #property strict
@@ -120,7 +120,9 @@ public:
    const SSessionSnapshot *GetSnapshot() const { return &m_snap; }
    double PeakEquity() const { return m_snap.peak_equity; }
    double DailyPnL() const { return m_snap.daily_pnl; }
+   double GetDailyPnL() const { return m_snap.daily_pnl; }
    double CurrentDrawdown() const { return m_snap.current_drawdown; }
+   double GetDrawdownPct() const { return m_snap.current_drawdown; }
    double MaxDrawdown() const { return m_snap.max_drawdown; }
 
    bool IsNewDay()
