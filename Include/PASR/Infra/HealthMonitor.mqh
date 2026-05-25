@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/HealthMonitor.mqh — v2.01                                  |
+//| Infra/HealthMonitor.mqh — v2.02                                  |
 //| Self-Healing & System Health Monitoring                          |
 //+------------------------------------------------------------------+
 #property strict
@@ -177,6 +177,7 @@ public:
      }
 
    int  Status() const { return m_status; }
+   int  GetStatus() const { return m_status; }
    virtual bool IsHealthy() const override { return (m_initialized && m_status <= HEALTH_STATUS_WARNING); }
    bool IsDead() const { return (m_status == HEALTH_STATUS_DEAD); }
 
@@ -195,7 +196,8 @@ private:
       ev.id       = event_id;
       ev.priority = 1;
       ev.tag      = comment;
-      m_bus.Push(ev);
+      ev.comment  = comment;
+      m_bus.Dispatch(ev);
      }
 
    void LogHealth(const string msg, int level) const
