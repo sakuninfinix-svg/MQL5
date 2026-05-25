@@ -1,19 +1,6 @@
 //+------------------------------------------------------------------+
-//| Core/IManager.mqh — CANONICAL v2.18                              |
+//| Core/IManager.mqh — CANONICAL v2.19                              |
 //| Base class for all PASR managers                                 |
-//|                                                                  |
-//| CHANGES v2.18 (2026-05-24):                                      |
-//|   S21-003: Uses canonical IDataManager.mqh instead of forward    |
-//|            declaring an incomplete data-provider contract.       |
-//|                                                                  |
-//| CHANGES v2.17 (2026-05-24):                                      |
-//|   BUG-C02 — Added HandlerName() contract used by EventBus and    |
-//|             Orchestrator logging.                                |
-//|   BUG-C03 — Added m_initialized lifecycle guard to base manager. |
-//|   BUG-NEW-06 — Init() now sets m_initialized=true; Deinit()      |
-//|                resets it.                                        |
-//|   BUG-C04 — IManager explicitly extends IEventHandler so         |
-//|             EventBus can call IsListening() polymorphically.     |
 //+------------------------------------------------------------------+
 #pragma once
 #ifndef CORE_IMANAGER_MQH
@@ -21,8 +8,7 @@
 
 #include "IDataManager.mqh"
 
-static const uint PASR_MASK_NOISY_EVENTS = (1u << (uint)EVENT_ID_TICK) |
-                                           (1u << (uint)EVENT_ID_PRICE_UPDATE);
+#define PASR_MAX_EVENT_ID 100
 
 class IManager : public IEventHandler
   {
@@ -32,7 +18,8 @@ protected:
    StrategyConfig    m_cfg;
    bool              m_cfgDirty;
    bool              m_debugMode;
-   uint              m_eventMask;
+   bool              m_eventSubscribed[PASR_MAX_EVENT_ID];
+   bool              m_hasExplicitSubscriptions;
    bool              m_initialized;
 
    void RefreshConfig()
@@ -56,8 +43,10 @@ protected:
 
    void AddEvent(ENUM_EVENT_ID id)
      {
-      if((int)id >= 0 && (int)id < 32)
-         m_eventMask |= (1u << (uint)id);
+      int idx = (int)id;
+      if(idx < 0 || idx >= PASR_MAX_EVENT_ID) return;
+      m_eventSubscribed[idx] = true;
+      m_hasExplicitSubscriptions = true;
      }
 
    string BuildGVPrefix()
@@ -69,8 +58,9 @@ protected:
 
 public:
    IManager() : m_data(NULL), m_bus(NULL), m_cfgDirty(true),
-                m_debugMode(false), m_eventMask(0), m_initialized(false)
-     {}
+                m_debugMode(false), m_hasExplicitSubscriptions(false),
+                m_initialized(false)
+     { ArrayInitialize(m_eventSubscribed, false); }
 
    virtual string HandlerName() const { return "IManager"; }
 
@@ -91,7 +81,8 @@ public:
    virtual void Deinit()
      {
       m_initialized = false;
-      m_eventMask   = 0;
+      ArrayInitialize(m_eventSubscribed, false);
+      m_hasExplicitSubscriptions = false;
      }
 
    virtual void OnEvent(const PASREvent &ev) {}
@@ -101,14 +92,14 @@ public:
 
    virtual bool IsListening(ENUM_EVENT_ID id) const
      {
-      if(m_eventMask == 0)
+      int idx = (int)id;
+      if(idx < 0 || idx >= PASR_MAX_EVENT_ID) return false;
+      if(!m_hasExplicitSubscriptions)
         {
-         if((int)id >= 0 && (int)id < 32)
-            return (PASR_MASK_NOISY_EVENTS & (1u << (uint)id)) == 0;
-         return true;
+         // Default: listen to everything except high-frequency noisy events.
+         return (id != EVENT_ID_TICK && id != EVENT_ID_PRICE_UPDATE);
         }
-      if((int)id < 0 || (int)id >= 32) return false;
-      return (m_eventMask & (1u << (uint)id)) != 0;
+      return m_eventSubscribed[idx];
      }
 
    virtual bool IsHealthy() const
