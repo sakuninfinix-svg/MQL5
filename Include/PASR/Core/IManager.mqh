@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/IManager.mqh — CANONICAL v2.19                              |
+//| Core/IManager.mqh — CANONICAL v2.20                              |
 //| Base class for all PASR managers                                 |
 //+------------------------------------------------------------------+
 #pragma once
@@ -30,6 +30,13 @@ protected:
      }
 
    void DispatchEvent(const PASREvent &ev)
+     {
+      if(m_bus == NULL) return;
+      if(CheckPointer(m_bus) == POINTER_INVALID) return;
+      m_bus.Dispatch(ev);
+     }
+
+   void QueueEvent(const PASREvent &ev)
      {
       if(m_bus == NULL) return;
       if(CheckPointer(m_bus) == POINTER_INVALID) return;
@@ -95,10 +102,7 @@ public:
       int idx = (int)id;
       if(idx < 0 || idx >= PASR_MAX_EVENT_ID) return false;
       if(!m_hasExplicitSubscriptions)
-        {
-         // Default: listen to everything except high-frequency noisy events.
          return (id != EVENT_ID_TICK && id != EVENT_ID_PRICE_UPDATE);
-        }
       return m_eventSubscribed[idx];
      }
 
