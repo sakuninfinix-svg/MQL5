@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalManager.mqh — v4.03                                |
+//| Signal/SignalManager.mqh — v4.04                                |
 //| Signal orchestration using canonical PASREvent model             |
 //+------------------------------------------------------------------+
 #property strict
@@ -97,6 +97,7 @@ private:
                     decision.orderType == ORDER_TYPE_BUY ? "BUY" : "SELL",
                     support, resistance, (int)decision.patternType,
                     decision.signalShift, decision.reason);
+      ev.comment  = ev.tag;
       ev.ticket   = (ulong)decision.orderType;
       m_bus.Push(ev);
      }
@@ -176,10 +177,7 @@ private:
          int    currentHtfAlign = (dir == 1) ? supHtfAlign   : resHtfAlign;
 
          if(m_config.GetUseMTF() && currentHtfAlign < 0)
-           {
-            reason = (dir == 1) ? "HTF Contra-Support" : "HTF Contra-Resistance";
-            continue;
-           }
+           { reason = (dir == 1) ? "HTF Contra-Support" : "HTF Contra-Resistance"; continue; }
 
          if((dir == 1 && isSupBroken) || (dir == -1 && isResBroken))
            { reason = "Zone broken"; continue; }
@@ -190,10 +188,7 @@ private:
                atrPoints, htfSupport, htfResistance,
                currentBufMult, support, resistance,
                filterResult, rates))
-           {
-            reason = filterResult.reason;
-            continue;
-           }
+           { reason = filterResult.reason; continue; }
 
          ENUM_SIGNAL_DIR signalDir = (dir == 1) ? SIGNAL_BUY : SIGNAL_SELL;
 
@@ -231,8 +226,6 @@ private:
 
    void ApplyZoneUpdate(const PASREvent &ev)
      {
-      // Canonical lightweight mapping:
-      // data1 = ATR points, data2 = support, tag can optionally carry resistance.
       if(ev.data1 > 0.0) m_marketData.atrPoints = ev.data1;
       if(ev.data2 > 0.0) m_marketData.support = ev.data2;
       double res = StringToDouble(ev.tag);
@@ -244,9 +237,7 @@ public:
       : IManager(), m_pattern(NULL), m_sr(NULL), m_regime(NULL),
         m_signalPending(false), m_lastProcessedBar(0),
         m_hasNewTick(false), m_configReady(false)
-     {
-      m_marketData.Reset();
-     }
+     { m_marketData.Reset(); }
 
    virtual string HandlerName() const override { return "SignalManager"; }
 
@@ -273,6 +264,24 @@ public:
      { return m_aggregator.RegisterSource(src, weight); }
 
    int SourceCount() const { return m_aggregator.SourceCount(); }
+
+   SSignal AggregateSignals()
+     {
+      EnsureConfigReady();
+      SSignal out;
+      out.Clear();
+      AggregatedSignal agg = m_aggregator.Aggregate();
+      if(agg.vetoed || agg.direction == SIGNAL_NONE) return out;
+      out.direction     = agg.direction;
+      out.confidence    = agg.normalizedScore;
+      out.primarySource = agg.contributingSources;
+      out.entryPrice    = (agg.direction == SIGNAL_BUY)
+                          ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+                          : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      out.slPoints      = 0.0;
+      out.tpPoints      = 0.0;
+      return out;
+     }
 
    virtual void DeclareEvents() override
      {
@@ -317,18 +326,10 @@ public:
      {
       switch(ev.id)
         {
-         case EVENT_ID_PRICE_UPDATE:
-            OnPriceUpdate();
-            break;
-         case EVENT_ID_NEW_BAR:
-            OnNewBar();
-            break;
-         case EVENT_ID_CONFIG_RELOAD:
-            OnConfigReload();
-            break;
-         case EVENT_ID_ZONE_UPDATE:
-            ApplyZoneUpdate(ev);
-            break;
+         case EVENT_ID_PRICE_UPDATE:  OnPriceUpdate(); break;
+         case EVENT_ID_NEW_BAR:       OnNewBar(); break;
+         case EVENT_ID_CONFIG_RELOAD: OnConfigReload(); break;
+         case EVENT_ID_ZONE_UPDATE:   ApplyZoneUpdate(ev); break;
          case EVENT_ID_EMERGENCY_STOP:
             m_signalPending = false;
             if(m_config.GetDebugMode()) Log("Emergency Stop: Clearing pending signals.");
