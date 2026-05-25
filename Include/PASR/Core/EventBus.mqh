@@ -1,25 +1,6 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — v3.03                                       |
+//| Core/EventBus.mqh — v3.04                                       |
 //| High-performance event dispatch with binary-heap priority queue  |
-//|                                                                  |
-//| CHANGELOG:                                                       |
-//|   v3.03 (2026-05-24):                                           |
-//|     BUG-C04: Dispatch() and Drain() now respect handler          |
-//|              IsListening(event_id) filters. IEventHandler adds   |
-//|              default IsListening() returning true.               |
-//|   v3.02 (2026-05-23) — Sprint 11 API Unification:               |
-//|     BUG-N06: Register() alias added (= Subscribe()) so          |
-//|              Orchestrator::RegisterManager() compiles cleanly.  |
-//|     BUG-N01: Dispatch(ev) single-event helper added for         |
-//|              intra-pipeline drain (Stage_AnalysisSR).           |
-//|     Drain() now returns count of dispatched events.             |
-//|   v3.01 (2026-05-23) — Sprint 4 Performance Hardening:          |
-//|     - REPLACED O(n) linear scan with binary min-heap            |
-//|     - Push(): O(log n) sift-up                                  |
-//|     - Pop() / Drain(): O(log n) sift-down per event             |
-//|     - Added Stats() struct for telemetry monitoring             |
-//|     - Added EVENTBUS_MAX_DEPTH guard                            |
-//|   v3.00 — Initial EventBus with CEventBus class + IEventHandler |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_EVENTBUS_MQH__
@@ -30,9 +11,6 @@
 #define EVENTBUS_MAX_DEPTH   256
 #define EVENTBUS_MAX_SUBS     32
 
-//+------------------------------------------------------------------+
-//| IEventHandler — interface all managers must implement            |
-//+------------------------------------------------------------------+
 class IEventHandler
   {
 public:
@@ -41,9 +19,6 @@ public:
    virtual bool      IsListening(ENUM_EVENT_ID id) const { return true; }
   };
 
-//+------------------------------------------------------------------+
-//| EventBus Stats                                                   |
-//+------------------------------------------------------------------+
 struct SEventBusStats
   {
    int               queue_depth;
@@ -53,9 +28,6 @@ struct SEventBusStats
    ulong             total_drained;
   };
 
-//+------------------------------------------------------------------+
-//| CEventBus — Binary min-heap priority queue + subscriber dispatch |
-//+------------------------------------------------------------------+
 class CEventBus
   {
 private:
@@ -98,6 +70,26 @@ private:
            }
          else break;
         }
+     }
+
+   int FindWorstPriorityIndex() const
+     {
+      if(m_size <= 0) return -1;
+      int worst = 1;
+      int firstLeaf = MathMax(1, m_size / 2 + 1);
+      for(int i = firstLeaf; i <= m_size; i++)
+        {
+         if(m_heap[i].priority > m_heap[worst].priority)
+            worst = i;
+        }
+      return worst;
+     }
+
+   void RestoreHeapAt(int idx)
+     {
+      if(idx <= 0 || idx > m_size) return;
+      SiftUp(idx);
+      SiftDown(idx);
      }
 
    void RouteEvent(const PASREvent &ev)
@@ -145,10 +137,15 @@ public:
       m_stats.total_pushed++;
       if(m_size >= EVENTBUS_MAX_DEPTH)
         {
-         if(ev.priority >= m_heap[m_size].priority)
-           { m_stats.total_dropped++; return false; }
-         m_heap[m_size] = ev;
-         SiftUp(m_size);
+         int worstIdx = FindWorstPriorityIndex();
+         if(worstIdx < 1 || ev.priority >= m_heap[worstIdx].priority)
+           {
+            m_stats.total_dropped++;
+            return false;
+           }
+         m_heap[worstIdx] = ev;
+         RestoreHeapAt(worstIdx);
+         m_stats.queue_depth = m_size;
          return true;
         }
       m_size++;
