@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/ExecutionManager.mqh — v3.03                               |
+//| Trade/ExecutionManager.mqh — v3.04                               |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -21,7 +21,7 @@ private:
    bool      m_has_pending;
    TradePlan m_pending_plan;
    int       m_pending_retries;
-   datetime  m_next_retry_time;
+   ulong     m_next_retry_ms;
 
    void ClampStopsToMinLevel(ENUM_SIGNAL_DIR dir, double &sl, double &tp)
      {
@@ -32,18 +32,14 @@ private:
       if(dir == SIGNAL_BUY)
         {
          double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         if(sl > 0.0 && (ask - sl) < stopLevel)
-            sl = NormalizeDouble(ask - stopLevel, _Digits);
-         if(tp > 0.0 && (tp - ask) < stopLevel)
-            tp = NormalizeDouble(ask + stopLevel, _Digits);
+         if(sl > 0.0 && (ask - sl) < stopLevel) sl = NormalizeDouble(ask - stopLevel, _Digits);
+         if(tp > 0.0 && (tp - ask) < stopLevel) tp = NormalizeDouble(ask + stopLevel, _Digits);
         }
       else if(dir == SIGNAL_SELL)
         {
          double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         if(sl > 0.0 && (sl - bid) < stopLevel)
-            sl = NormalizeDouble(bid + stopLevel, _Digits);
-         if(tp > 0.0 && (bid - tp) < stopLevel)
-            tp = NormalizeDouble(bid - stopLevel, _Digits);
+         if(sl > 0.0 && (sl - bid) < stopLevel) sl = NormalizeDouble(bid + stopLevel, _Digits);
+         if(tp > 0.0 && (bid - tp) < stopLevel) tp = NormalizeDouble(bid - stopLevel, _Digits);
         }
      }
 
@@ -85,10 +81,21 @@ private:
       return false;
      }
 
+   void DispatchPositionOpened(const SExecResult &result)
+     {
+      PASREvent ev;
+      ev.id       = EVENT_ID_POSITION_UPDATE;
+      ev.ticket   = result.ticket;
+      ev.priority = 15;
+      ev.data1    = 1.0; // open/refresh signal for RiskManager::SyncOpenTradesFromBroker()
+      ev.comment  = "OrderPlaced";
+      DispatchEvent(ev);
+     }
+
 public:
    CExecutionManager()
       : IManager(), m_maxRetries(3), m_retryDelayMs(500),
-        m_has_pending(false), m_pending_retries(0), m_next_retry_time(0)
+        m_has_pending(false), m_pending_retries(0), m_next_retry_ms(0)
      {}
 
    virtual string HandlerName() const override { return "ExecutionManager"; }
@@ -99,7 +106,7 @@ public:
       m_trade.SetExpertMagicNumber(m_cfg.MagicNumber);
       m_trade.SetDeviationInPoints((int)MathMax(10.0, m_cfg.Market.SpreadFilterPips * 10.0));
       m_trade.SetTypeFilling(ORDER_FILLING_IOC);
-      Print("[Exec] v3.03 Init OK");
+      Print("[Exec] v3.04 Init OK");
       return true;
      }
 
@@ -117,8 +124,7 @@ public:
 
    virtual void OnEvent(const PASREvent &ev) override
      {
-      if(ev.id == EVENT_ID_EMERGENCY_STOP)
-         m_has_pending = false;
+      if(ev.id == EVENT_ID_EMERGENCY_STOP) m_has_pending = false;
      }
 
    SExecResult Execute(const TradePlan &plan)
@@ -131,7 +137,11 @@ public:
          return result;
         }
 
-      if(SendOnce(plan, result)) return result;
+      if(SendOnce(plan, result))
+        {
+         DispatchPositionOpened(result);
+         return result;
+        }
 
       if(result.retcode == TRADE_RETCODE_REQUOTE ||
          result.retcode == TRADE_RETCODE_PRICE_CHANGED ||
@@ -140,7 +150,7 @@ public:
          m_has_pending = true;
          m_pending_plan = plan;
          m_pending_retries = 0;
-         m_next_retry_time = TimeCurrent();
+         m_next_retry_ms = GetTickCount64() + (ulong)m_retryDelayMs;
          result.status = EXEC_RETRYING;
          Print("[Exec] Queued for retry: ", result.retcode, " ", result.comment);
         }
@@ -150,18 +160,15 @@ public:
    void ProcessRetryQueue()
      {
       if(!m_has_pending) return;
-      if(TimeCurrent() < m_next_retry_time) return;
+      ulong nowMs = GetTickCount64();
+      if(nowMs < m_next_retry_ms) return;
 
       SExecResult result;
       if(SendOnce(m_pending_plan, result))
         {
          m_has_pending = false;
          PrintFormat("[Exec] Retry success on attempt %d ticket=%llu", m_pending_retries + 1, result.ticket);
-         PASREvent ev;
-         ev.id = EVENT_ID_POSITION_UPDATE;
-         ev.ticket = result.ticket;
-         ev.priority = 15;
-         DispatchEvent(ev);
+         DispatchPositionOpened(result);
          return;
         }
 
@@ -174,7 +181,7 @@ public:
         }
 
       int delayMs = m_retryDelayMs * (1 << m_pending_retries);
-      m_next_retry_time = TimeCurrent() + (datetime)(delayMs / 1000) + 1;
+      m_next_retry_ms = nowMs + (ulong)delayMs;
       PrintFormat("[Exec] Retry %d/%d in %dms. Code=%d", m_pending_retries, m_maxRetries, delayMs, result.retcode);
      }
 
