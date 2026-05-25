@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v1.05                                  |
+//| Core/PipelineEngine.mqh — v1.06                                  |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_PIPELINE_ENGINE_MQH__
@@ -50,11 +50,27 @@ private:
       return STAGE_OK;
      }
 
+   void FillPriceContext(PipelineContext &ctx)
+     {
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      ctx.bid = bid;
+      ctx.ask = ask;
+      ctx.spread_pts = (point > 0.0 && ask > bid) ? (ask - bid) / point : 0.0;
+      ctx.atr_points = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
+      ctx.atr = ctx.atr_points;
+      ctx.bar_time = iTime(_Symbol, _Period, 0);
+      ctx.market_open = (bid > 0.0 && ask > 0.0);
+      ctx.session = DetectSession();
+     }
+
    ENUM_STAGE_RESULT Stage_DataSync(PipelineContext &ctx)
      {
       if(SkipIfNull(m_data, "DataSync") == STAGE_SKIP) return STAGE_SKIP;
       m_stage_timer.Start();
       m_data.OnTick();
+      FillPriceContext(ctx);
       if(m_profiling_enabled) m_stage_timer.Log("Stage1_DataSync");
       return STAGE_OK;
      }
@@ -95,13 +111,18 @@ private:
      {
       if(m_regime != NULL)
         {
+         m_stage_timer.Start();
          m_regime.OnNewBar();
          ctx.regime = m_regime.GetRegime();
+         ctx.regime_confidence = m_regime.IsReady() ? 1.0 : 0.0;
+         if(m_profiling_enabled) m_stage_timer.Log("Stage5_RegimeDet");
          return STAGE_OK;
         }
       if(SkipIfNull(m_regime_det, "RegimeDet") == STAGE_SKIP) return STAGE_SKIP;
       m_stage_timer.Start();
       ctx.regime = m_regime_det.GetCurrentRegime();
+      const SDynamicParams &params = m_regime_det.GetParams();
+      ctx.regime_confidence = MathMin(1.0, MathMax(0.0, params.trend_strength / 100.0));
       if(m_profiling_enabled) m_stage_timer.Log("Stage5_RegimeDet");
       return STAGE_OK;
      }
@@ -111,6 +132,7 @@ private:
       if(SkipIfNull(m_signal, "SignalGen") == STAGE_SKIP) return STAGE_SKIP;
       m_stage_timer.Start();
       ctx.signal = m_signal.AggregateSignals();
+      ctx.signal_strength = ctx.signal.confidence;
       if(m_debug_mode)
          PrintFormat("[Pipeline] SignalGen: dir=%d conf=%.3f src=%s", (int)ctx.signal.direction, ctx.signal.confidence, ctx.signal.primarySource);
       if(m_profiling_enabled) m_stage_timer.Log("Stage6_SignalGen");
@@ -121,7 +143,17 @@ private:
      {
       if(SkipIfNull(m_ai_orch, "AIInfer") == STAGE_SKIP) return STAGE_SKIP;
       m_stage_timer.Start();
-      ctx.ai_score = m_ai_orch.Evaluate();
+      ctx.ai_score = (float)m_ai_orch.Evaluate();
+      ctx.ai_veto = m_ai_orch.GetLastVeto();
+      ctx.drift_score = (float)m_ai_orch.GetLastDriftScore();
+      ctx.ai_result.score = ctx.ai_score;
+      ctx.ai_result.drift_index = ctx.drift_score;
+      ctx.ai_result.model_healthy = m_ai_orch.IsHealthy();
+      if(ctx.ai_veto)
+        {
+         ctx.signal.Clear();
+         ctx.exit_message = "AI veto";
+        }
       if(m_profiling_enabled) m_stage_timer.Log("Stage7_AIInfer");
       return STAGE_OK;
      }
@@ -147,7 +179,11 @@ private:
    ENUM_STAGE_RESULT Stage_AdaptiveParams(PipelineContext &ctx)
      {
       if(SkipIfNull(m_adaptive, "AdaptiveParams") == STAGE_SKIP) return STAGE_SKIP;
-      if(!ctx.new_bar) return STAGE_SKIP;
+      if(!ctx.new_bar)
+        {
+         ctx.plan.valid = false;
+         return STAGE_SKIP;
+        }
       m_stage_timer.Start();
       m_adaptive.OnNewBar();
       if(m_profiling_enabled) m_stage_timer.Log("Stage9_AdaptiveParams");
@@ -171,13 +207,22 @@ private:
       plan.slPoints = ctx.signal.slPoints;
       plan.comment = StringFormat("PASR|PIPE|%.0f", ctx.signal.confidence * 100.0);
       plan.valid = (plan.direction != SIGNAL_NONE && plan.lot > 0 && plan.sl > 0 && plan.tp > 0);
+
       ctx.plan.direction = plan.direction;
       ctx.plan.entryPrice = plan.entryPrice;
       ctx.plan.sl = plan.sl;
       ctx.plan.tp = plan.tp;
       ctx.plan.slPoints = plan.slPoints;
+      ctx.plan.tpPoints = ctx.signal.tpPoints;
       ctx.plan.lot = plan.lot;
       ctx.plan.valid = plan.valid;
+
+      if(!plan.valid)
+        {
+         ctx.exit_message = "Execution skipped: invalid trade plan";
+         if(m_profiling_enabled) m_stage_timer.Log("Stage10_Execution");
+         return STAGE_SKIP;
+        }
 
       ctx.exec_result = m_exec.Execute(plan);
 
@@ -247,8 +292,7 @@ private:
       if(SkipIfNull(m_recovery, "Recovery") == STAGE_SKIP) return STAGE_SKIP;
       m_stage_timer.Start();
       m_recovery.OnPriceUpdate();
-      if(ctx.new_bar)
-         m_recovery.OnNewBar();
+      if(ctx.new_bar) m_recovery.OnNewBar();
       if(m_profiling_enabled) m_stage_timer.Log("Stage12_Recovery");
       return STAGE_OK;
      }
