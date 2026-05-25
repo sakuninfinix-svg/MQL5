@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/Orchestrator.mqh — v3.09                                    |
+//| Core/Orchestrator.mqh — v3.10                                    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property strict
@@ -55,6 +55,8 @@ private:
    bool                       m_initialised;
    bool                       m_profiling_enabled;
    bool                       m_new_bar_flag;
+   ulong                      m_last_price_dispatch_ms;
+   int                        m_price_dispatch_throttle_ms;
 
    bool BarChanged()
      {
@@ -66,7 +68,6 @@ private:
    void RegisterManager(IManager *mgr)
      {
       if(mgr == NULL || m_bus == NULL) return;
-      mgr.DeclareEvents();
       if(!m_bus.Register(mgr))
          PrintFormat("[Orchestrator] Register failed for %s", mgr.HandlerName());
      }
@@ -100,7 +101,8 @@ public:
         m_latency_sim(NULL), m_srcPattern(NULL), m_srcSR(NULL),
         m_srcAI(NULL), m_srcRegime(NULL), m_bus(NULL), m_cfgMgr(NULL),
         m_pipeline(NULL), m_lastBarTime(0), m_debugMode(false),
-        m_initialised(false), m_profiling_enabled(true), m_new_bar_flag(false)
+        m_initialised(false), m_profiling_enabled(true), m_new_bar_flag(false),
+        m_last_price_dispatch_ms(0), m_price_dispatch_throttle_ms(50)
      {}
 
    ~COrchestrator() { FreeAll(); }
@@ -116,6 +118,7 @@ public:
    void SetDebugMode(bool enable) { m_debugMode = enable; }
    void SetProfilingEnabled(bool enable) { m_profiling_enabled = enable; }
    bool IsProfilingEnabled() const { return m_profiling_enabled; }
+   void SetPriceDispatchThrottleMs(int ms) { if(ms >= 0) m_price_dispatch_throttle_ms = ms; }
 
    void OnTick()
      {
@@ -126,10 +129,16 @@ public:
       if(BarChanged()) m_new_bar_flag = true;
       if(m_bus != NULL)
         {
-         PASREvent evTick;
-         evTick.id       = EVENT_ID_PRICE_UPDATE;
-         evTick.priority = 5;
-         m_bus.Push(evTick);
+         ulong nowMs = GetTickCount64();
+         if(m_price_dispatch_throttle_ms == 0 || nowMs - m_last_price_dispatch_ms >= (ulong)m_price_dispatch_throttle_ms)
+           {
+            PASREvent evTick;
+            evTick.id       = EVENT_ID_PRICE_UPDATE;
+            evTick.priority = 90;
+            evTick.timestamp= TimeCurrent();
+            m_bus.Dispatch(evTick);
+            m_last_price_dispatch_ms = nowMs;
+           }
         }
      }
 
