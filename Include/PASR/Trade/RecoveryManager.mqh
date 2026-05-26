@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property link      "agsicentre.wordpress.com"
-#property version   "2.21"
+#property version   "2.22"
 #property strict
 
 #ifndef __TRADE_RECOVERY_MANAGER_MQH__
@@ -17,6 +17,8 @@
 #include "../Analysis/Pattern/PatternManager.mqh"
 #include "../Data/RegimeTypes.mqh"
 #include "RecoveryEngine.mqh"
+
+#define RECOVERY_MIN_FLOATING_LOSS_ATR 0.50
 
 struct RecoveryStats
   {
@@ -94,6 +96,7 @@ private:
    int               m_todayRecoveryCount;
    double            m_equityBaseline;
    bool              m_recoveryHaltedDueToDecay;
+   double            m_minFloatingLossATR;
 
    bool IsFakeoutPending(ulong ticket) const
      {
@@ -145,17 +148,45 @@ private:
       ArrayResize(engines,keep);
      }
 
+   double GetFloatingLossPoints(RecoveryEngine *r) const
+     {
+      if(r==NULL || !PositionSelectByTicket(r.mainTicket)) return 0.0;
+      ENUM_POSITION_TYPE ptype=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      double openPrice=PositionGetDouble(POSITION_PRICE_OPEN);
+      double curPrice=(ptype==POSITION_TYPE_BUY)?SymbolInfoDouble(_Symbol,SYMBOL_BID):SymbolInfoDouble(_Symbol,SYMBOL_ASK);
+      double pnlPoints=(ptype==POSITION_TYPE_BUY)?(curPrice-openPrice)/_Point:(openPrice-curPrice)/_Point;
+      return (pnlPoints < 0.0) ? -pnlPoints : 0.0;
+     }
+
+   bool HasMinimumFloatingLoss(RecoveryEngine *r)
+     {
+      if(m_minFloatingLossATR <= 0.0) return true;
+      double atrPoints = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
+      if(atrPoints <= 0.0) return true;
+      double lossPoints = GetFloatingLossPoints(r);
+      double minLoss = atrPoints * m_minFloatingLossATR;
+      if(lossPoints < minLoss)
+        {
+         if(m_debugMode)
+            PrintFormat("[Recovery] Skipped: floating loss %.1f < min %.1f pts", lossPoints, minLoss);
+         return false;
+        }
+      return true;
+     }
+
    void CloseActivePosition(RecoveryEngine *r, const string reason)
      {
       if(r==NULL || r.state==TRADE_STATE_DONE) return;
       bool wasRecovered=(r.recoveryAttempts>0 && r.state==TRADE_STATE_RECOVERY);
       bool fakeoutPending=IsFakeoutPending(r.mainTicket);
       double profitPoints=0.0;
+      double realizedProfit=0.0;
       ulong closedTicket=r.mainTicket;
       if(PositionSelectByTicket(r.mainTicket))
         {
          double closePrice=(r.direction==1)?SymbolInfoDouble(_Symbol,SYMBOL_BID):SymbolInfoDouble(_Symbol,SYMBOL_ASK);
          profitPoints=(r.direction==1)?(closePrice-r.entryPrice)/_Point:(r.entryPrice-closePrice)/_Point;
+         realizedProfit=PositionGetDouble(POSITION_PROFIT)+PositionGetDouble(POSITION_SWAP)+PositionGetDouble(POSITION_COMMISSION);
         }
       r.state=TRADE_STATE_DONE;
       if(PositionSelectByTicket(r.mainTicket))
@@ -175,7 +206,7 @@ private:
               }
             if(fakeoutPending && profitPoints>0) m_stats.fakeoutsRecovered++;
             ClearFakeoutPending(closedTicket);
-            if(m_debugMode) PrintFormat("[Recovery] Closed %d: %s profit=%.2fpts",r.mainTicket,reason,profitPoints);
+            if(m_debugMode) PrintFormat("[Recovery] Closed %d: %s profit=%.2fpts pnl=%.2f",r.mainTicket,reason,profitPoints,realizedProfit);
            }
         }
       r.ClearGVs(BuildGVPrefix()); r.Reset(); r.active=false;
@@ -184,7 +215,8 @@ private:
       ev.priority = 10;
       ev.ticket   = closedTicket;
       ev.data1    = 1.0;
-      ev.profit   = 0.0;
+      ev.profit   = realizedProfit;
+      ev.comment  = reason;
       DispatchEvent(ev);
      }
 
@@ -201,6 +233,7 @@ private:
       double slDistance=(ptype==POSITION_TYPE_BUY)?(curPrice-slPrice):(slPrice-curPrice);
       double threshold=atrPoints*m_cfg.Risk.SLMultiplier*0.4;
       if(slDistance>=threshold) return false;
+      if(!HasMinimumFloatingLoss(r)) return false;
       int level=MathMin(3,r.recoveryAttempts+1);
       if(level<2) return false;
       double slAdjust=atrPoints*m_cfg.Risk.SLMultiplier*0.5;
@@ -260,6 +293,7 @@ private:
    bool AttemptRecovery(RecoveryEngine *r)
      {
       if(r==NULL) return false;
+      if(!HasMinimumFloatingLoss(r)) return false;
       if(!m_stats.IsRecoveryAllowed())
         { PrintFormat("[Recovery][LIMIT] Daily limit %d/%d. Blocking ticket=%d",m_stats.recoveryAttemptsToday,m_stats.maxRecoveryAttemptsPerDay,r.mainTicket); return false; }
       double currentEquity=AccountInfoDouble(ACCOUNT_EQUITY);
@@ -277,7 +311,7 @@ private:
       r.lastKnownATR=m_data.GetATRPoints();
       r.SaveState(BuildGVPrefix());
       if(m_stats.equityAtFirstRecovery<=0) m_stats.equityAtFirstRecovery=currentEquity;
-      PASREvent ev; ev.id=EVENT_ID_RECOVERY_OPPORTUNITY; ev.priority=20; DispatchEvent(ev);
+      if(m_debugMode) PrintFormat("[Recovery] Recovery state armed ticket=%d attempts=%d", r.mainTicket, r.recoveryAttempts);
       return true;
      }
 
@@ -307,13 +341,6 @@ private:
       if(TimeCurrent()>r.entryTime+(datetime)(maxDays*86400)) CloseActivePosition(r,"MaxDurationExpiry");
      }
 
-   void OnRecoveryOpportunity()
-     {
-      int sz=ArraySize(engines);
-      for(int i=0;i<sz;i++)
-        { RecoveryEngine *r=engines[i]; if(r==NULL||!r.active) continue; if(r.state!=TRADE_STATE_RECOVERY) continue; if(r.recoveryCooldownExpiry>0&&TimeCurrent()<r.recoveryCooldownExpiry) continue; if(m_debugMode) PrintFormat("[Recovery] Opportunity ticket=%d",r.mainTicket); }
-     }
-
    void OnEmergencyStop()
      {
       PrintFormat("[Recovery] EMERGENCY STOP. Closing %d engines.",GetActiveEngineCount());
@@ -330,7 +357,8 @@ public:
         m_lastPartialCloseMs(0), m_partialCloseThrottleMs(500),
         m_regimeAware(false), m_minRegimeScore(0.0),
         m_lastRecoveryCheckDay(0), m_todayRecoveryCount(0),
-        m_equityBaseline(0.0), m_recoveryHaltedDueToDecay(false)
+        m_equityBaseline(0.0), m_recoveryHaltedDueToDecay(false),
+        m_minFloatingLossATR(RECOVERY_MIN_FLOATING_LOSS_ATR)
      { ArrayResize(engines,0); ArrayResize(m_fakeoutPendingTickets,0); m_stats.Init(); }
 
    ~CRecoveryManager()
@@ -358,13 +386,13 @@ public:
 
    void SetTrailingThrottle(int ms)     { if(ms>0) m_trailingThrottleMs=ms; }
    void SetPartialCloseThrottle(int ms) { if(ms>0) m_partialCloseThrottleMs=ms; }
+   void SetMinFloatingLossATR(double mult) { m_minFloatingLossATR = MathMax(0.0, mult); }
 
    virtual void DeclareEvents() override
      {
       AddEvent(EVENT_ID_POSITION_UPDATE);
       AddEvent(EVENT_ID_PRICE_UPDATE);
       AddEvent(EVENT_ID_NEW_BAR);
-      AddEvent(EVENT_ID_RECOVERY_OPPORTUNITY);
       AddEvent(EVENT_ID_EMERGENCY_STOP);
       AddEvent(EVENT_ID_CONFIG_RELOAD);
      }
@@ -373,12 +401,11 @@ public:
      {
       switch(ev.id)
         {
-         case EVENT_ID_NEW_BAR:               OnNewBar();              break;
-         case EVENT_ID_PRICE_UPDATE:          OnPriceUpdate();         break;
-         case EVENT_ID_POSITION_UPDATE:       OnPriceUpdate(); CompactEngines(); break;
-         case EVENT_ID_RECOVERY_OPPORTUNITY:  OnRecoveryOpportunity(); break;
-         case EVENT_ID_EMERGENCY_STOP:        OnEmergencyStop();       break;
-         case EVENT_ID_CONFIG_RELOAD:         OnConfigReload();        break;
+         case EVENT_ID_NEW_BAR:         OnNewBar();      break;
+         case EVENT_ID_PRICE_UPDATE:    OnPriceUpdate(); break;
+         case EVENT_ID_POSITION_UPDATE: CompactEngines(); break;
+         case EVENT_ID_EMERGENCY_STOP:  OnEmergencyStop(); break;
+         case EVENT_ID_CONFIG_RELOAD:   OnConfigReload(); break;
          default: break;
         }
      }
