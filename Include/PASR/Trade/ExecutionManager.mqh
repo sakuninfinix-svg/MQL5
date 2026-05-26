@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/ExecutionManager.mqh — v3.04                               |
+//| Trade/ExecutionManager.mqh — v3.05                               |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -81,15 +81,23 @@ private:
       return false;
      }
 
-   void DispatchPositionOpened(const SExecResult &result)
+   void DispatchPositionOpened(const TradePlan &plan, const SExecResult &result)
      {
-      PASREvent ev;
-      ev.id       = EVENT_ID_POSITION_UPDATE;
-      ev.ticket   = result.ticket;
-      ev.priority = 15;
-      ev.data1    = 1.0; // open/refresh signal for RiskManager::SyncOpenTradesFromBroker()
-      ev.comment  = "OrderPlaced";
-      DispatchEvent(ev);
+      PASREvent evOpen;
+      evOpen.id       = EVENT_ID_TRADE_OPEN;
+      evOpen.ticket   = result.ticket;
+      evOpen.priority = 10;
+      evOpen.data1    = (double)plan.direction;
+      evOpen.comment  = "OrderPlaced";
+      DispatchEvent(evOpen);
+
+      PASREvent evUpdate;
+      evUpdate.id       = EVENT_ID_POSITION_UPDATE;
+      evUpdate.ticket   = result.ticket;
+      evUpdate.priority = 15;
+      evUpdate.data1    = 1.0; // open/refresh signal for RiskManager::SyncOpenTradesFromBroker()
+      evUpdate.comment  = "OrderPlaced";
+      DispatchEvent(evUpdate);
      }
 
 public:
@@ -106,7 +114,7 @@ public:
       m_trade.SetExpertMagicNumber(m_cfg.MagicNumber);
       m_trade.SetDeviationInPoints((int)MathMax(10.0, m_cfg.Market.SpreadFilterPips * 10.0));
       m_trade.SetTypeFilling(ORDER_FILLING_IOC);
-      Print("[Exec] v3.04 Init OK");
+      Print("[Exec] v3.05 Init OK");
       return true;
      }
 
@@ -139,7 +147,7 @@ public:
 
       if(SendOnce(plan, result))
         {
-         DispatchPositionOpened(result);
+         DispatchPositionOpened(plan, result);
          return result;
         }
 
@@ -168,7 +176,7 @@ public:
         {
          m_has_pending = false;
          PrintFormat("[Exec] Retry success on attempt %d ticket=%llu", m_pending_retries + 1, result.ticket);
-         DispatchPositionOpened(result);
+         DispatchPositionOpened(m_pending_plan, result);
          return;
         }
 
