@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Analysis/MarketRegimeDetector.mqh — v2.03                        |
+//| Analysis/MarketRegimeDetector.mqh — v2.04                        |
 //| Canonical EMarketRegime detector                                 |
 //+------------------------------------------------------------------+
 #property strict
@@ -14,7 +14,7 @@ struct SDynamicParams
    double sl_multiplier;
    double tp_multiplier;
    double risk_percent;
-   double entry_threshold;
+   double entry_threshold; // INFO ONLY. Signal filtering uses SignalConfig thresholds.
    int    max_positions;
    string regime_name;
    double volatility_ratio;
@@ -48,7 +48,37 @@ private:
    ulong            m_update_count;
    EMarketRegime    m_prev_regime;
    int              m_regime_stable_bars;
-   const int        MIN_STABLE_BARS;
+   int              m_min_stable_bars;
+   double           m_adx_hysteresis_band;
+
+   int GetMinStableBarsForPeriod(ENUM_TIMEFRAMES tf) const
+     {
+      switch(tf)
+        {
+         case PERIOD_M1:
+         case PERIOD_M5:  return 5;
+         case PERIOD_M15: return 5;
+         case PERIOD_M30: return 4;
+         case PERIOD_H1:  return 3;
+         case PERIOD_H4:  return 3;
+         default:         return 3;
+        }
+     }
+
+   double GetADXThresholdForPeriod(ENUM_TIMEFRAMES tf) const
+     {
+      switch(tf)
+        {
+         case PERIOD_M1:
+         case PERIOD_M5:
+         case PERIOD_M15: return 18.0;
+         case PERIOD_M30: return 19.0;
+         case PERIOD_H1:  return 21.0;
+         case PERIOD_H4:  return 23.0;
+         case PERIOD_D1:  return 25.0;
+         default:         return 22.0;
+        }
+     }
 
    bool ReadADX(const string symbol, ENUM_TIMEFRAMES tf,
                 double &adx, double &diPlus, double &diMinus) const
@@ -123,7 +153,8 @@ public:
    CMarketRegimeDetector() : m_current_regime(REGIME_UNKNOWN),
                              m_prev_regime(REGIME_UNKNOWN),
                              m_last_update(0), m_update_count(0),
-                             m_regime_stable_bars(0), MIN_STABLE_BARS(2)
+                             m_regime_stable_bars(0), m_min_stable_bars(3),
+                             m_adx_hysteresis_band(3.0)
      {
       m_atr_period = 14;
       m_adx_period = 14;
@@ -133,7 +164,7 @@ public:
       m_squeeze_thresh = 0.5;
       m_vol_low_thresh = 0.5;
       m_vol_high_thresh = 2.0;
-      m_trend_strength_thresh = 25.0;
+      m_trend_strength_thresh = 22.0;
       m_crash_thresh = 3.0;
       m_last_atr = 0;
       m_last_adx = 0;
@@ -167,12 +198,18 @@ public:
       m_last_update = 0;
      }
 
+   void SetHysteresis(int minStableBars, double adxBand)
+     {
+      m_min_stable_bars = MathMax(1, minStableBars);
+      m_adx_hysteresis_band = MathMax(0.0, adxBand);
+     }
+
    void ResetToDefault()
      {
       m_params.sl_multiplier = 1.0;
       m_params.tp_multiplier = 1.0;
       m_params.risk_percent = 1.0;
-      m_params.entry_threshold = 0.5;
+      m_params.entry_threshold = 0.55;
       m_params.max_positions = 3;
       m_params.regime_name = "UNKNOWN";
       m_params.volatility_ratio = 1.0;
@@ -185,6 +222,10 @@ public:
       datetime currentBarTime = iTime(symbol, tf, 0);
       if(currentBarTime == m_last_update && m_update_count > 0)
          return m_current_regime;
+
+      m_min_stable_bars = GetMinStableBarsForPeriod(tf);
+      if(m_trend_strength_thresh <= 0.0 || m_trend_strength_thresh == 22.0)
+         m_trend_strength_thresh = GetADXThresholdForPeriod(tf);
 
       double atr = 0, avgAtr = 0;
       if(dataMgr != NULL)
@@ -218,14 +259,16 @@ public:
       if(detected != m_current_regime)
         {
          m_regime_stable_bars++;
-         if(m_regime_stable_bars >= MIN_STABLE_BARS)
+         if(m_regime_stable_bars >= m_min_stable_bars)
            {
+            int stableBars = m_regime_stable_bars;
             m_prev_regime = m_current_regime;
             m_current_regime = detected;
             m_regime_stable_bars = 0;
             ApplyRegimeAdjustments();
-            PrintFormat("[Regime] Changed from %s to %s",
-                        GetRegimeName(m_prev_regime), GetRegimeName(m_current_regime));
+            PrintFormat("[Regime] Changed from %s to %s (stable after %d bars, ADX=%.1f th=%.1f)",
+                        GetRegimeName(m_prev_regime), GetRegimeName(m_current_regime),
+                        stableBars, m_last_adx, m_trend_strength_thresh);
            }
         }
       else
@@ -243,11 +286,12 @@ public:
 
    string ExportRegimeInfo() const
      {
-      return StringFormat("Regime=%s|VolRatio=%.2f|ADX=%.1f|Momentum=%.2f|BB=%.4f/%.4f|Risk=%.1f%%",
+      return StringFormat("Regime=%s|VolRatio=%.2f|ADX=%.1f|Momentum=%.2f|BB=%.4f/%.4f|Risk=%.1f%%|StableBars=%d/%d",
                           GetRegimeName(m_current_regime), m_params.volatility_ratio,
                           m_params.trend_strength, m_params.momentum_score,
                           m_last_bb_bandwidth, m_avg_bb_bandwidth,
-                          m_params.risk_percent * 100.0);
+                          m_params.risk_percent * 100.0,
+                          m_regime_stable_bars, m_min_stable_bars);
      }
 
    ulong GetUpdateCount() const { return m_update_count; }
@@ -259,17 +303,21 @@ private:
       double volRatio = m_params.volatility_ratio;
       double adx = m_params.trend_strength;
       double momScore = m_params.momentum_score;
+      double trendEnter = m_trend_strength_thresh + m_adx_hysteresis_band;
+      double trendStay  = m_trend_strength_thresh - m_adx_hysteresis_band;
       if(volRatio > m_crash_thresh) return REGIME_CRASH;
       if(volRatio > m_vol_high_thresh) return REGIME_VOLATILE;
       if(adx <= m_trend_strength_thresh &&
          m_last_bb_bandwidth > 0.0 && m_avg_bb_bandwidth > 0.0 &&
          m_last_bb_bandwidth < m_squeeze_thresh * m_avg_bb_bandwidth)
          return REGIME_SQUEEZE;
-      if(adx > m_trend_strength_thresh)
+      bool currentlyTrending = (m_current_regime == REGIME_TREND_UP || m_current_regime == REGIME_TREND_DOWN);
+      bool isTrend = currentlyTrending ? (adx >= trendStay) : (adx >= trendEnter);
+      if(isTrend)
         {
          if(momScore > 5.0) return REGIME_TREND_UP;
          if(momScore < -5.0) return REGIME_TREND_DOWN;
-         return REGIME_VOLATILE;
+         return REGIME_TRANSITION;
         }
       return REGIME_RANGE;
      }
@@ -284,6 +332,7 @@ private:
          case REGIME_RANGE:      AdjustParamsForRange();      break;
          case REGIME_SQUEEZE:    AdjustParamsForSqueeze();    break;
          case REGIME_CRASH:      AdjustParamsForCrash();      break;
+         case REGIME_TRANSITION: AdjustParamsForTransition(); break;
          default:                ResetToDefault();            break;
         }
      }
@@ -293,8 +342,8 @@ private:
       m_params.regime_name = bullish ? "TREND_UP" : "TREND_DOWN";
       m_params.sl_multiplier = 1.5;
       m_params.tp_multiplier = 2.0;
-      m_params.risk_percent = 1.2;
-      m_params.entry_threshold = 0.4;
+      m_params.risk_percent = 0.8;
+      m_params.entry_threshold = 0.60;
       m_params.max_positions = 2;
      }
 
@@ -304,7 +353,7 @@ private:
       m_params.sl_multiplier = 0.8;
       m_params.tp_multiplier = 1.2;
       m_params.risk_percent = 0.8;
-      m_params.entry_threshold = 0.7;
+      m_params.entry_threshold = 0.65;
       m_params.max_positions = 4;
      }
 
@@ -314,7 +363,7 @@ private:
       m_params.sl_multiplier = 2.0;
       m_params.tp_multiplier = 1.5;
       m_params.risk_percent = 0.5;
-      m_params.entry_threshold = 0.8;
+      m_params.entry_threshold = 0.80;
       m_params.max_positions = 1;
      }
 
@@ -323,9 +372,19 @@ private:
       m_params.regime_name = "SQUEEZE";
       m_params.sl_multiplier = 1.2;
       m_params.tp_multiplier = 1.5;
+      m_params.risk_percent = 0.3;
+      m_params.entry_threshold = 0.90;
+      m_params.max_positions = 0;
+     }
+
+   void AdjustParamsForTransition()
+     {
+      m_params.regime_name = "TRANSITION";
+      m_params.sl_multiplier = 1.4;
+      m_params.tp_multiplier = 1.8;
       m_params.risk_percent = 0.5;
-      m_params.entry_threshold = 0.9;
-      m_params.max_positions = 2;
+      m_params.entry_threshold = 0.75;
+      m_params.max_positions = 1;
      }
 
    void AdjustParamsForCrash()
