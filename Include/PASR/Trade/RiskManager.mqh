@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.07                                    |
+//| Trade/RiskManager.mqh — v2.08                                    |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -15,6 +15,13 @@ struct RiskCheckResult
    double suggestedLot;
    string reason;
    RiskCheckResult() : allowed(false), suggestedLot(0), reason("") {}
+  };
+
+struct RiskPnLRecord
+  {
+   ulong    ticket;
+   double   profit;
+   datetime day;
   };
 
 class CRiskManager : public IManager
@@ -36,6 +43,7 @@ private:
    double  m_peakEquity;
    datetime m_lastResetDay;
    bool    m_circuitBroken;
+   RiskPnLRecord m_accountedPnL[];
 
    double AccountBalance()    const { return ::AccountInfoDouble(ACCOUNT_BALANCE);     }
    double AccountEquity()     const { return ::AccountInfoDouble(ACCOUNT_EQUITY);      }
@@ -44,11 +52,58 @@ private:
    datetime ServerDateMidnight() const
      { return StringToTime(TimeToString(TimeCurrent(), TIME_DATE)); }
 
+   double DailyLossPercent(double dailyPnl) const
+     {
+      double bal = AccountBalance();
+      if(bal <= 0.0) return 0.0;
+      return MathMax(0.0, -dailyPnl / bal * 100.0);
+     }
+
    bool IsMaxDDActive() const
      {
       if(m_peakEquity <= 0.0 || m_maxDDPct <= 0.0) return false;
       double ddPct = (1.0 - AccountEquity() / m_peakEquity) * 100.0;
       return ddPct >= m_maxDDPct;
+     }
+
+   void ClearAccountedPnL()
+     { ArrayResize(m_accountedPnL, 0); }
+
+   bool IsPnLAccounted(ulong ticket, double profit) const
+     {
+      if(ticket == 0) return false;
+      datetime today = ServerDateMidnight();
+      for(int i=0; i<ArraySize(m_accountedPnL); i++)
+        {
+         if(m_accountedPnL[i].ticket == ticket &&
+            m_accountedPnL[i].day == today &&
+            MathAbs(m_accountedPnL[i].profit - profit) < 0.0000001)
+            return true;
+        }
+      return false;
+     }
+
+   void MarkPnLAccounted(ulong ticket, double profit)
+     {
+      if(ticket == 0) return;
+      int n = ArraySize(m_accountedPnL);
+      ArrayResize(m_accountedPnL, n + 1);
+      m_accountedPnL[n].ticket = ticket;
+      m_accountedPnL[n].profit = profit;
+      m_accountedPnL[n].day    = ServerDateMidnight();
+     }
+
+   void AccumulateClosedPnL(ulong ticket, double profit)
+     {
+      if(profit == 0.0) return;
+      if(ticket > 0 && IsPnLAccounted(ticket, profit))
+        {
+         if(m_debugMode) PrintFormat("[Risk] Duplicate PnL ignored ticket=%I64u profit=%.2f", ticket, profit);
+         return;
+        }
+      m_dailyLoss += profit;
+      if(ticket > 0) MarkPnLAccounted(ticket, profit);
+      CheckDailyLossBreaker(m_dailyLoss);
      }
 
    void CheckDailyReset()
@@ -57,6 +112,7 @@ private:
       if(today > m_lastResetDay)
         {
          m_dailyLoss = 0.0;
+         ClearAccountedPnL();
          m_lastResetDay = today;
          bool ddStillActive = IsMaxDDActive();
          if(!ddStillActive)
@@ -84,11 +140,10 @@ private:
       return spread <= m_maxSpreadPts;
      }
 
-   void CheckDailyLossBreaker(double projectedDailyLoss)
+   void CheckDailyLossBreaker(double projectedDailyPnl)
      {
-      double bal = AccountBalance();
-      if(bal <= 0 || m_dailyLossPct <= 0) return;
-      if((-projectedDailyLoss / bal * 100.0) >= m_dailyLossPct)
+      if(m_dailyLossPct <= 0.0) return;
+      if(DailyLossPercent(projectedDailyPnl) >= m_dailyLossPct)
         {
          m_circuitBroken = true;
          Print("[Risk] CIRCUIT BREAKER: daily loss limit.");
@@ -122,7 +177,7 @@ public:
       m_minLot(0.01), m_maxLot(10.0), m_lotStep(0.01),
       m_openTrades(0), m_consecLoss(0), m_dailyLoss(0),
       m_peakEquity(0), m_lastResetDay(0), m_circuitBroken(false)
-     {}
+     { ArrayResize(m_accountedPnL, 0); }
 
    virtual void DeclareEvents() override
      { AddEvent(EVENT_ID_NEW_BAR); AddEvent(EVENT_ID_POSITION_UPDATE); AddEvent(EVENT_ID_CONFIG_RELOAD); }
@@ -139,8 +194,9 @@ public:
       if(m_lotStep <= 0) m_lotStep = 0.01;
       m_peakEquity   = AccountEquity();
       m_lastResetDay = ServerDateMidnight();
+      ClearAccountedPnL();
       SyncOpenTradesFromBroker();
-      PrintFormat("[Risk] v2.07 Init OK: risk=%.1f%% daily=%.1f%% maxTrades=%d open=%d",
+      PrintFormat("[Risk] v2.08 Init OK: risk=%.1f%% daily=%.1f%% maxTrades=%d open=%d",
                   m_riskPct, m_dailyLossPct, m_maxOpenTrades, m_openTrades);
       return true;
      }
@@ -156,11 +212,7 @@ public:
         {
          case EVENT_ID_POSITION_UPDATE:
             if(ev.data1 == 1.0) SyncOpenTradesFromBroker();
-            if(ev.profit != 0.0)
-              {
-               m_dailyLoss += ev.profit;
-               CheckDailyLossBreaker(m_dailyLoss);
-              }
+            AccumulateClosedPnL(ev.ticket, ev.profit);
             { double eq = AccountEquity(); if(eq > m_peakEquity) m_peakEquity = eq; }
             break;
          case EVENT_ID_NEW_BAR:       OnNewBar();    break;
@@ -175,13 +227,9 @@ public:
       if(m_circuitBroken) { r.reason = "CircuitBroken"; return r; }
       if(m_openTrades >= m_maxOpenTrades)
         { r.reason = StringFormat("MaxTrades(%d/%d)", m_openTrades, m_maxOpenTrades); return r; }
-      double bal = AccountBalance();
-      if(bal > 0 && m_dailyLossPct > 0)
-        {
-         double dlPct = (m_dailyLoss / bal) * 100.0;
-         if(dlPct <= -m_dailyLossPct)
-           { r.reason = StringFormat("DailyLoss(%.1f%%>=%.1f%%)", -dlPct, m_dailyLossPct); return r; }
-        }
+      double lossPct = DailyLossPercent(m_dailyLoss);
+      if(m_dailyLossPct > 0.0 && lossPct >= m_dailyLossPct)
+        { r.reason = StringFormat("DailyLoss(%.1f%%>=%.1f%%)", lossPct, m_dailyLossPct); return r; }
       if(IsMaxDDActive())
         { r.reason = StringFormat("MaxDD(%.1f%%>=%.1f%%)", GetDrawdownPct(), m_maxDDPct); return r; }
       if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
@@ -287,8 +335,7 @@ public:
    int    GetOpenTrades()   const { return m_openTrades; }
    int    GetConsecLoss()   const { return m_consecLoss; }
    double GetDailyLoss()    const { return m_dailyLoss; }
-   double GetDailyLossPct() const
-     { double b = AccountBalance(); return (b > 0) ? (-m_dailyLoss / b * 100.0) : 0; }
+   double GetDailyLossPct() const { return DailyLossPercent(m_dailyLoss); }
    double GetDrawdownPct() const
      { return (m_peakEquity > 0) ? (1.0 - AccountEquity() / m_peakEquity) * 100.0 : 0; }
    bool IsTradingAllowed() const { return !m_circuitBroken && Check(0).allowed; }
