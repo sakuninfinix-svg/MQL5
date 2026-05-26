@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/ExecutionManager.mqh — v3.05                               |
+//| Trade/ExecutionManager.mqh — v3.06                               |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -89,7 +89,7 @@ private:
       evOpen.priority = 10;
       evOpen.data1    = (double)plan.direction;
       evOpen.comment  = "OrderPlaced";
-      DispatchEvent(evOpen);
+      DispatchImmediate(evOpen);
 
       PASREvent evUpdate;
       evUpdate.id       = EVENT_ID_POSITION_UPDATE;
@@ -97,7 +97,7 @@ private:
       evUpdate.priority = 15;
       evUpdate.data1    = 1.0; // open/refresh signal for RiskManager::SyncOpenTradesFromBroker()
       evUpdate.comment  = "OrderPlaced";
-      DispatchEvent(evUpdate);
+      DispatchImmediate(evUpdate);
      }
 
 public:
@@ -114,7 +114,7 @@ public:
       m_trade.SetExpertMagicNumber(m_cfg.MagicNumber);
       m_trade.SetDeviationInPoints((int)MathMax(10.0, m_cfg.Market.SpreadFilterPips * 10.0));
       m_trade.SetTypeFilling(ORDER_FILLING_IOC);
-      Print("[Exec] v3.05 Init OK");
+      Print("[Exec] v3.06 Init OK");
       return true;
      }
 
