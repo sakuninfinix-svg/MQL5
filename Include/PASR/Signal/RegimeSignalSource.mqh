@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/RegimeSignalSource.mqh — v1.02                            |
+//| Signal/RegimeSignalSource.mqh — v1.03                            |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_REGIME_SOURCE_MQH__
@@ -39,11 +39,13 @@ public:
 
       EMarketRegime r = m_regime.GetRegime();
 
-      if(m_mode == REGIME_MODE_VETO && (r == REGIME_VOLATILE || r == REGIME_CRASH))
+      if(m_mode == REGIME_MODE_VETO &&
+         (r == REGIME_VOLATILE || r == REGIME_CRASH || r == REGIME_SQUEEZE))
         {
          out.direction  = SIGNAL_NONE;
          out.confidence = 0.0;
-         out.reason     = StringFormat("RegimeGate:%s(ADX=%.1f)", MarketRegimeName(r), m_regime.GetADX());
+         out.reason     = StringFormat("RegimeGate:%s(ADX=%.1f,BW=%.4f)",
+                                        MarketRegimeName(r), m_regime.GetADX(), m_regime.GetBW());
          return true;
         }
 
@@ -53,7 +55,8 @@ public:
          case REGIME_RANGE:      confMult = 1.1; break;
          case REGIME_TREND_UP:
          case REGIME_TREND_DOWN: confMult = 0.7; break;
-         case REGIME_SQUEEZE:    confMult = 0.5; break;
+         case REGIME_TRANSITION: confMult = 0.6; break;
+         case REGIME_SQUEEZE:    confMult = 0.0; break;
          case REGIME_VOLATILE:   confMult = 0.2; break;
          case REGIME_CRASH:      confMult = 0.0; break;
          default:                confMult = 1.0; break;
