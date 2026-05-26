@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AIFeatureBuilder.mqh — v4.02                                  |
+//| AI/AIFeatureBuilder.mqh — v4.03                                  |
 //| Feature engineering: 26-dim normalised vector for AI inference.  |
 //+------------------------------------------------------------------+
 #property strict
@@ -158,8 +158,9 @@ public:
       sig.slMultiplier = 1.0; sig.zonePrice = SymbolInfoDouble(Sym(), SYMBOL_BID);
       double atrPts = (m_data != NULL) ? m_data.GetATRPoints() : 100.0;
       double price = SymbolInfoDouble(Sym(), SYMBOL_BID);
+      SRZone emptyZones[]; ArrayResize(emptyZones, 0);
       FeatureVector fv = Build(sig, atrPts, price - atrPts*SymbolInfoDouble(Sym(), SYMBOL_POINT),
-                               price + atrPts*SymbolInfoDouble(Sym(), SYMBOL_POINT), NULL, 0);
+                               price + atrPts*SymbolInfoDouble(Sym(), SYMBOL_POINT), emptyZones, 0);
       ArrayResize(features, AI_FEATURE_DIM);
       for(int i=0;i<AI_FEATURE_DIM;i++) features[i]=fv.f[i];
       return AI_FEATURE_DIM;
