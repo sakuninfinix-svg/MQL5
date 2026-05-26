@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/RegimeFilter.mqh — v1.02                                  |
+//| Signal/RegimeFilter.mqh — v1.03                                  |
 //| Canonical regime filter using EMarketRegime from Data layer       |
 //+------------------------------------------------------------------+
 #property strict
@@ -38,6 +38,21 @@ private:
    double  m_bwHistory[RF_HISTORY];
    int     m_histIdx;
    int     m_histFilled;
+
+   double GetADXThresholdForPeriod() const
+     {
+      switch(_Period)
+        {
+         case PERIOD_M1:
+         case PERIOD_M5:  return 18.0;
+         case PERIOD_M15: return 18.0;
+         case PERIOD_M30: return 19.0;
+         case PERIOD_H1:  return 21.0;
+         case PERIOD_H4:  return 23.0;
+         case PERIOD_D1:  return 25.0;
+         default:         return 22.0;
+        }
+     }
 
    double CalcMedian(double &arr[], int n) const
      {
@@ -100,15 +115,15 @@ private:
       m_regime = DetermineRegime();
 
       if(m_debugMode && m_regime != prev)
-         PrintFormat("[RegimeFilter] %s -> %s ADX=%.1f ATR=%.5f BW=%.3f",
+         PrintFormat("[RegimeFilter] %s -> %s ADX=%.1f(th=%.1f) ATR=%.5f BW=%.3f",
                      MarketRegimeName(prev), MarketRegimeName(m_regime),
-                     m_currentADX, m_currentATR, m_currentBW);
+                     m_currentADX, m_adxTrendThreshold, m_currentATR, m_currentBW);
      }
 
 public:
    CRegimeFilter() : IManager(),
       m_hADX(INVALID_HANDLE), m_hATR(INVALID_HANDLE), m_hBB(INVALID_HANDLE),
-      m_adxTrendThreshold(25.0), m_atrVolatileRatio(1.8), m_bwSqueezeRatio(0.5),
+      m_adxTrendThreshold(22.0), m_atrVolatileRatio(1.8), m_bwSqueezeRatio(0.5),
       m_regime(REGIME_UNKNOWN), m_currentADX(0), m_currentATR(0),
       m_atrMedian(0), m_currentBW(0), m_bwMedian(0),
       m_ready(false), m_histIdx(0), m_histFilled(0)
@@ -135,6 +150,7 @@ public:
      {
       if(!IManager::Init(data, bus)) return false;
 
+      m_adxTrendThreshold = GetADXThresholdForPeriod();
       m_hADX = iADX(_Symbol, _Period, RF_ADX_PERIOD);
       m_hATR = iATR(_Symbol, _Period, RF_ATR_PERIOD);
       m_hBB  = iBands(_Symbol, _Period, RF_BB_PERIOD, 0, RF_BB_DEVIATION, PRICE_CLOSE);
@@ -168,10 +184,11 @@ public:
    double GetATR() const { return m_currentATR; }
    double GetBW() const { return m_currentBW; }
    double GetATRMedian() const { return m_atrMedian; }
+   double GetADXThreshold() const { return m_adxTrendThreshold; }
 
    void SetThresholds(double adxTrend, double atrVolatile, double bwSqueeze)
      {
-      m_adxTrendThreshold = adxTrend;
+      m_adxTrendThreshold = (adxTrend > 0.0) ? adxTrend : GetADXThresholdForPeriod();
       m_atrVolatileRatio  = atrVolatile;
       m_bwSqueezeRatio    = bwSqueeze;
      }
