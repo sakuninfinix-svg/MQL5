@@ -210,7 +210,18 @@ public:
    double          GetEntryThreshold() const { return m_entryThreshold; }
    double          GetRiskMultiplier() const { return m_riskMultiplier; }
    string          GetStrategyDescription() const;
-
+   
+   // Configuration method for user parameters
+   void ConfigureParameters(bool useAI, double vetoThresh, double driftVeto, double highThresh)
+     {
+      m_useAI = useAI;
+      m_vetoThreshold = vetoThresh;
+      m_driftVetoThreshold = driftVeto;
+      m_highConfidenceThreshold = highThresh;
+      Print("[AIOrchestrator] Configured: useAI=", useAI, " veto=", vetoThresh, " drift=", driftVeto, " high=", highThresh);
+     }
+   
+   // Gatekeeper: AI memutuskan apakah sinyal boleh dieksekusi
    bool ShouldAllowTrade(int signalStrength);
    void AdjustRiskParameters(double &riskPercent, double &maxDrawdown);
 
@@ -385,6 +396,119 @@ public:
    const SAIModelPerf &GetPerf() const { return m_perf; }
    CAIFeatureBuilder *GetFeatureBuilder() { return m_feat; }
    CAIEnsemble *GetEnsemble() { return m_ensemble; }
+
+   // --- Configuration state (user-tunable) ---
+protected:
+   bool     m_useAI;                  // User flag to enable/disable AI
+   double   m_vetoThreshold;          // Veto below this score
+   double   m_driftVetoThreshold;     // Veto if drift exceeds this
+   double   m_highConfidenceThreshold; // High-confidence threshold for aggressive trades
+
+private:
+   // --- NEW: Dynamic Strategy Orchestration Methods ---
+   
+   // DetectRegime: Analisis kondisi pasar real-time
+   void DetectRegime()
+     {
+      // Hitung indikator regime sederhana (bisa diganti dengan ONNX model)
+      double trendStr = CalculateTrendStrength(50);
+      double vol      = CalculateVolatility(20);
+      
+      EMarketRegime newRegime = REGIME_UNKNOWN;
+      
+      if(trendStr > 0.8 && vol > 0.4)
+         newRegime = REGIME_TRENDING_STRONG;
+      else if(trendStr < 0.3 && vol < 0.3)
+         newRegime = REGIME_SIDEWAYS;
+      else if(vol > 0.8)
+         newRegime = REGIME_VOLATILE;
+      else if(trendStr > 0.5)
+         newRegime = REGIME_TRENDING_WEAK;
+      else
+         newRegime = REGIME_CHAOS;
+         
+      // Cek streak (butuh 3 bar konfirmasi untuk ganti regime)
+      if(newRegime == m_detectedRegime)
+         m_regimeStreak++;
+      else
+        {
+         if(m_regimeStreak >= 3)
+           {
+            m_detectedRegime = newRegime;
+            m_regimeStreak = 1;
+           }
+         else
+            m_regimeStreak = 1; // Reset streak untuk regime baru
+        }
+     }
+   
+   // SelectStrategy: Pilih strategi optimal berdasarkan regime
+   void SelectStrategy()
+     {
+      switch(m_detectedRegime)
+        {
+         case REGIME_TRENDING_STRONG:
+            m_currentStrategy = STRAT_TREND_FOLLOW;
+            m_entryThreshold = 0.6;      // Lebih longgar untuk entry
+            m_riskMultiplier = 1.2;      // Tingkatkan risiko 20%
+            m_strategyConfidence = 0.85;
+            break;
+            
+         case REGIME_SIDEWAYS:
+            // CORRECTION: Price Action & S/R work BEST here! Bounce trading is optimal.
+            m_currentStrategy = STRAT_RANGE_TRADING;   // NEW: Bounce off S/R zones
+            m_entryThreshold = 0.65;     // Moderate threshold - trust S/R touches
+            m_riskMultiplier = 1.3;      // INCREASED: High confidence in S/R bounces
+            m_strategyConfidence = 0.85; // High confidence when price at S/R
+            break;
+            
+         case REGIME_VOLATILE:
+            m_currentStrategy = STRAT_BREAKOUT;
+            m_entryThreshold = 0.85;     // Tunggu konfirmasi breakout
+            m_riskMultiplier = 0.9;      // Risiko sedang
+            m_strategyConfidence = 0.70;
+            break;
+            
+         case REGIME_CHAOS:
+         case REGIME_UNKNOWN:
+            m_currentStrategy = STRAT_CONSERVATIVE;
+            m_entryThreshold = 0.95;     // Hampir tidak pernah trade
+            m_riskMultiplier = 0.1;      // Risiko minimal
+            m_strategyConfidence = 0.0;  // Tidak yakin sama sekali
+            break;
+            
+         default: // REGIME_TRENDING_WEAK
+            m_currentStrategy = STRAT_SCALP_AI;
+            m_entryThreshold = 0.7;
+            m_riskMultiplier = 1.0;
+            m_strategyConfidence = 0.75;
+            break;
+        }
+      m_lastStrategyChange = TimeCurrent();
+     }
+   
+   // Helper: Hitung volatilitas (normalized 0-1)
+   double CalculateVolatility(int period)
+     {
+      double atr = iATR(_Symbol, _Period, period);
+      if(atr == 0) return 0;
+      
+      double avgPrice = (SymbolInfoDouble(_Symbol, SYMBOL_BID) + SymbolInfoDouble(_Symbol, SYMBOL_ASK)) / 2.0;
+      double normVol = (atr / avgPrice) * 100.0; // Persentase
+      
+      // Normalisasi kasar (adjust sesuai karakteristik pair)
+      return MathMin(normVol * 10.0, 1.0);
+     }
+   
+   // Helper: Hitung kekuatan trend (normalized 0-1)
+   double CalculateTrendStrength(int maPeriod)
+     {
+      double adx = iADX(_Symbol, _Period, maPeriod);
+      if(adx == 0) return 0;
+      
+      // Normalisasi ADX (0-100) ke 0.0-1.0
+      return MathMin(adx / 50.0, 1.0);
+     }
   };
 
 string CAIOrchestrator::GetStrategyDescription() const
