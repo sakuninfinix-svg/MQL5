@@ -1,8 +1,12 @@
 //+------------------------------------------------------------------+
-//| Trade/PositionManager.mqh — v3.00 (Pipeline Integrated)         |
+//| Trade/PositionManager.mqh — v3.01 (Pipeline Integrated)         |
 //| Open position scanner and cache manager for Stage_PositionMgmt  |
 //|                                                                  |
 //| CHANGELOG:                                                       |
+//|   v3.01 (2026-05-27) Phase 1 audit fix:                         |
+//|     - Removed stale ../Core/PASR.Types.mqh include.              |
+//|     - Added PositionSelectByTicket() after PositionGetTicket()   |
+//|       before reading position properties.                        |
 //|   v3.00 (2026-05-24) Sprint 3A:                                 |
 //|     BUG-T09: Rewrite API to match IManager::Init(data,bus) /   |
 //|              Deinit() — old Initialize(bus) was not a true      |
@@ -25,7 +29,6 @@
 
 #include "../Core/IManager.mqh"
 #include "../Core/PipelineTypes.mqh"
-#include "../Core/PASR.Types.mqh"
 
 //+------------------------------------------------------------------+
 //| CPositionManager — Pipeline-aware position scanner              |
@@ -61,7 +64,7 @@ public:
       m_cached_count  = 0;
       m_cached_ticket = 0;
       m_cache_time    = 0;
-      Print("[PosMgr] v3.00 Init OK — magic=", m_magic, " sym=", m_symbol);
+      Print("[PosMgr] v3.01 Init OK — magic=", m_magic, " sym=", m_symbol);
       return true;
      }
 
@@ -118,6 +121,7 @@ public:
         {
          ulong t = PositionGetTicket(i);
          if(t == 0) continue;
+         if(!PositionSelectByTicket(t)) continue;
          if(m_symbol != "" && PositionGetString(POSITION_SYMBOL) != m_symbol) continue;
          if(m_magic  != 0  && PositionGetInteger(POSITION_MAGIC) != m_magic)  continue;
          count++;
@@ -126,6 +130,7 @@ public:
 
       ctx.positions_count  = count;
       ctx.position_ticket  = ticket;
+      ctx.has_position     = (count > 0);
       m_cached_count       = count;
       m_cached_ticket      = ticket;
       m_cache_time         = TimeCurrent();
@@ -183,6 +188,7 @@ public:
         {
          ulong t = PositionGetTicket(i);
          if(t == 0) continue;
+         if(!PositionSelectByTicket(t)) continue;
          if(m_magic != 0 && PositionGetInteger(POSITION_MAGIC) != m_magic) continue;
          pnl += PositionGetDouble(POSITION_PROFIT);
         }
