@@ -1,7 +1,6 @@
 //+------------------------------------------------------------------+
-#include <PASR/MQL5Compatibility.mqh>
-//| Analysis/SRManager.mqh — v6.0.1                                  |
-//| Responsibility: PIPELINE ORCHESTRATOR — IManager adapter         |
+//| Analysis/SRManager.mqh — v6.0.2                                  |
+//| Responsibility: PIPELINE ORCHESTRATOR — IManager adapter          |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_SR_MANAGER_MQH__
@@ -53,11 +52,8 @@ public:
         m_lastScanTime(0), m_lastScanBar(-1)
      {}
 
-   void SetRegimeDetector(CMarketRegimeDetector *regime)
-     { m_regime = regime; }
-
-   void SetHTFPeriod(ENUM_TIMEFRAMES period)
-     { m_htfPeriod = period; }
+   void SetRegimeDetector(CMarketRegimeDetector *regime) { m_regime = regime; }
+   void SetHTFPeriod(ENUM_TIMEFRAMES period) { m_htfPeriod = period; }
 
    virtual string HandlerName() const override { return "SRManager"; }
 
@@ -74,9 +70,7 @@ public:
       IManager::Deinit();
      }
 
-   virtual bool IsHealthy() const override
-     { return IManager::IsHealthy() && m_store.IsValid(); }
-
+   virtual bool IsHealthy() const override { return IManager::IsHealthy() && m_store.IsValid(); }
    virtual void OnPriceUpdate() override {}
 
    virtual void DeclareEvents() override
@@ -91,8 +85,8 @@ public:
       double atr = m_data.GetATRPoints() * _Point;
       m_store.UpdateATR(atr);
 
-      datetime barTime = GetTime(_Symbol, _Period, 0);
-      int      barIdx  = (int)iBarShift(_Symbol, _Period, 0);
+      datetime barTime = iTime(_Symbol, _Period, 0);
+      int      barIdx  = iBarShift(_Symbol, _Period, barTime);
       if(barIdx == m_lastScanBar && barTime == m_lastScanTime) return;
       m_lastScanBar  = barIdx;
       m_lastScanTime = barTime;
@@ -115,7 +109,7 @@ public:
       m_store.RemoveStale();
 
       if(m_debugMode)
-         PrintFormat("[SR v6.0.1] Scan #%llu | %d active | lookback=%d | ATR=%.5f",
+         PrintFormat("[SR v6.0.2] Scan #%llu | %d active | lookback=%d | ATR=%.5f",
                      m_scanCount, m_store.GetActiveCount(), lookback, atr);
      }
 
@@ -125,23 +119,12 @@ public:
       if(ev.id == EVENT_ID_CONFIG_RELOAD) { }
      }
 
-   bool GetNearestSupport(double price, SRZoneExtended &out) const
-     { return m_store.GetNearestSupport(price, out); }
-
-   bool GetNearestResistance(double price, SRZoneExtended &out) const
-     { return m_store.GetNearestResistance(price, out); }
-
-   bool IsNearValidZone(double price, double atrMult, SRZoneExtended &out) const
-     { return m_store.IsNearValidZone(price, atrMult, out); }
-
-   bool IsZoneValid(const SRZoneExtended &z) const
-     { return m_store.IsZoneValid(z); }
-
-   const SRZoneExtended *GetZone(int i) const
-     { return m_store.GetZone(i); }
-
-   int GetActiveCount() const
-     { return m_store.GetActiveCount(); }
+   bool GetNearestSupport(double price, SRZoneExtended &out) const { return m_store.GetNearestSupport(price, out); }
+   bool GetNearestResistance(double price, SRZoneExtended &out) const { return m_store.GetNearestResistance(price, out); }
+   bool IsNearValidZone(double price, double atrMult, SRZoneExtended &out) const { return m_store.IsNearValidZone(price, atrMult, out); }
+   bool IsZoneValid(const SRZoneExtended &z) const { return m_store.IsZoneValid(z); }
+   const SRZoneExtended *GetZone(int i) const { return m_store.GetZone(i); }
+   int GetActiveCount() const { return m_store.GetActiveCount(); }
   };
 
 typedef CAnalysisSRManager AnalysisSRManager;
