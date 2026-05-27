@@ -2,9 +2,9 @@
 //|                                     Infra/DataManager.mqh        |
 //|                          Copyright 2026, Agsicentre              |
 //+------------------------------------------------------------------+
-//| v2.03 (2026-05-27)                                                |
-//|   Phase 1 audit fix: expose EventBus reference for existing EA    |
-//|   QA helpers while the canonical owner remains IManager::m_bus.   |
+//| v2.04 (2026-05-27)                                                |
+//|   Phase 2 cleanup: removed temporary EventBus accessor shim.      |
+//|   EventBus ownership/access remains in COrchestrator/IManager.    |
 //| v2.02 (2026-05-24)                                                |
 //|   S21-003..005 / BUG-C01:                                        |
 //|     - DataManager is now CDataManager.                           |
@@ -149,16 +149,6 @@ public:
    virtual double GetDailyProfit() const override       { return m_dailyProfit;       }
    virtual double GetStartBalance() const override      { return m_startBalance;      }
    virtual int    GetConsecutiveLosses() const override { return m_consecutiveLosses; }
-
-   CEventBus& GetEventBus() const
-     {
-      return *m_bus;
-     }
-
-   CEventBus* GetEventBusPtr() const
-     {
-      return m_bus;
-     }
 
    void UpdateConsecutiveLosses(double profit)
      { m_consecutiveLosses = (profit < 0) ? m_consecutiveLosses+1 : 0; }
