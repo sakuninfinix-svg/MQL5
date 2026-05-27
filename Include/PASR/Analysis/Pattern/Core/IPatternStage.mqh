@@ -1,92 +1,45 @@
 //+------------------------------------------------------------------+
-//|                                             IPatternStage.mqh    |
-//|                                 Copyright 2024, PASR Architecture|
-//|                                     https://pasr-architecture.com|
+//| Analysis/Pattern/Core/IPatternStage.mqh — v1.01                  |
+//| Self-contained pattern pipeline stage interface                   |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2024, PASR Architecture"
-#property link      "https://pasr-architecture.com"
-#property version   "1.00"
-//+------------------------------------------------------------------+
-//| Interface untuk Pattern Pipeline Stage                           |
-//+------------------------------------------------------------------+
-#include "..\..\Core\Config\Types.mqh"
+#property strict
+#ifndef __ANALYSIS_PATTERN_CORE_IPATTERN_STAGE_MQH__
+#define __ANALYSIS_PATTERN_CORE_IPATTERN_STAGE_MQH__
 
-// Forward declaration
 class CPatternContext;
 
-//+------------------------------------------------------------------+
-//| Enum untuk status eksekusi stage                                 |
-//+------------------------------------------------------------------+
 enum ENUM_STAGE_STATUS
-{
-   STAGE_OK       = 0,  // Stage berhasil
-   STAGE_SKIP     = 1,  // Stage di-skip (kondisi tidak terpenuhi)
-   STAGE_FAIL     = 2,  // Stage gagal (error)
-   STAGE_ABORT    = 3   // Stage abort (hentikan pipeline)
-};
+  {
+   STAGE_OK    = 0,
+   STAGE_SKIP  = 1,
+   STAGE_FAIL  = 2,
+   STAGE_ABORT = 3
+  };
 
-//+------------------------------------------------------------------+
-//| Interface Base untuk semua Pattern Stage                         |
-//+------------------------------------------------------------------+
 class IPatternStage
-{
+  {
 protected:
    string m_name;
    bool   m_enabled;
-   
+
 public:
-   IPatternStage() : m_enabled(true) {}
+   IPatternStage() : m_name("PatternStage"), m_enabled(true) {}
    virtual ~IPatternStage() {}
-   
-   // Set nama stage
+
    void SetName(const string name) { m_name = name; }
    string GetName() const { return m_name; }
-   
-   // Enable/Disable stage
    void Enable(bool enabled = true) { m_enabled = enabled; }
    bool IsEnabled() const { return m_enabled; }
-   
-   //+------------------------------------------------------------------+
-   //| Method utama yang harus diimplementasikan oleh subclass          |
-   //+------------------------------------------------------------------+
-   virtual ENUM_STAGE_STATUS Process(CPatternContext &ctx) = 0;
-   
-   //+------------------------------------------------------------------+
-   //| Optional: Initialization                                         |
-   //+------------------------------------------------------------------+
-   virtual bool Init() { return true; }
-   
-   //+------------------------------------------------------------------+
-   //| Optional: Cleanup                                                |
-   //+------------------------------------------------------------------+
-   virtual void Shutdown() {}
-   
-   //+------------------------------------------------------------------+
-   //| Get description                                                  |
-   //+------------------------------------------------------------------+
-   virtual string GetDescription() const { return m_name; }
-};
 
-//+------------------------------------------------------------------+
-//| Helper function untuk logging stage                              |
-//+------------------------------------------------------------------+
-void LogStageMessage(const string stage_name, const string message, ENUM_LOG_LEVEL level = LOG_INFO)
-{
-   string prefix = "[PatternPipeline::" + stage_name + "] ";
-   
-   switch(level)
-   {
-      case LOG_DEBUG:
-         PrintDebug(prefix + message);
-         break;
-      case LOG_WARNING:
-         PrintWarning(prefix + message);
-         break;
-      case LOG_ERROR:
-         PrintError(prefix + message);
-         break;
-      default:
-         PrintInfo(prefix + message);
-   }
-}
-//+------------------------------------------------------------------+
+   virtual ENUM_STAGE_STATUS Process(CPatternContext &ctx) = 0;
+   virtual bool Init() { return true; }
+   virtual void Shutdown() {}
+   virtual string GetDescription() const { return m_name; }
+  };
+
+void LogStageMessage(const string stage_name, const string message)
+  {
+   Print("[PatternPipeline::", stage_name, "] ", message);
+  }
+
+#endif // __ANALYSIS_PATTERN_CORE_IPATTERN_STAGE_MQH__
