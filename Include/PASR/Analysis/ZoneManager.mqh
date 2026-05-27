@@ -1,4 +1,5 @@
 //+------------------------------------------------------------------+
+#include <PASR/MQL5Compatibility.mqh>
 //| Analysis/ZoneManager.mqh — v2.02                                 |
 //| Supply/Demand zone detection via impulse-base candle method.     |
 //|                                                                  |
@@ -102,7 +103,7 @@ private:
 
    void UpdateFreshnessAndConsumed()
      {
-      double curPrice = iClose(_Symbol, _Period, 1);
+      double curPrice = GetClose(_Symbol, _Period, 1);
       for(int i=0; i<m_zoneCount; i++)
         {
          if(!m_zones[i].isActive) continue;
@@ -148,7 +149,7 @@ private:
       for(int shift = AZ_IMPULSE_BARS + 1; shift < scanEnd; shift++)
         {
          // Prevent re-scanning already processed bars
-         datetime barTime = iTime(_Symbol, _Period, shift);
+         datetime barTime = GetTime(_Symbol, _Period, shift);
          if(barTime <= (datetime)m_lastScanBarTime) continue;
 
          // ── Bullish impulse: AZ_IMPULSE_BARS consecutive bull candles
@@ -156,8 +157,8 @@ private:
          double bullMove    = 0;
          for(int j=0; j<AZ_IMPULSE_BARS; j++)
            {
-            double o = iOpen(_Symbol,_Period,shift-j);
-            double c = iClose(_Symbol,_Period,shift-j);
+            double o = GetOpen(_Symbol,_Period,shift-j);
+            double c = GetClose(_Symbol,_Period,shift-j);
             if(c <= o) { bullImpulse=false; break; }
             bullMove += (c - o);
            }
@@ -165,10 +166,10 @@ private:
          if(bullImpulse && bullMove >= threshold)
            {
             int    baseShift = shift + 1;
-            double bO = iOpen(_Symbol,_Period,baseShift);
-            double bC = iClose(_Symbol,_Period,baseShift);
-            double bH = iHigh(_Symbol,_Period,baseShift);
-            double bL = iLow(_Symbol,_Period,baseShift);
+            double bO = GetOpen(_Symbol,_Period,baseShift);
+            double bC = GetClose(_Symbol,_Period,baseShift);
+            double bH = GetHigh(_Symbol,_Period,baseShift);
+            double bL = GetLow(_Symbol,_Period,baseShift);
             double bRange = bH - bL;
             double bBody  = MathAbs(bC - bO);
             if(bRange > 0 && bBody/bRange <= AZ_BASE_MAX_BODY)
@@ -177,7 +178,7 @@ private:
                double zL       = MathMin(bO, bC);
                double strength = bullMove / atr;
                TryAddZone(zH, zL, false,   // demand zone (support)
-                          iTime(_Symbol, _Period, baseShift), strength);
+                          GetTime(_Symbol, _Period, baseShift), strength);
               }
            }
 
@@ -186,8 +187,8 @@ private:
          double bearMove    = 0;
          for(int j=0; j<AZ_IMPULSE_BARS; j++)
            {
-            double o = iOpen(_Symbol,_Period,shift-j);
-            double c = iClose(_Symbol,_Period,shift-j);
+            double o = GetOpen(_Symbol,_Period,shift-j);
+            double c = GetClose(_Symbol,_Period,shift-j);
             if(c >= o) { bearImpulse=false; break; }
             bearMove += (o - c);
            }
@@ -195,10 +196,10 @@ private:
          if(bearImpulse && bearMove >= threshold)
            {
             int    baseShift = shift + 1;
-            double bO = iOpen(_Symbol,_Period,baseShift);
-            double bC = iClose(_Symbol,_Period,baseShift);
-            double bH = iHigh(_Symbol,_Period,baseShift);
-            double bL = iLow(_Symbol,_Period,baseShift);
+            double bO = GetOpen(_Symbol,_Period,baseShift);
+            double bC = GetClose(_Symbol,_Period,baseShift);
+            double bH = GetHigh(_Symbol,_Period,baseShift);
+            double bL = GetLow(_Symbol,_Period,baseShift);
             double bRange = bH - bL;
             double bBody  = MathAbs(bC - bO);
             if(bRange > 0 && bBody/bRange <= AZ_BASE_MAX_BODY)
@@ -207,14 +208,14 @@ private:
                double zL       = MathMin(bO, bC);
                double strength = bearMove / atr;
                TryAddZone(zH, zL, true,   // supply zone (resistance)
-                          iTime(_Symbol, _Period, baseShift), strength);
+                          GetTime(_Symbol, _Period, baseShift), strength);
               }
            }
         }
 
       // Update last scan timestamp
       if(scanEnd > AZ_IMPULSE_BARS + 1)
-         m_lastScanBarTime = (ulong)iTime(_Symbol, _Period, AZ_IMPULSE_BARS + 1);
+         m_lastScanBarTime = (ulong)GetTime(_Symbol, _Period, AZ_IMPULSE_BARS + 1);
      }
 
    void CompactZones()

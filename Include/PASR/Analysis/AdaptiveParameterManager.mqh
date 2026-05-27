@@ -1,4 +1,5 @@
 //+------------------------------------------------------------------+
+#include <PASR/MQL5Compatibility.mqh>
 //| Analysis/AdaptiveParameterManager.mqh — v3.02                    |
 //| Dynamic SL/TP/lot sizing based on canonical market regime.        |
 //+------------------------------------------------------------------+
@@ -163,7 +164,7 @@ public:
       if(m_regimeDetector == NULL)
         { m_cacheValid = false; return false; }
 
-      datetime curBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+      datetime curBarTime = GetTime(_Symbol, PERIOD_CURRENT, 0);
       if(curBarTime == m_lastBarTime && m_cacheValid) return true;
 
       EMarketRegime detectedRegime = m_regimeDetector.Detect(_Symbol, PERIOD_CURRENT, (DataManager*)m_data);

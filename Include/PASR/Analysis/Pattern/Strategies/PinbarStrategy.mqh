@@ -45,10 +45,10 @@ public:
 protected:
    virtual bool CheckPatternShape(int shift) override
    {
-      double open = iOpen(_Symbol, _Period, shift);
-      double high = iHigh(_Symbol, _Period, shift);
-      double low = iLow(_Symbol, _Period, shift);
-      double close = iClose(_Symbol, _Period, shift);
+      double open = GetOpen(_Symbol, _Period, shift);
+      double high = GetHigh(_Symbol, _Period, shift);
+      double low = GetLow(_Symbol, _Period, shift);
+      double close = GetClose(_Symbol, _Period, shift);
       
       double candleRange = high - low;
       if(candleRange == 0)
@@ -104,7 +104,7 @@ protected:
       if(atr == 0)
          return true;  // Skip ATR check if not available
       
-      double candleRange = iHigh(_Symbol, _Period, shift) - iLow(_Symbol, _Period, shift);
+      double candleRange = GetHigh(_Symbol, _Period, shift) - GetLow(_Symbol, _Period, shift);
       double candleATR = candleRange / atr;
       
       if(candleATR < params.minCandleSizeATR)
@@ -135,10 +135,10 @@ protected:
       // Break of previous high/low bonus (up to +15 points)
       if(m_params.requireBreakOfPrev)
       {
-         double prevHigh = iHigh(_Symbol, _Period, shift + 1);
-         double prevLow = iLow(_Symbol, _Period, shift + 1);
-         double currHigh = iHigh(_Symbol, _Period, shift);
-         double currLow = iLow(_Symbol, _Period, shift);
+         double prevHigh = GetHigh(_Symbol, _Period, shift + 1);
+         double prevLow = GetLow(_Symbol, _Period, shift + 1);
+         double currHigh = GetHigh(_Symbol, _Period, shift);
+         double currLow = GetLow(_Symbol, _Period, shift);
          
          if(m_isBullish && currLow < prevLow)
             score += 15.0;  // Swept lows before reversing
@@ -163,9 +163,9 @@ protected:
                              double &stopLoss,
                              double &takeProfit) override
    {
-      double high = iHigh(_Symbol, _Period, shift);
-      double low = iLow(_Symbol, _Period, shift);
-      double close = iClose(_Symbol, _Period, shift);
+      double high = GetHigh(_Symbol, _Period, shift);
+      double low = GetLow(_Symbol, _Period, shift);
+      double close = GetClose(_Symbol, _Period, shift);
       double point = _Point;
       
       if(direction > 0)  // Bullish pinbar

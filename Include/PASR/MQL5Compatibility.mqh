@@ -235,4 +235,21 @@ public:
    }
 };
 
+//+------------------------------------------------------------------+
+//| Helper function to create MA handle (MQL5 style)                 |
+//+------------------------------------------------------------------+
+int CreateMAHandle(const ENUM_TIMEFRAMES timeframe, const int period, 
+                   const ENUM_MA_METHOD method, const ENUM_APPLIED_PRICE price)
+{
+   return iMA(_Symbol, timeframe, period, 0, method, price);
+}
+
+//+------------------------------------------------------------------+
+//| Helper function to create ATR handle (MQL5 style)                |
+//+------------------------------------------------------------------+
+int CreateATRHandle(const ENUM_TIMEFRAMES timeframe, const int period)
+{
+   return iATR(_Symbol, timeframe, period);
+}
+
 #endif // __MQL5_COMPATIBILITY_H__

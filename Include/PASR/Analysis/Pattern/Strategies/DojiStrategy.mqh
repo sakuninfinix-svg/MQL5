@@ -40,10 +40,10 @@ public:
       if(!CheckPatternShape(shift))
          return 0.0;
       
-      double open = iOpen(_Symbol, _Period, shift);
-      double close = iClose(_Symbol, _Period, shift);
-      double high = iHigh(_Symbol, _Period, shift);
-      double low = iLow(_Symbol, _Period, shift);
+      double open = GetOpen(_Symbol, _Period, shift);
+      double close = GetClose(_Symbol, _Period, shift);
+      double high = GetHigh(_Symbol, _Period, shift);
+      double low = GetLow(_Symbol, _Period, shift);
       
       double body = MathAbs(close - open);
       double range = high - low;
@@ -95,10 +95,10 @@ public:
    
    virtual bool CheckPatternShape(int shift) override
    {
-      double open = iOpen(_Symbol, _Period, shift);
-      double close = iClose(_Symbol, _Period, shift);
-      double high = iHigh(_Symbol, _Period, shift);
-      double low = iLow(_Symbol, _Period, shift);
+      double open = GetOpen(_Symbol, _Period, shift);
+      double close = GetClose(_Symbol, _Period, shift);
+      double high = GetHigh(_Symbol, _Period, shift);
+      double low = GetLow(_Symbol, _Period, shift);
       
       double body = MathAbs(close - open);
       double range = high - low;
@@ -132,7 +132,7 @@ public:
    
    virtual bool CheckPatternSize(int shift, const SPatternParams &params) override
    {
-      double range = iHigh(_Symbol, _Period, shift) - iLow(_Symbol, _Period, shift);
+      double range = GetHigh(_Symbol, _Period, shift) - GetLow(_Symbol, _Period, shift);
       double atr = CCandleUtils::GetATR(14, shift);
       
       if(atr == 0)
@@ -158,9 +158,9 @@ protected:
       if(shift < 1)
          return 0;
       
-      double prevClose = iClose(_Symbol, _Period, shift + 1);
-      double prevOpen = iOpen(_Symbol, _Period, shift + 1);
-      double currentClose = iClose(_Symbol, _Period, shift);
+      double prevClose = GetClose(_Symbol, _Period, shift + 1);
+      double prevOpen = GetOpen(_Symbol, _Period, shift + 1);
+      double currentClose = GetClose(_Symbol, _Period, shift);
       
       // If previous was bullish and doji forms, potential bearish reversal
       if(prevClose > prevOpen)
@@ -191,10 +191,10 @@ public:
       if(!CDojiStrategy::CheckPatternShape(shift))
          return false;
       
-      double open = iOpen(_Symbol, _Period, shift);
-      double close = iClose(_Symbol, _Period, shift);
-      double high = iHigh(_Symbol, _Period, shift);
-      double low = iLow(_Symbol, _Period, shift);
+      double open = GetOpen(_Symbol, _Period, shift);
+      double close = GetClose(_Symbol, _Period, shift);
+      double high = GetHigh(_Symbol, _Period, shift);
+      double low = GetLow(_Symbol, _Period, shift);
       
       double body = MathAbs(close - open);
       double range = high - low;

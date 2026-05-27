@@ -45,16 +45,16 @@ protected:
    virtual bool CheckPatternShape(int shift) override
    {
       // Current (engulfing) candle
-      double currOpen = iOpen(_Symbol, _Period, shift);
-      double currHigh = iHigh(_Symbol, _Period, shift);
-      double currLow = iLow(_Symbol, _Period, shift);
-      double currClose = iClose(_Symbol, _Period, shift);
+      double currOpen = GetOpen(_Symbol, _Period, shift);
+      double currHigh = GetHigh(_Symbol, _Period, shift);
+      double currLow = GetLow(_Symbol, _Period, shift);
+      double currClose = GetClose(_Symbol, _Period, shift);
       
       // Previous candle
-      double prevOpen = iOpen(_Symbol, _Period, shift + 1);
-      double prevHigh = iHigh(_Symbol, _Period, shift + 1);
-      double prevLow = iLow(_Symbol, _Period, shift + 1);
-      double prevClose = iClose(_Symbol, _Period, shift + 1);
+      double prevOpen = GetOpen(_Symbol, _Period, shift + 1);
+      double prevHigh = GetHigh(_Symbol, _Period, shift + 1);
+      double prevLow = GetLow(_Symbol, _Period, shift + 1);
+      double prevClose = GetClose(_Symbol, _Period, shift + 1);
       
       double currRange = currHigh - currLow;
       double prevRange = prevHigh - prevLow;
@@ -119,7 +119,7 @@ protected:
       if(atr == 0)
          return true;
       
-      double candleRange = iHigh(_Symbol, _Period, shift) - iLow(_Symbol, _Period, shift);
+      double candleRange = GetHigh(_Symbol, _Period, shift) - GetLow(_Symbol, _Period, shift);
       double candleATR = candleRange / atr;
       
       if(candleATR < params.minCandleSizeATR)
@@ -146,20 +146,20 @@ protected:
       // Full engulf bonus
       if(m_params.requireFullEngulf)
       {
-         double currHigh = iHigh(_Symbol, _Period, shift);
-         double currLow = iLow(_Symbol, _Period, shift);
-         double prevHigh = iHigh(_Symbol, _Period, shift + 1);
-         double prevLow = iLow(_Symbol, _Period, shift + 1);
+         double currHigh = GetHigh(_Symbol, _Period, shift);
+         double currLow = GetLow(_Symbol, _Period, shift);
+         double prevHigh = GetHigh(_Symbol, _Period, shift + 1);
+         double prevLow = GetLow(_Symbol, _Period, shift + 1);
          
          if(currHigh > prevHigh && currLow < prevLow)
             score += 15.0;  // Complete engulfment
       }
       
       // Close position scoring (up to +20 points)
-      double currClose = iClose(_Symbol, _Period, shift);
-      double currOpen = iOpen(_Symbol, _Period, shift);
-      double currHigh = iHigh(_Symbol, _Period, shift);
-      double currLow = iLow(_Symbol, _Period, shift);
+      double currClose = GetClose(_Symbol, _Period, shift);
+      double currOpen = GetOpen(_Symbol, _Period, shift);
+      double currHigh = GetHigh(_Symbol, _Period, shift);
+      double currLow = GetLow(_Symbol, _Period, shift);
       
       double closePosition = 0.0;
       if(m_isBullish)
@@ -189,9 +189,9 @@ protected:
                              double &stopLoss,
                              double &takeProfit) override
    {
-      double high = iHigh(_Symbol, _Period, shift);
-      double low = iLow(_Symbol, _Period, shift);
-      double close = iClose(_Symbol, _Period, shift);
+      double high = GetHigh(_Symbol, _Period, shift);
+      double low = GetLow(_Symbol, _Period, shift);
+      double close = GetClose(_Symbol, _Period, shift);
       double point = _Point;
       
       if(direction > 0)  // Bullish engulfing
@@ -226,8 +226,8 @@ private:
       
       for(int i = shift + 1; i < shift + lookback && i < Bars(_Symbol, _Period); i++)
       {
-         double open = iOpen(_Symbol, _Period, i);
-         double close = iClose(_Symbol, _Period, i);
+         double open = GetOpen(_Symbol, _Period, i);
+         double close = GetClose(_Symbol, _Period, i);
          
          int barDir = 0;
          if(close > open)

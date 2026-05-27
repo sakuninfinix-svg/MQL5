@@ -1,4 +1,5 @@
 //+------------------------------------------------------------------+
+#include <PASR/MQL5Compatibility.mqh>
 //| Core/PipelineEngine.mqh — v1.06                                  |
 //+------------------------------------------------------------------+
 #property strict
@@ -60,7 +61,7 @@ private:
       ctx.spread_pts = (point > 0.0 && ask > bid) ? (ask - bid) / point : 0.0;
       ctx.atr_points = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
       ctx.atr = ctx.atr_points;
-      ctx.bar_time = iTime(_Symbol, _Period, 0);
+      ctx.bar_time = GetTime(_Symbol, _Period, 0);
       ctx.market_open = (bid > 0.0 && ask > 0.0);
       ctx.session = DetectSession();
      }

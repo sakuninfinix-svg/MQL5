@@ -1,4 +1,5 @@
 //+------------------------------------------------------------------+
+#include <PASR/MQL5Compatibility.mqh>
 //| Analysis/SRDetector.mqh — v1.0.2                                 |
 //| Responsibility: PIVOT DETECTION ONLY                             |
 //+------------------------------------------------------------------+
@@ -28,18 +29,18 @@ private:
    bool IsPivotHigh(int shift, int totalBars) const
      {
       if(shift < m_rightBars || shift >= totalBars - m_leftBars) return false;
-      double h = iHigh(_Symbol, _Period, shift);
-      for(int i=1;i<=m_leftBars;i++)  if(iHigh(_Symbol,_Period,shift+i) >= h) return false;
-      for(int i=1;i<=m_rightBars;i++) if(iHigh(_Symbol,_Period,shift-i) >= h) return false;
+      double h = GetHigh(_Symbol, _Period, shift);
+      for(int i=1;i<=m_leftBars;i++)  if(GetHigh(_Symbol,_Period,shift+i) >= h) return false;
+      for(int i=1;i<=m_rightBars;i++) if(GetHigh(_Symbol,_Period,shift-i) >= h) return false;
       return true;
      }
 
    bool IsPivotLow(int shift, int totalBars) const
      {
       if(shift < m_rightBars || shift >= totalBars - m_leftBars) return false;
-      double l = iLow(_Symbol, _Period, shift);
-      for(int i=1;i<=m_leftBars;i++)  if(iLow(_Symbol,_Period,shift+i) <= l) return false;
-      for(int i=1;i<=m_rightBars;i++) if(iLow(_Symbol,_Period,shift-i) <= l) return false;
+      double l = GetLow(_Symbol, _Period, shift);
+      for(int i=1;i<=m_leftBars;i++)  if(GetLow(_Symbol,_Period,shift+i) <= l) return false;
+      for(int i=1;i<=m_rightBars;i++) if(GetLow(_Symbol,_Period,shift-i) <= l) return false;
       return true;
      }
 
@@ -92,7 +93,7 @@ public:
          ArrayResize(out,newIdx+1);
          out[newIdx].barsAgo = shift;
          out[newIdx].isHigh  = isHigh;
-         out[newIdx].price   = isHigh ? iHigh(_Symbol,_Period,shift) : iLow(_Symbol,_Period,shift);
+         out[newIdx].price   = isHigh ? GetHigh(_Symbol,_Period,shift) : GetLow(_Symbol,_Period,shift);
          found++;
         }
       return found;
