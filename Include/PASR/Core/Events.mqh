@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/Events.mqh — CANONICAL v2.16                                |
+//| Core/Events.mqh — CANONICAL v2.17                                |
 //| All event type definitions for the PASR framework                |
 //+------------------------------------------------------------------+
 #pragma once
@@ -45,11 +45,7 @@ enum ENUM_EVENT_ID
    EVENT_ID_HEALTH_CHECK            = 48,
    EVENT_ID_SNAPSHOT_SAVE           = 49,
    EVENT_ID_SNAPSHOT_LOAD           = 50,
-   EVENT_ID_DEFERRED                = 99,
-
-   // Canonical alias retained for older QA callers after the migration.
-   // New code should use EVENT_ID_TICK.
-   EVENT_TICK                    = EVENT_ID_TICK
+   EVENT_ID_DEFERRED                = 99
   };
 
 struct PASREvent
