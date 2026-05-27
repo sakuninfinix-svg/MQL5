@@ -1,6 +1,5 @@
 //+------------------------------------------------------------------+
-#include <PASR/MQL5Compatibility.mqh>
-//| Analysis/SRDetector.mqh — v1.0.2                                 |
+//| Analysis/SRDetector.mqh — v1.0.3                                 |
 //| Responsibility: PIVOT DETECTION ONLY                             |
 //+------------------------------------------------------------------+
 #property strict
@@ -26,21 +25,26 @@ private:
    int   m_leftBars;
    int   m_rightBars;
 
+   double HighAt(const int shift) const { return iHigh(_Symbol, _Period, shift); }
+   double LowAt(const int shift)  const { return iLow(_Symbol, _Period, shift);  }
+
    bool IsPivotHigh(int shift, int totalBars) const
      {
       if(shift < m_rightBars || shift >= totalBars - m_leftBars) return false;
-      double h = GetHigh(_Symbol, _Period, shift);
-      for(int i=1;i<=m_leftBars;i++)  if(GetHigh(_Symbol,_Period,shift+i) >= h) return false;
-      for(int i=1;i<=m_rightBars;i++) if(GetHigh(_Symbol,_Period,shift-i) >= h) return false;
+      double h = HighAt(shift);
+      if(h <= 0.0) return false;
+      for(int i=1;i<=m_leftBars;i++)  if(HighAt(shift+i) >= h) return false;
+      for(int i=1;i<=m_rightBars;i++) if(HighAt(shift-i) >= h) return false;
       return true;
      }
 
    bool IsPivotLow(int shift, int totalBars) const
      {
       if(shift < m_rightBars || shift >= totalBars - m_leftBars) return false;
-      double l = GetLow(_Symbol, _Period, shift);
-      for(int i=1;i<=m_leftBars;i++)  if(GetLow(_Symbol,_Period,shift+i) <= l) return false;
-      for(int i=1;i<=m_rightBars;i++) if(GetLow(_Symbol,_Period,shift-i) <= l) return false;
+      double l = LowAt(shift);
+      if(l <= 0.0) return false;
+      for(int i=1;i<=m_leftBars;i++)  if(LowAt(shift+i) <= l) return false;
+      for(int i=1;i<=m_rightBars;i++) if(LowAt(shift-i) <= l) return false;
       return true;
      }
 
@@ -93,7 +97,7 @@ public:
          ArrayResize(out,newIdx+1);
          out[newIdx].barsAgo = shift;
          out[newIdx].isHigh  = isHigh;
-         out[newIdx].price   = isHigh ? GetHigh(_Symbol,_Period,shift) : GetLow(_Symbol,_Period,shift);
+         out[newIdx].price   = isHigh ? HighAt(shift) : LowAt(shift);
          found++;
         }
       return found;
@@ -137,4 +141,4 @@ public:
      }
   };
 
-#endif
+#endif // __ANALYSIS_SR_DETECTOR_MQH__
