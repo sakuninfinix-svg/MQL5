@@ -1,16 +1,6 @@
 //+------------------------------------------------------------------+
-//| Analysis/ZoneManager.mqh — v2.03                                 |
+//| Analysis/ZoneManager.mqh — v2.04                                 |
 //| Supply/Demand zone detection via impulse-base candle method.     |
-//|                                                                  |
-//| CHANGELOG:                                                       |
-//|   v2.03 (2026-05-27):                                            |
-//|     BUG-A06: Add real-time PRICE_UPDATE consumption detection.   |
-//|     OnNewBar still owns closed-bar freshness/touch decay.        |
-//|   v2.02 (2026-05-23) Sprint 7:                                   |
-//|     BUG-013: Missing OnEvent() override — DeclareEvents()        |
-//|              subscribed to EVENT_ID_NEW_BAR but EventBus         |
-//|              dispatch was silent-failing. OnEvent() added.       |
-//|   v2.01 — Optimized & Clean (confidence scoring, CSV export)     |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_ZONE_MANAGER_MQH__
@@ -18,9 +8,6 @@
 
 #include "../Core/IManager.mqh"
 
-//+------------------------------------------------------------------+
-//| SDZone — Supply/Demand zone structure                            |
-//+------------------------------------------------------------------+
 struct SDZone
   {
    double   high;
@@ -125,7 +112,8 @@ private:
 
    void UpdateFreshnessAndConsumed()
      {
-      double curPrice = GetClose(_Symbol, _Period, 1);
+      double curPrice = iClose(_Symbol, _Period, 1);
+      if(curPrice <= 0.0) return;
       for(int i=0; i<m_zoneCount; i++)
         {
          if(!m_zones[i].isActive) continue;
@@ -170,22 +158,22 @@ private:
          double bullMove    = 0;
          for(int j=0; j<AZ_IMPULSE_BARS; j++)
            {
-            double o = GetOpen(_Symbol,_Period,shift-j);
-            double c = GetClose(_Symbol,_Period,shift-j);
-            if(c <= o) { bullImpulse=false; break; }
+            double o = iOpen(_Symbol,_Period,shift-j);
+            double c = iClose(_Symbol,_Period,shift-j);
+            if(o <= 0.0 || c <= 0.0 || c <= o) { bullImpulse=false; break; }
             bullMove += (c - o);
            }
 
          if(bullImpulse && bullMove >= threshold)
            {
             int    baseShift = shift + 1;
-            double bO = GetOpen(_Symbol,_Period,baseShift);
-            double bC = GetClose(_Symbol,_Period,baseShift);
-            double bH = GetHigh(_Symbol,_Period,baseShift);
-            double bL = GetLow(_Symbol,_Period,baseShift);
+            double bO = iOpen(_Symbol,_Period,baseShift);
+            double bC = iClose(_Symbol,_Period,baseShift);
+            double bH = iHigh(_Symbol,_Period,baseShift);
+            double bL = iLow(_Symbol,_Period,baseShift);
             double bRange = bH - bL;
             double bBody  = MathAbs(bC - bO);
-            if(bRange > 0 && bBody/bRange <= AZ_BASE_MAX_BODY)
+            if(bO > 0.0 && bC > 0.0 && bRange > 0 && bBody/bRange <= AZ_BASE_MAX_BODY)
               {
                double zH       = MathMax(bO, bC);
                double zL       = MathMin(bO, bC);
@@ -198,22 +186,22 @@ private:
          double bearMove    = 0;
          for(int j=0; j<AZ_IMPULSE_BARS; j++)
            {
-            double o = GetOpen(_Symbol,_Period,shift-j);
-            double c = GetClose(_Symbol,_Period,shift-j);
-            if(c >= o) { bearImpulse=false; break; }
+            double o = iOpen(_Symbol,_Period,shift-j);
+            double c = iClose(_Symbol,_Period,shift-j);
+            if(o <= 0.0 || c <= 0.0 || c >= o) { bearImpulse=false; break; }
             bearMove += (o - c);
            }
 
          if(bearImpulse && bearMove >= threshold)
            {
             int    baseShift = shift + 1;
-            double bO = GetOpen(_Symbol,_Period,baseShift);
-            double bC = GetClose(_Symbol,_Period,baseShift);
-            double bH = GetHigh(_Symbol,_Period,baseShift);
-            double bL = GetLow(_Symbol,_Period,baseShift);
+            double bO = iOpen(_Symbol,_Period,baseShift);
+            double bC = iClose(_Symbol,_Period,baseShift);
+            double bH = iHigh(_Symbol,_Period,baseShift);
+            double bL = iLow(_Symbol,_Period,baseShift);
             double bRange = bH - bL;
             double bBody  = MathAbs(bC - bO);
-            if(bRange > 0 && bBody/bRange <= AZ_BASE_MAX_BODY)
+            if(bO > 0.0 && bC > 0.0 && bRange > 0 && bBody/bRange <= AZ_BASE_MAX_BODY)
               {
                double zH       = MathMax(bO, bC);
                double zL       = MathMin(bO, bC);
@@ -224,7 +212,7 @@ private:
         }
 
       if(scanEnd > AZ_IMPULSE_BARS + 1)
-         m_lastScanBarTime = (ulong)GetTime(_Symbol, _Period, AZ_IMPULSE_BARS + 1);
+         m_lastScanBarTime = (ulong)iTime(_Symbol, _Period, AZ_IMPULSE_BARS + 1);
      }
 
    void CompactZones()
@@ -250,6 +238,8 @@ public:
 
    virtual ~CAnalysisZoneManager() {}
 
+   virtual string HandlerName() const override { return "ZoneManager"; }
+
    virtual void DeclareEvents() override
      {
       AddEvent(EVENT_ID_PRICE_UPDATE);
@@ -271,6 +261,7 @@ public:
 
    virtual void OnNewBar() override
      {
+      if(m_data == NULL) return;
       double atr = m_data.GetATRPoints() * _Point;
       if(atr <= 0) return;
 
@@ -279,7 +270,7 @@ public:
       CompactZones();
 
       if(m_debugMode)
-         PrintFormat("[Zone v2.03] Active: %d | Created: %d | Consumed: %d",
+         PrintFormat("[Zone v2.04] Active: %d | Created: %d | Consumed: %d",
                      m_zoneCount, m_totalZonesCreated, m_totalZonesConsumed);
      }
 
@@ -296,6 +287,7 @@ public:
 
    bool IsNearZone(double price, double atrMult, SDZone &out) const
      {
+      if(m_data == NULL) return false;
       double atr  = m_data.GetATRPoints() * _Point;
       double tol  = atr * atrMult;
       double best = DBL_MAX;
@@ -361,9 +353,16 @@ public:
      {
       if(m_zoneCount == 0) return 0.0;
       double sum = 0.0;
+      int active = 0;
       for(int i=0; i<m_zoneCount; i++)
-         if(m_zones[i].isActive) sum += m_zones[i].confidence;
-      return sum / m_zoneCount;
+        {
+         if(m_zones[i].isActive)
+           {
+            sum += m_zones[i].confidence;
+            active++;
+           }
+        }
+      return active > 0 ? sum / active : 0.0;
      }
   };
 
