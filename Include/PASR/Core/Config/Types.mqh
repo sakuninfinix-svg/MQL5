@@ -18,6 +18,9 @@
 //|      .Display  → DisplayConfig (panel, arrows, alerts, colors)  |
 //|                                                                  |
 //|  CHANGE LOG:                                                     |
+//|  v2.15 (2026-05-26) — Risk safety fields added:                  |
+//|    + MaxDrawdownPct        — double, equity peak drawdown limit  |
+//|    + MaxConsecLoss         — int, consecutive loss breaker       |
 //|  v2.14 (2026-05-21) — Phase 6 fields added to RiskConfig:       |
 //|    + RecoveryEnabled        — bool, master switch for recovery   |
 //|    + MaxRecoveryAttempts    — int,  max retries before abandon   |
@@ -44,8 +47,10 @@ struct RiskConfig
    double TPMultiplier;         // TakeProfit = ATR * TPMultiplier
 
    //--- Session & drawdown limits
-   double MaxDailyLossPct;      // EA halts if daily drawdown exceeds this %
+   double MaxDailyLossPct;      // EA halts if daily realised loss exceeds this %
+   double MaxDrawdownPct;       // EA halts if equity drawdown from peak exceeds this %
    int    MaxOpenPositions;     // max concurrent open positions
+   int    MaxConsecLoss;        // consecutive losing closes before circuit breaker (0=off)
 
    //--- Break-even
    bool   UseBreakEven;         // move SL to break-even when in profit
@@ -83,7 +88,8 @@ struct RiskConfig
    RiskConfig()
       : LotSize(0.01),          RiskPercent(1.0),
         SLMultiplier(1.5),      TPMultiplier(2.5),
-        MaxDailyLossPct(3.0),   MaxOpenPositions(3),
+        MaxDailyLossPct(3.0),   MaxDrawdownPct(10.0),
+        MaxOpenPositions(3),    MaxConsecLoss(5),
         UseBreakEven(true),     BreakEvenATRMult(1.0),
         UseTrailingStop(false), TrailATRMult(1.0),
         //--- Phase 6 defaults
@@ -199,7 +205,7 @@ struct StrategyConfig
    StrategyConfig()
       : MagicNumber(123456),
         EAName("PASR"),
-        Version("2.14.0") {}
+        Version("2.15.0") {}
   };
 
 #endif // __CORE_CONFIG_TYPES_MQH__

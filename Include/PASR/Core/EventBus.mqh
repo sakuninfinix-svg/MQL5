@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — v3.04                                       |
+//| Core/EventBus.mqh — v3.05                                       |
 //| High-performance event dispatch with binary-heap priority queue  |
 //+------------------------------------------------------------------+
 #property strict
@@ -26,6 +26,7 @@ struct SEventBusStats
    ulong             total_pushed;
    ulong             total_dropped;
    ulong             total_drained;
+   ulong             total_immediate;
   };
 
 class CEventBus
@@ -167,10 +168,20 @@ public:
       return true;
      }
 
+   void DispatchImmediate(const PASREvent &ev)
+     {
+      // Explicit direct-route path. Use only for latency-sensitive events
+      // where immediate subscriber notification is required.
+      RouteEvent(ev);
+      m_stats.total_immediate++;
+      m_stats.total_drained++;
+     }
+
    void Dispatch(const PASREvent &ev)
      {
-      RouteEvent(ev);
-      m_stats.total_drained++;
+      // Backward-compatible alias for legacy callers. New code should use
+      // DispatchImmediate() for direct routing or Push()/Drain() for queued routing.
+      DispatchImmediate(ev);
      }
 
    int Drain()
@@ -202,6 +213,7 @@ public:
    void ResetStats()
      {
       m_stats.total_pushed = m_stats.total_dropped = m_stats.total_drained = 0;
+      m_stats.total_immediate = 0;
       m_stats.peak_depth   = m_size;
      }
   };

@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalManager.mqh — v4.04                                |
+//| Signal/SignalManager.mqh — v4.05                                |
 //| Signal orchestration using canonical PASREvent model             |
 //+------------------------------------------------------------------+
 #property strict
@@ -99,7 +99,7 @@ private:
                     decision.signalShift, decision.reason);
       ev.comment  = ev.tag;
       ev.ticket   = (ulong)decision.orderType;
-      m_bus.Push(ev);
+      m_bus.DispatchImmediate(ev);
      }
 
    void ProcessSignalOnNewBar(datetime barOpenTime)

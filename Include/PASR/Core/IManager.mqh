@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/IManager.mqh — CANONICAL v2.20                              |
+//| Core/IManager.mqh — CANONICAL v2.21                              |
 //| Base class for all PASR managers                                 |
 //+------------------------------------------------------------------+
 #pragma once
@@ -29,11 +29,18 @@ protected:
       m_cfgDirty = false;
      }
 
-   void DispatchEvent(const PASREvent &ev)
+   void DispatchImmediate(const PASREvent &ev)
      {
       if(m_bus == NULL) return;
       if(CheckPointer(m_bus) == POINTER_INVALID) return;
-      m_bus.Dispatch(ev);
+      m_bus.DispatchImmediate(ev);
+     }
+
+   void DispatchEvent(const PASREvent &ev)
+     {
+      // Legacy direct-dispatch helper. Kept for backwards compatibility.
+      // Prefer DispatchImmediate() for direct routing or QueueEvent() for queued delivery.
+      DispatchImmediate(ev);
      }
 
    void QueueEvent(const PASREvent &ev)

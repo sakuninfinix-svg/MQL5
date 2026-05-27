@@ -1,9 +1,11 @@
 //+------------------------------------------------------------------+
-#include <PASR/MQL5Compatibility.mqh>
-//| Analysis/ZoneManager.mqh — v2.02                                 |
+//| Analysis/ZoneManager.mqh — v2.03                                 |
 //| Supply/Demand zone detection via impulse-base candle method.     |
 //|                                                                  |
 //| CHANGELOG:                                                       |
+//|   v2.03 (2026-05-27):                                            |
+//|     BUG-A06: Add real-time PRICE_UPDATE consumption detection.   |
+//|     OnNewBar still owns closed-bar freshness/touch decay.        |
 //|   v2.02 (2026-05-23) Sprint 7:                                   |
 //|     BUG-013: Missing OnEvent() override — DeclareEvents()        |
 //|              subscribed to EVENT_ID_NEW_BAR but EventBus         |
@@ -21,15 +23,15 @@
 //+------------------------------------------------------------------+
 struct SDZone
   {
-   double   high;            // Zone high price
-   double   low;             // Zone low price
-   bool     isSupply;        // true=supply (resistance), false=demand (support)
-   datetime createdTime;     // When zone was created
-   datetime consumedTime;    // When zone was consumed/breached
-   double   freshnessPct;    // 1.0 = fresh, decays on re-tests
-   int      touchCount;      // Number of times price touched zone
-   bool     isActive;        // Whether zone is still valid
-   double   confidence;      // Confidence score 0.0-1.0
+   double   high;
+   double   low;
+   bool     isSupply;
+   datetime createdTime;
+   datetime consumedTime;
+   double   freshnessPct;
+   int      touchCount;
+   bool     isActive;
+   double   confidence;
 
    void Init()
      {
@@ -45,28 +47,23 @@ struct SDZone
    double Strength()  const { return confidence * freshnessPct; }
   };
 
-// ── Configuration Constants ───────────────────────────────────────
 #define AZ_MAX_ZONES        30
 #define AZ_LOOKBACK         200
-#define AZ_IMPULSE_BARS     3     // consecutive bars to confirm impulse
-#define AZ_IMPULSE_ATR      1.5   // ATR multiplier for impulse threshold
-#define AZ_BASE_MAX_BODY    0.5   // base candle body/range <= this ratio
-#define AZ_FRESHNESS_DECAY  0.2   // decay per re-test
-#define AZ_MIN_CONFIDENCE   0.3   // minimum confidence to consider zone
+#define AZ_IMPULSE_BARS     3
+#define AZ_IMPULSE_ATR      1.5
+#define AZ_BASE_MAX_BODY    0.5
+#define AZ_FRESHNESS_DECAY  0.2
+#define AZ_MIN_CONFIDENCE   0.3
+#define AZ_CONSUME_BUFFER_POINTS 5
 
-//+------------------------------------------------------------------+
-//| CAnalysisZoneManager — full S/D detection with confidence        |
-//+------------------------------------------------------------------+
 class CAnalysisZoneManager : public IManager
   {
 private:
    SDZone  m_zones[AZ_MAX_ZONES];
    int     m_zoneCount;
-   int     m_totalZonesCreated;    // lifetime counter for stats
-   int     m_totalZonesConsumed;   // lifetime counter for stats
-   ulong   m_lastScanBarTime;      // prevent duplicate scans
-
-   // ── Helpers ────────────────────────────────────────────────
+   int     m_totalZonesCreated;
+   int     m_totalZonesConsumed;
+   ulong   m_lastScanBarTime;
 
    bool ZoneExists(double zHigh, double zLow) const
      {
@@ -77,6 +74,15 @@ private:
             MathAbs(m_zones[i].low  - zLow)  < _Point * 5) return true;
         }
       return false;
+     }
+
+   void MarkZoneConsumed(const int index)
+     {
+      if(index < 0 || index >= m_zoneCount) return;
+      if(!m_zones[index].isActive) return;
+      m_zones[index].isActive    = false;
+      m_zones[index].consumedTime = TimeCurrent();
+      m_totalZonesConsumed++;
      }
 
    bool TryAddZone(double zHigh, double zLow, bool isSupply, datetime t, double impulseStrength)
@@ -92,13 +98,29 @@ private:
       z.createdTime  = t;
       z.freshnessPct = 1.0;
       z.isActive     = true;
-      // Calculate initial confidence based on impulse strength
       z.confidence   = MathMin(1.0, 0.5 + impulseStrength * 0.1);
       z.touchCount   = 0;
 
       m_zoneCount++;
       m_totalZonesCreated++;
       return true;
+     }
+
+   void ConsumeZonesRealtime(const double price)
+     {
+      if(price <= 0.0) return;
+      double buffer = AZ_CONSUME_BUFFER_POINTS * _Point;
+      for(int i=0; i<m_zoneCount; i++)
+        {
+         if(!m_zones[i].isActive) continue;
+         if(m_zones[i].isSupply && price > m_zones[i].high + buffer)
+           {
+            MarkZoneConsumed(i);
+            continue;
+           }
+         if(!m_zones[i].isSupply && price < m_zones[i].low - buffer)
+            MarkZoneConsumed(i);
+        }
      }
 
    void UpdateFreshnessAndConsumed()
@@ -108,23 +130,17 @@ private:
         {
          if(!m_zones[i].isActive) continue;
 
-         // Consumed: close breaks through zone
          if(m_zones[i].isSupply && curPrice > m_zones[i].high)
            {
-            m_zones[i].isActive    = false;
-            m_zones[i].consumedTime = TimeCurrent();
-            m_totalZonesConsumed++;
+            MarkZoneConsumed(i);
             continue;
            }
          if(!m_zones[i].isSupply && curPrice < m_zones[i].low)
            {
-            m_zones[i].isActive    = false;
-            m_zones[i].consumedTime = TimeCurrent();
-            m_totalZonesConsumed++;
+            MarkZoneConsumed(i);
             continue;
            }
 
-         // Re-test: price entered zone but didn't close through
          bool inZone = (curPrice >= m_zones[i].low && curPrice <= m_zones[i].high);
          if(inZone && m_zones[i].touchCount > 0)
            {
@@ -135,7 +151,6 @@ private:
          if(inZone)
            {
             m_zones[i].touchCount++;
-            // Update confidence based on successful test
             m_zones[i].confidence = MathMin(1.0, m_zones[i].confidence + 0.05);
            }
         }
@@ -148,11 +163,9 @@ private:
 
       for(int shift = AZ_IMPULSE_BARS + 1; shift < scanEnd; shift++)
         {
-         // Prevent re-scanning already processed bars
-         datetime barTime = GetTime(_Symbol, _Period, shift);
+         datetime barTime = iTime(_Symbol, _Period, shift);
          if(barTime <= (datetime)m_lastScanBarTime) continue;
 
-         // ── Bullish impulse: AZ_IMPULSE_BARS consecutive bull candles
          bool   bullImpulse = true;
          double bullMove    = 0;
          for(int j=0; j<AZ_IMPULSE_BARS; j++)
@@ -177,12 +190,10 @@ private:
                double zH       = MathMax(bO, bC);
                double zL       = MathMin(bO, bC);
                double strength = bullMove / atr;
-               TryAddZone(zH, zL, false,   // demand zone (support)
-                          GetTime(_Symbol, _Period, baseShift), strength);
+               TryAddZone(zH, zL, false, iTime(_Symbol, _Period, baseShift), strength);
               }
            }
 
-         // ── Bearish impulse: AZ_IMPULSE_BARS consecutive bear candles
          bool   bearImpulse = true;
          double bearMove    = 0;
          for(int j=0; j<AZ_IMPULSE_BARS; j++)
@@ -207,13 +218,11 @@ private:
                double zH       = MathMax(bO, bC);
                double zL       = MathMin(bO, bC);
                double strength = bearMove / atr;
-               TryAddZone(zH, zL, true,   // supply zone (resistance)
-                          GetTime(_Symbol, _Period, baseShift), strength);
+               TryAddZone(zH, zL, true, iTime(_Symbol, _Period, baseShift), strength);
               }
            }
         }
 
-      // Update last scan timestamp
       if(scanEnd > AZ_IMPULSE_BARS + 1)
          m_lastScanBarTime = (ulong)GetTime(_Symbol, _Period, AZ_IMPULSE_BARS + 1);
      }
@@ -241,24 +250,23 @@ public:
 
    virtual ~CAnalysisZoneManager() {}
 
-   //== IManager overrides ==========================================+
-
    virtual void DeclareEvents() override
      {
+      AddEvent(EVENT_ID_PRICE_UPDATE);
       AddEvent(EVENT_ID_NEW_BAR);
       AddEvent(EVENT_ID_CONFIG_RELOAD);
      }
 
-   //+---------------------------------------------------------------+
-   //| BUG-013 FIX (v2.02): OnEvent() was missing. EventBus calls    |
-   //| Dispatch(ev) which iterates registered managers and calls     |
-   //| their OnEvent(). Without this override, all EVENT_ID_NEW_BAR  |
-   //| dispatches were no-ops — zone detection never ran from bus.   |
-   //+---------------------------------------------------------------+
    virtual void OnEvent(const PASREvent &ev) override
      {
+      if(ev.id == EVENT_ID_PRICE_UPDATE) { OnPriceUpdate(); return; }
       if(ev.id == EVENT_ID_NEW_BAR) OnNewBar();
-      // CONFIG_RELOAD: future hook for runtime parameter updates
+     }
+
+   virtual void OnPriceUpdate() override
+     {
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      ConsumeZonesRealtime(bid);
      }
 
    virtual void OnNewBar() override
@@ -271,11 +279,9 @@ public:
       CompactZones();
 
       if(m_debugMode)
-         PrintFormat("[Zone v2.02] Active: %d | Created: %d | Consumed: %d",
+         PrintFormat("[Zone v2.03] Active: %d | Created: %d | Consumed: %d",
                      m_zoneCount, m_totalZonesCreated, m_totalZonesConsumed);
      }
-
-   //== PIPELINE PUBLIC API =========================================+
 
    bool IsPriceInZone(double price, SDZone &out) const
      {
