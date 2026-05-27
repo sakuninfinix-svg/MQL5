@@ -2,12 +2,15 @@
 //|                                   Core/Config/Validator.mqh     |
 //|                                   Copyright 2026, Agsicentre    |
 //|                                                                  |
-//|  PURPOSE: Standalone config validation — 33 business rules.     |
+//|  PURPOSE: Standalone config validation — 35 business rules.     |
 //|    - Zero dependencies (no EventBus, no IManager)               |
 //|    - Returns human-readable error list                           |
 //|    - Called by CConfigManager before every ConfigReload dispatch |
 //|    - Can also be used in SmokeTest and OnInit guard             |
 //|                                                                  |
+//|  CHANGES v2.03 (2026-05-26):                                     |
+//|    Rule 34: MaxDrawdownPct in (0, 80]                            |
+//|    Rule 35: MaxConsecLoss in [0, 50] (0 = disabled)              |
 //|  CHANGES v2.02 (2026-05-21) — Phase 5:                          |
 //|    Rule 29: MaxRecoveryAttempts in [1, 10]                      |
 //|    Rule 30: RecoveryCooldownBars in [1, 50]                     |
@@ -55,7 +58,7 @@ private:
      }
 
 public:
-   //--- Main entry point. Returns true if ALL 33 rules pass.
+   //--- Main entry point. Returns true if ALL 35 rules pass.
    //--- On failure, errors[] is populated with all failing rules.
    //--- This is a COMPLETE scan — all errors collected, not fail-fast.
    static bool Validate(const StrategyConfig &cfg, string &errors[])
@@ -88,9 +91,17 @@ public:
          AddError(errors, "[Config.Risk] MaxDailyLossPct must be in (0, 50] (got " +
                   DoubleToString(cfg.Risk.MaxDailyLossPct, 2) + ")");
 
+      if(cfg.Risk.MaxDrawdownPct <= 0.0 || cfg.Risk.MaxDrawdownPct > 80.0)
+         AddError(errors, "[Config.Risk] MaxDrawdownPct must be in (0, 80] (got " +
+                  DoubleToString(cfg.Risk.MaxDrawdownPct, 2) + ")");
+
       if(cfg.Risk.MaxOpenPositions <= 0 || cfg.Risk.MaxOpenPositions > 100)
          AddError(errors, "[Config.Risk] MaxOpenPositions must be in [1, 100] (got " +
                   IntegerToString(cfg.Risk.MaxOpenPositions) + ")");
+
+      if(cfg.Risk.MaxConsecLoss < 0 || cfg.Risk.MaxConsecLoss > 50)
+         AddError(errors, "[Config.Risk] MaxConsecLoss must be in [0, 50] (got " +
+                  IntegerToString(cfg.Risk.MaxConsecLoss) + "). Use 0 to disable this breaker.");
 
       if(cfg.Risk.SLMultiplier <= 0.0 || cfg.Risk.SLMultiplier > 20.0)
          AddError(errors, "[Config.Risk] SLMultiplier must be in (0, 20] (got " +
@@ -299,7 +310,7 @@ public:
       int n = ArraySize(errors);
       if(n == 0)
         {
-         Print("[CConfigValidator] Config OK — all 33 rules passed");
+         Print("[CConfigValidator] Config OK — all 35 rules passed");
          return;
         }
       Print("[CConfigValidator] Config INVALID — ", n, " error(s):");

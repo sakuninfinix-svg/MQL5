@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| CorrelationManager.mqh                                    v2.01 |
+//| CorrelationManager.mqh                                    v2.02 |
 //| Dynamic Correlation Matrix for Multi-Symbol Risk Management      |
 //+------------------------------------------------------------------+
 #ifndef PASR_CORRELATION_MANAGER_MQH
@@ -64,7 +64,7 @@ public:
       m_pair_count = 0;
       m_tracked_count = 0;
       m_last_update = 0;
-      Print("[CORR] v2.01 initialized. Window=", CORR_WINDOW_SIZE,
+      Print("[CORR] v2.02 initialized. Window=", CORR_WINDOW_SIZE,
             " Threshold=", CORR_HIGH_THRESHOLD,
             " UpdateInterval=", CORR_UPDATE_INTERVAL, "s");
       return true;
@@ -275,7 +275,8 @@ private:
       ArrayInitialize(returns, 0.0);
       double closes[];
       ArraySetAsSeries(closes, true);
-      int copied = CopyClose(symbol, PERIOD_CURRENT, 0, window + 1, closes);
+      // Closed bars only: start=1 excludes the active unfinished candle.
+      int copied = CopyClose(symbol, PERIOD_CURRENT, 1, window + 1, closes);
       if(copied < window + 1) return;
       for(int i = 0; i < window && i < ArraySize(returns); i++)
          if(closes[i+1] > 0 && closes[i] > 0)

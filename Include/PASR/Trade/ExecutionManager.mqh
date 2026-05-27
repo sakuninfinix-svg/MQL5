@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/ExecutionManager.mqh — v3.04                               |
+//| Trade/ExecutionManager.mqh — v3.07                               |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -22,6 +22,15 @@ private:
    TradePlan m_pending_plan;
    int       m_pending_retries;
    ulong     m_next_retry_ms;
+
+   void ClearPendingRetry(const string reason)
+     {
+      if(!m_has_pending) return;
+      m_has_pending = false;
+      m_pending_retries = 0;
+      m_next_retry_ms = 0;
+      if(m_debugMode) Print("[Exec] Pending retry cleared: ", reason);
+     }
 
    void ClampStopsToMinLevel(ENUM_SIGNAL_DIR dir, double &sl, double &tp)
      {
@@ -81,15 +90,23 @@ private:
       return false;
      }
 
-   void DispatchPositionOpened(const SExecResult &result)
+   void DispatchPositionOpened(const TradePlan &plan, const SExecResult &result)
      {
-      PASREvent ev;
-      ev.id       = EVENT_ID_POSITION_UPDATE;
-      ev.ticket   = result.ticket;
-      ev.priority = 15;
-      ev.data1    = 1.0; // open/refresh signal for RiskManager::SyncOpenTradesFromBroker()
-      ev.comment  = "OrderPlaced";
-      DispatchEvent(ev);
+      PASREvent evOpen;
+      evOpen.id       = EVENT_ID_TRADE_OPEN;
+      evOpen.ticket   = result.ticket;
+      evOpen.priority = 10;
+      evOpen.data1    = (double)plan.direction;
+      evOpen.comment  = "OrderPlaced";
+      DispatchImmediate(evOpen);
+
+      PASREvent evUpdate;
+      evUpdate.id       = EVENT_ID_POSITION_UPDATE;
+      evUpdate.ticket   = result.ticket;
+      evUpdate.priority = 15;
+      evUpdate.data1    = 1.0; // open/refresh signal for RiskManager::SyncOpenTradesFromBroker()
+      evUpdate.comment  = "OrderPlaced";
+      DispatchImmediate(evUpdate);
      }
 
 public:
@@ -106,13 +123,13 @@ public:
       m_trade.SetExpertMagicNumber(m_cfg.MagicNumber);
       m_trade.SetDeviationInPoints((int)MathMax(10.0, m_cfg.Market.SpreadFilterPips * 10.0));
       m_trade.SetTypeFilling(ORDER_FILLING_IOC);
-      Print("[Exec] v3.04 Init OK");
+      Print("[Exec] v3.07 Init OK");
       return true;
      }
 
    virtual void Deinit() override
      {
-      m_has_pending = false;
+      ClearPendingRetry("Deinit");
       IManager::Deinit();
      }
 
@@ -120,11 +137,31 @@ public:
      {
       AddEvent(EVENT_ID_NEW_BAR);
       AddEvent(EVENT_ID_EMERGENCY_STOP);
+      AddEvent(EVENT_ID_POSITION_UPDATE);
+      AddEvent(EVENT_ID_TRADE_OPEN);
+      AddEvent(EVENT_ID_TRADE_CLOSE);
      }
 
    virtual void OnEvent(const PASREvent &ev) override
      {
-      if(ev.id == EVENT_ID_EMERGENCY_STOP) m_has_pending = false;
+      switch(ev.id)
+        {
+         case EVENT_ID_EMERGENCY_STOP:
+            ClearPendingRetry("EmergencyStop");
+            break;
+         case EVENT_ID_TRADE_OPEN:
+            ClearPendingRetry("TradeOpenEvent");
+            break;
+         case EVENT_ID_POSITION_UPDATE:
+            if(ev.data1 == 1.0 || ev.ticket > 0)
+               ClearPendingRetry("PositionUpdateEvent");
+            break;
+         case EVENT_ID_TRADE_CLOSE:
+            if(m_debugMode) PrintFormat("[Exec] Trade close observed ticket=%I64u", ev.ticket);
+            break;
+         default:
+            break;
+        }
      }
 
    SExecResult Execute(const TradePlan &plan)
@@ -139,7 +176,7 @@ public:
 
       if(SendOnce(plan, result))
         {
-         DispatchPositionOpened(result);
+         DispatchPositionOpened(plan, result);
          return result;
         }
 
@@ -166,16 +203,16 @@ public:
       SExecResult result;
       if(SendOnce(m_pending_plan, result))
         {
-         m_has_pending = false;
+         ClearPendingRetry("RetrySuccess");
          PrintFormat("[Exec] Retry success on attempt %d ticket=%llu", m_pending_retries + 1, result.ticket);
-         DispatchPositionOpened(result);
+         DispatchPositionOpened(m_pending_plan, result);
          return;
         }
 
       m_pending_retries++;
       if(m_pending_retries >= m_maxRetries)
         {
-         m_has_pending = false;
+         ClearPendingRetry("RetryExhausted");
          PrintFormat("[Exec] Retry exhausted after %d attempts. Last: %d %s", m_maxRetries, result.retcode, result.comment);
          return;
         }

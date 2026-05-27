@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| ExitEngine.mqh                                             v2.03 |
+//| ExitEngine.mqh                                             v2.04 |
 //| Smart Exit Logic for Position Management                         |
 //+------------------------------------------------------------------+
 #ifndef PASR_EXIT_ENGINE_MQH
@@ -54,6 +54,7 @@ private:
    ulong m_fade_exits;
    int   m_hATR;
    int   m_hRSI;
+   bool  m_indicatorsReady;
 
    bool InitIndicators()
      {
@@ -66,12 +67,14 @@ private:
      {
       if(m_hATR != INVALID_HANDLE) { IndicatorRelease(m_hATR); m_hATR = INVALID_HANDLE; }
       if(m_hRSI != INVALID_HANDLE) { IndicatorRelease(m_hRSI); m_hRSI = INVALID_HANDLE; }
+      m_indicatorsReady = false;
      }
 
    double GetATRValue()
      {
       if(m_hATR == INVALID_HANDLE) return 0.0;
       double buf[1];
+      // Use the last closed bar for consistency with Chandelier high/low sampling.
       if(CopyBuffer(m_hATR, 0, 1, 1, buf) <= 0) return 0.0;
       return buf[0];
      }
@@ -81,6 +84,7 @@ private:
       current = 0.0; prev = 0.0;
       if(m_hRSI == INVALID_HANDLE) return false;
       double buf[2];
+      // Closed-bar RSI values only; avoids intrabar profit-fade false exits.
       if(CopyBuffer(m_hRSI, 0, 1, 2, buf) < 2) return false;
       current = buf[0];
       prev = buf[1];
@@ -91,7 +95,8 @@ public:
    CExitEngine()
       : IManager(), m_chandelier_exits(0), m_time_exits(0),
         m_structure_exits(0), m_fade_exits(0),
-        m_hATR(INVALID_HANDLE), m_hRSI(INVALID_HANDLE)
+        m_hATR(INVALID_HANDLE), m_hRSI(INVALID_HANDLE),
+        m_indicatorsReady(false)
      {}
 
    ~CExitEngine() { CleanupIndicators(); }
@@ -104,9 +109,12 @@ public:
       if(!InitIndicators())
         {
          Print("[Exit] Failed to init indicator handles");
+         CleanupIndicators();
+         IManager::Deinit();
          return false;
         }
-      PrintFormat("[Exit] v2.03 Init OK — Chandelier ATR=%.1f Period=%d", CHANDELIER_ATR_MULT, CHANDELIER_PERIOD);
+      m_indicatorsReady = true;
+      PrintFormat("[Exit] v2.04 Init OK — Chandelier ATR=%.1f Period=%d", CHANDELIER_ATR_MULT, CHANDELIER_PERIOD);
       return true;
      }
 
@@ -138,7 +146,7 @@ public:
      {
       ExitSignal signal;
       signal.Clear();
-      if(!IsInitialized()) return signal;
+      if(!IsInitialized() || !m_indicatorsReady) return signal;
 
       double profit_pts = (position_type == ORDER_TYPE_BUY)
                           ? current_price - entry_price
@@ -228,6 +236,7 @@ public:
       int needed = STRUCTURE_BREAK_LOOKBACK + 3;
       double closes[];
       ArraySetAsSeries(closes, true);
+      // Exclude the active candle; closes[0] is the last fully closed bar.
       if(CopyClose(symbol, PERIOD_CURRENT, 1, needed, closes) < needed) return false;
       double atr = GetATRValue();
       if(atr <= 0.0) return false;

@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.08                                    |
+//| Trade/RiskManager.mqh — v2.09                                    |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -156,10 +156,11 @@ private:
       const StrategyConfig *cfg = m_data.GetConfig();
       if(cfg == NULL) { Print("[Risk] ERROR: GetConfig() NULL"); return false; }
       m_riskPct       = cfg.Risk.RiskPercent;
-      m_maxDDPct      = cfg.Risk.MaxDailyLossPct;
       m_dailyLossPct  = cfg.Risk.MaxDailyLossPct;
+      m_maxDDPct      = cfg.Risk.MaxDrawdownPct;
+      if(m_maxDDPct <= 0.0) m_maxDDPct = m_dailyLossPct * 2.0;
       m_maxOpenTrades = cfg.Risk.MaxOpenPositions;
-      m_maxConsecLoss = 5;
+      m_maxConsecLoss = cfg.Risk.MaxConsecLoss;
       m_maxSpreadPts  = cfg.Market.SpreadFilterPips * 10.0;
       return true;
      }
@@ -168,6 +169,17 @@ private:
      {
       double step = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
       return (step > 0.0) ? MathRound(price / step) * step : price;
+     }
+
+   void HandleTradeClosed(ulong ticket, double profit)
+     {
+      if(profit != 0.0 && ticket > 0 && IsPnLAccounted(ticket, profit))
+        {
+         if(m_debugMode) PrintFormat("[Risk] Duplicate trade-close ignored ticket=%I64u profit=%.2f", ticket, profit);
+         return;
+        }
+      OnTradeClosed(profit);
+      AccumulateClosedPnL(ticket, profit);
      }
 
 public:
@@ -180,7 +192,13 @@ public:
      { ArrayResize(m_accountedPnL, 0); }
 
    virtual void DeclareEvents() override
-     { AddEvent(EVENT_ID_NEW_BAR); AddEvent(EVENT_ID_POSITION_UPDATE); AddEvent(EVENT_ID_CONFIG_RELOAD); }
+     {
+      AddEvent(EVENT_ID_NEW_BAR);
+      AddEvent(EVENT_ID_POSITION_UPDATE);
+      AddEvent(EVENT_ID_TRADE_OPEN);
+      AddEvent(EVENT_ID_TRADE_CLOSE);
+      AddEvent(EVENT_ID_CONFIG_RELOAD);
+     }
 
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
@@ -196,8 +214,8 @@ public:
       m_lastResetDay = ServerDateMidnight();
       ClearAccountedPnL();
       SyncOpenTradesFromBroker();
-      PrintFormat("[Risk] v2.08 Init OK: risk=%.1f%% daily=%.1f%% maxTrades=%d open=%d",
-                  m_riskPct, m_dailyLossPct, m_maxOpenTrades, m_openTrades);
+      PrintFormat("[Risk] v2.09 Init OK: risk=%.1f%% daily=%.1f%% maxDD=%.1f%% maxTrades=%d open=%d",
+                  m_riskPct, m_dailyLossPct, m_maxDDPct, m_maxOpenTrades, m_openTrades);
       return true;
      }
 
@@ -210,9 +228,15 @@ public:
      {
       switch(ev.id)
         {
+         case EVENT_ID_TRADE_OPEN:
+            OnTradeOpened();
+            break;
+         case EVENT_ID_TRADE_CLOSE:
+            HandleTradeClosed(ev.ticket, ev.profit);
+            break;
          case EVENT_ID_POSITION_UPDATE:
             if(ev.data1 == 1.0) SyncOpenTradesFromBroker();
-            AccumulateClosedPnL(ev.ticket, ev.profit);
+            if(ev.profit != 0.0) HandleTradeClosed(ev.ticket, ev.profit);
             { double eq = AccountEquity(); if(eq > m_peakEquity) m_peakEquity = eq; }
             break;
          case EVENT_ID_NEW_BAR:       OnNewBar();    break;
@@ -221,7 +245,7 @@ public:
         }
      }
 
-   RiskCheckResult Check(double slPoints = 0) const
+   RiskCheckResult Check(double slPoints = 0, ENUM_ORDER_TYPE orderType = ORDER_TYPE_BUY) const
      {
       RiskCheckResult r;
       if(m_circuitBroken) { r.reason = "CircuitBroken"; return r; }
@@ -244,8 +268,11 @@ public:
       if(lot < m_minLot)
         { r.reason = StringFormat("LotBelowMin(%.4f<%.4f)", lot, m_minLot); return r; }
 
+      double price = (orderType == ORDER_TYPE_SELL)
+         ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
+         : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double marginReq = 0;
-      OrderCalcMargin(ORDER_TYPE_BUY, _Symbol, lot, SymbolInfoDouble(_Symbol, SYMBOL_ASK), marginReq);
+      OrderCalcMargin(orderType, _Symbol, lot, price, marginReq);
       if(marginReq > 0 && AccountFreeMargin() < marginReq * 1.2)
         { r.reason = StringFormat("InsufficientMargin(free=%.2f req=%.2f)", AccountFreeMargin(), marginReq * 1.2); return r; }
 
@@ -277,7 +304,8 @@ public:
       double tpPoints = signal.tpPoints;
       if(tpPoints <= 0.0)
          tpPoints = slPoints * MathMax(1.0, m_cfg.Risk.TPMultiplier / MathMax(0.1, m_cfg.Risk.SLMultiplier));
-      RiskCheckResult base = Check(slPoints);
+      ENUM_ORDER_TYPE orderType = (signal.direction == SIGNAL_SELL) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+      RiskCheckResult base = Check(slPoints, orderType);
       out.SetResult(base.allowed, base.suggestedLot, base.reason);
       if(!base.allowed) return out;
       double sl = 0.0, tp = 0.0;
