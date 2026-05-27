@@ -1,1 +1,41 @@
-Nothing needs to be added to .gitignore since only a markdown file (audit_report.md) was added, which is a source/config file and should not be ignored.
+```
+# Compiled and build artifacts
+*.mq5
+*.ex5
+*.mq4
+*.ex4
+
+# MetaQuotes specific
+MQL5/
+MQL4/
+Tester/
+Profiles/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+*~
+```
