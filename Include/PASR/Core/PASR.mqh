@@ -18,6 +18,10 @@
 #include "IManager.mqh"
 #include "PipelineTypes.mqh"
 
+// Layer 0b: Data types (used by multiple layers)
+#include "../Data/RegimeTypes.mqh"
+#include "../Data/SRStruct.mqh"
+
 // Layer 1: State & utility core
 #include "StateOwnershipMap.mqh"
 #include "PASR_SymbolManager.mqh"

@@ -1,41 +1,35 @@
 ```
-# Compiled and build artifacts
-*.mq5
-*.ex5
-*.mq4
+# Compiled and binary files
+*.mqh~
+*.mq4~
+*.mq5~
 *.ex4
+*.ex5
+*.fxt
+*.ghisto
+*.histo
+*.set
+*.hst
+*.csv
 
-# MetaQuotes specific
-MQL5/
-MQL4/
-Tester/
-Profiles/
-
-# Logs and temp files
+# Build artifacts
+tester/
+logs/
 *.log
-*.tmp
-*.swp
+*.txt
 
-# Environment
-.env
-.env.local
-.env.*
-
-# Editors
+# Editor/IDE files
 .vscode/
 .idea/
-*.suo
-*.user
-*.userosscache
-*.sln.docstates
+*.swp
+*.swo
+*.tmp
 
-# OS generated files
+# System files
 .DS_Store
 Thumbs.db
-desktop.ini
 
-# Backup files
-*.bak
-*.backup
-*~
+# Configuration backups
+config.backup
+settings.dat
 ```
