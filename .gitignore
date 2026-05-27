@@ -1,27 +1,4 @@
 ```
-# Compiled and binary files
-*.mqh
-*.mq4
-*.mq5
-*.ex4
-*.ex5
-*.fxt
-*.hst
-*.csv
-
-# Dependencies
-Include/PASR/Data/
-
-# Logs and temp files
-*.log
-*.tmp
-*.swp
-
-# Editors
-.vscode/
-.idea/
-
-# System files
-.DS_Store
-Thumbs.db
+# Documentation
+*.md
 ```
