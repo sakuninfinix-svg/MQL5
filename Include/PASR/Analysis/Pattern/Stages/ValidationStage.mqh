@@ -41,12 +41,11 @@ public:
       return true;
      }
 
-   virtual ENUM_STAGE_STATUS Process(CPatternContext &ctx) override
+   virtual ENUM_STAGE_STATUS Process(CPatternContextEnriched &ctx) override
      {
       if(!m_enabled) return STAGE_SKIP;
 
-      // The canonical CPatternContext is currently an enrichment container, not
-      // the older detection-result DTO that exposed Symbol/Timeframe/Direction.
+      // The canonical CPatternContextEnriched is an enrichment container
       // Keep this stage compile-safe and treat context score as the validation
       // signal until the pattern pipeline DTOs are unified.
       double contextScore = ctx.GetTotalContextScore();
