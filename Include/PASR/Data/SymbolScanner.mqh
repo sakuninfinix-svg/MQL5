@@ -26,7 +26,8 @@
 
 #include "../Core/IManager.mqh"
 #include "DataManager.mqh"
-#include "../Tools/TickCache.mqh"
+// TickCache moved to Infra/Optimizations for better organization
+#include "../Infra/Optimizations/TickCache.mqh"
 
 //+------------------------------------------------------------------+
 //| Symbol info structure                                            |
