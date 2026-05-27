@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Tools/TickCache.mqh — High-Performance Tick Filtering            |
+//| Infra/Optimizations/TickCache.mqh — High-Performance Tick Filtering            |
 //| Copyright 2026, Agsicentre                                       |
 //|                                                                  |
 //| PURPOSE:                                                         |
