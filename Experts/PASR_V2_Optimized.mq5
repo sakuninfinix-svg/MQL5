@@ -9,8 +9,7 @@
 #property strict
 
 #include <Trade/Trade.mqh>
-#include <PASR/3.MarketManager.mqh>
-#include <PASR/4.SRManager.mqh>
+#include <PASR/Execution/MarketManager.mqh>
 #include <PASR/MQL5Compatibility.mqh>
 
 CTrade trade;
@@ -276,7 +275,7 @@ void OnTick()
    }
    if (market.IsDailyLossLimitHit())
       return;
-   if (IsEntryCooldownActive())
+   if (market.IsEntryCooldownActive())
       return;
    if (posScan.normalCount >= InpMaxOpenPositions)
       return;
@@ -391,13 +390,13 @@ void CheckEntrySignals()
 
    if (InpEntryMode == MODE_SAFE)
    {
-      nearSupport = (signalPrice <= targetSupport + zoneWidth * 0.5);
-      nearResistance = (signalPrice >= targetResistance - zoneWidth * 0.5);
+      nearSupport = (signalPrice <= sr.Support() + zoneWidth * 0.5);
+      nearResistance = (signalPrice >= sr.Resistance() - zoneWidth * 0.5);
    }
    else
    {
-      nearSupport = (signalPrice <= targetSupport + zoneWidth);
-      nearResistance = (signalPrice >= targetResistance - zoneWidth);
+      nearSupport = (signalPrice <= sr.Support() + zoneWidth);
+      nearResistance = (signalPrice >= sr.Resistance() - zoneWidth);
    }
 
    if (wickType == 1.0 && nearSupport)
@@ -565,7 +564,7 @@ void UpdateRecoveryEngine(RecoveryEngine &r, const MqlTick &tick)
       {
          r.state = TRADE_STATE_VSL_HIT;
          r.vslHitTime = TimeCurrent();
-         DebugLog("VSL Hit on Ticket " + (string)r.mainTicket);
+         market.DebugLog("VSL Hit on Ticket " + (string)r.mainTicket);
          // Fall-through: Lanjut eksekusi case VSL_HIT di tick yang sama
       }
       else
@@ -1014,7 +1013,7 @@ void DrawDashboard(const MqlTick &tick)
    string text = "------------------------------------------\n";
    text += " EA NAME: PASR V2\n";
    text += " STATUS: " + market.GetNewsStatus() + "\n";
-   text += " SESSION: " + (IsTradingSession() ? "OPEN" : "CLOSED") + "\n";
+   text += " SESSION: " + (market.IsTradingSession() ? "OPEN" : "CLOSED") + "\n";
    text += " MODE: " + EnumToString(InpEntryMode) + " | SR: " + EnumToString(InpSRMode) + "\n";
    text += " EXIT: " + EnumToString(InpExitMode) + " (" + (InpUseTrailing ? "Trail ON" : "Trail OFF") + ")\n";
    text += " TRADES TODAY: " + (string)statTradesToday + "\n";
