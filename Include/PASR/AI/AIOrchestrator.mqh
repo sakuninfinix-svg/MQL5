@@ -83,6 +83,16 @@ public:
    double          GetRiskMultiplier() const { return m_riskMultiplier; }
    string          GetStrategyDescription() const;
    
+   // Configuration method for user parameters
+   void ConfigureParameters(bool useAI, double vetoThresh, double driftVeto, double highThresh)
+     {
+      m_useAI = useAI;
+      m_vetoThreshold = vetoThresh;
+      m_driftVetoThreshold = driftVeto;
+      m_highConfidenceThreshold = highThresh;
+      Print("[AIOrchestrator] Configured: useAI=", useAI, " veto=", vetoThresh, " drift=", driftVeto, " high=", highThresh);
+     }
+   
    // Gatekeeper: AI memutuskan apakah sinyal boleh dieksekusi
    bool ShouldAllowTrade(int signalStrength);
    
@@ -261,6 +271,13 @@ public:
    const SAIModelPerf &GetPerf() const { return m_perf; }
    CAIFeatureBuilder *GetFeatureBuilder() { return m_feat; }
    CAIEnsemble *GetEnsemble() { return m_ensemble; }
+
+   // --- Configuration state (user-tunable) ---
+protected:
+   bool     m_useAI;                  // User flag to enable/disable AI
+   double   m_vetoThreshold;          // Veto below this score
+   double   m_driftVetoThreshold;     // Veto if drift exceeds this
+   double   m_highConfidenceThreshold; // High-confidence threshold for aggressive trades
 
 private:
    // --- NEW: Dynamic Strategy Orchestration Methods ---

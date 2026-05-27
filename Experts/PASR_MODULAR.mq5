@@ -162,6 +162,10 @@ sinput bool    InpDebugLog        = false;   // Verbose debug logging
 //--- PIPELINE CORE: Single orchestrator owns all modules
 COrchestrator        g_orch;             // Main pipeline coordinator (SOLE owner of all managers)
 
+//--- AI ORCHESTRATOR: Dynamic Strategy Brain (v14.01)
+// Direct reference for low-latency strategy decisions
+CAIOrchestrator     *g_aiOrch = NULL;    // Will be initialized from g_orch.GetAIOrchestrator()
+
 //--- QA & Stress Test Module (standalone - not part of orchestrator)
 #ifdef PASR_QA_BUILD
 CQAStressTest        g_qa;               // Chaos engineering (external QA tool)
@@ -309,6 +313,17 @@ int OnInit()
       return INIT_FAILED;
      }
    
+   // AI ORCHESTRATOR INTEGRATION (v14.01): Get direct reference for low-latency decisions
+   g_aiOrch = g_orch.GetAIOrchestrator();
+   if(g_aiOrch == NULL)
+     {
+      Alert("[PASR] CRITICAL: AI Orchestrator not available");
+      return INIT_FAILED;
+     }
+   
+   // Configure AI with user parameters
+   g_aiOrch->ConfigureParameters(InpUseAI, InpAIVetoThresh, InpDriftVeto, InpAIHighThresh);
+   
    g_orch.SetDebugMode(InpDebugLog);
    g_orch.SetProfilingEnabled(true);
    
@@ -320,6 +335,7 @@ int OnInit()
    Print("[PASR] Pipeline profiling: ENABLED");
    Print("[PASR] All modules encapsulated in COrchestrator");
    Print("[PASR] Event handlers delegate exclusively to g_orch");
+   Print("[PASR] AI Orchestrator v14.01: Dynamic Strategy Brain ACTIVE");
    
    return INIT_SUCCEEDED;
   }
