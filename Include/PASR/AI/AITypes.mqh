@@ -128,4 +128,31 @@ struct SAIEnsembleVote
    }
 };
 
+//+------------------------------------------------------------------+
+//| Market Regime Enumeration                                        |
+//+------------------------------------------------------------------+
+enum EMarketRegime
+{
+   REGIME_UNKNOWN         = 0,  // Not enough data
+   REGIME_STRONG_TREND    = 1,  // ADX > 30, clear direction
+   REGIME_SIDEWAYS        = 2,  // ADX < 20, range-bound
+   REGIME_VOLATILE        = 3,  // High ATR, breakout potential
+   REGIME_CHAOS           = 4,  // Erratic, avoid trading
+   REGIME_TRENDING_WEAK   = 5   // ADX 20-30, weak trend
+};
+
+//+------------------------------------------------------------------+
+//| Active Strategy Enumeration                                      |
+//+------------------------------------------------------------------+
+enum EActiveStrategy
+{
+   STRAT_NONE             = 0,  // No active strategy (chaos)
+   STRAT_TREND_FOLLOW     = 1,  // Follow strong trends
+   STRAT_RANGE_TRADING    = 2,  // Bounce off S/R in sideways (NEW!)
+   STRAT_MEAN_REVERT      = 3,  // Fade extremes (risky in strong S/R)
+   STRAT_BREAKOUT         = 4,  // Trade volatility breakouts
+   STRAT_SCALP_AI         = 5,  // High-frequency AI scalping
+   STRAT_CONSERVATIVE     = 6   // Capital preservation mode
+};
+
 #endif // __AI_TYPES_MQH__
