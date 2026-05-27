@@ -1,12 +1,11 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineTypes.mqh — v1.06                                   |
+//| Core/PipelineTypes.mqh — v1.07                                   |
 //| Shared types, enums, and PipelineContext for CPipelineEngine      |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_PIPELINE_TYPES_MQH__
 #define __CORE_PIPELINE_TYPES_MQH__
 
-#include "PASR.Types.mqh"
 #include "Events.mqh"
 #include "../Data/RegimeTypes.mqh"
 #include "../Signal/ISignalSource.mqh"
@@ -279,6 +278,10 @@ struct PipelineContext
       position_ticket = 0;
       has_position = false;
       position_pnl = 0;
+      health_status = 0;
+      session_dd = 0.0;
+      daily_pnl = 0.0;
+      max_session_dd = 0.0;
       exit_reason = STAGE_OK;
       exit_message = "";
       cycle_start_time = TimeCurrent();
