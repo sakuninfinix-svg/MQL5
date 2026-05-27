@@ -1,6 +1,5 @@
 //+------------------------------------------------------------------+
-#include <PASR/MQL5Compatibility.mqh>
-//| Core/PipelineEngine.mqh — v1.06                                  |
+//| Core/PipelineEngine.mqh — v1.07                                  |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_PIPELINE_ENGINE_MQH__
@@ -61,7 +60,7 @@ private:
       ctx.spread_pts = (point > 0.0 && ask > bid) ? (ask - bid) / point : 0.0;
       ctx.atr_points = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
       ctx.atr = ctx.atr_points;
-      ctx.bar_time = GetTime(_Symbol, _Period, 0);
+      ctx.bar_time = iTime(_Symbol, _Period, 0);
       ctx.market_open = (bid > 0.0 && ask > 0.0);
       ctx.session = DetectSession();
      }
@@ -84,7 +83,7 @@ private:
       PASREvent ev;
       ev.id = EVENT_ID_NEW_BAR;
       ev.priority = 10;
-      if(m_bus != NULL) m_bus.Dispatch(ev);
+      if(m_bus != NULL) m_bus.DispatchImmediate(ev);
       if(m_profiling_enabled) m_stage_timer.Log("Stage2_AnalysisSR");
       return STAGE_OK;
      }
@@ -113,7 +112,7 @@ private:
       if(m_regime != NULL)
         {
          m_stage_timer.Start();
-         m_regime.OnNewBar();
+         if(ctx.new_bar) m_regime.OnNewBar();
          ctx.regime = m_regime.GetRegime();
          ctx.regime_confidence = m_regime.IsReady() ? 1.0 : 0.0;
          if(m_profiling_enabled) m_stage_timer.Log("Stage5_RegimeDet");
