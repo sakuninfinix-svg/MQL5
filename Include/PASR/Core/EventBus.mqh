@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — v3.06                                       |
+//| Core/EventBus.mqh — v3.07                                       |
 //| High-performance event dispatch with binary-heap priority queue  |
 //+------------------------------------------------------------------+
 #property strict
@@ -157,12 +157,6 @@ public:
       return true;
      }
 
-   bool CreateEvent(ENUM_EVENT_ID id, int priority = 50)
-     {
-      PASREvent ev(id, priority);
-      return Push(ev);
-     }
-
    bool Pop(PASREvent &out)
      {
       if(m_size == 0) return false;
@@ -176,8 +170,6 @@ public:
 
    void DispatchImmediate(const PASREvent &ev)
      {
-      // Explicit direct-route path. Use only for latency-sensitive events
-      // where immediate subscriber notification is required.
       RouteEvent(ev);
       m_stats.total_immediate++;
       m_stats.total_drained++;
@@ -185,8 +177,6 @@ public:
 
    void Dispatch(const PASREvent &ev)
      {
-      // Backward-compatible alias for legacy callers. New code should use
-      // DispatchImmediate() for direct routing or Push()/Drain() for queued routing.
       DispatchImmediate(ev);
      }
 
@@ -201,11 +191,6 @@ public:
          m_stats.total_drained++;
         }
       return dispatched;
-     }
-
-   int ProcessPending()
-     {
-      return Drain();
      }
 
    bool Peek(PASREvent &out) const
