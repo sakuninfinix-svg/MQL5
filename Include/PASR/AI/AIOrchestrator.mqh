@@ -51,7 +51,15 @@ public:
       : IManager(), m_feat(NULL), m_infer(NULL), m_ensemble(NULL),
         m_trainer(NULL), m_calib(NULL), m_guard(NULL),
         m_ready(false), m_model_path(""), m_min_bars_required(50),
-        m_open_features_valid(false)
+        m_open_features_valid(false),
+        // Initialize new orchestrator fields
+        m_currentStrategy(STRAT_NONE),
+        m_detectedRegime(REGIME_UNKNOWN),
+        m_strategyConfidence(0.0),
+        m_lastStrategyChange(0),
+        m_regimeStreak(0),
+        m_entryThreshold(0.7),
+        m_riskMultiplier(1.0)
      {
       m_last_result.Reset();
       m_perf.Reset();
@@ -61,6 +69,20 @@ public:
    ~CAIOrchestrator() { ReleaseComponents(); }
 
    virtual string HandlerName() const override { return "AIOrchestrator"; }
+
+   // --- NEW: Public API for Dynamic Strategy Orchestration ---
+   EActiveStrategy GetActiveStrategy() const { return m_currentStrategy; }
+   EMarketRegime   GetCurrentRegime() const { return m_detectedRegime; }
+   double          GetStrategyConfidence() const { return m_strategyConfidence; }
+   double          GetEntryThreshold() const { return m_entryThreshold; }
+   double          GetRiskMultiplier() const { return m_riskMultiplier; }
+   string          GetStrategyDescription() const;
+   
+   // Gatekeeper: AI memutuskan apakah sinyal boleh dieksekusi
+   bool ShouldAllowTrade(int signalStrength);
+   
+   // Dynamic Risk Adjustment: AI mengontrol parameter risiko
+   void AdjustRiskParameters(double &riskPercent, double &maxDrawdown);
 
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
@@ -91,7 +113,14 @@ public:
 
       m_trainer.SetEnsemble(m_ensemble);
       m_ready = true;
-      Print("CAIOrchestrator v2.03: Initialized");
+      
+      // Initial regime detection and strategy selection
+      DetectRegime();
+      SelectStrategy();
+      
+      Print("CAIOrchestrator v14.01-ORCHESTRATOR: Initialized as Dynamic Strategy Orchestrator");
+      Print("  Active Strategy: ", GetStrategyDescription());
+      Print("  Current Regime: ", EnumToString(m_detectedRegime));
       return true;
      }
 
@@ -227,6 +256,177 @@ public:
    const SAIModelPerf &GetPerf() const { return m_perf; }
    CAIFeatureBuilder *GetFeatureBuilder() { return m_feat; }
    CAIEnsemble *GetEnsemble() { return m_ensemble; }
+
+private:
+   // --- NEW: Dynamic Strategy Orchestration Methods ---
+   
+   // DetectRegime: Analisis kondisi pasar real-time
+   void DetectRegime()
+     {
+      // Hitung indikator regime sederhana (bisa diganti dengan ONNX model)
+      double trendStr = CalculateTrendStrength(50);
+      double vol      = CalculateVolatility(20);
+      
+      EMarketRegime newRegime = REGIME_UNKNOWN;
+      
+      if(trendStr > 0.8 && vol > 0.4)
+         newRegime = REGIME_TRENDING_STRONG;
+      else if(trendStr < 0.3 && vol < 0.3)
+         newRegime = REGIME_SIDEWAYS;
+      else if(vol > 0.8)
+         newRegime = REGIME_VOLATILE;
+      else if(trendStr > 0.5)
+         newRegime = REGIME_TRENDING_WEAK;
+      else
+         newRegime = REGIME_CHAOS;
+         
+      // Cek streak (butuh 3 bar konfirmasi untuk ganti regime)
+      if(newRegime == m_detectedRegime)
+         m_regimeStreak++;
+      else
+        {
+         if(m_regimeStreak >= 3)
+           {
+            m_detectedRegime = newRegime;
+            m_regimeStreak = 1;
+           }
+         else
+            m_regimeStreak = 1; // Reset streak untuk regime baru
+        }
+     }
+   
+   // SelectStrategy: Pilih strategi optimal berdasarkan regime
+   void SelectStrategy()
+     {
+      switch(m_detectedRegime)
+        {
+         case REGIME_TRENDING_STRONG:
+            m_currentStrategy = STRAT_TREND_FOLLOW;
+            m_entryThreshold = 0.6;      // Lebih longgar untuk entry
+            m_riskMultiplier = 1.2;      // Tingkatkan risiko 20%
+            m_strategyConfidence = 0.85;
+            break;
+            
+         case REGIME_SIDEWAYS:
+            m_currentStrategy = STRAT_MEAN_REVERT;
+            m_entryThreshold = 0.75;     // Ketat, cari ekstrem
+            m_riskMultiplier = 0.7;      // Kurangi risiko
+            m_strategyConfidence = 0.65;
+            break;
+            
+         case REGIME_VOLATILE:
+            m_currentStrategy = STRAT_BREAKOUT;
+            m_entryThreshold = 0.85;     // Tunggu konfirmasi breakout
+            m_riskMultiplier = 0.9;      // Risiko sedang
+            m_strategyConfidence = 0.70;
+            break;
+            
+         case REGIME_CHAOS:
+         case REGIME_UNKNOWN:
+            m_currentStrategy = STRAT_CONSERVATIVE;
+            m_entryThreshold = 0.95;     // Hampir tidak pernah trade
+            m_riskMultiplier = 0.1;      // Risiko minimal
+            m_strategyConfidence = 0.0;  // Tidak yakin sama sekali
+            break;
+            
+         default: // REGIME_TRENDING_WEAK
+            m_currentStrategy = STRAT_SCALP_AI;
+            m_entryThreshold = 0.7;
+            m_riskMultiplier = 1.0;
+            m_strategyConfidence = 0.75;
+            break;
+        }
+      m_lastStrategyChange = TimeCurrent();
+     }
+   
+   // Helper: Hitung volatilitas (normalized 0-1)
+   double CalculateVolatility(int period)
+     {
+      double atr = iATR(_Symbol, _Period, period);
+      if(atr == 0) return 0;
+      
+      double avgPrice = (SymbolInfoDouble(_Symbol, SYMBOL_BID) + SymbolInfoDouble(_Symbol, SYMBOL_ASK)) / 2.0;
+      double normVol = (atr / avgPrice) * 100.0; // Persentase
+      
+      // Normalisasi kasar (adjust sesuai karakteristik pair)
+      return MathMin(normVol * 10.0, 1.0);
+     }
+   
+   // Helper: Hitung kekuatan trend (normalized 0-1)
+   double CalculateTrendStrength(int maPeriod)
+     {
+      double adx = iADX(_Symbol, _Period, maPeriod);
+      if(adx == 0) return 0;
+      
+      // Normalisasi ADX (0-100) ke 0.0-1.0
+      return MathMin(adx / 50.0, 1.0);
+     }
   };
+
+//+------------------------------------------------------------------+
+//| Implementation: GetStrategyDescription                           |
+//+------------------------------------------------------------------+
+string CAIOrchestrator::GetStrategyDescription() const
+{
+   switch(m_currentStrategy)
+     {
+      case STRAT_TREND_FOLLOW:  return "Trend Following (Aggressive)";
+      case STRAT_MEAN_REVERT:   return "Mean Reversion (Range Bound)";
+      case STRAT_BREAKOUT:      return "Volatility Breakout";
+      case STRAT_SCALP_AI:      return "AI Scalping (High Freq)";
+      case STRAT_CONSERVATIVE:  return "Capital Preservation (No Trade)";
+      default:                  return "Unknown Strategy";
+     }
+}
+
+//+------------------------------------------------------------------+
+//| Implementation: ShouldAllowTrade                                 |
+//+------------------------------------------------------------------+
+bool CAIOrchestrator::ShouldAllowTrade(int signalStrength)
+{
+   // Jika strategi konservatif, tolak semua kecuali sinyal sangat kuat
+   if(m_currentStrategy == STRAT_CONSERVATIVE)
+      return (signalStrength > 90); // Hampir tidak pernah trade
+      
+   // Jika confidence rendah, tolak sinyal lemah
+   if(m_strategyConfidence < 0.4 && signalStrength < 70)
+      return false;
+      
+   // Sesuai strategi
+   if(m_currentStrategy == STRAT_MEAN_REVERT && signalStrength < 50)
+      return false; // Jangan ambil sinyal lemah saat sideways
+      
+   // Check against dynamic entry threshold
+   double normalizedSignal = signalStrength / 100.0;
+   if(normalizedSignal < m_entryThreshold)
+      return false;
+      
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Implementation: AdjustRiskParameters                             |
+//+------------------------------------------------------------------+
+void CAIOrchestrator::AdjustRiskParameters(double &riskPercent, double &maxDrawdown)
+{
+   // AI berhak menurunkan risiko jika kondisi tidak pasti
+   if(m_currentStrategy == STRAT_CONSERVATIVE)
+     {
+      riskPercent *= 0.1; // Kurangi risiko jadi 10% dari setting awal
+      maxDrawdown *= 0.5;
+     }
+   else if(m_currentStrategy == STRAT_TREND_FOLLOW && m_strategyConfidence > 0.8)
+     {
+      riskPercent *= m_riskMultiplier; // Tingkatkan risiko sesuai multiplier
+     }
+   else if(m_currentStrategy == STRAT_MEAN_REVERT)
+     {
+      riskPercent *= m_riskMultiplier; // Mean reversion lebih berisiko
+     }
+   else if(m_currentStrategy == STRAT_BREAKOUT)
+     {
+      riskPercent *= m_riskMultiplier; // Breakout butuh risiko terukur
+     }
+}
 
 #endif // __AI_ORCHESTRATOR_MQH__
