@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.09                                    |
+//| Trade/RiskManager.mqh — v2.10                                    |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -8,6 +8,13 @@
 
 #include "../Core/IManager.mqh"
 #include "../Core/PipelineTypes.mqh"
+
+enum ENUM_RISK_CB_TYPE
+  {
+   RISK_CB_DAILY_LOSS   = 0,
+   RISK_CB_MAX_DRAWDOWN = 1,
+   RISK_CB_SPREAD       = 2
+  };
 
 struct RiskCheckResult
   {
@@ -214,7 +221,7 @@ public:
       m_lastResetDay = ServerDateMidnight();
       ClearAccountedPnL();
       SyncOpenTradesFromBroker();
-      PrintFormat("[Risk] v2.09 Init OK: risk=%.1f%% daily=%.1f%% maxDD=%.1f%% maxTrades=%d open=%d",
+      PrintFormat("[Risk] v2.10 Init OK: risk=%.1f%% daily=%.1f%% maxDD=%.1f%% maxTrades=%d open=%d",
                   m_riskPct, m_dailyLossPct, m_maxDDPct, m_maxOpenTrades, m_openTrades);
       return true;
      }
