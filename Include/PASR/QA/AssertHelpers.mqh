@@ -1,8 +1,11 @@
 //+------------------------------------------------------------------+
-//| QA/AssertHelpers.mqh — v2.00                                     |
+//| QA/AssertHelpers.mqh — v2.01                                     |
 //| Sprint 6 — S6-004: Extended assertion macros for PASR tests     |
 //|                                                                   |
 //| CHANGELOG:                                                        |
+//|   v2.01 (2026-05-27) Phase 1 audit fix:                         |
+//|     - Removed stale ../Core/PASR.Types.mqh include.              |
+//|       ENUM_SIGNAL_TYPE is provided by PipelineTypes.mqh alias.   |
 //|   v2.00 (2026-05-23) Sprint 6:                                   |
 //|     + ASSERT_RANGE(val, lo, hi, msg)                             |
 //|     + ASSERT_NULL(ptr, msg)                                      |
@@ -19,8 +22,7 @@
 #ifndef __QA_ASSERT_HELPERS_MQH__
 #define __QA_ASSERT_HELPERS_MQH__
 
-#include "../Core/PipelineTypes.mqh"   // ENUM_STAGE_RESULT
-#include "../Core/PASR.Types.mqh"      // ENUM_SIGNAL_TYPE
+#include "../Core/PipelineTypes.mqh"   // ENUM_STAGE_RESULT + ENUM_SIGNAL_TYPE alias
 
 //--- Internal failure reporter (used by all macros)
 #define _QA_FAIL(msg) \
