@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/OrchestratorInit.mqh — v1.03                                |
+//| Core/OrchestratorInit.mqh — v1.04                                |
 //| Out-of-class COrchestrator method implementations                 |
 //+------------------------------------------------------------------+
 #property strict
@@ -44,6 +44,25 @@ int COrchestrator::Init(const StrategyConfig &cfg)
       return INIT_FAILED;
      }
 
+   m_zone = new CAnalysisZoneManager();
+   if(!InitManager(m_zone, "ZoneManager"))
+     {
+      FreeAll();
+      return INIT_FAILED;
+     }
+
+   m_regime = new CRegimeFilter();
+   if(!InitManager(m_regime, "RegimeFilter"))
+     {
+      Print("[Orchestrator] RegimeFilter init failed; continuing without regime source");
+      if(m_regime != NULL)
+        {
+         m_regime.Deinit();
+         delete m_regime;
+         m_regime = NULL;
+        }
+     }
+
    // Core analysis/signal/trade managers. These are required for the pipeline
    // to do useful work instead of silently skipping most stages.
    m_pattern = new CPatternManager();
@@ -61,6 +80,8 @@ int COrchestrator::Init(const StrategyConfig &cfg)
      }
    m_signal.SetPatternManager(m_pattern);
    m_signal.SetSRManager(m_sr);
+   if(m_regime != NULL)
+      m_signal.SetRegimeManager(NULL);
 
    m_srcPattern = new PatternSignalSource(m_pattern);
    if(m_srcPattern != NULL)
@@ -69,6 +90,13 @@ int COrchestrator::Init(const StrategyConfig &cfg)
    m_srcSR = new SRSignalSource(m_sr, m_data, 0.5);
    if(m_srcSR != NULL)
       m_signal.RegisterSource(m_srcSR, 0.8);
+
+   if(m_regime != NULL)
+     {
+      m_srcRegime = new CRegimeSignalSource(m_regime, REGIME_MODE_VETO);
+      if(m_srcRegime != NULL)
+         m_signal.RegisterSource(m_srcRegime, 0.6);
+     }
 
    if(m_cfg.AI.EnableAI)
      {
