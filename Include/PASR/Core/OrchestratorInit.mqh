@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/OrchestratorInit.mqh — v1.01                                |
+//| Core/OrchestratorInit.mqh — v1.02                                |
 //| Out-of-class COrchestrator method implementations                 |
 //+------------------------------------------------------------------+
 #property strict
@@ -37,6 +37,37 @@ int COrchestrator::Init(const StrategyConfig &cfg)
      }
    RegisterManager(m_data);
 
+   // Core analysis/signal/trade managers. These are required for the pipeline
+   // to do useful work instead of silently skipping most stages.
+   m_pattern = new CPatternManager();
+   if(!InitManager(m_pattern, "PatternManager"))
+     {
+      FreeAll();
+      return INIT_FAILED;
+     }
+
+   m_signal = new CSignalManager();
+   if(!InitManager(m_signal, "SignalManager"))
+     {
+      FreeAll();
+      return INIT_FAILED;
+     }
+   m_signal.SetPatternManager(m_pattern);
+
+   m_risk = new CRiskManager();
+   if(!InitManager(m_risk, "RiskManager"))
+     {
+      FreeAll();
+      return INIT_FAILED;
+     }
+
+   m_exec = new CExecutionManager();
+   if(!InitManager(m_exec, "ExecutionManager"))
+     {
+      FreeAll();
+      return INIT_FAILED;
+     }
+
    m_exit = new CExitEngine();
    if(m_exit == NULL)
      {
@@ -71,7 +102,7 @@ int COrchestrator::Init(const StrategyConfig &cfg)
    m_new_bar_flag = false;
    m_initialised  = true;
 
-   Print("[Orchestrator] minimal bootstrap OK");
+   Print("[Orchestrator] core pipeline bootstrap OK");
    return INIT_SUCCEEDED;
   }
 
