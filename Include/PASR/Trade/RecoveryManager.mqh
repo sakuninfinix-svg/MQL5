@@ -80,7 +80,9 @@ class CRecoveryManager : public IManager
   {
 private:
    RecoveryEngine   *engines[];
-   ulong             m_fakeoutPendingTickets[];
+   ulong             m_fakeout_mask[];    // Bitmask for fakeout pending tickets (up to 64 tickets)
+   ulong             m_fakeoutTickets[64]; // Circular buffer for ticket numbers
+   int               m_fakeoutCount;       // Number of tracked fakeout tickets
    CTrade            m_trade;
    int               m_recoveryScore;
    double            m_avgRecoveryTime;
@@ -100,27 +102,44 @@ private:
 
    bool IsFakeoutPending(ulong ticket) const
      {
-      for(int i=0;i<ArraySize(m_fakeoutPendingTickets);i++)
-         if(m_fakeoutPendingTickets[i]==ticket) return true;
+      // Check bitmask first for O(1) rejection of most tickets
+      ulong hash = ticket % 64;
+      if((m_fakeout_mask[hash / 64] & ((ulong)1 << (hash % 64))) == 0)
+         return false;
+      
+      // Linear search in the small circular buffer
+      for(int i = 0; i < m_fakeoutCount; i++)
+         if(m_fakeoutTickets[i] == ticket) return true;
       return false;
      }
 
    void MarkFakeoutPending(ulong ticket)
      {
-      if(ticket==0 || IsFakeoutPending(ticket)) return;
-      int n=ArraySize(m_fakeoutPendingTickets);
-      ArrayResize(m_fakeoutPendingTickets,n+1);
-      m_fakeoutPendingTickets[n]=ticket;
+      if(ticket == 0 || IsFakeoutPending(ticket)) return;
+      if(m_fakeoutCount >= 64) return;  // Prevent overflow
+      
+      m_fakeoutTickets[m_fakeoutCount++] = ticket;
+      
+      // Set bit in bitmask for fast rejection
+      ulong hash = ticket % 64;
+      m_fakeout_mask[hash / 64] |= ((ulong)1 << (hash % 64));
      }
 
    void ClearFakeoutPending(ulong ticket)
      {
-      int n=ArraySize(m_fakeoutPendingTickets);
-      for(int i=0;i<n;i++)
+      for(int i = 0; i < m_fakeoutCount; i++)
         {
-         if(m_fakeoutPendingTickets[i]!=ticket) continue;
-         for(int j=i;j<n-1;j++) m_fakeoutPendingTickets[j]=m_fakeoutPendingTickets[j+1];
-         ArrayResize(m_fakeoutPendingTickets,n-1);
+         if(m_fakeoutTickets[i] != ticket) continue;
+         
+         // Shift remaining tickets
+         for(int j = i; j < m_fakeoutCount - 1; j++)
+            m_fakeoutTickets[j] = m_fakeoutTickets[j + 1];
+         
+         m_fakeoutCount--;
+         
+         // Clear bit from bitmask
+         ulong hash = ticket % 64;
+         m_fakeout_mask[hash / 64] &= ~((ulong)1 << (hash % 64));
          return;
         }
      }
@@ -358,8 +377,15 @@ public:
         m_regimeAware(false), m_minRegimeScore(0.0),
         m_lastRecoveryCheckDay(0), m_todayRecoveryCount(0),
         m_equityBaseline(0.0), m_recoveryHaltedDueToDecay(false),
-        m_minFloatingLossATR(RECOVERY_MIN_FLOATING_LOSS_ATR)
-     { ArrayResize(engines,0); ArrayResize(m_fakeoutPendingTickets,0); m_stats.Init(); }
+        m_minFloatingLossATR(RECOVERY_MIN_FLOATING_LOSS_ATR),
+        m_fakeoutCount(0)
+     { 
+      ArrayResize(engines, 0); 
+      ArrayResize(m_fakeout_mask, 1);
+      ArrayInitialize(m_fakeout_mask, 0);
+      ArrayInitialize(m_fakeoutTickets, 0);
+      m_stats.Init(); 
+     }
 
    ~CRecoveryManager()
      {
@@ -370,7 +396,7 @@ public:
            { delete engines[i]; engines[i]=NULL; }
         }
       ArrayResize(engines,0);
-      ArrayResize(m_fakeoutPendingTickets,0);
+      // m_fakeout_mask and m_fakeoutTickets are fixed-size, no cleanup needed
      }
 
    virtual string HandlerName() const override { return "RecoveryManager"; }
