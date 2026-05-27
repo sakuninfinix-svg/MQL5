@@ -1,22 +1,20 @@
 //+------------------------------------------------------------------+
-//| Trade/TradePlan.mqh — v2.00                                       |
-//| Trade plan struct + builder: entry, SL, TP1, TP2, BE, partial.  |
-//|                                                                  |
-//| CHANGE LOG:                                                      |
-//|   v2.00 (2026-05-21) — Phase 5+6:                                |
-//|     + tp2           : second take profit (partial close target)  |
-//|     + beLevel       : break-even trigger price                   |
-//|     + partialClosePct: % lot to close at TP1 (default 50)        |
-//|     + urgency       : copied from FinalSignal urgency tier       |
-//|     + comment       : auto-generated from signal metadata        |
-//|   v1.00 (2026-05-20) — initial plan struct                       |
+//| Trade/TradePlan.mqh — v2.01                                      |
+//| Trade plan struct + optional builder for pipeline signals         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __TRADE_TRADE_PLAN_MQH__
 #define __TRADE_TRADE_PLAN_MQH__
 
 #include "../Core/IManager.mqh"
-#include "../Signal/SignalManager.mqh"
+#include "../Core/PipelineTypes.mqh"
+
+enum ENUM_SIGNAL_URGENCY
+  {
+   SIGNAL_URGENCY_LOW    = 0,
+   SIGNAL_URGENCY_MEDIUM = 1,
+   SIGNAL_URGENCY_HIGH   = 2
+  };
 
 struct TradePlan
   {
@@ -24,14 +22,14 @@ struct TradePlan
    ENUM_SIGNAL_DIR  direction;
    double           lot;
    double           entryPrice;
-   double           sl;            // stop loss price
-   double           tp;            // take profit 1 (full close default)
-   double           tp2;           // take profit 2 (let rest run)
-   double           beLevel;       // break-even trigger price
-   double           slPoints;      // SL distance in points (for risk calc)
-   double           partialClosePct; // % to close at TP1 (0=disable, default 50)
-   ENUM_SIGNAL_URGENCY urgency;    // from FinalSignal
-   string           comment;       // order comment (auto-generated)
+   double           sl;
+   double           tp;
+   double           tp2;
+   double           beLevel;
+   double           slPoints;
+   double           partialClosePct;
+   ENUM_SIGNAL_URGENCY urgency;
+   string           comment;
 
    void Clear()
      {
@@ -43,9 +41,6 @@ struct TradePlan
      }
   };
 
-//+------------------------------------------------------------------+
-//| CTradePlan — builds a TradePlan from a FinalSignal               |
-//+------------------------------------------------------------------+
 class CTradePlan
   {
 private:
@@ -67,7 +62,7 @@ public:
 
    void SetCfg(const StrategyConfig &cfg) { m_cfg = cfg; }
 
-   TradePlan Build(const FinalSignal &sig, double lot)
+   TradePlan Build(const SSignal &sig, double lot)
      {
       TradePlan plan;
       plan.Clear();
@@ -79,21 +74,21 @@ public:
       double ask     = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double bid     = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
-      if(atr <= 0 || point <= 0) return plan;
+      if(atr <= 0 || point <= 0 || ask <= 0 || bid <= 0) return plan;
 
-      double slDist  = atr * m_cfg.Risk.SLMultiplier * point;
-      double tp1Dist = atr * m_cfg.Risk.TPMultiplier  * point;
-
-      // TP2 = 2× TP1 distance (configurable in future via cfg.Risk.TP2Multiplier)
-      double tp2Dist = tp1Dist * 2.0;
-
-      // Break-even trigger: halfway between entry and TP1
-      double beDist  = tp1Dist * 0.5;
+      double slPoints = sig.slPoints > 0.0 ? sig.slPoints : atr * m_cfg.Risk.SLMultiplier;
+      double tpPoints = sig.tpPoints > 0.0 ? sig.tpPoints : atr * m_cfg.Risk.TPMultiplier;
+      double slDist   = slPoints * point;
+      double tp1Dist  = tpPoints * point;
+      double tp2Dist  = tp1Dist * 2.0;
+      double beDist   = tp1Dist * 0.5;
 
       plan.direction       = sig.direction;
       plan.lot             = lot;
-      plan.urgency         = sig.urgency;
-      plan.partialClosePct = 50.0;  // default: close half at TP1
+      plan.urgency         = (sig.confidence >= 0.75) ? SIGNAL_URGENCY_HIGH
+                           : (sig.confidence >= 0.45) ? SIGNAL_URGENCY_MEDIUM
+                           : SIGNAL_URGENCY_LOW;
+      plan.partialClosePct = MathMax(0.0, MathMin(100.0, m_cfg.Risk.PartialClosePct * 100.0));
 
       if(sig.direction == SIGNAL_BUY)
         {
@@ -112,13 +107,11 @@ public:
          plan.beLevel    = NormalizePrice(bid - beDist);
         }
 
-      plan.slPoints = slDist / point;
-
-      // Auto comment: encodes signal metadata
-      plan.comment = StringFormat("PASR|%s|%.0f|%d",
+      plan.slPoints = slPoints;
+      plan.comment = StringFormat("PASR|%s|%.0f|%s",
                                   sig.direction==SIGNAL_BUY?"B":"S",
-                                  sig.score * 100,
-                                  sig.confluence);
+                                  sig.confidence * 100.0,
+                                  sig.primarySource);
 
       plan.valid = (plan.sl > 0 && plan.tp > 0 && plan.lot > 0);
       return plan;
