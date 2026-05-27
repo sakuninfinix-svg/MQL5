@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — v3.05                                       |
+//| Core/EventBus.mqh — v3.06                                       |
 //| High-performance event dispatch with binary-heap priority queue  |
 //+------------------------------------------------------------------+
 #property strict
@@ -157,6 +157,12 @@ public:
       return true;
      }
 
+   bool CreateEvent(ENUM_EVENT_ID id, int priority = 50)
+     {
+      PASREvent ev(id, priority);
+      return Push(ev);
+     }
+
    bool Pop(PASREvent &out)
      {
       if(m_size == 0) return false;
@@ -195,6 +201,11 @@ public:
          m_stats.total_drained++;
         }
       return dispatched;
+     }
+
+   int ProcessPending()
+     {
+      return Drain();
      }
 
    bool Peek(PASREvent &out) const
