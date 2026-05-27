@@ -166,7 +166,7 @@ struct SVolumeContext
 //+------------------------------------------------------------------+
 //| Complete Pattern Context                                          |
 //+------------------------------------------------------------------+
-class CPatternContext
+class CPatternContextEnriched
   {
 private:
    SMarketContext     m_marketCtx;

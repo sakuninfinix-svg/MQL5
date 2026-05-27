@@ -6,6 +6,8 @@
 #property copyright "Copyright 2024, PASR Architecture"
 #property link      "https://pasr-architecture.com"
 #property version   "1.00"
+#ifndef __ANALYSIS_PATTERN_CORE_CONTEXT_MQH__
+#define __ANALYSIS_PATTERN_CORE_CONTEXT_MQH__
 //+------------------------------------------------------------------+
 //| Context object untuk Pattern Pipeline                            |
 //+------------------------------------------------------------------+
@@ -318,4 +320,6 @@ public:
                          m_overallScore, m_isValid ? "YES" : "NO");
    }
 };
+//+------------------------------------------------------------------+
+#endif // __ANALYSIS_PATTERN_CORE_CONTEXT_MQH__
 //+------------------------------------------------------------------+
