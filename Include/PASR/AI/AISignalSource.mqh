@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AISignalSource.mqh — v1.01                                    |
+//| AI/AISignalSource.mqh — v1.02                                    |
 //| Bridge: CAIOrchestrator inference score -> ISignalSource         |
 //+------------------------------------------------------------------+
 #property strict
@@ -10,14 +10,10 @@
 #include "AIOrchestrator.mqh"
 #include "../Signal/ISignalSource.mqh"
 
-//+------------------------------------------------------------------+
-//| CAISignalSource : ISignalSource                                  |
-//| Wraps CAIOrchestrator::Predict() as an ISignalSource plugin      |
-//+------------------------------------------------------------------+
 class CAISignalSource : public ISignalSource
   {
 private:
-   CAIOrchestrator *m_ai;          // non-owning reference
+   CAIOrchestrator *m_ai;
    string           m_name;
 
 public:
@@ -64,5 +60,7 @@ public:
    void SetName(string name) { m_name = name; }
    CAIOrchestrator* GetOrchestrator() { return m_ai; }
   };
+
+typedef CAISignalSource AISignalSource;
 
 #endif // __AI_SIGNAL_SOURCE_MQH__
