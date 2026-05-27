@@ -1,28 +1,83 @@
 ```
-# Compiled MQL files
-*.ex5
-*.ex4
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.class
+*.out
 
-# MT5 temporary files
-*.gsc
-*.gse
-*.gsh
+# Dependencies
+node_modules/
+venv/
+.venv/
+.env
+.env.local
+*.env.*
 
-# Editor/IDE files
+# Build directories
+dist/
+build/
+target/
+.gradle/
+
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
+
+# Logs and temp files
+*.log
 *.tmp
 
-# Logs
-*.log
+# Coverage
+.coverage
+coverage/
+htmlcov/
 
-# Backup files
-*.bak
-*.backup
-
-# OS files
+# OS
 .DS_Store
 Thumbs.db
+
+# Python specific
+*.pyo
+*.pyd
+*.egg-info/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+.tox/
+.nox/
+
+# Compression
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
 ```

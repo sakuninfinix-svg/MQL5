@@ -37,7 +37,7 @@ class CEventPool
 private:
    // Pool storage — statically allocated
    PASREvent         m_pool[];          // Dynamic array for flexibility
-   bool              m_active[];        // Track which slots are in use
+   ulong             m_active_mask[];   // Bitmask: track which slots are in use (64 slots per ulong)
    int               m_capacity;        // Total pool size
    int               m_active_count;    // Currently allocated events
    int               m_peak_usage;      // Highest active count seen
@@ -48,7 +48,6 @@ public:
    CEventPool() : m_capacity(0), m_active_count(0), 
                   m_peak_usage(0), m_initialized(false)
      {
-      ArrayInitialize(m_active, false);
      }
 
    // Destructor
@@ -79,14 +78,16 @@ public:
          return false;
         }
 
-      if(ArrayResize(m_active, capacity) != capacity)
+      // Calculate number of ulong words needed for bitmask
+      int mask_size = (capacity + 63) / 64;  // Round up division
+      if(ArrayResize(m_active_mask, mask_size) != mask_size)
         {
-         Print("[EventPool][ERROR] Failed to allocate active array");
+         Print("[EventPool][ERROR] Failed to allocate active mask");
          return false;
         }
 
-      // Initialize all slots as inactive
-      ArrayInitialize(m_active, false);
+      // Initialize all slots as inactive (clear all bits)
+      ArrayInitialize(m_active_mask, 0);
       ArrayInitialize(m_pool, PASREvent());
 
       m_capacity    = capacity;
@@ -108,12 +109,16 @@ public:
          return new PASREvent();
         }
 
-      // Linear search for first inactive slot
+      // Linear search for first inactive slot using bitmask
       for(int i = 0; i < m_capacity; i++)
         {
-         if(!m_active[i])
+         int word_idx = i / 64;
+         int bit_idx  = i % 64;
+         
+         if((m_active_mask[word_idx] & ((ulong)1 << bit_idx)) == 0)
            {
-            m_active[i] = true;
+            // Set bit to mark as active
+            m_active_mask[word_idx] |= ((ulong)1 << bit_idx);
             m_active_count++;
             
             // Track peak usage
@@ -145,19 +150,24 @@ public:
          return true;
         }
 
-      // Find the event in the pool and mark as inactive
+      // Find the event in the pool and clear its bit
       for(int i = 0; i < m_capacity; i++)
         {
          // Compare by reference (pointer arithmetic)
          if(&m_pool[i] == ev)
            {
-            if(!m_active[i])
+            int word_idx = i / 64;
+            int bit_idx  = i % 64;
+            ulong bit    = (ulong)1 << bit_idx;
+            
+            if((m_active_mask[word_idx] & bit) == 0)
               {
                Print("[EventPool][WARN] Double-release detected at index ", i);
                return false;
               }
 
-            m_active[i] = false;
+            // Clear bit to mark as inactive
+            m_active_mask[word_idx] &= ~bit;
             m_active_count--;
             
             // Reset event data
@@ -220,7 +230,7 @@ public:
      {
       if(!m_initialized) return;
 
-      ArrayInitialize(m_active, false);
+      ArrayInitialize(m_active_mask, 0);
       ArrayInitialize(m_pool, PASREvent());
       m_active_count = 0;
       
