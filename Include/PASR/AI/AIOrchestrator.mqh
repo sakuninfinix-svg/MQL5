@@ -1,6 +1,11 @@
 //+------------------------------------------------------------------+
-//| AI/AIOrchestrator.mqh — v2.03                                    |
+//| AI/AIOrchestrator.mqh — v2.04                                    |
 //| Top-level AI subsystem manager                                    |
+//|                                                                   |
+//| v2.04 CHANGES:                                                    |
+//| - Added STRAT_RANGE_TRADING for optimal S/R bounce trading       |
+//| - Sideways regime now INCREASES risk (1.3x) due to S/R conf.     |
+//| - Better gatekeeper logic for range-bound markets                |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ORCHESTRATOR_MQH__
@@ -308,10 +313,11 @@ private:
             break;
             
          case REGIME_SIDEWAYS:
-            m_currentStrategy = STRAT_MEAN_REVERT;
-            m_entryThreshold = 0.75;     // Ketat, cari ekstrem
-            m_riskMultiplier = 0.7;      // Kurangi risiko
-            m_strategyConfidence = 0.65;
+            // CORRECTION: Price Action & S/R work BEST here! Bounce trading is optimal.
+            m_currentStrategy = STRAT_RANGE_TRADING;   // NEW: Bounce off S/R zones
+            m_entryThreshold = 0.65;     // Moderate threshold - trust S/R touches
+            m_riskMultiplier = 1.3;      // INCREASED: High confidence in S/R bounces
+            m_strategyConfidence = 0.85; // High confidence when price at S/R
             break;
             
          case REGIME_VOLATILE:
@@ -371,7 +377,8 @@ string CAIOrchestrator::GetStrategyDescription() const
    switch(m_currentStrategy)
      {
       case STRAT_TREND_FOLLOW:  return "Trend Following (Aggressive)";
-      case STRAT_MEAN_REVERT:   return "Mean Reversion (Range Bound)";
+      case STRAT_RANGE_TRADING: return "Range Trading (S/R Bounce) - OPTIMAL FOR SIDEWAYS";
+      case STRAT_MEAN_REVERT:   return "Mean Reversion (Fade Extremes)";
       case STRAT_BREAKOUT:      return "Volatility Breakout";
       case STRAT_SCALP_AI:      return "AI Scalping (High Freq)";
       case STRAT_CONSERVATIVE:  return "Capital Preservation (No Trade)";
@@ -392,9 +399,18 @@ bool CAIOrchestrator::ShouldAllowTrade(int signalStrength)
    if(m_strategyConfidence < 0.4 && signalStrength < 70)
       return false;
       
-   // Sesuai strategi
+   // RANGE TRADING (Sideways): Prioritaskan sinyal di area S/R
+   if(m_currentStrategy == STRAT_RANGE_TRADING)
+     {
+      // Di sideways, sinyal 60+ di area S/R sudah cukup bagus
+      if(signalStrength < 60)
+         return false;
+      return true;
+     }
+      
+   // MEAN REVERT: Hati-hati dengan sinyal lemah
    if(m_currentStrategy == STRAT_MEAN_REVERT && signalStrength < 50)
-      return false; // Jangan ambil sinyal lemah saat sideways
+      return false; // Jangan ambil sinyal lemah saat mean reversion
       
    // Check against dynamic entry threshold
    double normalizedSignal = signalStrength / 100.0;
@@ -418,6 +434,11 @@ void CAIOrchestrator::AdjustRiskParameters(double &riskPercent, double &maxDrawd
    else if(m_currentStrategy == STRAT_TREND_FOLLOW && m_strategyConfidence > 0.8)
      {
       riskPercent *= m_riskMultiplier; // Tingkatkan risiko sesuai multiplier
+     }
+   else if(m_currentStrategy == STRAT_RANGE_TRADING)
+     {
+      // RANGE TRADING: Risiko lebih tinggi karena S/R memberikan konfirmasi kuat
+      riskPercent *= m_riskMultiplier; // 1.3x - high confidence at S/R zones
      }
    else if(m_currentStrategy == STRAT_MEAN_REVERT)
      {

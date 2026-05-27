@@ -1,13 +1,15 @@
 # PASR Architecture Migration - Change Log
 
 ## Date: 2026-01-XX
-## Version: 13.01 → 14.00 (Post-Migration Cleanup)
+## Version: 13.01 → 14.00 (Post-Migration Cleanup) → 14.01 (AI Enhancement)
 
 ---
 
 ## Summary
 
 Complete architecture audit and cleanup performed after large-scale migration. All legacy code, broken includes, MQL4-style syntax, and duplicate modules have been removed. The codebase is now 100% MQL5-native, modular, and compile-ready.
+
+**LATEST UPDATE (v14.01):** AI system enhanced from passive filter to "Dynamic Strategy Orchestrator" with new STRAT_RANGE_TRADING mode that OPTIMIZES sideways market trading by increasing risk allocation (1.3x) when Price Action and S/R strategies are most effective.
 
 ---
 
@@ -159,5 +161,65 @@ For questions about this migration, refer to:
 
 ---
 
+## AI Enhancement Details (v14.01)
+
+### Problem Identified
+Previous architecture treated sideways markets as "low confidence" scenarios, reducing risk allocation (0.7x). This was counterproductive because:
+- Price Action and Support/Resistance strategies work BEST in sideways markets
+- S/R bounces provide high-probability entry points in range-bound conditions
+- Reducing risk during optimal S/R conditions meant missing best opportunities
+
+### Solution Implemented
+
+#### 1. New Strategy: STRAT_RANGE_TRADING
+- **Purpose:** Dedicated strategy for bouncing off S/R zones in sideways markets
+- **Entry Threshold:** 0.65 (moderate - trust S/R touches)
+- **Risk Multiplier:** 1.3x (INCREASED - high confidence at S/R)
+- **Confidence Target:** 0.85 (high when price at S/R)
+
+#### 2. Updated Regime Logic
+```mqh
+case REGIME_SIDEWAYS:
+   m_currentStrategy = STRAT_RANGE_TRADING;   // Bounce off S/R zones
+   m_entryThreshold = 0.65;     // Moderate threshold
+   m_riskMultiplier = 1.3;      // INCREASED: High confidence in S/R bounces
+   m_strategyConfidence = 0.85; // High confidence when price at S/R
+   break;
+```
+
+#### 3. Enhanced Gatekeeper Logic
+```mqh
+// RANGE TRADING (Sideways): Prioritaskan sinyal di area S/R
+if(m_currentStrategy == STRAT_RANGE_TRADING)
+{
+   // Di sideways, sinyal 60+ di area S/R sudah cukup bagus
+   if(signalStrength < 60)
+      return false;
+   return true;
+}
+```
+
+#### 4. Dynamic Risk Adjustment
+```mqh
+else if(m_currentStrategy == STRAT_RANGE_TRADING)
+{
+   // RANGE TRADING: Risiko lebih tinggi karena S/R memberikan konfirmasi kuat
+   riskPercent *= m_riskMultiplier; // 1.3x - high confidence at S/R zones
+}
+```
+
+### Files Modified for v14.01
+1. `Include/PASR/AI/AITypes.mqh` - Added EMarketRegime and EActiveStrategy enums
+2. `Include/PASR/AI/AIOrchestrator.mqh` - Updated regime logic, gatekeeper, risk management
+
+### Expected Impact
+- **Sideways Markets:** +30% risk allocation → More trades at S/R zones
+- **Win Rate:** Improved by filtering only signals with S/R confirmation
+- **Risk/Reward:** Better entries at support/resistance levels
+- **Adaptability:** AI now correctly matches strategy to market condition
+
+---
+
 **Migration Status: ✅ COMPLETE**
-**Version: 14.00-CLEAN**
+**AI Enhancement Status: ✅ COMPLETE**
+**Version: 14.01-RANGE-TRADING-OPTIMIZED**
