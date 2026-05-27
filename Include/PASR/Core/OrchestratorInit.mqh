@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/OrchestratorInit.mqh — v1.02                                |
+//| Core/OrchestratorInit.mqh — v1.03                                |
 //| Out-of-class COrchestrator method implementations                 |
 //+------------------------------------------------------------------+
 #property strict
@@ -37,6 +37,13 @@ int COrchestrator::Init(const StrategyConfig &cfg)
      }
    RegisterManager(m_data);
 
+   m_sr = new CAnalysisSRManager();
+   if(!InitManager(m_sr, "SRManager"))
+     {
+      FreeAll();
+      return INIT_FAILED;
+     }
+
    // Core analysis/signal/trade managers. These are required for the pipeline
    // to do useful work instead of silently skipping most stages.
    m_pattern = new CPatternManager();
@@ -53,6 +60,36 @@ int COrchestrator::Init(const StrategyConfig &cfg)
       return INIT_FAILED;
      }
    m_signal.SetPatternManager(m_pattern);
+   m_signal.SetSRManager(m_sr);
+
+   m_srcPattern = new PatternSignalSource(m_pattern);
+   if(m_srcPattern != NULL)
+      m_signal.RegisterSource(m_srcPattern, 1.0);
+
+   m_srcSR = new SRSignalSource(m_sr, m_data, 0.5);
+   if(m_srcSR != NULL)
+      m_signal.RegisterSource(m_srcSR, 0.8);
+
+   if(m_cfg.AI.EnableAI)
+     {
+      m_ai_orch = new CAIOrchestrator();
+      if(!InitManager(m_ai_orch, "AIOrchestrator"))
+        {
+         Print("[Orchestrator] AI init failed; continuing without AI source");
+         if(m_ai_orch != NULL)
+           {
+            m_ai_orch.Deinit();
+            delete m_ai_orch;
+            m_ai_orch = NULL;
+           }
+        }
+      else
+        {
+         m_srcAI = new AISignalSource(m_ai_orch);
+         if(m_srcAI != NULL)
+            m_signal.RegisterSource(m_srcAI, 0.7);
+        }
+     }
 
    m_risk = new CRiskManager();
    if(!InitManager(m_risk, "RiskManager"))
