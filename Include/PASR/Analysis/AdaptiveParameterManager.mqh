@@ -1,6 +1,5 @@
 //+------------------------------------------------------------------+
-#include <PASR/MQL5Compatibility.mqh>
-//| Analysis/AdaptiveParameterManager.mqh — v3.02                    |
+//| Analysis/AdaptiveParameterManager.mqh — v3.03                    |
 //| Dynamic SL/TP/lot sizing based on canonical market regime.        |
 //+------------------------------------------------------------------+
 #property strict
@@ -92,14 +91,13 @@ private:
 
    void PublishRegimeChange(EMarketRegime regime)
      {
-      if(m_bus == NULL) return;
       PASREvent ev;
       ev.id       = EVENT_ID_ADAPTIVE_UPDATE;
       ev.priority = 3;
       ev.data1    = (double)regime;
       ev.data2    = m_config.StopLossPoints;
       ev.tag      = StringFormat("TP=%.1f", m_config.TakeProfitPoints);
-      m_bus.Push(ev);
+      QueueEvent(ev);
 
       if(m_config.MaxOpenPositions == 0)
         {
@@ -108,7 +106,7 @@ private:
          stop.priority = 1;
          stop.data1    = (double)regime;
          stop.tag      = "Adaptive regime halted trading";
-         m_bus.Push(stop);
+         DispatchImmediate(stop);
         }
      }
 
@@ -164,7 +162,8 @@ public:
       if(m_regimeDetector == NULL)
         { m_cacheValid = false; return false; }
 
-      datetime curBarTime = GetTime(_Symbol, PERIOD_CURRENT, 0);
+      datetime curBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+      if(curBarTime == 0) return false;
       if(curBarTime == m_lastBarTime && m_cacheValid) return true;
 
       EMarketRegime detectedRegime = m_regimeDetector.Detect(_Symbol, PERIOD_CURRENT, (DataManager*)m_data);
@@ -204,4 +203,4 @@ public:
 
 typedef CAdaptiveParameterManager AdaptiveParameterManager;
 
-#endif
+#endif // __ANALYSIS_ADAPTIVE_PARAMETER_MANAGER_MQH__
