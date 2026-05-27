@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/RegimeSignalSource.mqh — v1.03                            |
+//| Signal/RegimeSignalSource.mqh — v1.04                            |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_REGIME_SOURCE_MQH__
@@ -29,6 +29,7 @@ public:
 
    virtual bool Evaluate(SignalResult &out) override
      {
+      out.Clear();
       if(m_regime == NULL || !m_regime.IsReady())
         {
          out.direction  = SIGNAL_NONE;
@@ -72,4 +73,6 @@ public:
      { return m_regime ? m_regime.GetRegime() : REGIME_UNKNOWN; }
   };
 
-#endif
+typedef RegimeSignalSource CRegimeSignalSource;
+
+#endif // __SIGNAL_REGIME_SOURCE_MQH__
