@@ -9,6 +9,7 @@
 
 //--- Include Trade Class
 #include <Trade\Trade.mqh>
+#include <PASR/MQL5Compatibility.mqh>
 CTrade trade;
 
 //--- INPUT PARAMETERS
@@ -160,10 +161,13 @@ void OnTick()
 //+------------------------------------------------------------------+
 void UpdateSRLevels()
 {
-   int highestIdx = iHighest(_Symbol, _Period, MODE_HIGH, InpSRLookback, 1);
-   int lowestIdx = iLowest(_Symbol, _Period, MODE_LOW, InpSRLookback, 1);
-   targetResistance = iHigh(_Symbol, _Period, highestIdx);
-   targetSupport = iLow(_Symbol, _Period, lowestIdx);
+   int highestIdx = FindHighestHigh(_Symbol, _Period, InpSRLookback, 1);
+   int lowestIdx = FindLowestLow(_Symbol, _Period, InpSRLookback, 1);
+   
+   if(highestIdx >= 0)
+      targetResistance = GetHigh(_Symbol, _Period, highestIdx);
+   if(lowestIdx >= 0)
+      targetSupport = GetLow(_Symbol, _Period, lowestIdx);
 
    // MEMBUAT GARIS VISUAL DI GRAFIK
    ObjectCreate(0, "ResLine", OBJ_HLINE, 0, 0, targetResistance);
@@ -177,10 +181,13 @@ void UpdateSRLevels()
 
 void UpdateHTFLevels()
 {
-   int highestIdx = iHighest(_Symbol, InpHTF, MODE_HIGH, InpHTFLookback, 1);
-   int lowestIdx = iLowest(_Symbol, InpHTF, MODE_LOW, InpHTFLookback, 1);
-   htfResistance = iHigh(_Symbol, InpHTF, highestIdx);
-   htfSupport = iLow(_Symbol, InpHTF, lowestIdx);
+   int highestIdx = FindHighestHigh(_Symbol, InpHTF, InpHTFLookback, 1);
+   int lowestIdx = FindLowestLow(_Symbol, InpHTF, InpHTFLookback, 1);
+   
+   if(highestIdx >= 0)
+      htfResistance = GetHigh(_Symbol, InpHTF, highestIdx);
+   if(lowestIdx >= 0)
+      htfSupport = GetLow(_Symbol, InpHTF, lowestIdx);
 }
 
 //+------------------------------------------------------------------+
@@ -188,10 +195,14 @@ void UpdateHTFLevels()
 //+------------------------------------------------------------------+
 bool IsValidRejection(int shift, double &wickType)
 {
-   double high = iHigh(_Symbol, _Period, shift);
-   double low = iLow(_Symbol, _Period, shift);
-   double open = iOpen(_Symbol, _Period, shift);
-   double close = iClose(_Symbol, _Period, shift);
+   OHLCV ohlcv;
+   if(!GetOHLCV(_Symbol, _Period, shift, ohlcv))
+      return false;
+   
+   double high = ohlcv.high;
+   double low = ohlcv.low;
+   double open = ohlcv.open;
+   double close = ohlcv.close;
    double range = high - low;
    double body = MathAbs(open - close);
 
@@ -329,7 +340,7 @@ void ManagePositions()
 bool IsNewCandle()
 {
    static datetime lastTime = 0;
-   datetime currTime = iTime(_Symbol, _Period, 0);
+   datetime currTime = GetTime(_Symbol, _Period, 0);
    if (lastTime != currTime)
    {
       lastTime = currTime;

@@ -11,6 +11,7 @@
 #include <Trade/Trade.mqh>
 #include <PASR/3.MarketManager.mqh>
 #include <PASR/4.SRManager.mqh>
+#include <PASR/MQL5Compatibility.mqh>
 
 CTrade trade;
 
@@ -251,7 +252,7 @@ void OnTick()
    DrawDashboard(currentTick); // Pass tick for current spread/ATR
 
    // 2. New Candle Logic - Pindahkan ke atas agar filter di bawah hanya jalan 1x per bar
-   datetime currTime = iTime(_Symbol, _Period, 0);
+   datetime currTime = GetTime(_Symbol, _Period, 0);
    if (!market.IsNewBar())
       return;
 
@@ -285,10 +286,14 @@ void OnTick()
 
 bool IsValidRejection(int shift, double &wickType, double &signalPrice, bool &midpointFail)
 {
-   double high = iHigh(_Symbol, _Period, shift);
-   double low = iLow(_Symbol, _Period, shift);
-   double open = iOpen(_Symbol, _Period, shift);
-   double close = iClose(_Symbol, _Period, shift);
+   OHLCV ohlcv;
+   if(!GetOHLCV(_Symbol, _Period, shift, ohlcv))
+      return false;
+   
+   double high = ohlcv.high;
+   double low = ohlcv.low;
+   double open = ohlcv.open;
+   double close = ohlcv.close;
    double mid = (high + low) / 2.0; // This should use market.GetATRPoints()
    double range = high - low;
    double body = MathAbs(open - close);
@@ -342,7 +347,7 @@ bool IsZoneReuseBlocked(bool isBuy, double zonePrice)
    if (!InpOneEntryPerZone)
       return false;
 
-   datetime currBar = iTime(_Symbol, _Period, 0);
+   datetime currBar = GetTime(_Symbol, _Period, 0);
    double tol = GetATRPoints() * InpZoneReuseATR * _Point;
 
    if (isBuy)
@@ -466,7 +471,7 @@ void ExecuteEntry(ENUM_ORDER_TYPE type, double signalPrice)
          ticket = trade.ResultDeal(); // Safety for some brokers
 
       statTradesToday++;
-      lastEntryBarTime = iTime(_Symbol, _Period, 0);
+      lastEntryBarTime = GetTime(_Symbol, _Period, 0);
 
       if (type == ORDER_TYPE_BUY)
       {
@@ -654,7 +659,7 @@ void UpdateRecoveryEngine(RecoveryEngine &r, const MqlTick &tick)
       bool priceFailed = (r.direction > 0) ? (tick.bid < r.failPrice - confirmDist) : (tick.ask > r.failPrice + confirmDist);
 
       // Cek Close Candle Konfirmasi
-      double lastClose = iClose(_Symbol, _Period, 1);
+      double lastClose = GetClose(_Symbol, _Period, 1);
       bool candleFailed = (r.direction > 0) ? (lastClose < r.failPrice) : (lastClose > r.failPrice);
 
       if (priceFailed || candleFailed)
