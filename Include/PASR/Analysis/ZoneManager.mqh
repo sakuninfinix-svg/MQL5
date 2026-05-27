@@ -125,7 +125,7 @@ private:
 
    void UpdateFreshnessAndConsumed()
      {
-      double curPrice = iClose(_Symbol, _Period, 1);
+      double curPrice = GetClose(_Symbol, _Period, 1);
       for(int i=0; i<m_zoneCount; i++)
         {
          if(!m_zones[i].isActive) continue;
@@ -170,8 +170,8 @@ private:
          double bullMove    = 0;
          for(int j=0; j<AZ_IMPULSE_BARS; j++)
            {
-            double o = iOpen(_Symbol,_Period,shift-j);
-            double c = iClose(_Symbol,_Period,shift-j);
+            double o = GetOpen(_Symbol,_Period,shift-j);
+            double c = GetClose(_Symbol,_Period,shift-j);
             if(c <= o) { bullImpulse=false; break; }
             bullMove += (c - o);
            }
@@ -179,10 +179,10 @@ private:
          if(bullImpulse && bullMove >= threshold)
            {
             int    baseShift = shift + 1;
-            double bO = iOpen(_Symbol,_Period,baseShift);
-            double bC = iClose(_Symbol,_Period,baseShift);
-            double bH = iHigh(_Symbol,_Period,baseShift);
-            double bL = iLow(_Symbol,_Period,baseShift);
+            double bO = GetOpen(_Symbol,_Period,baseShift);
+            double bC = GetClose(_Symbol,_Period,baseShift);
+            double bH = GetHigh(_Symbol,_Period,baseShift);
+            double bL = GetLow(_Symbol,_Period,baseShift);
             double bRange = bH - bL;
             double bBody  = MathAbs(bC - bO);
             if(bRange > 0 && bBody/bRange <= AZ_BASE_MAX_BODY)
@@ -198,8 +198,8 @@ private:
          double bearMove    = 0;
          for(int j=0; j<AZ_IMPULSE_BARS; j++)
            {
-            double o = iOpen(_Symbol,_Period,shift-j);
-            double c = iClose(_Symbol,_Period,shift-j);
+            double o = GetOpen(_Symbol,_Period,shift-j);
+            double c = GetClose(_Symbol,_Period,shift-j);
             if(c >= o) { bearImpulse=false; break; }
             bearMove += (o - c);
            }
@@ -207,10 +207,10 @@ private:
          if(bearImpulse && bearMove >= threshold)
            {
             int    baseShift = shift + 1;
-            double bO = iOpen(_Symbol,_Period,baseShift);
-            double bC = iClose(_Symbol,_Period,baseShift);
-            double bH = iHigh(_Symbol,_Period,baseShift);
-            double bL = iLow(_Symbol,_Period,baseShift);
+            double bO = GetOpen(_Symbol,_Period,baseShift);
+            double bC = GetClose(_Symbol,_Period,baseShift);
+            double bH = GetHigh(_Symbol,_Period,baseShift);
+            double bL = GetLow(_Symbol,_Period,baseShift);
             double bRange = bH - bL;
             double bBody  = MathAbs(bC - bO);
             if(bRange > 0 && bBody/bRange <= AZ_BASE_MAX_BODY)
@@ -224,7 +224,7 @@ private:
         }
 
       if(scanEnd > AZ_IMPULSE_BARS + 1)
-         m_lastScanBarTime = (ulong)iTime(_Symbol, _Period, AZ_IMPULSE_BARS + 1);
+         m_lastScanBarTime = (ulong)GetTime(_Symbol, _Period, AZ_IMPULSE_BARS + 1);
      }
 
    void CompactZones()

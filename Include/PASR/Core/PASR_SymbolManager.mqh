@@ -1,4 +1,5 @@
 //+------------------------------------------------------------------+
+#include <PASR/MQL5Compatibility.mqh>
 //|                                             PASR_SymbolManager.mqh |
 //|                        Modular OOP Architecture - Symbol Manager   |
 //|                        (c) 2024 PASR Quant Development             |

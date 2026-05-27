@@ -7,6 +7,7 @@
 #property strict
 
 #include <Trade\Trade.mqh>
+#include <PASR/MQL5Compatibility.mqh>
 CTrade trade;
 
 enum ENUM_PYRAMID_MODE { PROFIT, SIGNAL };
@@ -72,9 +73,9 @@ int    failedBlacklistBar = 0;
 //+------------------------------------------------------------------+
 int OnInit() {
    hIchimoku = iIchimoku(_Symbol, HigherTimeframe, 5, 13, 26);
-   hKijun = iMA(_Symbol, LowerTimeframe, 13, 0, MODE_SMA, PRICE_MEDIAN);
-   hTenkan = iMA(_Symbol, HigherTimeframe, 5, 0, MODE_SMA, PRICE_MEDIAN);
-   hATR = iATR(_Symbol, LowerTimeframe, 14);
+   hKijun = CreateMAHandle(LowerTimeframe, 13, MODE_SMA, PRICE_MEDIAN);
+   hTenkan = CreateMAHandle(HigherTimeframe, 5, MODE_SMA, PRICE_MEDIAN);
+   hATR = CreateATRHandle(LowerTimeframe, 14);
    
    if(hIchimoku == INVALID_HANDLE || hKijun == INVALID_HANDLE || hTenkan == INVALID_HANDLE || hATR == INVALID_HANDLE) return INIT_FAILED;
    
@@ -91,7 +92,7 @@ void OnDeinit(const int reason) {
 void OnTick() {
    if(Bars(_Symbol, LowerTimeframe) < 100 || !TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)) return;
    
-   datetime bTime = iTime(_Symbol, LowerTimeframe, 0);
+   datetime bTime = GetTime(_Symbol, LowerTimeframe, 0);
    if(bTime != lastBarTime) {
       if(failedBlacklistBar > 0) failedBlacklistBar--;
    }
@@ -187,7 +188,7 @@ double NormalizeLot(double lot) {
 
 double GetTodayProfit() {
    double p = 0;
-   if(HistorySelect(iTime(_Symbol, PERIOD_D1, 0), TimeCurrent())) {
+   if(HistorySelect(GetTime(_Symbol, PERIOD_D1, 0), TimeCurrent())) {
       for(int i = HistoryDealsTotal()-1; i >= 0; i--) {
          ulong t = HistoryDealGetTicket(i);
          if(HistoryDealGetInteger(t, DEAL_MAGIC) == MagicNumber) p += HistoryDealGetDouble(t, DEAL_PROFIT);

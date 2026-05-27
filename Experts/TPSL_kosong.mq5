@@ -8,6 +8,7 @@
 #property strict
 
 #include <Trade\Trade.mqh>
+#include <PASR/MQL5Compatibility.mqh>
 CTrade trade;
 
 enum ENUM_CHARTSYMBOL
@@ -282,7 +283,7 @@ void SetSLnTP()
 //+------------------------------------------------------------------+ OnInit
 int OnInit()
 {
-   atr_handle = iATR(_Symbol, PERIOD_CURRENT, ATR_Period);
+   atr_handle = CreateATRHandle(PERIOD_CURRENT, ATR_Period);
    if (atr_handle == INVALID_HANDLE)
    {
       Print("Error creating ATR handle");

@@ -1,4 +1,5 @@
 //+------------------------------------------------------------------+
+#include <PASR/MQL5Compatibility.mqh>
 //| Analysis/SRManager.mqh — v6.0.1                                  |
 //| Responsibility: PIPELINE ORCHESTRATOR — IManager adapter         |
 //+------------------------------------------------------------------+
@@ -90,7 +91,7 @@ public:
       double atr = m_data.GetATRPoints() * _Point;
       m_store.UpdateATR(atr);
 
-      datetime barTime = iTime(_Symbol, _Period, 0);
+      datetime barTime = GetTime(_Symbol, _Period, 0);
       int      barIdx  = (int)iBarShift(_Symbol, _Period, 0);
       if(barIdx == m_lastScanBar && barTime == m_lastScanTime) return;
       m_lastScanBar  = barIdx;
