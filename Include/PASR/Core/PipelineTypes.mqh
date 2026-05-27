@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineTypes.mqh — v1.07                                   |
+//| Core/PipelineTypes.mqh — v1.08                                   |
 //| Shared types, enums, and PipelineContext for CPipelineEngine      |
 //+------------------------------------------------------------------+
 #property strict
@@ -38,7 +38,11 @@ enum ENUM_TRADING_SESSION
    SESSION_TOKYO    = 2,
    SESSION_LONDON   = 3,
    SESSION_NEW_YORK = 4,
-   SESSION_OVERLAP  = 5
+   SESSION_OVERLAP  = 5,
+   // Keep legacy enum spellings as aliases while canonical code uses the names above.
+   SESSION_ASIAN    = SESSION_TOKYO,
+   SESSION_NEWYORK  = SESSION_NEW_YORK,
+   SESSION_OFF      = SESSION_UNKNOWN
   };
 
 // Compatibility alias for legacy pipeline wording.
@@ -178,7 +182,7 @@ struct PipelineReport
      }
   };
 
-ENUM_TRADING_SESSION DetectSession()
+ENUM_TRADING_SESSION PASRDetectSession()
   {
    MqlDateTime dt;
    TimeToStruct(TimeGMT(), dt);
@@ -190,6 +194,10 @@ ENUM_TRADING_SESSION DetectSession()
    if(h >= 12 && h < 21) return SESSION_NEW_YORK;
    return SESSION_UNKNOWN;
   }
+
+// Allow existing pipeline code to call DetectSession(), then undefine this macro
+// in PASR.mqh before control returns to the EA translation unit.
+#define DetectSession PASRDetectSession
 
 struct PipelineContext
   {
