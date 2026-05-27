@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/ConfidenceCalibrator.mqh — v1.01                               |
+//| AI/ConfidenceCalibrator.mqh — v1.02                              |
 //| Platt scaling + agreement-weighted confidence calibration         |
 //+------------------------------------------------------------------+
 #property strict
@@ -7,7 +7,7 @@
 #define __CONFIDENCE_CALIBRATOR_MQH__
 
 #include "AITypes.mqh"
-#include "../../Core/IManager.mqh"
+#include "../Core/IManager.mqh"
 
 class CConfidenceCalibrator : public IManager
   {

@@ -64,6 +64,8 @@
 
 // Layer 5: Signal managers
 #include "../Signal/SignalFilterPipeline.mqh"
+#include "../Signal/RegimeFilter.mqh"
+#include "../Signal/RegimeSignalSource.mqh"
 #include "../Signal/SignalManager.mqh"
 
 // Layer 6: Trade managers
@@ -82,6 +84,14 @@
 
 // Layer 8: Pipeline and orchestration
 #include "PipelineEngine.mqh"
+
+// PipelineTypes temporarily maps DetectSession -> PASRDetectSession so included
+// core pipeline code binds to the canonical helper. Undefine it before returning
+// to the EA translation unit so PASR_MODULAR.mq5 can keep its own helper name.
+#ifdef DetectSession
+#undef DetectSession
+#endif
+
 #include "Orchestrator.mqh"
 #include "OrchestratorInit.mqh"
 

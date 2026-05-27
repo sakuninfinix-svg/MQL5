@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalManager.mqh — v4.05                                |
+//| Signal/SignalManager.mqh — v4.06                                |
 //| Signal orchestration using canonical PASREvent model             |
 //+------------------------------------------------------------------+
 #property strict
@@ -245,7 +245,6 @@ public:
      {
       if(!IManager::Init(data, bus)) return false;
       EnsureConfigReady();
-      if(m_bus != NULL) m_bus.Subscribe(this);
       return true;
      }
 
@@ -295,7 +294,11 @@ public:
 
    virtual void OnPriceUpdate() override
      {
-      SymbolInfoTick(_Symbol, m_cachedTick);
+      if(!SymbolInfoTick(_Symbol, m_cachedTick))
+        {
+         m_hasNewTick = false;
+         return;
+        }
       m_hasNewTick = true;
      }
 

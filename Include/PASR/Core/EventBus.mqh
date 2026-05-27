@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — v3.05                                       |
+//| Core/EventBus.mqh — v3.07                                       |
 //| High-performance event dispatch with binary-heap priority queue  |
 //+------------------------------------------------------------------+
 #property strict
@@ -170,8 +170,6 @@ public:
 
    void DispatchImmediate(const PASREvent &ev)
      {
-      // Explicit direct-route path. Use only for latency-sensitive events
-      // where immediate subscriber notification is required.
       RouteEvent(ev);
       m_stats.total_immediate++;
       m_stats.total_drained++;
@@ -179,8 +177,6 @@ public:
 
    void Dispatch(const PASREvent &ev)
      {
-      // Backward-compatible alias for legacy callers. New code should use
-      // DispatchImmediate() for direct routing or Push()/Drain() for queued routing.
       DispatchImmediate(ev);
      }
 

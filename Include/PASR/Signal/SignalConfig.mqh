@@ -1,10 +1,17 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalConfig.mqh — v1.01                                  |
+//| Signal/SignalConfig.mqh — v1.02                                  |
 //| Centralized configuration cache for Signal module                |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_CONFIG_MQH__
 #define __SIGNAL_CONFIG_MQH__
+
+enum ENUM_ENTRY_MODE
+  {
+   MODE_SAFE       = 0,
+   MODE_BALANCED   = 1,
+   MODE_AGGRESSIVE = 2
+  };
 
 struct SignalConfigData
   {

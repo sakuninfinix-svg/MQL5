@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/OnlineLearningGuard.mqh — v1.01                                |
+//| AI/OnlineLearningGuard.mqh — v1.02                               |
 //| Concept drift detection and veto guard for AI inference           |
 //+------------------------------------------------------------------+
 #property strict
@@ -7,7 +7,7 @@
 #define __ONLINE_LEARNING_GUARD_MQH__
 
 #include "AITypes.mqh"
-#include "../../Core/IManager.mqh"
+#include "../Core/IManager.mqh"
 
 #define GUARD_WINDOW     100
 #define GUARD_DRIFT_VETO 0.75

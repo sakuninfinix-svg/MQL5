@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AIFeatureBuilder.mqh — v1.01                                  |
+//| AI/AIFeatureBuilder.mqh — v1.02                                  |
 //| 26-dimensional feature engineering for PASR AI subsystem          |
 //+------------------------------------------------------------------+
 #property strict
@@ -7,8 +7,8 @@
 #define __AI_FEATURE_BUILDER_MQH__
 
 #include "AITypes.mqh"
-#include "../../Core/IManager.mqh"
-#include "../../Data/RegimeTypes.mqh"
+#include "../Core/IManager.mqh"
+#include "../Data/RegimeTypes.mqh"
 
 class CAIFeatureBuilder : public IManager
   {

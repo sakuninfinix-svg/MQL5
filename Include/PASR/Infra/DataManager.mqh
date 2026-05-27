@@ -2,6 +2,9 @@
 //|                                     Infra/DataManager.mqh        |
 //|                          Copyright 2026, Agsicentre              |
 //+------------------------------------------------------------------+
+//| v2.04 (2026-05-27)                                                |
+//|   Phase 2 cleanup: removed temporary EventBus accessor shim.      |
+//|   EventBus ownership/access remains in COrchestrator/IManager.    |
 //| v2.02 (2026-05-24)                                                |
 //|   S21-003..005 / BUG-C01:                                        |
 //|     - DataManager is now CDataManager.                           |

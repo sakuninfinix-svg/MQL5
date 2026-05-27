@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/Events.mqh — CANONICAL v2.15                                |
+//| Core/Events.mqh — CANONICAL v2.17                                |
 //| All event type definitions for the PASR framework                |
 //+------------------------------------------------------------------+
 #pragma once

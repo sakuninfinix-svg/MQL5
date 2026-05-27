@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AIInference.mqh — v1.01                                       |
+//| AI/AIInference.mqh — v1.02                                       |
 //| Expert routing + MLP forward pass for PASR AI subsystem          |
 //+------------------------------------------------------------------+
 #property strict
@@ -7,8 +7,7 @@
 #define __AI_INFERENCE_MQH__
 
 #include "AITypes.mqh"
-#include "../../Core/IManager.mqh"
-#include "../../Data/RegimeTypes.mqh"
+#include "../Core/IManager.mqh"
 
 struct SMLPLayer
   {
@@ -35,7 +34,11 @@ private:
    double   m_b3;
 
    double ReLU(double x) { return MathMax(0.0, x); }
-   double Tanh(double x) { return MathTanh(x); }
+   double Tanh(double x)
+     {
+      double e2 = MathExp(2.0 * x);
+      return (e2 - 1.0) / (e2 + 1.0);
+     }
 
    void InitRandomWeights()
      {

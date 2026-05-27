@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AITrainer.mqh — v1.01                                         |
+//| AI/AITrainer.mqh — v1.02                                         |
 //| Online / offline trainer for PASR AI models                      |
 //+------------------------------------------------------------------+
 #property strict
@@ -8,7 +8,7 @@
 
 #include "AITypes.mqh"
 #include "AIEnsemble.mqh"
-#include "../../Core/IManager.mqh"
+#include "../Core/IManager.mqh"
 
 #define AI_TRAINER_BUFFER_SIZE  500
 #define AI_TRAINER_MIN_RETRAIN   50
@@ -50,7 +50,7 @@ private:
       int start = MathMax(0, n - mini_batch);
       for(int s = start; s < n; s++)
         {
-         const SAITrainSample &samp = m_buffer[s];
+         SAITrainSample samp = m_buffer[s];
          for(int m = 0; m < n_models; m++)
            {
             CAIInference *model = m_ensemble.GetModel(m);
@@ -88,7 +88,7 @@ public:
      {
       m_buffer[m_head] = sample;
       m_head = (m_head + 1) % AI_TRAINER_BUFFER_SIZE;
-      m_count++;
+      if(m_count < AI_TRAINER_BUFFER_SIZE) m_count++;
       m_since_retrain++;
      }
 
@@ -105,9 +105,7 @@ public:
       PrintFormat("CAITrainer: Retrain (samples=%d, mini_batch=%d, loss %.4f->%.4f, lr=%.5f)",
                   m_count, mini_batch, loss_before, loss_after, m_lr);
 
-      PASREvent ev;
-      ev.id = EVENT_ID_AI_MODEL_UPDATED;
-      ev.priority = 5;
+      PASREvent ev(EVENT_ID_ADAPTIVE_UPDATE, 5, loss_after, loss_before, "AI_MODEL_RETRAINED");
       QueueEvent(ev);
 
       m_since_retrain = 0;
