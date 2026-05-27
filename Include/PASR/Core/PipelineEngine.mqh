@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v1.07                                  |
+//| Core/PipelineEngine.mqh — v1.08                                  |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_PIPELINE_ENGINE_MQH__
@@ -52,16 +52,23 @@ private:
 
    void FillPriceContext(PipelineContext &ctx)
      {
-      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      MqlTick tick;
+      if(SymbolInfoTick(_Symbol, tick))
+        {
+         ctx.bid = tick.bid;
+         ctx.ask = tick.ask;
+        }
+      else
+        {
+         ctx.bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         ctx.ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+        }
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      ctx.bid = bid;
-      ctx.ask = ask;
-      ctx.spread_pts = (point > 0.0 && ask > bid) ? (ask - bid) / point : 0.0;
+      ctx.spread_pts = (point > 0.0 && ctx.ask > ctx.bid) ? (ctx.ask - ctx.bid) / point : 0.0;
       ctx.atr_points = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
       ctx.atr = ctx.atr_points;
       ctx.bar_time = iTime(_Symbol, _Period, 0);
-      ctx.market_open = (bid > 0.0 && ask > 0.0);
+      ctx.market_open = (ctx.bid > 0.0 && ctx.ask > 0.0);
       ctx.session = DetectSession();
      }
 
@@ -91,9 +98,9 @@ private:
    ENUM_STAGE_RESULT Stage_AnalysisZone(PipelineContext &ctx)
      {
       if(SkipIfNull(m_zone, "AnalysisZone") == STAGE_SKIP) return STAGE_SKIP;
-      if(!ctx.new_bar) return STAGE_SKIP;
       m_stage_timer.Start();
-      m_zone.Update();
+      m_zone.OnPriceUpdate();
+      if(ctx.new_bar) m_zone.OnNewBar();
       if(m_profiling_enabled) m_stage_timer.Log("Stage3_AnalysisZone");
       return STAGE_OK;
      }
@@ -316,7 +323,6 @@ private:
       if(!ctx.new_bar) return STAGE_SKIP;
       m_stage_timer.Start();
       m_journal.LogEntry(ctx);
-      if(m_telemetry != NULL) m_telemetry.RecordBarEvent(ctx);
       if(m_profiling_enabled) m_stage_timer.Log("Stage14_Journal");
       return STAGE_OK;
      }
