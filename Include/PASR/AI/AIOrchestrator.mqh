@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AIOrchestrator.mqh — v3.00                                    |
+//| AI/AIOrchestrator.mqh — v3.01                                    |
 //| AI-first strategy brain for PASR                                  |
 //+------------------------------------------------------------------+
 #property strict
@@ -8,7 +8,6 @@
 
 #include "AITypes.mqh"
 #include "AIFeatureBuilder.mqh"
-#include "AIInference.mqh"
 #include "AIEnsemble.mqh"
 #include "AITrainer.mqh"
 #include "ConfidenceCalibrator.mqh"
@@ -20,7 +19,6 @@ class CAIOrchestrator : public IManager
   {
 private:
    CAIFeatureBuilder     *m_feat;
-   CAIInference          *m_infer;
    CAIEnsemble           *m_ensemble;
    CAITrainer            *m_trainer;
    CConfidenceCalibrator *m_calib;
@@ -29,7 +27,6 @@ private:
    SAIInferenceResult     m_last_result;
    SAIModelPerf           m_perf;
    bool                   m_ready;
-   string                 m_model_path;
    int                    m_min_bars_required;
    SAIFeatureVector       m_open_features;
    bool                   m_open_features_valid;
@@ -49,6 +46,16 @@ private:
 
    int                    m_hATRRegime;
    int                    m_hADXRegime;
+
+   void SetUnavailable(SAIInferenceResult &out_result, string reason)
+     {
+      out_result.Reset();
+      out_result.valid = false;
+      out_result.vetoed = true;
+      out_result.veto_reason = reason;
+      out_result.timestamp = TimeCurrent();
+      m_last_result = out_result;
+     }
 
    void ReleaseIndicator(int &handle)
      {
@@ -83,7 +90,6 @@ private:
       if(m_calib    != NULL) { m_calib.Deinit();    delete m_calib;    m_calib    = NULL; }
       if(m_trainer  != NULL) { m_trainer.Deinit();  delete m_trainer;  m_trainer  = NULL; }
       if(m_ensemble != NULL) { m_ensemble.Deinit(); delete m_ensemble; m_ensemble = NULL; }
-      if(m_infer    != NULL) { m_infer.Deinit();    delete m_infer;    m_infer    = NULL; }
       if(m_feat     != NULL) { m_feat.Deinit();     delete m_feat;     m_feat     = NULL; }
       ReleaseIndicator(m_hATRRegime);
       ReleaseIndicator(m_hADXRegime);
@@ -189,9 +195,11 @@ private:
 
    double DynamicThreshold() const
      {
-      double th = MathMax(AI_DEFAULT_CONF_THRESHOLD, m_entryThreshold);
+      double th = MathMax(m_vetoThreshold, m_entryThreshold);
       if(m_currentStrategy == STRAT_CONSERVATIVE)
          th = MathMax(th, 0.90);
+      if(m_highConfidenceThreshold > 0.0)
+         th = MathMin(th, m_highConfidenceThreshold);
       return MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, th));
      }
 
@@ -208,24 +216,31 @@ private:
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
       if(ask <= 0.0 || bid <= 0.0 || point <= 0.0) return false;
 
-      double atrPts = (m_data != NULL) ? m_data.GetATRPoints() / point : 0.0;
-      if(atrPts <= 0.0) atrPts = 100.0;
+      double atrPrice = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
+      double atrPts = (atrPrice > 0.0) ? atrPrice / point : 0.0;
+      if(atrPts <= 0.0)
+        {
+         // Do not invent a trade-sized stop if ATR is unavailable. Let caller fall back to rule pipeline.
+         return false;
+        }
 
+      double slMult = MathMax(0.5, m_cfg.Risk.SLMultiplier);
+      double tpMult = MathMax(1.0, m_cfg.Risk.TPMultiplier);
       out.direction = (res.direction > 0) ? SIGNAL_BUY : SIGNAL_SELL;
       out.confidence = res.confidence;
       out.primarySource = StringFormat("AI_PRIMARY:%s|%s|score=%.3f|drift=%.3f",
                                        GetStrategyDescription(), res.model_id, res.score, res.drift_score);
       out.entryPrice = (out.direction == SIGNAL_BUY) ? ask : bid;
-      out.slPoints = atrPts * MathMax(0.5, m_cfg.Risk.SLMultiplier) / MathMax(0.1, m_riskMultiplier);
-      out.tpPoints = out.slPoints * MathMax(1.0, m_cfg.Risk.TPMultiplier / MathMax(0.1, m_cfg.Risk.SLMultiplier));
+      out.slPoints = atrPts * slMult / MathMax(0.1, m_riskMultiplier);
+      out.tpPoints = out.slPoints * MathMax(1.0, tpMult / MathMax(0.1, slMult));
       return true;
      }
 
 public:
    CAIOrchestrator()
-      : IManager(), m_feat(NULL), m_infer(NULL), m_ensemble(NULL),
+      : IManager(), m_feat(NULL), m_ensemble(NULL),
         m_trainer(NULL), m_calib(NULL), m_guard(NULL),
-        m_ready(false), m_model_path(""), m_min_bars_required(50),
+        m_ready(false), m_min_bars_required(50),
         m_open_features_valid(false),
         m_currentStrategy(STRAT_NONE), m_detectedRegime(REGIME_UNKNOWN),
         m_strategyConfidence(0.0), m_lastStrategyChange(0), m_regimeStreak(0),
@@ -271,14 +286,13 @@ public:
       ReleaseComponents();
 
       m_feat     = new CAIFeatureBuilder();
-      m_infer    = new CAIInference();
       m_ensemble = new CAIEnsemble();
       m_trainer  = new CAITrainer();
       m_calib    = new CConfidenceCalibrator();
       m_guard    = new COnlineLearningGuard();
 
-      if(m_feat == NULL || m_infer == NULL || m_ensemble == NULL ||
-         m_trainer == NULL || m_calib == NULL || m_guard == NULL)
+      if(m_feat == NULL || m_ensemble == NULL || m_trainer == NULL ||
+         m_calib == NULL || m_guard == NULL)
         {
          Print("AI: allocation failed");
          ReleaseComponents();
@@ -286,7 +300,6 @@ public:
         }
 
       if(!m_feat.Init(data, bus))     { Print("AI: FeatureBuilder init failed"); ReleaseComponents(); return false; }
-      if(!m_infer.Init(data, bus))    { Print("AI: Inference init failed");      ReleaseComponents(); return false; }
       if(!m_ensemble.Init(data, bus)) { Print("AI: Ensemble init failed");       ReleaseComponents(); return false; }
       if(!m_trainer.Init(data, bus))  { Print("AI: Trainer init failed");        ReleaseComponents(); return false; }
       if(!m_calib.Init(data, bus))    { Print("AI: Calibrator init failed");     ReleaseComponents(); return false; }
@@ -300,7 +313,7 @@ public:
       DetectRegime();
       SelectStrategy();
 
-      Print("CAIOrchestrator v3.00: AI-primary strategy brain initialized");
+      Print("CAIOrchestrator v3.01: AI-primary strategy brain initialized");
       Print("  Active Strategy: ", GetStrategyDescription());
       Print("  Current Regime: ", EnumToString(m_detectedRegime));
       return true;
@@ -322,7 +335,12 @@ public:
 
    virtual void OnEvent(const PASREvent &ev) override
      {
-      if(ev.id == EVENT_ID_CONFIG_RELOAD) { OnConfigReload(); ConfigureParameters(m_useAI, m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold); return; }
+      if(ev.id == EVENT_ID_CONFIG_RELOAD)
+        {
+         OnConfigReload();
+         ConfigureParameters(m_useAI, m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold);
+         return;
+        }
       if(!m_ready) return;
 
       if(ev.id == EVENT_ID_NEW_BAR)
@@ -356,38 +374,39 @@ public:
       out_result.Reset();
       if(!m_useAI)
         {
-         out_result.vetoed = true;
-         out_result.veto_reason = "AI disabled";
+         SetUnavailable(out_result, "AI disabled");
          return false;
         }
       if(!m_ready || m_feat == NULL || m_guard == NULL || m_ensemble == NULL || m_calib == NULL)
+        {
+         SetUnavailable(out_result, "AI not ready");
          return false;
+        }
 
       SAIFeatureVector fv;
       fv.Reset();
       if(!m_feat.Build(fv))
         {
-         out_result.valid = false;
-         out_result.vetoed = true;
-         out_result.veto_reason = "Feature build failed";
-         m_last_result = out_result;
+         SetUnavailable(out_result, "Feature build failed");
          return false;
         }
 
       double drift = m_guard.ComputeDrift(fv);
       if(m_guard.ShouldVeto(drift))
         {
+         SetUnavailable(out_result, StringFormat("Drift veto: %.3f", drift));
          out_result.drift_score = drift;
-         out_result.vetoed = true;
-         out_result.veto_reason = StringFormat("Drift veto: %.3f", drift);
-         out_result.valid = false;
          m_last_result = out_result;
          return false;
         }
 
       SAIEnsembleVote vote;
       vote.Reset();
-      m_ensemble.Vote(fv, vote);
+      if(!m_ensemble.Vote(fv, vote) || vote.n_models <= 0)
+        {
+         SetUnavailable(out_result, "Ensemble vote failed");
+         return false;
+        }
 
       double raw_conf = MathAbs(vote.final_score);
       double cal_conf = m_calib.Calibrate(raw_conf, vote.agreement);
@@ -395,7 +414,7 @@ public:
       out_result.score = vote.final_score;
       out_result.confidence = cal_conf;
       out_result.direction = (vote.final_score > 0.0) ? 1 : ((vote.final_score < 0.0) ? -1 : 0);
-      out_result.valid = (cal_conf >= DynamicThreshold());
+      out_result.valid = (cal_conf >= DynamicThreshold() && out_result.direction != 0);
       out_result.model_id = "ensemble_v3_ai_primary";
       out_result.timestamp = TimeCurrent();
       out_result.drift_score = drift;
