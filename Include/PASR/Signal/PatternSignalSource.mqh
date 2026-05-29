@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Signal/PatternSignalSource.mqh — v2.02                           |
-//| ISignalSource plugin: CPatternManager result → directional vote. |
+//| Signal/PatternSignalSource.mqh — v3.00                           |
+//| ISignalSource plugin: normalized pattern regression fallback vote |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_PATTERN_SOURCE_MQH__
@@ -16,8 +16,8 @@ private:
    double           m_minConfidence;
 
 public:
-   PatternSignalSource(CPatternManager *p, double minConfidence = 1.60)
-      : m_pattern(p), m_minConfidence(minConfidence) {}
+   PatternSignalSource(CPatternManager *p, double minConfidence = 0.55)
+      : m_pattern(p), m_minConfidence(MathMax(0.0, MathMin(1.0, minConfidence))) {}
 
    virtual string Name() override { return "PatternSignalSource"; }
 
@@ -29,9 +29,12 @@ public:
       SPatternResult pr = m_pattern.GetLastResult();
       if(!pr.found) return false;
 
-      if(pr.confluenceScore < m_minConfidence) return false;
+      double score = MathMax(0.0, MathMin(1.0, pr.confluenceScore));
+      if(score < m_minConfidence) return false;
 
-      out.confidence = MathMin(1.0, pr.confluenceScore / MathMax(m_minConfidence, 1.0));
+      double gapBoost = MathMax(0.0, MathMin(1.0, pr.dominanceGap));
+      double conflictPenalty = MathMax(0.0, MathMin(1.0, pr.conflictScore));
+      out.confidence = MathMax(0.0, MathMin(1.0, score * (0.75 + 0.25 * gapBoost) * (1.0 - 0.35 * conflictPenalty)));
       out.reason     = pr.reason;
 
       if(pr.direction > 0)
