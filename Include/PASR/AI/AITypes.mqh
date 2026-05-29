@@ -26,6 +26,27 @@ enum ENUM_AI_MODEL_TYPE
    AI_MODEL_ONLINE     = 4
   };
 
+//--- Risk-aware AI decision class
+enum ENUM_AI_DECISION_CLASS
+  {
+   AI_DECISION_NO_TRADE    = 0,
+   AI_DECISION_WEAK_BUY    = 1,
+   AI_DECISION_STRONG_BUY  = 2,
+   AI_DECISION_WEAK_SELL   = -1,
+   AI_DECISION_STRONG_SELL = -2
+  };
+
+//--- Label quality class for future supervised/offline training
+enum ENUM_AI_LABEL_CLASS
+  {
+   AI_LABEL_INVALID       = 0,
+   AI_LABEL_NO_TRADE      = 1,
+   AI_LABEL_GOOD_BUY      = 2,
+   AI_LABEL_GOOD_SELL     = 3,
+   AI_LABEL_BAD_BUY       = 4,
+   AI_LABEL_BAD_SELL      = 5
+  };
+
 //--- Inference result from a single forward pass
 struct SAIInferenceResult
   {
@@ -53,6 +74,35 @@ struct SAIInferenceResult
      }
   };
 
+//--- Risk-aware strategy decision produced by the AI brain
+struct SAIRiskDecision
+  {
+   ENUM_AI_DECISION_CLASS decisionClass;
+   int      direction;              // +1 / -1 / 0
+   double   confidence;             // calibrated confidence
+   double   expectedR;              // expected R multiple estimate
+   double   failureProbability;     // probability of invalidation/loss [0..1]
+   double   recommendedSL_ATR;      // stop distance in ATR units
+   double   recommendedTP_ATR;      // target distance in ATR units
+   double   riskMultiplier;         // final risk scaling [0..2]
+   double   noTradePenalty;         // internal abstention pressure [0..1]
+   string   reason;
+
+   void Reset()
+     {
+      decisionClass      = AI_DECISION_NO_TRADE;
+      direction          = 0;
+      confidence         = 0.0;
+      expectedR          = 0.0;
+      failureProbability = 1.0;
+      recommendedSL_ATR  = 0.0;
+      recommendedTP_ATR  = 0.0;
+      riskMultiplier     = 0.0;
+      noTradePenalty     = 1.0;
+      reason             = "";
+     }
+  };
+
 //--- Feature vector wrapper (26-dim)
 struct SAIFeatureVector
   {
@@ -74,7 +124,7 @@ struct SAIFeatureVector
 struct SAITrainSample
   {
    double   features[AI_FEATURE_DIM];
-   double   label;          // +1 / -1
+   double   label;          // +1 / -1 directional target
    double   weight;         // Sample importance weight
    datetime timestamp;
 
@@ -84,6 +134,33 @@ struct SAITrainSample
       label = 0.0;
       weight = 0.0;
       timestamp = 0;
+     }
+  };
+
+//--- Rich label for risk-aware offline/online learning
+struct SAITradeLabel
+  {
+   ENUM_AI_LABEL_CLASS labelClass;
+   int      direction;
+   double   realizedR;
+   double   maxFavorableR;
+   double   maxAdverseR;
+   double   durationBars;
+   bool     hitTPBeforeSL;
+   bool     valid;
+   datetime timestamp;
+
+   void Reset()
+     {
+      labelClass    = AI_LABEL_INVALID;
+      direction     = 0;
+      realizedR     = 0.0;
+      maxFavorableR = 0.0;
+      maxAdverseR   = 0.0;
+      durationBars  = 0.0;
+      hitTPBeforeSL = false;
+      valid         = false;
+      timestamp     = 0;
      }
   };
 
