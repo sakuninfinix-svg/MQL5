@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/TelemetryRecorder.mqh — v2.01                              |
+//| Infra/TelemetryRecorder.mqh — v2.02                              |
 //| Telemetry metrics recorder                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -65,8 +65,7 @@ public:
       m_base_path = "PASR\\Telemetry\\";
       OpenNewFile();
       WriteHeader();
-      if(m_bus != NULL) m_bus.Subscribe(this);
-      PASRLogInfo("Telemetry", "v2.01 Initialized — recording to: " + m_base_path);
+      PASRLogInfo("Telemetry", "v2.02 Initialized — recording to: " + m_base_path);
       return true;
      }
 
