@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v2.00                                  |
+//| Core/PipelineEngine.mqh — v2.01                                  |
 //| AI-primary pipeline with rule-based fallback/context stages       |
 //+------------------------------------------------------------------+
 #property strict
@@ -86,7 +86,7 @@ private:
          if(m_sr.IsNearValidZone(ctx.bid, 0.5, z))
            {
             double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-            double atrPrice = (ctx.atr_points > 0.0 && point > 0.0) ? ctx.atr_points * point : 0.0;
+            double atrPrice = (ctx.atr_points > 0.0) ? ctx.atr_points : 0.0;
             double dist = MathAbs(ctx.bid - z.price);
             srDist = (atrPrice > 0.0) ? MathMax(0.0, MathMin(1.0, 1.0 - dist / MathMax(atrPrice, point))) : 0.5;
             zoneStrength = MathMax(0.0, MathMin(1.0, z.strength / 100.0));
@@ -165,50 +165,13 @@ private:
       return STAGE_OK;
      }
 
-   ENUM_STAGE_RESULT Stage_SignalGen(PipelineContext &ctx)
+   ENUM_STAGE_RESULT Stage_RuleFallbackSignal(PipelineContext &ctx)
      {
-      m_stage_timer.Start();
-      ctx.signal.Clear();
-      InjectAIContext(ctx);
-
-      if(m_ai_orch != NULL && m_ai_orch.IsReady())
-        {
-         if(m_ai_orch.PredictSignal(ctx.signal))
-           {
-            const SAIInferenceResult &ai = m_ai_orch.GetLastResult();
-            ctx.ai_score = (float)ai.score;
-            ctx.ai_veto = ai.vetoed;
-            ctx.drift_score = (float)ai.drift_score;
-            ctx.ai_result.score = ctx.ai_score;
-            ctx.ai_result.drift_index = ctx.drift_score;
-            ctx.ai_result.model_healthy = m_ai_orch.IsHealthy();
-            ctx.signal_strength = ctx.signal.confidence;
-            if(m_debug_mode)
-               PrintFormat("[Pipeline] AI_PRIMARY Signal: dir=%d conf=%.3f src=%s", (int)ctx.signal.direction, ctx.signal.confidence, ctx.signal.primarySource);
-            if(m_profiling_enabled) m_stage_timer.Log("Stage6_AIPrimarySignal");
-            return STAGE_OK;
-           }
-
-         const SAIInferenceResult &last = m_ai_orch.GetLastResult();
-         ctx.ai_score = (float)last.score;
-         ctx.ai_veto = last.vetoed;
-         ctx.drift_score = (float)last.drift_score;
-         ctx.ai_result.score = ctx.ai_score;
-         ctx.ai_result.drift_index = ctx.drift_score;
-         ctx.ai_result.model_healthy = m_ai_orch.IsHealthy();
-         ctx.exit_message = last.vetoed ? last.veto_reason : "AI primary produced no signal";
-         if(m_debug_mode)
-            PrintFormat("[Pipeline] AI_PRIMARY no trade: %s", ctx.exit_message);
-         if(m_profiling_enabled) m_stage_timer.Log("Stage6_AIPrimarySignal");
-         return STAGE_OK;
-        }
-
       if(SkipIfNull(m_signal, "RuleFallbackSignal") == STAGE_SKIP)
         {
          if(m_profiling_enabled) m_stage_timer.Log("Stage6_SignalGen");
          return STAGE_SKIP;
         }
-
       ctx.signal = m_signal.AggregateSignals();
       ctx.signal_strength = ctx.signal.confidence;
       if(m_debug_mode)
@@ -217,10 +180,52 @@ private:
       return STAGE_OK;
      }
 
+   ENUM_STAGE_RESULT Stage_SignalGen(PipelineContext &ctx)
+     {
+      m_stage_timer.Start();
+      ctx.signal.Clear();
+      InjectAIContext(ctx);
+
+      bool aiAvailable = (m_ai_orch != NULL && m_ai_orch.IsReady() && m_ai_orch.IsHealthy());
+      if(!aiAvailable)
+        {
+         ctx.ai_result.model_healthy = false;
+         ctx.exit_message = "AI unavailable; using rule fallback";
+         return Stage_RuleFallbackSignal(ctx);
+        }
+
+      if(m_ai_orch.PredictSignal(ctx.signal))
+        {
+         const SAIInferenceResult &ai = m_ai_orch.GetLastResult();
+         ctx.ai_score = (float)ai.score;
+         ctx.ai_veto = ai.vetoed;
+         ctx.drift_score = (float)ai.drift_score;
+         ctx.ai_result.score = ctx.ai_score;
+         ctx.ai_result.drift_index = ctx.drift_score;
+         ctx.ai_result.model_healthy = true;
+         ctx.signal_strength = ctx.signal.confidence;
+         if(m_debug_mode)
+            PrintFormat("[Pipeline] AI_PRIMARY Signal: dir=%d conf=%.3f src=%s", (int)ctx.signal.direction, ctx.signal.confidence, ctx.signal.primarySource);
+         if(m_profiling_enabled) m_stage_timer.Log("Stage6_AIPrimarySignal");
+         return STAGE_OK;
+        }
+
+      const SAIInferenceResult &last = m_ai_orch.GetLastResult();
+      ctx.ai_score = (float)last.score;
+      ctx.ai_veto = last.vetoed;
+      ctx.drift_score = (float)last.drift_score;
+      ctx.ai_result.score = ctx.ai_score;
+      ctx.ai_result.drift_index = ctx.drift_score;
+      ctx.ai_result.model_healthy = true;
+      ctx.exit_message = last.vetoed ? last.veto_reason : "AI primary chose no trade";
+      if(m_debug_mode)
+         PrintFormat("[Pipeline] AI_PRIMARY no trade: %s", ctx.exit_message);
+      if(m_profiling_enabled) m_stage_timer.Log("Stage6_AIPrimarySignal");
+      return STAGE_OK;
+     }
+
    ENUM_STAGE_RESULT Stage_AIInfer(PipelineContext &ctx)
      {
-      // AI inference is now performed inside Stage_SignalGen as the primary
-      // decision source. This stage is kept for report compatibility only.
       if(m_ai_orch == NULL) return STAGE_SKIP;
       ctx.ai_result.model_healthy = m_ai_orch.IsHealthy();
       return STAGE_OK;
