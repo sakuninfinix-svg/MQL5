@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/JournalManager.mqh — v2.02                                 |
+//| Infra/JournalManager.mqh — v2.03                                 |
 //| Per-trade CSV journal + in-memory performance analytics.         |
 //+------------------------------------------------------------------+
 #property strict
@@ -7,26 +7,10 @@
 #define __INFRA_JOURNAL_MANAGER_MQH__
 
 #include "../Core/IManager.mqh"
-#include "../Core/EventBus.mqh"
-#include "../Core/Events.mqh"
-#include "../Core/Globals.mqh"
 #include "../Core/PipelineTypes.mqh"
 #include "../Data/RegimeTypes.mqh"
-#include "../Signal/AI/AITypes.mqh"
-#include "../Signal/AI/AIFeatureBuilder.mqh"
+#include "../AI/AITypes.mqh"
 #include "../Trade/TradePlan.mqh"
-
-#ifndef PASR_TRADING_SESSION_DEFINED
-#define PASR_TRADING_SESSION_DEFINED
-enum ENUM_TRADING_SESSION
-  {
-   SESSION_ASIAN    = 0,
-   SESSION_LONDON   = 1,
-   SESSION_NEWYORK  = 2,
-   SESSION_OVERLAP  = 3,
-   SESSION_OFF      = 4
-  };
-#endif
 
 #define JOURNAL_BUF_SIZE    500
 #define JOURNAL_DAILY_SIZE   30
@@ -62,7 +46,7 @@ struct JournalEntry
      {
       ticket=0; timeOpen=0; timeClose=0; symbol=""; direction=SIGNAL_NONE;
       entry=0; sl=0; tp1=0; tp2=0; closePrice=0; lots=0; pnl=0; rr=0;
-      durationMin=0; isWin=false; regime=REGIME_UNKNOWN; session=SESSION_OFF;
+      durationMin=0; isWin=false; regime=REGIME_UNKNOWN; session=SESSION_UNKNOWN;
       aiScore=0; driftScore=0; ensembleModel=-1; beDone=false; partialDone=false; runnerActive=false;
       ArrayInitialize(features, 0.0);
      }
@@ -117,11 +101,12 @@ private:
      {
       switch(s)
         {
-         case SESSION_ASIAN:   return "Asian";
-         case SESSION_LONDON:  return "London";
-         case SESSION_NEWYORK: return "NewYork";
-         case SESSION_OVERLAP: return "Overlap";
-         default:              return "Off";
+         case SESSION_TOKYO:    return "Tokyo";
+         case SESSION_LONDON:   return "London";
+         case SESSION_NEW_YORK: return "NewYork";
+         case SESSION_OVERLAP:  return "Overlap";
+         case SESSION_SYDNEY:   return "Sydney";
+         default:               return "Unknown";
         }
      }
 
@@ -244,7 +229,6 @@ public:
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
-      if(m_bus != NULL) m_bus.Subscribe(this);
       PASRLogInfo("Journal", "Initialized. CSV=" + (m_csvEnabled ? "ON" : "OFF"));
       return true;
      }
@@ -270,7 +254,7 @@ public:
       e.pnl = ev.profit;
       e.isWin = (ev.profit > 0.0);
       e.regime = REGIME_UNKNOWN;
-      e.session = SESSION_OFF;
+      e.session = SESSION_UNKNOWN;
       StoreEntry(e);
      }
 
@@ -281,7 +265,7 @@ public:
                          double closePrice, double pnl, EMarketRegime regime,
                          ENUM_TRADING_SESSION session, double aiScore,
                          double driftScore, int ensembleModel,
-                         const FeatureVector &fv, bool beDone,
+                         const SAIFeatureVector &fv, bool beDone,
                          bool partialDone, bool runnerActive)
      {
       JournalEntry e;
@@ -311,7 +295,7 @@ public:
       double riskPts = MathAbs(plan.entryPrice - plan.sl);
       double pnlPts  = MathAbs(closePrice - plan.entryPrice);
       e.rr = (riskPts > 0) ? ((pnl > 0 ? 1 : -1) * pnlPts / riskPts) : 0;
-      for(int i=0; i<AI_FEATURE_DIM; i++) e.features[i] = fv.f[i];
+      for(int i=0; i<AI_FEATURE_DIM; i++) e.features[i] = fv.features[i];
       StoreEntry(e);
       PASRLogInfo("Journal", StringFormat("#%d %s %s PnL=%.2f RR=%.2f AI=%.2f%s",
                   m_totalTrades, DirectionName(e.direction), e.isWin?"WIN":"LOSS",
