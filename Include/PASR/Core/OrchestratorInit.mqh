@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Core/OrchestratorInit.mqh — v1.05                                |
-//| Out-of-class COrchestrator method implementations                 |
+//| Core/OrchestratorInit.mqh — v2.00                                |
+//| AI-primary orchestrator bootstrap                                |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_ORCHESTRATOR_INIT_MQH__
@@ -54,7 +54,7 @@ int COrchestrator::Init(const StrategyConfig &cfg)
    m_regime = new CRegimeFilter();
    if(!InitManager(m_regime, "RegimeFilter"))
      {
-      Print("[Orchestrator] RegimeFilter init failed; continuing without regime source");
+      Print("[Orchestrator] RegimeFilter init failed; continuing without regime context");
       if(m_regime != NULL)
         {
          m_regime.Deinit();
@@ -81,6 +81,9 @@ int COrchestrator::Init(const StrategyConfig &cfg)
    if(m_regime != NULL)
       m_signal.SetRegimeManager(NULL);
 
+   // Rule sources stay registered only as fallback/context providers.
+   // AI is no longer registered as a voter here; CPipelineEngine asks
+   // CAIOrchestrator::PredictSignal() directly as the primary brain.
    m_srcPattern = new PatternSignalSource(m_pattern);
    if(m_srcPattern != NULL)
       m_signal.RegisterSource(m_srcPattern, 1.0);
@@ -101,7 +104,7 @@ int COrchestrator::Init(const StrategyConfig &cfg)
       m_ai_orch = new CAIOrchestrator();
       if(!InitManager(m_ai_orch, "AIOrchestrator"))
         {
-         Print("[Orchestrator] AI init failed; continuing without AI source");
+         Print("[Orchestrator] AI init failed; rule fallback remains available");
          if(m_ai_orch != NULL)
            {
             m_ai_orch.Deinit();
@@ -111,9 +114,10 @@ int COrchestrator::Init(const StrategyConfig &cfg)
         }
       else
         {
-         m_srcAI = new AISignalSource(m_ai_orch);
-         if(m_srcAI != NULL)
-            m_signal.RegisterSource(m_srcAI, 0.7);
+         m_ai_orch.ConfigureParameters(m_cfg.AI.EnableAI,
+                                       m_cfg.AI.VetoThreshold,
+                                       m_cfg.AI.DriftVetoThreshold,
+                                       m_cfg.AI.HighConfidenceThreshold);
         }
      }
 
@@ -199,7 +203,7 @@ int COrchestrator::Init(const StrategyConfig &cfg)
    m_new_bar_flag = false;
    m_initialised  = true;
 
-   Print("[Orchestrator] core pipeline bootstrap OK");
+   Print("[Orchestrator] AI-primary pipeline bootstrap OK");
    return INIT_SUCCEEDED;
   }
 
