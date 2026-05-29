@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| AI/AIOrchestrator.mqh — v3.01                                    |
-//| AI-first strategy brain for PASR                                  |
+//| AI/AIOrchestrator.mqh — v3.10                                    |
+//| AI-first, risk-aware strategy brain for PASR                      |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ORCHESTRATOR_MQH__
@@ -25,6 +25,8 @@ private:
    COnlineLearningGuard  *m_guard;
 
    SAIInferenceResult     m_last_result;
+   SAIRiskDecision        m_last_decision;
+   SAITradeLabel          m_last_label;
    SAIModelPerf           m_perf;
    bool                   m_ready;
    int                    m_min_bars_required;
@@ -47,6 +49,9 @@ private:
    int                    m_hATRRegime;
    int                    m_hADXRegime;
 
+   double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
+   double Clamp(double v, double lo, double hi) const { return MathMax(lo, MathMin(hi, v)); }
+
    void SetUnavailable(SAIInferenceResult &out_result, string reason)
      {
       out_result.Reset();
@@ -55,6 +60,8 @@ private:
       out_result.veto_reason = reason;
       out_result.timestamp = TimeCurrent();
       m_last_result = out_result;
+      m_last_decision.Reset();
+      m_last_decision.reason = reason;
      }
 
    void ReleaseIndicator(int &handle)
@@ -139,21 +146,18 @@ private:
             m_riskMultiplier = 1.20;
             m_strategyConfidence = 0.85;
             break;
-
          case REGIME_RANGE:
             m_currentStrategy = STRAT_RANGE_TRADING;
             m_entryThreshold = 0.65;
             m_riskMultiplier = 1.30;
             m_strategyConfidence = 0.85;
             break;
-
          case REGIME_VOLATILE:
             m_currentStrategy = STRAT_BREAKOUT;
             m_entryThreshold = 0.85;
             m_riskMultiplier = 0.90;
             m_strategyConfidence = 0.70;
             break;
-
          case REGIME_CRASH:
          case REGIME_UNKNOWN:
             m_currentStrategy = STRAT_CONSERVATIVE;
@@ -161,7 +165,6 @@ private:
             m_riskMultiplier = 0.10;
             m_strategyConfidence = 0.0;
             break;
-
          default:
             m_currentStrategy = STRAT_SCALP_AI;
             m_entryThreshold = 0.70;
@@ -203,13 +206,58 @@ private:
       return MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, th));
      }
 
-   bool BuildSignalFromInference(const SAIInferenceResult &res, SSignal &out)
+   bool BuildRiskDecision(const SAIInferenceResult &res, SAIRiskDecision &decision)
      {
-      out.Clear();
-      if(!res.valid || res.vetoed || res.direction == 0) return false;
+      decision.Reset();
+      if(!res.valid || res.vetoed || res.direction == 0)
+        {
+         decision.reason = res.vetoed ? res.veto_reason : "invalid inference";
+         return false;
+        }
 
       double threshold = DynamicThreshold();
-      if(res.confidence < threshold) return false;
+      double edge = MathAbs(res.score);
+      double margin = res.confidence - threshold;
+      double regimeQuality = Clamp01(m_strategyConfidence);
+      double driftPenalty = Clamp01(res.drift_score);
+
+      decision.direction = res.direction;
+      decision.confidence = res.confidence;
+      decision.failureProbability = Clamp01(1.0 - res.confidence + driftPenalty * 0.35 + (1.0 - regimeQuality) * 0.15);
+      decision.expectedR = (res.confidence * 2.0 + edge * 1.25 + regimeQuality * 0.75) - (decision.failureProbability * 1.4);
+      decision.noTradePenalty = Clamp01((threshold - res.confidence) + driftPenalty * 0.50 + (m_currentStrategy == STRAT_CONSERVATIVE ? 0.25 : 0.0));
+
+      if(margin < 0.0 || decision.expectedR < 0.35 || decision.failureProbability > 0.72)
+        {
+         decision.decisionClass = AI_DECISION_NO_TRADE;
+         decision.riskMultiplier = 0.0;
+         decision.reason = StringFormat("AI_NO_TRADE conf=%.2f th=%.2f expR=%.2f fail=%.2f",
+                                        res.confidence, threshold, decision.expectedR, decision.failureProbability);
+         return false;
+        }
+
+      bool strong = (res.confidence >= MathMax(threshold + 0.10, 0.75) && decision.expectedR >= 1.20 && decision.failureProbability <= 0.45);
+      if(res.direction > 0)
+         decision.decisionClass = strong ? AI_DECISION_STRONG_BUY : AI_DECISION_WEAK_BUY;
+      else
+         decision.decisionClass = strong ? AI_DECISION_STRONG_SELL : AI_DECISION_WEAK_SELL;
+
+      double volBoost = (m_detectedRegime == REGIME_VOLATILE) ? 1.25 : 1.0;
+      double rangeTighten = (m_detectedRegime == REGIME_RANGE) ? 0.90 : 1.0;
+      decision.recommendedSL_ATR = Clamp(1.0 * volBoost * rangeTighten / MathMax(0.7, m_riskMultiplier), 0.60, 3.00);
+      decision.recommendedTP_ATR = Clamp(decision.recommendedSL_ATR * MathMax(1.15, decision.expectedR), 1.00, 5.00);
+      decision.riskMultiplier = Clamp(m_riskMultiplier * res.confidence * (1.0 - decision.failureProbability * 0.45), 0.05, 1.50);
+      decision.reason = StringFormat("AI_RISK_AWARE %s conf=%.2f expR=%.2f fail=%.2f SL=%.2fATR TP=%.2fATR risk=%.2f",
+                                     GetStrategyDescription(), decision.confidence, decision.expectedR,
+                                     decision.failureProbability, decision.recommendedSL_ATR,
+                                     decision.recommendedTP_ATR, decision.riskMultiplier);
+      return true;
+     }
+
+   bool BuildSignalFromDecision(const SAIInferenceResult &res, const SAIRiskDecision &decision, SSignal &out)
+     {
+      out.Clear();
+      if(decision.decisionClass == AI_DECISION_NO_TRADE || decision.direction == 0) return false;
 
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -218,21 +266,16 @@ private:
 
       double atrPrice = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
       double atrPts = (atrPrice > 0.0) ? atrPrice / point : 0.0;
-      if(atrPts <= 0.0)
-        {
-         // Do not invent a trade-sized stop if ATR is unavailable. Let caller fall back to rule pipeline.
-         return false;
-        }
+      if(atrPts <= 0.0) return false;
 
-      double slMult = MathMax(0.5, m_cfg.Risk.SLMultiplier);
-      double tpMult = MathMax(1.0, m_cfg.Risk.TPMultiplier);
-      out.direction = (res.direction > 0) ? SIGNAL_BUY : SIGNAL_SELL;
-      out.confidence = res.confidence;
-      out.primarySource = StringFormat("AI_PRIMARY:%s|%s|score=%.3f|drift=%.3f",
-                                       GetStrategyDescription(), res.model_id, res.score, res.drift_score);
+      out.direction = (decision.direction > 0) ? SIGNAL_BUY : SIGNAL_SELL;
+      out.confidence = decision.confidence;
+      out.primarySource = StringFormat("AI_PRIMARY:%s|%s|score=%.3f|expR=%.2f|fail=%.2f",
+                                       GetStrategyDescription(), res.model_id, res.score,
+                                       decision.expectedR, decision.failureProbability);
       out.entryPrice = (out.direction == SIGNAL_BUY) ? ask : bid;
-      out.slPoints = atrPts * slMult / MathMax(0.1, m_riskMultiplier);
-      out.tpPoints = out.slPoints * MathMax(1.0, tpMult / MathMax(0.1, slMult));
+      out.slPoints = atrPts * decision.recommendedSL_ATR;
+      out.tpPoints = atrPts * decision.recommendedTP_ATR;
       return true;
      }
 
@@ -250,6 +293,8 @@ public:
         m_hATRRegime(INVALID_HANDLE), m_hADXRegime(INVALID_HANDLE)
      {
       m_last_result.Reset();
+      m_last_decision.Reset();
+      m_last_label.Reset();
       m_perf.Reset();
       m_open_features.Reset();
      }
@@ -313,7 +358,7 @@ public:
       DetectRegime();
       SelectStrategy();
 
-      Print("CAIOrchestrator v3.01: AI-primary strategy brain initialized");
+      Print("CAIOrchestrator v3.10: risk-aware AI strategy brain initialized");
       Print("  Active Strategy: ", GetStrategyDescription());
       Print("  Current Regime: ", EnumToString(m_detectedRegime));
       return true;
@@ -424,12 +469,35 @@ public:
       return out_result.valid;
      }
 
+   bool PredictDecision(SAIRiskDecision &out_decision)
+     {
+      out_decision.Reset();
+      SAIInferenceResult result;
+      if(!Predict(result))
+        {
+         out_decision = m_last_decision;
+         return false;
+        }
+      bool ok = BuildRiskDecision(result, out_decision);
+      m_last_decision = out_decision;
+      return ok;
+     }
+
    bool PredictSignal(SSignal &out_signal)
      {
       out_signal.Clear();
       SAIInferenceResult result;
       if(!Predict(result)) return false;
-      return BuildSignalFromInference(result, out_signal);
+
+      SAIRiskDecision decision;
+      if(!BuildRiskDecision(result, decision))
+        {
+         m_last_decision = decision;
+         return false;
+        }
+
+      m_last_decision = decision;
+      return BuildSignalFromDecision(result, decision, out_signal);
      }
 
    double Evaluate()
@@ -460,8 +528,22 @@ public:
          if(last != NULL) ArrayCopy(sample.features, last);
         }
 
-      sample.label = was_profitable ? 1.0 : -1.0;
-      sample.weight = MathMax(0.1, m_last_result.confidence);
+      m_last_label.Reset();
+      m_last_label.valid = true;
+      m_last_label.timestamp = TimeCurrent();
+      m_last_label.direction = m_last_result.direction;
+      m_last_label.realizedR = was_profitable ? MathMax(0.1, m_last_decision.expectedR) : -1.0;
+      m_last_label.hitTPBeforeSL = was_profitable;
+      m_last_label.durationBars = 0.0;
+      if(m_last_result.direction > 0)
+         m_last_label.labelClass = was_profitable ? AI_LABEL_GOOD_BUY : AI_LABEL_BAD_BUY;
+      else if(m_last_result.direction < 0)
+         m_last_label.labelClass = was_profitable ? AI_LABEL_GOOD_SELL : AI_LABEL_BAD_SELL;
+      else
+         m_last_label.labelClass = AI_LABEL_NO_TRADE;
+
+      sample.label = was_profitable ? MathMax(0.25, MathMin(1.0, m_last_label.realizedR)) : -1.0;
+      sample.weight = MathMax(0.1, MathMin(2.0, m_last_result.confidence + MathAbs(m_last_label.realizedR) * 0.25));
       sample.timestamp = TimeCurrent();
       m_trainer.AddSample(sample);
       m_trainer.MaybeRetrain();
@@ -478,6 +560,8 @@ public:
    bool IsReady() const { return m_ready; }
    virtual bool IsHealthy() const override { return IsInitialized() && m_ready && m_useAI; }
    const SAIInferenceResult &GetLastResult() const { return m_last_result; }
+   const SAIRiskDecision &GetLastDecision() const { return m_last_decision; }
+   const SAITradeLabel &GetLastLabel() const { return m_last_label; }
    const SAIModelPerf &GetPerf() const { return m_perf; }
    CAIFeatureBuilder *GetFeatureBuilder() { return m_feat; }
    CAIEnsemble *GetEnsemble() { return m_ensemble; }
