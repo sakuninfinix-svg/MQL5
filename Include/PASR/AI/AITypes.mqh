@@ -8,8 +8,10 @@
 
 #include "../Data/RegimeTypes.mqh"
 
-//--- Feature dimensionality (26-dim as of v2.00)
-#define AI_FEATURE_DIM 26
+//--- Feature dimensionality
+// 0..25  : price/volatility/momentum/volume/structure/session/stat features
+// 26..33 : rich pattern-regression features
+#define AI_FEATURE_DIM 34
 
 //--- Confidence threshold defaults
 #define AI_DEFAULT_CONF_THRESHOLD  0.55
@@ -50,15 +52,15 @@ enum ENUM_AI_LABEL_CLASS
 //--- Inference result from a single forward pass
 struct SAIInferenceResult
   {
-   double   score;           // Raw output score [-1..1]
-   double   confidence;      // Calibrated confidence [0..1]
-   int      direction;       // +1 BUY / -1 SELL / 0 FLAT
-   bool     valid;           // Is result usable?
-   string   model_id;        // Which model produced it
-   datetime timestamp;       // When produced
-   double   drift_score;     // Concept drift indicator [0..1]
-   bool     vetoed;          // Vetoed by guard?
-   string   veto_reason;     // Reason if vetoed
+   double   score;
+   double   confidence;
+   int      direction;
+   bool     valid;
+   string   model_id;
+   datetime timestamp;
+   double   drift_score;
+   bool     vetoed;
+   string   veto_reason;
 
    void Reset()
      {
@@ -74,18 +76,17 @@ struct SAIInferenceResult
      }
   };
 
-//--- Risk-aware strategy decision produced by the AI brain
 struct SAIRiskDecision
   {
    ENUM_AI_DECISION_CLASS decisionClass;
-   int      direction;              // +1 / -1 / 0
-   double   confidence;             // calibrated confidence
-   double   expectedR;              // expected R multiple estimate
-   double   failureProbability;     // probability of invalidation/loss [0..1]
-   double   recommendedSL_ATR;      // stop distance in ATR units
-   double   recommendedTP_ATR;      // target distance in ATR units
-   double   riskMultiplier;         // final risk scaling [0..2]
-   double   noTradePenalty;         // internal abstention pressure [0..1]
+   int      direction;
+   double   confidence;
+   double   expectedR;
+   double   failureProbability;
+   double   recommendedSL_ATR;
+   double   recommendedTP_ATR;
+   double   riskMultiplier;
+   double   noTradePenalty;
    string   reason;
 
    void Reset()
@@ -103,13 +104,12 @@ struct SAIRiskDecision
      }
   };
 
-//--- Feature vector wrapper (26-dim)
 struct SAIFeatureVector
   {
-   double   features[AI_FEATURE_DIM]; // Raw feature values
-   bool     valid;                    // Are features usable?
-   datetime bar_time;                 // Bar this was built on
-   int      regime;                   // Regime at build time
+   double   features[AI_FEATURE_DIM];
+   bool     valid;
+   datetime bar_time;
+   int      regime;
 
    void Reset()
      {
@@ -120,12 +120,11 @@ struct SAIFeatureVector
      }
   };
 
-//--- Training sample
 struct SAITrainSample
   {
    double   features[AI_FEATURE_DIM];
-   double   label;          // +1 / -1 directional target
-   double   weight;         // Sample importance weight
+   double   label;
+   double   weight;
    datetime timestamp;
 
    void Reset()
@@ -137,7 +136,6 @@ struct SAITrainSample
      }
   };
 
-//--- Rich label for risk-aware offline/online learning
 struct SAITradeLabel
   {
    ENUM_AI_LABEL_CLASS labelClass;
@@ -164,14 +162,13 @@ struct SAITradeLabel
      }
   };
 
-//--- Model performance snapshot
 struct SAIModelPerf
   {
    int      total_predictions;
    int      correct_predictions;
-   double   accuracy;          // correct/total
-   double   avg_confidence;    // mean confidence on correct
-   double   avg_drift;         // mean drift score
+   double   accuracy;
+   double   avg_confidence;
+   double   avg_drift;
    datetime last_updated;
 
    void Reset()
@@ -195,14 +192,13 @@ struct SAIModelPerf
      }
   };
 
-//--- Ensemble vote
 struct SAIEnsembleVote
   {
-   double   scores[];       // Raw scores from each model
-   double   weights[];      // Model weights
-   double   final_score;    // Weighted aggregate
-   double   agreement;      // Vote agreement [0..1]
-   int      n_models;       // Number of voters
+   double   scores[];
+   double   weights[];
+   double   final_score;
+   double   agreement;
+   int      n_models;
 
    void Reset()
      {
@@ -214,9 +210,6 @@ struct SAIEnsembleVote
      }
   };
 
-//+------------------------------------------------------------------+
-//| Active Strategy Enumeration                                      |
-//+------------------------------------------------------------------+
 enum EActiveStrategy
   {
    STRAT_NONE             = 0,
