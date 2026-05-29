@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/Orchestrator.mqh — v3.10                                    |
+//| Core/Orchestrator.mqh — v3.11                                    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property strict
@@ -213,25 +213,25 @@ void COrchestrator::FreeAll()
    if(m_srcSR != NULL) { delete m_srcSR; m_srcSR = NULL; }
    if(m_srcPattern != NULL) { delete m_srcPattern; m_srcPattern = NULL; }
    if(m_pipeline != NULL) { delete m_pipeline; m_pipeline = NULL; }
-   if(m_adaptive != NULL) { delete m_adaptive; m_adaptive = NULL; }
-   if(m_journal != NULL) { delete m_journal; m_journal = NULL; }
-   if(m_telemetry != NULL) { delete m_telemetry; m_telemetry = NULL; }
-   if(m_dash != NULL) { m_dash.Destroy(); delete m_dash; m_dash = NULL; }
-   if(m_recovery != NULL) { delete m_recovery; m_recovery = NULL; }
-   if(m_exit != NULL) { delete m_exit; m_exit = NULL; }
-   if(m_exec != NULL) { delete m_exec; m_exec = NULL; }
-   if(m_risk != NULL) { delete m_risk; m_risk = NULL; }
+   if(m_adaptive != NULL) { m_adaptive.Deinit(); delete m_adaptive; m_adaptive = NULL; }
+   if(m_journal != NULL) { m_journal.Deinit(); delete m_journal; m_journal = NULL; }
+   if(m_telemetry != NULL) { m_telemetry.Deinit(); delete m_telemetry; m_telemetry = NULL; }
+   if(m_dash != NULL) { m_dash.Deinit(); delete m_dash; m_dash = NULL; }
+   if(m_recovery != NULL) { m_recovery.Deinit(); delete m_recovery; m_recovery = NULL; }
+   if(m_exit != NULL) { m_exit.Deinit(); delete m_exit; m_exit = NULL; }
+   if(m_exec != NULL) { m_exec.Deinit(); delete m_exec; m_exec = NULL; }
+   if(m_risk != NULL) { m_risk.Deinit(); delete m_risk; m_risk = NULL; }
    if(m_ai_orch != NULL) { m_ai_orch.Deinit(); delete m_ai_orch; m_ai_orch = NULL; }
-   if(m_signal != NULL) { delete m_signal; m_signal = NULL; }
-   if(m_pattern != NULL) { delete m_pattern; m_pattern = NULL; }
-   if(m_regime != NULL) { delete m_regime; m_regime = NULL; }
-   if(m_regime_det != NULL) { delete m_regime_det; m_regime_det = NULL; }
-   if(m_zone != NULL) { delete m_zone; m_zone = NULL; }
-   if(m_sr != NULL) { delete m_sr; m_sr = NULL; }
-   if(m_sanity != NULL) { delete m_sanity; m_sanity = NULL; }
+   if(m_signal != NULL) { m_signal.Deinit(); delete m_signal; m_signal = NULL; }
+   if(m_pattern != NULL) { m_pattern.Deinit(); delete m_pattern; m_pattern = NULL; }
+   if(m_regime != NULL) { m_regime.Deinit(); delete m_regime; m_regime = NULL; }
+   if(m_regime_det != NULL) { m_regime_det.Deinit(); delete m_regime_det; m_regime_det = NULL; }
+   if(m_zone != NULL) { m_zone.Deinit(); delete m_zone; m_zone = NULL; }
+   if(m_sr != NULL) { m_sr.Deinit(); delete m_sr; m_sr = NULL; }
+   if(m_sanity != NULL) { m_sanity.Deinit(); delete m_sanity; m_sanity = NULL; }
    if(m_latency_sim != NULL) { delete m_latency_sim; m_latency_sim = NULL; }
    if(m_cfgMgr != NULL) { delete m_cfgMgr; m_cfgMgr = NULL; }
-   if(m_data != NULL) { delete m_data; m_data = NULL; }
+   if(m_data != NULL) { m_data.Deinit(); delete m_data; m_data = NULL; }
    if(m_bus != NULL) { delete m_bus; m_bus = NULL; }
   }
 
