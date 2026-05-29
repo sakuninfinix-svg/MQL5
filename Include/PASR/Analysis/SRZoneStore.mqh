@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
-//| Analysis/SRZoneStore.mqh — v1.0.1                                |
+//| Analysis/SRZoneStore.mqh — v1.1.0                                |
 //| Responsibility: ZONE STORAGE, CLUSTERING & LIFECYCLE             |
+//| Optimized with sorted support/resistance price indexes.          |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_SR_ZONE_STORE_MQH__
@@ -68,6 +69,66 @@ private:
    double         m_atr;
    double         m_clusterTol;
    bool           m_debug;
+
+   int            m_supportIdx[SRZ_MAX_ZONES];
+   int            m_supportCount;
+   int            m_resistanceIdx[SRZ_MAX_ZONES];
+   int            m_resistanceCount;
+
+   bool IsIndexableZone(const SRZoneExtended &z) const
+     {
+      return (!z.isBroken && z.strength >= SRZ_MIN_STRENGTH);
+     }
+
+   void ClearIndexes()
+     {
+      m_supportCount = 0;
+      m_resistanceCount = 0;
+      for(int i=0; i<SRZ_MAX_ZONES; i++)
+        {
+         m_supportIdx[i] = -1;
+         m_resistanceIdx[i] = -1;
+        }
+     }
+
+   void InsertSortedIndex(int &arr[], int &cnt, int zoneIdx)
+     {
+      if(cnt >= SRZ_MAX_ZONES || zoneIdx < 0 || zoneIdx >= m_count) return;
+      double price = m_zones[zoneIdx].price;
+      int pos = cnt;
+      while(pos > 0 && m_zones[arr[pos-1]].price > price)
+        {
+         arr[pos] = arr[pos-1];
+         pos--;
+        }
+      arr[pos] = zoneIdx;
+      cnt++;
+     }
+
+   void RebuildIndexes()
+     {
+      ClearIndexes();
+      for(int i=0; i<m_count; i++)
+        {
+         if(!IsIndexableZone(m_zones[i])) continue;
+         if(m_zones[i].isSupport)
+            InsertSortedIndex(m_supportIdx, m_supportCount, i);
+         else
+            InsertSortedIndex(m_resistanceIdx, m_resistanceCount, i);
+        }
+     }
+
+   int LowerBoundByPrice(const int &arr[], int cnt, double price) const
+     {
+      int lo = 0, hi = cnt;
+      while(lo < hi)
+        {
+         int mid = (lo + hi) / 2;
+         if(m_zones[arr[mid]].price < price) lo = mid + 1;
+         else hi = mid;
+        }
+      return lo;
+     }
 
    double TouchBufferMult(int touches) const
      {
@@ -150,9 +211,11 @@ private:
      }
 
 public:
-   CSRZoneStore() : m_count(0), m_atr(0.0), m_clusterTol(0.0), m_debug(false)
+   CSRZoneStore() : m_count(0), m_atr(0.0), m_clusterTol(0.0), m_debug(false),
+                    m_supportCount(0), m_resistanceCount(0)
      {
       for(int i = 0; i < SRZ_MAX_ZONES; i++) m_zones[i].Init();
+      ClearIndexes();
      }
 
    void SetDebug(bool d) { m_debug = d; }
@@ -204,16 +267,19 @@ public:
          z.htf_alignment = CalcHTFAlignment(price, isSupport, htfPeriod);
          m_count++;
         }
+      RebuildIndexes();
      }
 
    void CheckBroken()
      {
+      bool changed = false;
+      int bars = Bars(_Symbol, _Period);
       for(int i = 0; i < m_count; i++)
         {
          if(m_zones[i].isBroken) continue;
          double level = m_zones[i].isSupport ? m_zones[i].low : m_zones[i].high;
          int closes = 0;
-         for(int b = 1; b <= SRZ_BREAKOUT_BARS && b < Bars(_Symbol, _Period); b++)
+         for(int b = 1; b <= SRZ_BREAKOUT_BARS && b < bars; b++)
            {
             double cl = iClose(_Symbol, _Period, b);
             if(m_zones[i].isSupport)
@@ -221,15 +287,22 @@ public:
             else
               { if(cl > level + m_atr * 0.1) closes++; }
            }
-         if(closes >= SRZ_BREAKOUT_CLOSES) m_zones[i].isBroken = true;
+         if(closes >= SRZ_BREAKOUT_CLOSES)
+           {
+            m_zones[i].isBroken = true;
+            changed = true;
+           }
         }
+      if(changed) RebuildIndexes();
      }
 
    void AgeAndRefresh(ENUM_TIMEFRAMES htfPeriod = PERIOD_CURRENT)
      {
+      bool changed = false;
       for(int i = 0; i < m_count; i++)
         {
          if(m_zones[i].isBroken) continue;
+         double oldStrength = m_zones[i].strength;
          m_zones[i].formation_bars++;
          m_zones[i].lastTouchAge++;
          int excess = m_zones[i].formation_bars - SRZ_AGE_DECAY_START;
@@ -237,7 +310,9 @@ public:
          m_zones[i].htf_alignment = CalcHTFAlignment(m_zones[i].price, m_zones[i].isSupport, htfPeriod);
          m_zones[i].strength = CalcStrength(m_zones[i]);
          m_zones[i].confidence = CalcConfidence(m_zones[i]);
+         if((oldStrength >= SRZ_MIN_STRENGTH) != (m_zones[i].strength >= SRZ_MIN_STRENGTH)) changed = true;
         }
+      if(changed) RebuildIndexes();
      }
 
    void MergeNearby()
@@ -271,6 +346,7 @@ public:
            }
         }
       if(merged > 0) RemoveStale();
+      else RebuildIndexes();
       if(m_debug && merged > 0) PrintFormat("[SRStore] Merged %d zone pairs", merged);
      }
 
@@ -292,34 +368,33 @@ public:
            }
         }
       m_count = keep;
+      RebuildIndexes();
      }
 
    bool GetNearestSupport(double price, SRZoneExtended &out) const
      {
-      double best = DBL_MAX;
-      bool found = false;
-      for(int i = 0; i < m_count; i++)
+      int pos = LowerBoundByPrice(m_supportIdx, m_supportCount, price) - 1;
+      while(pos >= 0)
         {
-         if(!m_zones[i].isSupport || m_zones[i].isBroken) continue;
-         if(m_zones[i].price >= price) continue;
-         double d = price - m_zones[i].price;
-         if(d < best) { best = d; out = m_zones[i]; found = true; }
+         int idx = m_supportIdx[pos];
+         if(idx >= 0 && idx < m_count && m_zones[idx].isSupport && !m_zones[idx].isBroken && m_zones[idx].price < price)
+           { out = m_zones[idx]; return true; }
+         pos--;
         }
-      return found;
+      return false;
      }
 
    bool GetNearestResistance(double price, SRZoneExtended &out) const
      {
-      double best = DBL_MAX;
-      bool found = false;
-      for(int i = 0; i < m_count; i++)
+      int pos = LowerBoundByPrice(m_resistanceIdx, m_resistanceCount, price);
+      while(pos < m_resistanceCount)
         {
-         if(m_zones[i].isSupport || m_zones[i].isBroken) continue;
-         if(m_zones[i].price <= price) continue;
-         double d = m_zones[i].price - price;
-         if(d < best) { best = d; out = m_zones[i]; found = true; }
+         int idx = m_resistanceIdx[pos];
+         if(idx >= 0 && idx < m_count && !m_zones[idx].isSupport && !m_zones[idx].isBroken && m_zones[idx].price > price)
+           { out = m_zones[idx]; return true; }
+         pos++;
         }
-      return found;
+      return false;
      }
 
    bool IsNearValidZone(double price, double atrMult, SRZoneExtended &out) const
@@ -327,13 +402,29 @@ public:
       double tol = m_atr * atrMult;
       double best = DBL_MAX;
       bool found = false;
-      for(int i = 0; i < m_count; i++)
+
+      int sPos = LowerBoundByPrice(m_supportIdx, m_supportCount, price - tol);
+      for(int p=sPos; p<m_supportCount; p++)
         {
-         if(m_zones[i].isBroken) continue;
-         if(m_zones[i].strength < SRZ_MIN_STRENGTH) continue;
-         if(m_zones[i].confidence < 40.0) continue;
-         double d = MathAbs(price - m_zones[i].price);
-         if(d <= tol && d < best) { best = d; out = m_zones[i]; found = true; }
+         int idx = m_supportIdx[p];
+         if(idx < 0 || idx >= m_count) continue;
+         double zp = m_zones[idx].price;
+         if(zp > price + tol) break;
+         if(m_zones[idx].confidence < 40.0) continue;
+         double d = MathAbs(price - zp);
+         if(d <= tol && d < best) { best = d; out = m_zones[idx]; found = true; }
+        }
+
+      int rPos = LowerBoundByPrice(m_resistanceIdx, m_resistanceCount, price - tol);
+      for(int p=rPos; p<m_resistanceCount; p++)
+        {
+         int idx = m_resistanceIdx[p];
+         if(idx < 0 || idx >= m_count) continue;
+         double zp = m_zones[idx].price;
+         if(zp > price + tol) break;
+         if(m_zones[idx].confidence < 40.0) continue;
+         double d = MathAbs(price - zp);
+         if(d <= tol && d < best) { best = d; out = m_zones[idx]; found = true; }
         }
       return found;
      }
@@ -352,6 +443,8 @@ public:
    int GetCount() const { return m_count; }
    double GetATR() const { return m_atr; }
    double GetClusterTol() const { return m_clusterTol; }
+   int GetSupportIndexCount() const { return m_supportCount; }
+   int GetResistanceIndexCount() const { return m_resistanceCount; }
 
    int GetActiveCount() const
      {
@@ -373,11 +466,14 @@ public:
       m_atr = 0.0;
       m_clusterTol = 0.0;
       for(int i = 0; i < SRZ_MAX_ZONES; i++) m_zones[i].Init();
+      ClearIndexes();
      }
 
    bool IsValid() const
      {
-      return (m_count >= 0 && m_count <= SRZ_MAX_ZONES);
+      return (m_count >= 0 && m_count <= SRZ_MAX_ZONES &&
+              m_supportCount >= 0 && m_supportCount <= SRZ_MAX_ZONES &&
+              m_resistanceCount >= 0 && m_resistanceCount <= SRZ_MAX_ZONES);
      }
   };
 
