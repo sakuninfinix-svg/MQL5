@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/OrchestratorInit.mqh — v1.04                                |
+//| Core/OrchestratorInit.mqh — v1.05                                |
 //| Out-of-class COrchestrator method implementations                 |
 //+------------------------------------------------------------------+
 #property strict
@@ -63,8 +63,6 @@ int COrchestrator::Init(const StrategyConfig &cfg)
         }
      }
 
-   // Core analysis/signal/trade managers. These are required for the pipeline
-   // to do useful work instead of silently skipping most stages.
    m_pattern = new CPatternManager();
    if(!InitManager(m_pattern, "PatternManager"))
      {
@@ -144,6 +142,40 @@ int COrchestrator::Init(const StrategyConfig &cfg)
      {
       FreeAll();
       return INIT_FAILED;
+     }
+
+   if(m_cfg.Journal.Enabled)
+     {
+      m_journal = new CJournalManager();
+      if(!InitManager(m_journal, "JournalManager"))
+        {
+         Print("[Orchestrator] Journal init failed; continuing without journal");
+         if(m_journal != NULL)
+           {
+            m_journal.Deinit();
+            delete m_journal;
+            m_journal = NULL;
+           }
+        }
+     }
+
+   if(m_cfg.Display.ShowDashboard)
+     {
+      m_dash = new CDashboardManager();
+      if(!InitManager(m_dash, "DashboardManager"))
+        {
+         Print("[Orchestrator] Dashboard init failed; continuing without dashboard");
+         if(m_dash != NULL)
+           {
+            m_dash.Deinit();
+            delete m_dash;
+            m_dash = NULL;
+           }
+        }
+      else
+        {
+         m_dash.SetJournal(m_journal);
+        }
      }
 
    m_pipeline = new CPipelineEngine();
