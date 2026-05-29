@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v2.02                                  |
+//| Core/PipelineEngine.mqh — v2.03                                  |
 //| AI-primary pipeline with rule-based fallback/context stages       |
 //+------------------------------------------------------------------+
 #property strict
@@ -98,6 +98,13 @@ private:
          SPatternResult pr = m_pattern.GetLastResult();
          if(pr.found)
             patternScore = MathMax(0.0, MathMin(1.0, pr.confluenceScore));
+
+         SPatternFeatureSnapshot pf = m_pattern.GetLastFeatureSnapshot();
+         CAIFeatureBuilder *fb = m_ai_orch.GetFeatureBuilder();
+         if(fb != NULL)
+            fb.InjectPatternFeatures(pf.buyProb, pf.sellProb, pf.conflict, pf.dominanceGap,
+                                     pf.rejectionQuality, pf.trapQuality, pf.reclaimQuality,
+                                     pf.followThrough);
         }
 
       m_ai_orch.InjectContext(srDist, zoneStrength, patternScore, ctx.regime);
