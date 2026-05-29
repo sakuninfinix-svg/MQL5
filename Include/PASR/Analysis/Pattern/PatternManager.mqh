@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
-//| Analysis/Pattern/PatternManager.mqh — v3.10                      |
+//| Analysis/Pattern/PatternManager.mqh — v3.11                      |
 //| Probabilistic regression-style pattern score for AI context       |
+//| Uses fixed ring buffer history to avoid heap churn in runtime.   |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PATTERN_MANAGER_MQH__
@@ -10,7 +11,8 @@
 #include "../../Data/RegimeTypes.mqh"
 #include "../MarketRegimeDetector.mqh"
 #include "PatternTypes.mqh"
-#include <Arrays/ArrayObj.mqh>
+
+#define PATTERN_HISTORY_CAPACITY 200
 
 struct SPatternFeatureSnapshot
   {
@@ -42,8 +44,8 @@ struct SPatternVote
    ENUM_PATTERN_TYPE type;
    int               dir;
    double            extreme;
-   double            score;          // probability-like quality [0..1]
-   double            regimeWeight;   // context multiplier, converted safely
+   double            score;
+   double            regimeWeight;
    double            rejectionQuality;
    double            trapQuality;
    double            reclaimQuality;
@@ -77,9 +79,9 @@ struct SPatternResult
    ENUM_PATTERN_TYPE type;
    int               direction;
    double            extreme;
-   double            confluenceScore; // final probability-like score [0..1]
-   double            conflictScore;    // opposite-side probability [0..1]
-   double            dominanceGap;     // dominant-opposite gap [0..1]
+   double            confluenceScore;
+   double            conflictScore;
+   double            dominanceGap;
    string            reason;
    datetime          barTime;
 
@@ -97,17 +99,12 @@ struct SPatternResult
      }
   };
 
-class CPatternRecord : public CObject
-  {
-public:
-   SPatternResult data;
-   CPatternRecord(const SPatternResult &r) { data = r; }
-  };
-
 class CPatternManager : public IManager
   {
 private:
-   CArrayObj      m_patternHistory;
+   SPatternResult m_history[PATTERN_HISTORY_CAPACITY];
+   int            m_historyHead;
+   int            m_historyCount;
    SPatternResult m_lastResult;
    SPatternFeatureSnapshot m_lastFeatures;
    datetime       m_lastScanBarTime;
@@ -119,6 +116,20 @@ private:
 
    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
    double SafeDiv(double a, double b) const { return (MathAbs(b) <= DBL_EPSILON) ? 0.0 : a / b; }
+
+   void ClearHistory()
+     {
+      for(int i=0; i<PATTERN_HISTORY_CAPACITY; i++)
+         m_history[i].Clear();
+      m_historyHead = 0;
+      m_historyCount = 0;
+     }
+
+   int HistoryPhysicalIndex(int newestOffset) const
+     {
+      if(newestOffset < 0 || newestOffset >= m_historyCount) return -1;
+      return (m_historyHead - 1 - newestOffset + PATTERN_HISTORY_CAPACITY) % PATTERN_HISTORY_CAPACITY;
+     }
 
    int FindBestVote(const SPatternVote &votes[], int dir)
      {
@@ -223,9 +234,9 @@ private:
 
    void StorePatternHistory(const SPatternResult &result)
      {
-      if(m_patternHistory.Total() >= 200) m_patternHistory.Delete(0);
-      CPatternRecord *rec = new CPatternRecord(result);
-      if(rec != NULL) m_patternHistory.Add(rec);
+      m_history[m_historyHead] = result;
+      m_historyHead = (m_historyHead + 1) % PATTERN_HISTORY_CAPACITY;
+      if(m_historyCount < PATTERN_HISTORY_CAPACITY) m_historyCount++;
      }
 
    void EvaluatePinbar(const MqlRates &r[], int s, double atr, SPatternVote &vote)
@@ -372,34 +383,36 @@ private:
 
 public:
    CPatternManager()
-      : IManager(), m_lastScanBarTime(0), m_totalPatternsDetected(0),
+      : IManager(), m_historyHead(0), m_historyCount(0),
+        m_lastScanBarTime(0), m_totalPatternsDetected(0),
         m_totalValidSignals(0), m_minConfluenceScore(0.55),
         m_minDominanceGap(0.15), m_regimeBoostFactor(0.20)
      {
+      ClearHistory();
       m_lastResult.Clear();
       m_lastFeatures.Clear();
      }
 
-   ~CPatternManager() { m_patternHistory.Clear(); }
+   ~CPatternManager() {}
 
    virtual string HandlerName() const override { return "PatternManager"; }
 
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
-      m_patternHistory.Clear();
+      ClearHistory();
       m_lastResult.Clear();
       m_lastFeatures.Clear();
       m_lastScanBarTime = 0;
       m_totalPatternsDetected = 0;
       m_totalValidSignals = 0;
-      Print("[PatternManager] v3.10 Init OK");
+      Print("[PatternManager] v3.11 Init OK");
       return true;
      }
 
    virtual void Deinit() override
      {
-      m_patternHistory.Clear();
+      ClearHistory();
       IManager::Deinit();
      }
 
@@ -530,13 +543,12 @@ public:
      }
    const SPatternResult& GetLastResult() const { return m_lastResult; }
    const SPatternFeatureSnapshot& GetLastFeatureSnapshot() const { return m_lastFeatures; }
-   int GetHistoryCount() const { return m_patternHistory.Total(); }
+   int GetHistoryCount() const { return m_historyCount; }
    bool GetHistoryAt(int idx, SPatternResult &out) const
      {
-      if(idx < 0 || idx >= m_patternHistory.Total()) return false;
-      CPatternRecord *rec = (CPatternRecord*)m_patternHistory.At(idx);
-      if(rec == NULL) return false;
-      out = rec.data;
+      int physical = HistoryPhysicalIndex(idx);
+      if(physical < 0) return false;
+      out = m_history[physical];
       return true;
      }
   };
