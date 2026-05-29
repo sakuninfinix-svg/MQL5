@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v2.01                                  |
+//| Core/PipelineEngine.mqh — v2.02                                  |
 //| AI-primary pipeline with rule-based fallback/context stages       |
 //+------------------------------------------------------------------+
 #property strict
@@ -97,7 +97,7 @@ private:
         {
          SPatternResult pr = m_pattern.GetLastResult();
          if(pr.found)
-            patternScore = MathMax(0.0, MathMin(1.0, pr.confluenceScore / 3.0));
+            patternScore = MathMax(0.0, MathMin(1.0, pr.confluenceScore));
         }
 
       m_ai_orch.InjectContext(srDist, zoneStrength, patternScore, ctx.regime);
