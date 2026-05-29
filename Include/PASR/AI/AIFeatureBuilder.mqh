@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| AI/AIFeatureBuilder.mqh — v1.02                                  |
-//| 26-dimensional feature engineering for PASR AI subsystem          |
+//| AI/AIFeatureBuilder.mqh — v1.10                                  |
+//| 34-dimensional feature engineering for PASR AI subsystem          |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_FEATURE_BUILDER_MQH__
@@ -37,6 +37,18 @@ private:
    double   m_pending_pattern;
    bool     m_pending_struct_valid;
    int      m_pending_regime;
+
+   double   m_pending_pattern_buy;
+   double   m_pending_pattern_sell;
+   double   m_pending_pattern_conflict;
+   double   m_pending_pattern_gap;
+   double   m_pending_pattern_rejection;
+   double   m_pending_pattern_trap;
+   double   m_pending_pattern_reclaim;
+   double   m_pending_pattern_follow;
+   bool     m_pending_pattern_features_valid;
+
+   double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
 
    bool InitIndicators()
      {
@@ -156,7 +168,12 @@ public:
         m_hATR10(INVALID_HANDLE), m_hATR20(INVALID_HANDLE),
         m_useClosedBarsOnly(true),
         m_pending_sr_dist(0.5), m_pending_zone_str(0.5), m_pending_pattern(0.5),
-        m_pending_struct_valid(false), m_pending_regime(-1)
+        m_pending_struct_valid(false), m_pending_regime(-1),
+        m_pending_pattern_buy(0.0), m_pending_pattern_sell(0.0),
+        m_pending_pattern_conflict(0.0), m_pending_pattern_gap(0.0),
+        m_pending_pattern_rejection(0.0), m_pending_pattern_trap(0.0),
+        m_pending_pattern_reclaim(0.0), m_pending_pattern_follow(0.0),
+        m_pending_pattern_features_valid(false)
      {
       ArrayInitialize(m_last_features, 0.0);
      }
@@ -197,6 +214,7 @@ public:
       UpdateBaselines();
 
       double f[AI_FEATURE_DIM];
+      ArrayInitialize(f, 0.0);
       f[0] = MathMax(-0.05, MathMin(0.05, PriceReturn(1))) / 0.05;
       f[1] = MathMax(-0.05, MathMin(0.05, PriceReturn(2))) / 0.05;
       f[2] = MathMax(-0.05, MathMin(0.05, PriceReturn(3))) / 0.05;
@@ -229,9 +247,9 @@ public:
       f[14] = (m_vol_baseline > 0.0 && vol0 > 2.0 * m_vol_baseline) ? 1.0 : 0.0;
       f[15] = NormIndicator(mfi, 0.0, 100.0);
 
-      f[16] = m_pending_struct_valid ? m_pending_sr_dist  : 0.5;
-      f[17] = m_pending_struct_valid ? m_pending_zone_str : 0.5;
-      f[18] = m_pending_struct_valid ? m_pending_pattern  : 0.5;
+      f[16] = m_pending_struct_valid ? Clamp01(m_pending_sr_dist)  : 0.5;
+      f[17] = m_pending_struct_valid ? Clamp01(m_pending_zone_str) : 0.5;
+      f[18] = m_pending_struct_valid ? Clamp01(m_pending_pattern)  : 0.5;
 
       if(m_pending_regime == (int)REGIME_TREND_UP || m_pending_regime == (int)REGIME_TREND_DOWN)
         { f[19] = 1.0; f[20] = 0.0; f[21] = 0.0; }
@@ -247,6 +265,15 @@ public:
       f[24] = MathMax(-3.0, MathMin(3.0, ZScore(20))) / 3.0;
       f[25] = ReturnSkew(20);
 
+      f[26] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_buy)       : 0.0;
+      f[27] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_sell)      : 0.0;
+      f[28] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_conflict)  : 0.0;
+      f[29] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_gap)       : 0.0;
+      f[30] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_rejection) : 0.0;
+      f[31] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_trap)      : 0.0;
+      f[32] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_reclaim)   : 0.0;
+      f[33] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_follow)    : 0.0;
+
       ArrayCopy(out.features, f);
       out.valid = true;
       out.bar_time = iTime(_Symbol, PERIOD_CURRENT, 1);
@@ -257,16 +284,32 @@ public:
       m_build_count++;
 
       m_pending_struct_valid = false;
+      m_pending_pattern_features_valid = false;
       m_pending_regime = -1;
       return true;
      }
 
    void InjectStructure(double sr_dist_norm, double zone_strength_norm, double pattern_score_norm)
      {
-      m_pending_sr_dist = sr_dist_norm;
-      m_pending_zone_str = zone_strength_norm;
-      m_pending_pattern = pattern_score_norm;
+      m_pending_sr_dist = Clamp01(sr_dist_norm);
+      m_pending_zone_str = Clamp01(zone_strength_norm);
+      m_pending_pattern = Clamp01(pattern_score_norm);
       m_pending_struct_valid = true;
+     }
+
+   void InjectPatternFeatures(double buyProb, double sellProb, double conflict, double dominanceGap,
+                              double rejectionQuality, double trapQuality, double reclaimQuality,
+                              double followThrough)
+     {
+      m_pending_pattern_buy = Clamp01(buyProb);
+      m_pending_pattern_sell = Clamp01(sellProb);
+      m_pending_pattern_conflict = Clamp01(conflict);
+      m_pending_pattern_gap = Clamp01(dominanceGap);
+      m_pending_pattern_rejection = Clamp01(rejectionQuality);
+      m_pending_pattern_trap = Clamp01(trapQuality);
+      m_pending_pattern_reclaim = Clamp01(reclaimQuality);
+      m_pending_pattern_follow = Clamp01(followThrough);
+      m_pending_pattern_features_valid = true;
      }
 
    void InjectRegime(EMarketRegime regime)
