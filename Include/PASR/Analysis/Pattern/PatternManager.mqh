@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Analysis/Pattern/PatternManager.mqh — v2.04                      |
-//| Pattern manager with canonical IManager lifecycle                 |
+//| Analysis/Pattern/PatternManager.mqh — v3.00                      |
+//| Probabilistic regression-style pattern score for AI context       |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PATTERN_MANAGER_MQH__
@@ -18,8 +18,8 @@ struct SPatternVote
    ENUM_PATTERN_TYPE type;
    int               dir;
    double            extreme;
-   double            score;
-   double            regimeWeight;
+   double            score;          // probability-like quality [0..1]
+   double            regimeWeight;   // context multiplier, converted safely
    string            label;
 
    void Reset()
@@ -33,7 +33,10 @@ struct SPatternVote
       label = "";
      }
 
-   double TotalScore() const { return score * regimeWeight; }
+   double TotalScore() const
+     {
+      return MathMax(0.0, MathMin(0.99, score * MathMax(0.30, MathMin(1.50, regimeWeight))));
+     }
   };
 
 struct SPatternResult
@@ -42,7 +45,9 @@ struct SPatternResult
    ENUM_PATTERN_TYPE type;
    int               direction;
    double            extreme;
-   double            confluenceScore;
+   double            confluenceScore; // final probability-like score [0..1]
+   double            conflictScore;    // opposite-side probability [0..1]
+   double            dominanceGap;     // dominant-opposite gap [0..1]
    string            reason;
    datetime          barTime;
 
@@ -53,6 +58,8 @@ struct SPatternResult
       direction = 0;
       extreme = 0.0;
       confluenceScore = 0.0;
+      conflictScore = 0.0;
+      dominanceGap = 0.0;
       reason = "";
       barTime = 0;
      }
@@ -77,7 +84,8 @@ private:
    double         m_minDominanceGap;
    double         m_regimeBoostFactor;
 
-   void ResetVote(SPatternVote &v) { v.Reset(); }
+   double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
+   double SafeDiv(double a, double b) const { return (MathAbs(b) <= DBL_EPSILON) ? 0.0 : a / b; }
 
    int FindBestVote(const SPatternVote &votes[], int dir)
      {
@@ -99,9 +107,21 @@ private:
         {
          if(!votes[i].valid || votes[i].dir != dir) continue;
          if(txt != "") txt += " + ";
-         txt += votes[i].label;
+         txt += StringFormat("%s:%.2f", votes[i].label, votes[i].TotalScore());
         }
       return txt;
+     }
+
+   double AggregateProbability(const SPatternVote &votes[], int dir) const
+     {
+      double survive = 1.0;
+      for(int i = 0; i < ArraySize(votes); i++)
+        {
+         if(!votes[i].valid || votes[i].dir != dir) continue;
+         double p = votes[i].TotalScore();
+         survive *= (1.0 - p);
+        }
+      return Clamp01(1.0 - survive);
      }
 
    double CandleOpen(const MqlRates &r[], int s)  const { return r[s].open; }
@@ -119,29 +139,16 @@ private:
    double NormalizeATRFactor(const double value, const double atrPoints) const
      {
       double atrPrice = atrPoints * _Point;
-      return (atrPrice <= 0.0) ? 0.0 : value / atrPrice;
+      return Clamp01((atrPrice <= 0.0) ? 0.0 : value / atrPrice);
      }
 
-   void AddStrengthFromRejection(const MqlRates &r[], int s, double atr, int dir, double &score)
-     {
-      double range = CandleRange(r, s);
-      if(range <= 0.0) return;
-      double wick = (dir == 1) ? LowerWick(r, s) : UpperWick(r, s);
-      double wickPct = wick / range;
-      double bodyPct = CandleBody(r, s) / range;
-      double atrFactor = NormalizeATRFactor(range, atr);
-      if(wickPct >= 0.50) score += 0.20;
-      if(wickPct >= 0.60) score += 0.10;
-      if(bodyPct <= 0.35) score += 0.10;
-      if(atrFactor >= 0.60) score += 0.10;
-     }
-
-   void AddStrengthFromFollowThrough(const MqlRates &r[], int s, int dir, double &score)
+   double FollowThroughScore(const MqlRates &r[], int s, int dir) const
      {
       double prevClose = CandleClose(r, s + 1);
       double curClose = CandleClose(r, s);
-      if(dir == 1 && curClose > prevClose) score += 0.10;
-      if(dir == -1 && curClose < prevClose) score += 0.10;
+      if(dir == 1)  return Clamp01(SafeDiv(curClose - prevClose, MathMax(CandleRange(r, s), _Point)) + 0.5);
+      if(dir == -1) return Clamp01(SafeDiv(prevClose - curClose, MathMax(CandleRange(r, s), _Point)) + 0.5);
+      return 0.5;
      }
 
    double CalculateRegimeWeight(const EMarketRegime regime, ENUM_PATTERN_TYPE pattern, int dir) const
@@ -159,7 +166,7 @@ private:
             weight += m_regimeBoostFactor * 0.5;
         }
       if(regime == REGIME_VOLATILE || regime == REGIME_CRASH) weight -= 0.15;
-      return MathMax(0.5, weight);
+      return MathMax(0.50, MathMin(1.40, weight));
      }
 
    void StorePatternHistory(const SPatternResult &result)
@@ -181,10 +188,16 @@ private:
       if(CandleClose(r, s) > bodyMid && lower > (upper > 0.0 ? upper * 2.0 : _Point)) { dir = 1; extreme = CandleLow(r, s); }
       else if(CandleClose(r, s) < bodyMid && upper > (lower > 0.0 ? lower * 2.0 : _Point)) { dir = -1; extreme = CandleHigh(r, s); }
       else return;
+
+      double wick = (dir == 1) ? lower : upper;
+      double wickPct = Clamp01(wick / range);
+      double bodyPct = Clamp01(CandleBody(r, s) / range);
+      double atrQuality = NormalizeATRFactor(range, atr);
+      double follow = FollowThroughScore(r, s, dir);
+      double score = Clamp01(0.10 + 0.45 * wickPct + 0.20 * (1.0 - bodyPct) + 0.15 * atrQuality + 0.10 * follow);
+
       vote.valid = true; vote.type = PATTERN_PINBAR; vote.dir = dir; vote.extreme = extreme;
-      vote.score = 1.0; vote.label = (dir == 1) ? "Pinbar Bull" : "Pinbar Bear";
-      AddStrengthFromRejection(r, s, atr, dir, vote.score);
-      AddStrengthFromFollowThrough(r, s, dir, vote.score);
+      vote.score = score; vote.label = (dir == 1) ? "Pinbar Bull" : "Pinbar Bear";
      }
 
    void EvaluateEngulfing(const MqlRates &r[], int s, double atr, SPatternVote &vote)
@@ -193,16 +206,21 @@ private:
       double o2 = CandleOpen(r, s + 1), c2 = CandleClose(r, s + 1);
       bool prevBear = (c2 < o2), prevBull = (c2 > o2);
       int dir = 0;
-      double extreme = 0.0, score = 1.0;
+      double extreme = 0.0;
       if(prevBear && c1 > o1 && c1 > o2 && o1 < c2) { dir = 1; extreme = CandleLow(r, s); }
       else if(prevBull && c1 < o1 && c1 < o2 && o1 > c2) { dir = -1; extreme = CandleHigh(r, s); }
       else return;
+
       double b1 = CandleBody(r, s), b2 = CandleBody(r, s + 1);
-      if(b2 > 0.0 && b1 >= b2 * 1.20) score += 0.20;
-      if(NormalizeATRFactor(CandleRange(r, s), atr) >= 0.70) score += 0.15;
+      double bodyRatio = Clamp01(b2 > 0.0 ? b1 / (b2 * 1.50) : 0.0);
+      double atrQuality = NormalizeATRFactor(CandleRange(r, s), atr);
+      double closePower = (dir == 1) ? SafeDiv(c1 - CandleLow(r, s), MathMax(CandleRange(r, s), _Point))
+                                     : SafeDiv(CandleHigh(r, s) - c1, MathMax(CandleRange(r, s), _Point));
+      double follow = FollowThroughScore(r, s, dir);
+      double score = Clamp01(0.12 + 0.35 * bodyRatio + 0.20 * Clamp01(closePower) + 0.20 * atrQuality + 0.13 * follow);
+
       vote.valid = true; vote.type = PATTERN_ENGULFING; vote.dir = dir; vote.extreme = extreme;
       vote.score = score; vote.label = (dir == 1) ? "Engulf Bull" : "Engulf Bear";
-      AddStrengthFromFollowThrough(r, s, dir, vote.score);
      }
 
    void EvaluateTweezer(const MqlRates &r[], int s, double atr, SPatternVote &vote)
@@ -211,12 +229,17 @@ private:
       double h2 = CandleHigh(r, s + 1), l2 = CandleLow(r, s + 1);
       double tol = MathMax(atr * 0.10 * _Point, 3.0 * _Point);
       int dir = 0;
-      double extreme = 0.0, score = 1.0;
-      if(MathAbs(l1 - l2) <= tol && IsBullish(r, s)) { dir = 1; extreme = MathMin(l1, l2); }
-      else if(MathAbs(h1 - h2) <= tol && IsBearish(r, s)) { dir = -1; extreme = MathMax(h1, h2); }
+      double extreme = 0.0;
+      double distance = 0.0;
+      if(MathAbs(l1 - l2) <= tol && IsBullish(r, s)) { dir = 1; extreme = MathMin(l1, l2); distance = MathAbs(l1 - l2); }
+      else if(MathAbs(h1 - h2) <= tol && IsBearish(r, s)) { dir = -1; extreme = MathMax(h1, h2); distance = MathAbs(h1 - h2); }
       else return;
-      if(NormalizeATRFactor(CandleRange(r, s), atr) >= 0.50) score += 0.10;
-      if(CandleBody(r, s) / MathMax(CandleRange(r, s), _Point) >= 0.35) score += 0.10;
+
+      double equality = Clamp01(1.0 - distance / MathMax(tol, _Point));
+      double bodyPct = Clamp01(CandleBody(r, s) / MathMax(CandleRange(r, s), _Point));
+      double atrQuality = NormalizeATRFactor(CandleRange(r, s), atr);
+      double score = Clamp01(0.10 + 0.40 * equality + 0.25 * bodyPct + 0.15 * atrQuality + 0.10 * FollowThroughScore(r, s, dir));
+
       vote.valid = true; vote.type = PATTERN_BOTTOM; vote.dir = dir; vote.extreme = extreme;
       vote.score = score; vote.label = (dir == 1) ? "Tweezer Bottom" : "Tweezer Top";
      }
@@ -227,12 +250,18 @@ private:
       double h1 = CandleHigh(r, s + 1), l1 = CandleLow(r, s + 1), h2 = CandleHigh(r, s + 2), l2 = CandleLow(r, s + 2);
       if(!(h1 < h2 && l1 > l2)) return;
       int dir = 0;
-      double extreme = 0.0, score = 1.0;
-      if(l0 < l1 && c0 > l1 && c0 > o0) { dir = 1; extreme = l0; }
-      else if(h0 > h1 && c0 < h1 && c0 < o0) { dir = -1; extreme = h0; }
+      double extreme = 0.0, trapDepth = 0.0;
+      if(l0 < l1 && c0 > l1 && c0 > o0) { dir = 1; extreme = l0; trapDepth = l1 - l0; }
+      else if(h0 > h1 && c0 < h1 && c0 < o0) { dir = -1; extreme = h0; trapDepth = h0 - h1; }
       else return;
-      if(NormalizeATRFactor(CandleRange(r, s), atr) >= 0.60) score += 0.15;
-      if(CandleBody(r, s) / MathMax(CandleRange(r, s), _Point) >= 0.40) score += 0.10;
+
+      double insideRange = MathMax(h1 - l1, _Point);
+      double trapQuality = Clamp01(trapDepth / insideRange);
+      double reclaimQuality = (dir == 1) ? Clamp01((c0 - l1) / insideRange) : Clamp01((h1 - c0) / insideRange);
+      double atrQuality = NormalizeATRFactor(CandleRange(r, s), atr);
+      double bodyPct = Clamp01(CandleBody(r, s) / MathMax(CandleRange(r, s), _Point));
+      double score = Clamp01(0.12 + 0.30 * trapQuality + 0.25 * reclaimQuality + 0.18 * bodyPct + 0.15 * atrQuality);
+
       vote.valid = true; vote.type = PATTERN_FAKEY; vote.dir = dir; vote.extreme = extreme;
       vote.score = score; vote.label = (dir == 1) ? "Fakey Bull" : "Fakey Bear";
      }
@@ -241,16 +270,21 @@ private:
      {
       if(!IsInsideBar(r, s)) return;
       double motherHigh = CandleHigh(r, s + 1), motherLow = CandleLow(r, s + 1);
+      double motherRange = MathMax(motherHigh - motherLow, _Point);
+      double childRange = CandleRange(r, s);
       double mid = (motherHigh + motherLow) / 2.0;
       double close = CandleClose(r, s);
       int dir = 0;
-      double extreme = 0.0, score = 1.0;
+      double extreme = 0.0;
       if(close > mid) { dir = 1; extreme = CandleLow(r, s); }
       else if(close < mid) { dir = -1; extreme = CandleHigh(r, s); }
       else return;
-      double motherRange = CandleRange(r, s + 1), childRange = CandleRange(r, s);
-      if(motherRange > 0.0 && childRange / motherRange <= 0.65) score += 0.15;
-      if(NormalizeATRFactor(motherRange, atr) >= 0.70) score += 0.10;
+
+      double compression = Clamp01(1.0 - childRange / motherRange);
+      double closeBias = (dir == 1) ? Clamp01((close - mid) / (motherRange * 0.5)) : Clamp01((mid - close) / (motherRange * 0.5));
+      double motherATR = NormalizeATRFactor(motherRange, atr);
+      double score = Clamp01(0.08 + 0.40 * compression + 0.25 * closeBias + 0.20 * motherATR + 0.07 * FollowThroughScore(r, s, dir));
+
       vote.valid = true; vote.type = PATTERN_INSIDE_BAR_BREAKOUT; vote.dir = dir; vote.extreme = extreme;
       vote.score = score; vote.label = (dir == 1) ? "Inside Bull" : "Inside Bear";
      }
@@ -258,8 +292,8 @@ private:
 public:
    CPatternManager()
       : IManager(), m_lastScanBarTime(0), m_totalPatternsDetected(0),
-        m_totalValidSignals(0), m_minConfluenceScore(1.60),
-        m_minDominanceGap(0.35), m_regimeBoostFactor(0.20)
+        m_totalValidSignals(0), m_minConfluenceScore(0.55),
+        m_minDominanceGap(0.15), m_regimeBoostFactor(0.20)
      {
       m_lastResult.Clear();
      }
@@ -276,7 +310,7 @@ public:
       m_lastScanBarTime = 0;
       m_totalPatternsDetected = 0;
       m_totalValidSignals = 0;
-      Print("[PatternManager] v2.04 Init OK");
+      Print("[PatternManager] v3.00 Init OK");
       return true;
      }
 
@@ -329,31 +363,25 @@ public:
       for(int i = 0; i < 5; i++)
          if(votes[i].valid) votes[i].regimeWeight = CalculateRegimeWeight(currentRegime, votes[i].type, votes[i].dir);
 
-      double buyScore = 0.0, sellScore = 0.0;
-      for(int i = 0; i < 5; i++)
-        {
-         if(!votes[i].valid) continue;
-         double score = votes[i].TotalScore();
-         if(votes[i].dir == 1) buyScore += score;
-         else if(votes[i].dir == -1) sellScore += score;
-        }
-
+      double buyScore = AggregateProbability(votes, 1);
+      double sellScore = AggregateProbability(votes, -1);
       double totalScore = MathMax(buyScore, sellScore);
       double conflictScore = MathMin(buyScore, sellScore);
       double dominanceGap = totalScore - conflictScore;
+      double finalScore = Clamp01(totalScore * (1.0 - conflictScore * 0.50));
 
       m_totalPatternsDetected++;
       m_lastScanBarTime = curTime;
 
-      if(totalScore < m_minConfluenceScore)
+      if(finalScore < m_minConfluenceScore)
         {
-         outResult.reason = StringFormat("Confluence weak | buy=%.2f sell=%.2f", buyScore, sellScore);
+         outResult.reason = StringFormat("Pattern regression weak | buy=%.2f sell=%.2f final=%.2f", buyScore, sellScore, finalScore);
          m_lastResult = outResult;
          return false;
         }
       if(dominanceGap < m_minDominanceGap)
         {
-         outResult.reason = StringFormat("Confluence conflict | buy=%.2f sell=%.2f", buyScore, sellScore);
+         outResult.reason = StringFormat("Pattern regression conflict | buy=%.2f sell=%.2f gap=%.2f", buyScore, sellScore, dominanceGap);
          m_lastResult = outResult;
          return false;
         }
@@ -371,10 +399,12 @@ public:
       outResult.type = votes[bestIdx].type;
       outResult.direction = direction;
       outResult.extreme = votes[bestIdx].extreme;
-      outResult.confluenceScore = totalScore;
+      outResult.confluenceScore = finalScore;
+      outResult.conflictScore = conflictScore;
+      outResult.dominanceGap = dominanceGap;
       outResult.barTime = curTime;
-      outResult.reason = votes[bestIdx].label + StringFormat(" | Confluence %.2f | %s",
-                         totalScore, BuildConfluenceLabel(votes, direction));
+      outResult.reason = votes[bestIdx].label + StringFormat(" | PatternScore %.2f gap %.2f conflict %.2f | %s",
+                         finalScore, dominanceGap, conflictScore, BuildConfluenceLabel(votes, direction));
 
       m_lastResult = outResult;
       m_totalValidSignals++;
