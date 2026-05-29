@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| AI/AIOrchestrator.mqh — v2.05                                    |
-//| Top-level AI subsystem manager                                    |
+//| AI/AIOrchestrator.mqh — v3.00                                    |
+//| AI-first strategy brain for PASR                                  |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ORCHESTRATOR_MQH__
@@ -14,6 +14,7 @@
 #include "ConfidenceCalibrator.mqh"
 #include "OnlineLearningGuard.mqh"
 #include "../Core/IManager.mqh"
+#include "../Core/PipelineTypes.mqh"
 
 class CAIOrchestrator : public IManager
   {
@@ -40,6 +41,11 @@ private:
    int                    m_regimeStreak;
    double                 m_entryThreshold;
    double                 m_riskMultiplier;
+
+   bool                   m_useAI;
+   double                 m_vetoThreshold;
+   double                 m_driftVetoThreshold;
+   double                 m_highConfidenceThreshold;
 
    int                    m_hATRRegime;
    int                    m_hADXRegime;
@@ -91,7 +97,6 @@ private:
       double vol      = CalculateVolatility(20);
 
       EMarketRegime newRegime = REGIME_UNKNOWN;
-
       if(trendStr > 0.8 && vol > 0.4)
          newRegime = REGIME_TREND_UP;
       else if(trendStr < 0.3 && vol < 0.3)
@@ -124,22 +129,22 @@ private:
          case REGIME_TREND_UP:
          case REGIME_TREND_DOWN:
             m_currentStrategy = STRAT_TREND_FOLLOW;
-            m_entryThreshold = 0.6;
-            m_riskMultiplier = 1.2;
+            m_entryThreshold = 0.60;
+            m_riskMultiplier = 1.20;
             m_strategyConfidence = 0.85;
             break;
 
          case REGIME_RANGE:
             m_currentStrategy = STRAT_RANGE_TRADING;
             m_entryThreshold = 0.65;
-            m_riskMultiplier = 1.3;
+            m_riskMultiplier = 1.30;
             m_strategyConfidence = 0.85;
             break;
 
          case REGIME_VOLATILE:
             m_currentStrategy = STRAT_BREAKOUT;
             m_entryThreshold = 0.85;
-            m_riskMultiplier = 0.9;
+            m_riskMultiplier = 0.90;
             m_strategyConfidence = 0.70;
             break;
 
@@ -147,14 +152,14 @@ private:
          case REGIME_UNKNOWN:
             m_currentStrategy = STRAT_CONSERVATIVE;
             m_entryThreshold = 0.95;
-            m_riskMultiplier = 0.1;
+            m_riskMultiplier = 0.10;
             m_strategyConfidence = 0.0;
             break;
 
          default:
             m_currentStrategy = STRAT_SCALP_AI;
-            m_entryThreshold = 0.7;
-            m_riskMultiplier = 1.0;
+            m_entryThreshold = 0.70;
+            m_riskMultiplier = 1.00;
             m_strategyConfidence = 0.75;
             break;
         }
@@ -166,12 +171,10 @@ private:
       if(!EnsureRegimeIndicators()) return 0.0;
       double atr = ReadIndicator(m_hATRRegime, 0, 1);
       if(atr <= 0.0) return 0.0;
-
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double avgPrice = (bid + ask) / 2.0;
       if(avgPrice <= 0.0) return 0.0;
-
       double normVol = (atr / avgPrice) * 100.0;
       return MathMin(normVol * 10.0, 1.0);
      }
@@ -184,6 +187,40 @@ private:
       return MathMin(adx / 50.0, 1.0);
      }
 
+   double DynamicThreshold() const
+     {
+      double th = MathMax(AI_DEFAULT_CONF_THRESHOLD, m_entryThreshold);
+      if(m_currentStrategy == STRAT_CONSERVATIVE)
+         th = MathMax(th, 0.90);
+      return MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, th));
+     }
+
+   bool BuildSignalFromInference(const SAIInferenceResult &res, SSignal &out)
+     {
+      out.Clear();
+      if(!res.valid || res.vetoed || res.direction == 0) return false;
+
+      double threshold = DynamicThreshold();
+      if(res.confidence < threshold) return false;
+
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      if(ask <= 0.0 || bid <= 0.0 || point <= 0.0) return false;
+
+      double atrPts = (m_data != NULL) ? m_data.GetATRPoints() / point : 0.0;
+      if(atrPts <= 0.0) atrPts = 100.0;
+
+      out.direction = (res.direction > 0) ? SIGNAL_BUY : SIGNAL_SELL;
+      out.confidence = res.confidence;
+      out.primarySource = StringFormat("AI_PRIMARY:%s|%s|score=%.3f|drift=%.3f",
+                                       GetStrategyDescription(), res.model_id, res.score, res.drift_score);
+      out.entryPrice = (out.direction == SIGNAL_BUY) ? ask : bid;
+      out.slPoints = atrPts * MathMax(0.5, m_cfg.Risk.SLMultiplier) / MathMax(0.1, m_riskMultiplier);
+      out.tpPoints = out.slPoints * MathMax(1.0, m_cfg.Risk.TPMultiplier / MathMax(0.1, m_cfg.Risk.SLMultiplier));
+      return true;
+     }
+
 public:
    CAIOrchestrator()
       : IManager(), m_feat(NULL), m_infer(NULL), m_ensemble(NULL),
@@ -192,7 +229,9 @@ public:
         m_open_features_valid(false),
         m_currentStrategy(STRAT_NONE), m_detectedRegime(REGIME_UNKNOWN),
         m_strategyConfidence(0.0), m_lastStrategyChange(0), m_regimeStreak(0),
-        m_entryThreshold(0.7), m_riskMultiplier(1.0),
+        m_entryThreshold(0.70), m_riskMultiplier(1.0),
+        m_useAI(true), m_vetoThreshold(AI_DEFAULT_CONF_THRESHOLD),
+        m_driftVetoThreshold(0.75), m_highConfidenceThreshold(0.80),
         m_hATRRegime(INVALID_HANDLE), m_hADXRegime(INVALID_HANDLE)
      {
       m_last_result.Reset();
@@ -210,18 +249,19 @@ public:
    double          GetEntryThreshold() const { return m_entryThreshold; }
    double          GetRiskMultiplier() const { return m_riskMultiplier; }
    string          GetStrategyDescription() const;
-   
-   // Configuration method for user parameters
+
    void ConfigureParameters(bool useAI, double vetoThresh, double driftVeto, double highThresh)
      {
       m_useAI = useAI;
-      m_vetoThreshold = vetoThresh;
-      m_driftVetoThreshold = driftVeto;
-      m_highConfidenceThreshold = highThresh;
-      Print("[AIOrchestrator] Configured: useAI=", useAI, " veto=", vetoThresh, " drift=", driftVeto, " high=", highThresh);
+      m_vetoThreshold = MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, vetoThresh));
+      m_driftVetoThreshold = MathMax(0.1, MathMin(1.0, driftVeto));
+      m_highConfidenceThreshold = MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, highThresh));
+      if(m_guard != NULL) m_guard.SetVetoThreshold(m_driftVetoThreshold);
+      if(m_calib != NULL) m_calib.SetThreshold(m_vetoThreshold);
+      PrintFormat("[AIOrchestrator] Configured: useAI=%s veto=%.2f drift=%.2f high=%.2f",
+                  useAI ? "true" : "false", m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold);
      }
-   
-   // Gatekeeper: AI memutuskan apakah sinyal boleh dieksekusi
+
    bool ShouldAllowTrade(int signalStrength);
    void AdjustRiskParameters(double &riskPercent, double &maxDrawdown);
 
@@ -252,13 +292,15 @@ public:
       if(!m_calib.Init(data, bus))    { Print("AI: Calibrator init failed");     ReleaseComponents(); return false; }
       if(!m_guard.Init(data, bus))    { Print("AI: Guard init failed");          ReleaseComponents(); return false; }
 
+      m_calib.SetThreshold(m_vetoThreshold);
+      m_guard.SetVetoThreshold(m_driftVetoThreshold);
       m_trainer.SetEnsemble(m_ensemble);
       m_ready = true;
 
       DetectRegime();
       SelectStrategy();
 
-      Print("CAIOrchestrator v2.05: Initialized as Dynamic Strategy Orchestrator");
+      Print("CAIOrchestrator v3.00: AI-primary strategy brain initialized");
       Print("  Active Strategy: ", GetStrategyDescription());
       Print("  Current Regime: ", EnumToString(m_detectedRegime));
       return true;
@@ -275,12 +317,20 @@ public:
       AddEvent(EVENT_ID_TRADE_OPEN);
       AddEvent(EVENT_ID_TRADE_CLOSE);
       AddEvent(EVENT_ID_CONFIG_RELOAD);
+      AddEvent(EVENT_ID_NEW_BAR);
      }
 
    virtual void OnEvent(const PASREvent &ev) override
      {
-      if(ev.id == EVENT_ID_CONFIG_RELOAD) { OnConfigReload(); return; }
+      if(ev.id == EVENT_ID_CONFIG_RELOAD) { OnConfigReload(); ConfigureParameters(m_useAI, m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold); return; }
       if(!m_ready) return;
+
+      if(ev.id == EVENT_ID_NEW_BAR)
+        {
+         DetectRegime();
+         SelectStrategy();
+         return;
+        }
 
       if(ev.id == EVENT_ID_TRADE_CLOSE)
         {
@@ -304,6 +354,12 @@ public:
    bool Predict(SAIInferenceResult &out_result)
      {
       out_result.Reset();
+      if(!m_useAI)
+        {
+         out_result.vetoed = true;
+         out_result.veto_reason = "AI disabled";
+         return false;
+        }
       if(!m_ready || m_feat == NULL || m_guard == NULL || m_ensemble == NULL || m_calib == NULL)
          return false;
 
@@ -314,6 +370,7 @@ public:
          out_result.valid = false;
          out_result.vetoed = true;
          out_result.veto_reason = "Feature build failed";
+         m_last_result = out_result;
          return false;
         }
 
@@ -324,6 +381,7 @@ public:
          out_result.vetoed = true;
          out_result.veto_reason = StringFormat("Drift veto: %.3f", drift);
          out_result.valid = false;
+         m_last_result = out_result;
          return false;
         }
 
@@ -337,14 +395,22 @@ public:
       out_result.score = vote.final_score;
       out_result.confidence = cal_conf;
       out_result.direction = (vote.final_score > 0.0) ? 1 : ((vote.final_score < 0.0) ? -1 : 0);
-      out_result.valid = (cal_conf >= AI_DEFAULT_CONF_THRESHOLD);
-      out_result.model_id = "ensemble_v2.05";
+      out_result.valid = (cal_conf >= DynamicThreshold());
+      out_result.model_id = "ensemble_v3_ai_primary";
       out_result.timestamp = TimeCurrent();
       out_result.drift_score = drift;
       out_result.vetoed = false;
 
       m_last_result = out_result;
       return out_result.valid;
+     }
+
+   bool PredictSignal(SSignal &out_signal)
+     {
+      out_signal.Clear();
+      SAIInferenceResult result;
+      if(!Predict(result)) return false;
+      return BuildSignalFromInference(result, out_signal);
      }
 
    double Evaluate()
@@ -376,7 +442,7 @@ public:
         }
 
       sample.label = was_profitable ? 1.0 : -1.0;
-      sample.weight = m_last_result.confidence;
+      sample.weight = MathMax(0.1, m_last_result.confidence);
       sample.timestamp = TimeCurrent();
       m_trainer.AddSample(sample);
       m_trainer.MaybeRetrain();
@@ -391,124 +457,11 @@ public:
      }
 
    bool IsReady() const { return m_ready; }
-   virtual bool IsHealthy() const override { return IsInitialized() && m_ready; }
+   virtual bool IsHealthy() const override { return IsInitialized() && m_ready && m_useAI; }
    const SAIInferenceResult &GetLastResult() const { return m_last_result; }
    const SAIModelPerf &GetPerf() const { return m_perf; }
    CAIFeatureBuilder *GetFeatureBuilder() { return m_feat; }
    CAIEnsemble *GetEnsemble() { return m_ensemble; }
-
-   // --- Configuration state (user-tunable) ---
-protected:
-   bool     m_useAI;                  // User flag to enable/disable AI
-   double   m_vetoThreshold;          // Veto below this score
-   double   m_driftVetoThreshold;     // Veto if drift exceeds this
-   double   m_highConfidenceThreshold; // High-confidence threshold for aggressive trades
-
-private:
-   // --- NEW: Dynamic Strategy Orchestration Methods ---
-   
-   // DetectRegime: Analisis kondisi pasar real-time
-   void DetectRegime()
-     {
-      // Hitung indikator regime sederhana (bisa diganti dengan ONNX model)
-      double trendStr = CalculateTrendStrength(50);
-      double vol      = CalculateVolatility(20);
-      
-      EMarketRegime newRegime = REGIME_UNKNOWN;
-      
-      if(trendStr > 0.8 && vol > 0.4)
-         newRegime = REGIME_TRENDING_STRONG;
-      else if(trendStr < 0.3 && vol < 0.3)
-         newRegime = REGIME_SIDEWAYS;
-      else if(vol > 0.8)
-         newRegime = REGIME_VOLATILE;
-      else if(trendStr > 0.5)
-         newRegime = REGIME_TRENDING_WEAK;
-      else
-         newRegime = REGIME_CHAOS;
-         
-      // Cek streak (butuh 3 bar konfirmasi untuk ganti regime)
-      if(newRegime == m_detectedRegime)
-         m_regimeStreak++;
-      else
-        {
-         if(m_regimeStreak >= 3)
-           {
-            m_detectedRegime = newRegime;
-            m_regimeStreak = 1;
-           }
-         else
-            m_regimeStreak = 1; // Reset streak untuk regime baru
-        }
-     }
-   
-   // SelectStrategy: Pilih strategi optimal berdasarkan regime
-   void SelectStrategy()
-     {
-      switch(m_detectedRegime)
-        {
-         case REGIME_TRENDING_STRONG:
-            m_currentStrategy = STRAT_TREND_FOLLOW;
-            m_entryThreshold = 0.6;      // Lebih longgar untuk entry
-            m_riskMultiplier = 1.2;      // Tingkatkan risiko 20%
-            m_strategyConfidence = 0.85;
-            break;
-            
-         case REGIME_SIDEWAYS:
-            // CORRECTION: Price Action & S/R work BEST here! Bounce trading is optimal.
-            m_currentStrategy = STRAT_RANGE_TRADING;   // NEW: Bounce off S/R zones
-            m_entryThreshold = 0.65;     // Moderate threshold - trust S/R touches
-            m_riskMultiplier = 1.3;      // INCREASED: High confidence in S/R bounces
-            m_strategyConfidence = 0.85; // High confidence when price at S/R
-            break;
-            
-         case REGIME_VOLATILE:
-            m_currentStrategy = STRAT_BREAKOUT;
-            m_entryThreshold = 0.85;     // Tunggu konfirmasi breakout
-            m_riskMultiplier = 0.9;      // Risiko sedang
-            m_strategyConfidence = 0.70;
-            break;
-            
-         case REGIME_CHAOS:
-         case REGIME_UNKNOWN:
-            m_currentStrategy = STRAT_CONSERVATIVE;
-            m_entryThreshold = 0.95;     // Hampir tidak pernah trade
-            m_riskMultiplier = 0.1;      // Risiko minimal
-            m_strategyConfidence = 0.0;  // Tidak yakin sama sekali
-            break;
-            
-         default: // REGIME_TRENDING_WEAK
-            m_currentStrategy = STRAT_SCALP_AI;
-            m_entryThreshold = 0.7;
-            m_riskMultiplier = 1.0;
-            m_strategyConfidence = 0.75;
-            break;
-        }
-      m_lastStrategyChange = TimeCurrent();
-     }
-   
-   // Helper: Hitung volatilitas (normalized 0-1)
-   double CalculateVolatility(int period)
-     {
-      double atr = iATR(_Symbol, _Period, period);
-      if(atr == 0) return 0;
-      
-      double avgPrice = (SymbolInfoDouble(_Symbol, SYMBOL_BID) + SymbolInfoDouble(_Symbol, SYMBOL_ASK)) / 2.0;
-      double normVol = (atr / avgPrice) * 100.0; // Persentase
-      
-      // Normalisasi kasar (adjust sesuai karakteristik pair)
-      return MathMin(normVol * 10.0, 1.0);
-     }
-   
-   // Helper: Hitung kekuatan trend (normalized 0-1)
-   double CalculateTrendStrength(int maPeriod)
-     {
-      double adx = iADX(_Symbol, _Period, maPeriod);
-      if(adx == 0) return 0;
-      
-      // Normalisasi ADX (0-100) ke 0.0-1.0
-      return MathMin(adx / 50.0, 1.0);
-     }
   };
 
 string CAIOrchestrator::GetStrategyDescription() const
@@ -529,16 +482,12 @@ bool CAIOrchestrator::ShouldAllowTrade(int signalStrength)
   {
    if(m_currentStrategy == STRAT_CONSERVATIVE)
       return (signalStrength > 90);
-
    if(m_strategyConfidence < 0.4 && signalStrength < 70)
       return false;
-
    if(m_currentStrategy == STRAT_RANGE_TRADING)
       return (signalStrength >= 60);
-
    if(m_currentStrategy == STRAT_MEAN_REVERT && signalStrength < 50)
       return false;
-
    double normalizedSignal = signalStrength / 100.0;
    return (normalizedSignal >= m_entryThreshold);
   }
