@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AITrainer.mqh — v1.02                                         |
+//| AI/AITrainer.mqh — v1.03                                         |
 //| Online / offline trainer for PASR AI models                      |
 //+------------------------------------------------------------------+
 #property strict
@@ -27,15 +27,29 @@ private:
    double          m_lr;
    CAIEnsemble    *m_ensemble;
 
+   int PhysicalIndexFromNewest(int newestOffset) const
+     {
+      if(newestOffset < 0 || newestOffset >= m_count) return -1;
+      return (m_head - 1 - newestOffset + AI_TRAINER_BUFFER_SIZE) % AI_TRAINER_BUFFER_SIZE;
+     }
+
+   int PhysicalIndexFromOldest(int oldestOffset) const
+     {
+      if(oldestOffset < 0 || oldestOffset >= m_count) return -1;
+      int oldest = (m_head - m_count + AI_TRAINER_BUFFER_SIZE) % AI_TRAINER_BUFFER_SIZE;
+      return (oldest + oldestOffset) % AI_TRAINER_BUFFER_SIZE;
+     }
+
    double ComputeLoss()
      {
       if(m_count == 0) return 0.0;
       double loss = 0.0, total_w = 0.0;
-      int n = MathMin(m_count, AI_TRAINER_BUFFER_SIZE);
-      for(int i = 0; i < n; i++)
+      for(int i = 0; i < m_count; i++)
         {
-         loss += m_buffer[i].weight * MathAbs(m_buffer[i].label);
-         total_w += m_buffer[i].weight;
+         int idx = PhysicalIndexFromOldest(i);
+         if(idx < 0) continue;
+         loss += m_buffer[idx].weight * MathAbs(m_buffer[idx].label);
+         total_w += m_buffer[idx].weight;
         }
       return (total_w > 0.0) ? loss / total_w : 0.0;
      }
@@ -46,11 +60,12 @@ private:
       int n_models = m_ensemble.GetModelCount();
       if(n_models == 0) return;
 
-      int n = MathMin(m_count, AI_TRAINER_BUFFER_SIZE);
-      int start = MathMax(0, n - mini_batch);
-      for(int s = start; s < n; s++)
+      int n = MathMin(MathMin(m_count, mini_batch), AI_TRAINER_BUFFER_SIZE);
+      for(int offset = n - 1; offset >= 0; offset--)
         {
-         SAITrainSample samp = m_buffer[s];
+         int idx = PhysicalIndexFromNewest(offset);
+         if(idx < 0) continue;
+         SAITrainSample samp = m_buffer[idx];
          for(int m = 0; m < n_models; m++)
            {
             CAIInference *model = m_ensemble.GetModel(m);
@@ -64,7 +79,10 @@ public:
       : IManager(), m_head(0), m_count(0), m_since_retrain(0),
         m_retrain_pending(false), m_retrain_freq(AI_TRAINER_RETRAIN_FREQ),
         m_min_samples(AI_TRAINER_MIN_RETRAIN), m_lr(0.001), m_ensemble(NULL)
-     {}
+     {
+      for(int i=0; i<AI_TRAINER_BUFFER_SIZE; i++)
+         m_buffer[i].Reset();
+     }
 
    virtual string HandlerName() const override { return "AITrainer"; }
 
@@ -90,6 +108,7 @@ public:
       m_head = (m_head + 1) % AI_TRAINER_BUFFER_SIZE;
       if(m_count < AI_TRAINER_BUFFER_SIZE) m_count++;
       m_since_retrain++;
+      m_retrain_pending = (m_count >= m_min_samples && m_since_retrain >= m_retrain_freq);
      }
 
    bool MaybeRetrain()
