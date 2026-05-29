@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — v3.07                                       |
-//| High-performance event dispatch with binary-heap priority queue  |
+//| Core/EventBus.mqh — v3.08                                       |
+//| High-performance event dispatch with fixed binary-heap queue     |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_EVENTBUS_MQH__
@@ -32,9 +32,9 @@ struct SEventBusStats
 class CEventBus
   {
 private:
-   PASREvent         m_heap[];
+   PASREvent         m_heap[EVENTBUS_MAX_DEPTH + 2];
    int               m_size;
-   IEventHandler    *m_subs[];
+   IEventHandler    *m_subs[EVENTBUS_MAX_SUBS];
    int               m_sub_count;
    SEventBusStats    m_stats;
 
@@ -106,9 +106,9 @@ private:
 public:
    CEventBus() : m_size(0), m_sub_count(0)
      {
-      ArrayResize(m_heap, EVENTBUS_MAX_DEPTH + 2);
-      ArrayResize(m_subs, EVENTBUS_MAX_SUBS);
       ZeroMemory(m_stats);
+      for(int i=0; i<EVENTBUS_MAX_SUBS; i++)
+         m_subs[i] = NULL;
      }
 
    bool Subscribe(IEventHandler *handler)
@@ -128,6 +128,7 @@ public:
          if(m_subs[i] == handler)
            {
             for(int j = i; j < m_sub_count-1; j++) m_subs[j] = m_subs[j+1];
+            m_subs[m_sub_count-1] = NULL;
             m_sub_count--;
             return;
            }
