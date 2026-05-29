@@ -3,19 +3,8 @@
 #define __INFRA_ADAPTIVE_CONFIG_MQH__
 
 #include "../Core/IManager.mqh"
+#include "../Core/PipelineTypes.mqh"
 #include "../Data/RegimeTypes.mqh"
-
-#ifndef PASR_TRADING_SESSION_DEFINED
-#define PASR_TRADING_SESSION_DEFINED
-enum ENUM_TRADING_SESSION
-  {
-   SESSION_ASIAN    = 0,
-   SESSION_LONDON   = 1,
-   SESSION_NEWYORK  = 2,
-   SESSION_OVERLAP  = 3,
-   SESSION_OFF      = 4
-  };
-#endif
 
 #ifndef PASR_TRAIL_MODE_DEFINED
 #define PASR_TRAIL_MODE_DEFINED
@@ -88,12 +77,26 @@ private:
    VolPolicy     m_volPolicies[3];
    double        m_atrLowThresh;
    double        m_atrHighThresh;
+   double        m_aiConfidenceThreshold;
+   double        m_lastAIAccuracy;
 
    bool IsValidRegime(EMarketRegime r) const
      { return ((int)r >= 0 && (int)r < PASR_REGIME_POLICY_COUNT); }
 
+   int SessionIndex(ENUM_TRADING_SESSION s) const
+     {
+      switch(s)
+        {
+         case SESSION_TOKYO:    return 0;
+         case SESSION_LONDON:   return 1;
+         case SESSION_NEW_YORK: return 2;
+         case SESSION_OVERLAP:  return 3;
+         default:               return 4;
+        }
+     }
+
    bool IsValidSession(ENUM_TRADING_SESSION s) const
-     { return ((int)s >= 0 && (int)s < 5); }
+     { int idx = SessionIndex(s); return (idx >= 0 && idx < 5); }
 
    void PutRegime(EMarketRegime r, double sl, double tp, double score, int conf, ENUM_TRAIL_MODE trail, double be, double lot)
      {
@@ -119,16 +122,20 @@ private:
       PutRegime(REGIME_TRANSITION, 1.4, 2.0, 0.75, 3, TRAIL_SWING, 0.5, 0.6);
       PutRegime(REGIME_CRASH,      3.0, 1.0, 0.95, 4, TRAIL_NONE,  0.0, 0.0);
       PutRegime(REGIME_SQUEEZE,    1.2, 1.5, 0.90, 4, TRAIL_NONE,  0.3, 0.4);
-      m_sessionPolicies[SESSION_ASIAN]   = { SESSION_ASIAN,   0.6, +0.05, 2 };
-      m_sessionPolicies[SESSION_LONDON]  = { SESSION_LONDON,  1.0,  0.00, 4 };
-      m_sessionPolicies[SESSION_NEWYORK] = { SESSION_NEWYORK, 1.0, -0.02, 4 };
-      m_sessionPolicies[SESSION_OVERLAP] = { SESSION_OVERLAP, 1.0, -0.03, 5 };
-      m_sessionPolicies[SESSION_OFF]     = { SESSION_OFF,     0.3, +0.15, 1 };
+
+      m_sessionPolicies[0] = { SESSION_TOKYO,    0.6, +0.05, 2 };
+      m_sessionPolicies[1] = { SESSION_LONDON,   1.0,  0.00, 4 };
+      m_sessionPolicies[2] = { SESSION_NEW_YORK, 1.0, -0.02, 4 };
+      m_sessionPolicies[3] = { SESSION_OVERLAP,  1.0, -0.03, 5 };
+      m_sessionPolicies[4] = { SESSION_UNKNOWN,  0.3, +0.15, 1 };
+
       m_volPolicies[VOL_LOW]    = { VOL_LOW,    0.8, -0.1, 1.2 };
       m_volPolicies[VOL_NORMAL] = { VOL_NORMAL, 1.0,  0.0, 1.5 };
       m_volPolicies[VOL_HIGH]   = { VOL_HIGH,   1.4, +0.3, 2.0 };
       m_atrLowThresh  =  80.0;
       m_atrHighThresh = 200.0;
+      m_aiConfidenceThreshold = AI_DEFAULT_CONF_THRESHOLD;
+      m_lastAIAccuracy = 0.0;
      }
 
    ENUM_VOL_TIER ClassifyATR(double atrPts) const
@@ -145,9 +152,9 @@ private:
       int h = dt.hour;
       if(h >= 13 && h < 17) return SESSION_OVERLAP;
       if(h >=  8 && h < 13) return SESSION_LONDON;
-      if(h >= 17 && h < 22) return SESSION_NEWYORK;
-      if(h >=  0 && h <  8) return SESSION_ASIAN;
-      return SESSION_OFF;
+      if(h >= 17 && h < 22) return SESSION_NEW_YORK;
+      if(h >=  0 && h <  8) return SESSION_TOKYO;
+      return SESSION_UNKNOWN;
      }
 
 public:
@@ -169,8 +176,9 @@ public:
 
    void SetSessionPolicy(const SessionPolicy &p)
      {
-      if(!IsValidSession(p.session)) return;
-      m_sessionPolicies[(int)p.session] = p;
+      int idx = SessionIndex(p.session);
+      if(idx < 0 || idx >= 5) return;
+      m_sessionPolicies[idx] = p;
      }
 
    EffectivePolicy GetEffectivePolicy(EMarketRegime regime, double atrPoints) const
@@ -179,7 +187,7 @@ public:
       ENUM_TRADING_SESSION session = DetectSession();
       ENUM_VOL_TIER volTier = ClassifyATR(atrPoints);
       const RegimePolicy &rp = m_regimePolicies[(int)regime];
-      const SessionPolicy &sp = m_sessionPolicies[(int)session];
+      const SessionPolicy &sp = m_sessionPolicies[SessionIndex(session)];
       const VolPolicy &vp = m_volPolicies[(int)volTier];
       EffectivePolicy ep;
       ep.SLMultiplier       = MathMax(0.5, rp.SLMultiplier + vp.SLMultOffset);
@@ -201,15 +209,32 @@ public:
      {
       switch(s)
         {
-         case SESSION_ASIAN:   return "Asian";
-         case SESSION_LONDON:  return "London";
-         case SESSION_NEWYORK: return "NewYork";
-         case SESSION_OVERLAP: return "Overlap";
-         default:              return "Off";
+         case SESSION_TOKYO:    return "Tokyo";
+         case SESSION_LONDON:   return "London";
+         case SESSION_NEW_YORK: return "NewYork";
+         case SESSION_OVERLAP:  return "Overlap";
+         case SESSION_SYDNEY:   return "Sydney";
+         default:               return "Off";
         }
      }
 
    string RegimeName(EMarketRegime r) const { return MarketRegimeName(r); }
+
+   double GetAIConfidenceThreshold() const { return m_aiConfidenceThreshold; }
+
+   void SetAIConfidenceThreshold(double threshold)
+     {
+      m_aiConfidenceThreshold = MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, threshold));
+     }
+
+   void OnAIAccuracyUpdate(double accuracy)
+     {
+      m_lastAIAccuracy = MathMax(0.0, MathMin(1.0, accuracy));
+      if(m_lastAIAccuracy > 0.65)
+         m_aiConfidenceThreshold = MathMax(AI_MIN_CONF_THRESHOLD, m_aiConfidenceThreshold - 0.01);
+      else if(m_lastAIAccuracy < 0.45)
+         m_aiConfidenceThreshold = MathMin(AI_MAX_CONF_THRESHOLD, m_aiConfidenceThreshold + 0.01);
+     }
 
    void LogEffectivePolicy(const EffectivePolicy &ep) const
      {
