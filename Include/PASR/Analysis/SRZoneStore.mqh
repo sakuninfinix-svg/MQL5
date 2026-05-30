@@ -1,7 +1,6 @@
 //+------------------------------------------------------------------+
-//| Analysis/SRZoneStore.mqh — v1.1.0                                |
-//| Responsibility: ZONE STORAGE, CLUSTERING & LIFECYCLE             |
-//| Optimized with sorted support/resistance price indexes.          |
+//| Analysis/SRZoneStore.mqh - v1.1.1                                |
+//| SR zone storage with MQL5-safe sorted support/resistance indexes  |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_SR_ZONE_STORE_MQH__
@@ -51,13 +50,9 @@ struct SRZoneExtended : public SRZone
    string ToString() const
      {
       return StringFormat("SR[%.5f|%s|Str=%.1f|Conf=%.1f|T=%d|Age=%d|HTF=%d|Decay=%.2f|Merged=%d]",
-                          price,
-                          isSupport ? "SUP" : "RES",
-                          strength, confidence,
-                          touchCount, lastTouchAge,
-                          (int)htf_alignment,
-                          age_decay_factor,
-                          merge_count);
+                          price, isSupport ? "SUP" : "RES", strength, confidence,
+                          touchCount, lastTouchAge, (int)htf_alignment,
+                          age_decay_factor, merge_count);
      }
   };
 
@@ -75,9 +70,10 @@ private:
    int            m_resistanceIdx[SRZ_MAX_ZONES];
    int            m_resistanceCount;
 
-   bool IsIndexableZone(const SRZoneExtended &z) const
+   bool IsIndexableZone(const int idx) const
      {
-      return (!z.isBroken && z.strength >= SRZ_MIN_STRENGTH);
+      if(idx < 0 || idx >= m_count) return false;
+      return (!m_zones[idx].isBroken && m_zones[idx].strength >= SRZ_MIN_STRENGTH);
      }
 
    void ClearIndexes()
@@ -91,18 +87,32 @@ private:
         }
      }
 
-   void InsertSortedIndex(int &arr[], int &cnt, int zoneIdx)
+   void InsertSupportIndex(int zoneIdx)
      {
-      if(cnt >= SRZ_MAX_ZONES || zoneIdx < 0 || zoneIdx >= m_count) return;
-      double price = m_zones[zoneIdx].price;
-      int pos = cnt;
-      while(pos > 0 && m_zones[arr[pos-1]].price > price)
+      if(m_supportCount >= SRZ_MAX_ZONES || zoneIdx < 0 || zoneIdx >= m_count) return;
+      double p = m_zones[zoneIdx].price;
+      int pos = m_supportCount;
+      while(pos > 0 && m_zones[m_supportIdx[pos-1]].price > p)
         {
-         arr[pos] = arr[pos-1];
+         m_supportIdx[pos] = m_supportIdx[pos-1];
          pos--;
         }
-      arr[pos] = zoneIdx;
-      cnt++;
+      m_supportIdx[pos] = zoneIdx;
+      m_supportCount++;
+     }
+
+   void InsertResistanceIndex(int zoneIdx)
+     {
+      if(m_resistanceCount >= SRZ_MAX_ZONES || zoneIdx < 0 || zoneIdx >= m_count) return;
+      double p = m_zones[zoneIdx].price;
+      int pos = m_resistanceCount;
+      while(pos > 0 && m_zones[m_resistanceIdx[pos-1]].price > p)
+        {
+         m_resistanceIdx[pos] = m_resistanceIdx[pos-1];
+         pos--;
+        }
+      m_resistanceIdx[pos] = zoneIdx;
+      m_resistanceCount++;
      }
 
    void RebuildIndexes()
@@ -110,21 +120,31 @@ private:
       ClearIndexes();
       for(int i=0; i<m_count; i++)
         {
-         if(!IsIndexableZone(m_zones[i])) continue;
-         if(m_zones[i].isSupport)
-            InsertSortedIndex(m_supportIdx, m_supportCount, i);
-         else
-            InsertSortedIndex(m_resistanceIdx, m_resistanceCount, i);
+         if(!IsIndexableZone(i)) continue;
+         if(m_zones[i].isSupport) InsertSupportIndex(i);
+         else InsertResistanceIndex(i);
         }
      }
 
-   int LowerBoundByPrice(const int &arr[], int cnt, double price) const
+   int LowerBoundSupport(double price) const
      {
-      int lo = 0, hi = cnt;
+      int lo = 0, hi = m_supportCount;
       while(lo < hi)
         {
          int mid = (lo + hi) / 2;
-         if(m_zones[arr[mid]].price < price) lo = mid + 1;
+         if(m_zones[m_supportIdx[mid]].price < price) lo = mid + 1;
+         else hi = mid;
+        }
+      return lo;
+     }
+
+   int LowerBoundResistance(double price) const
+     {
+      int lo = 0, hi = m_resistanceCount;
+      while(lo < hi)
+        {
+         int mid = (lo + hi) / 2;
+         if(m_zones[m_resistanceIdx[mid]].price < price) lo = mid + 1;
          else hi = mid;
         }
       return lo;
@@ -147,10 +167,7 @@ private:
       return base;
      }
 
-   double CombinedBuffer(int touches) const
-     {
-      return VolAdjBuffer(TouchBufferMult(touches));
-     }
+   double CombinedBuffer(int touches) const { return VolAdjBuffer(TouchBufferMult(touches)); }
 
    int FindCluster(double price) const
      {
@@ -188,26 +205,36 @@ private:
       return !uptrend ? SR_HTF_ALIGNED : SR_HTF_CONTRA;
      }
 
-   double CalcStrength(const SRZoneExtended &z) const
+   double CalcStrengthAt(int idx) const
      {
-      double touchScore = MathMin(5.0, (double)z.touchCount) / 5.0 * 40.0;
-      double recencyScore = MathExp(-z.lastTouchAge / 100.0) * 30.0;
-      double freshness = z.isBroken ? 0.0 : 20.0;
-      double reactionScore = MathMin(10.0, z.last_reaction * 2.0);
-      double htfBonus = (z.htf_alignment == SR_HTF_ALIGNED) ? 10.0
-                      : (z.htf_alignment == SR_HTF_CONTRA) ? -5.0 : 0.0;
+      if(idx < 0 || idx >= m_count) return 0.0;
+      double touchScore = MathMin(5.0, (double)m_zones[idx].touchCount) / 5.0 * 40.0;
+      double recencyScore = MathExp(-m_zones[idx].lastTouchAge / 100.0) * 30.0;
+      double freshness = m_zones[idx].isBroken ? 0.0 : 20.0;
+      double reactionScore = MathMin(10.0, m_zones[idx].last_reaction * 2.0);
+      double htfBonus = (m_zones[idx].htf_alignment == SR_HTF_ALIGNED) ? 10.0
+                      : (m_zones[idx].htf_alignment == SR_HTF_CONTRA) ? -5.0 : 0.0;
       return MathMin(100.0, MathMax(0.0,
-                     (touchScore + recencyScore + freshness + reactionScore + htfBonus) * z.age_decay_factor));
+                     (touchScore + recencyScore + freshness + reactionScore + htfBonus) * m_zones[idx].age_decay_factor));
      }
 
-   double CalcConfidence(const SRZoneExtended &z) const
+   double CalcConfidenceAt(int idx) const
      {
-      double sf = z.strength / 100.0 * 35.0;
-      double cf = MathMin(1.0, z.touchCount / 3.0) * 25.0;
-      double af = (z.lastTouchAge < 50) ? 25.0 : MathMax(0.0, 25.0 - (z.lastTouchAge - 50) * 0.3);
-      double hf = (z.htf_alignment == SR_HTF_ALIGNED) ? 15.0
-                : (z.htf_alignment == SR_HTF_NEUTRAL) ? 7.5 : 0.0;
+      if(idx < 0 || idx >= m_count) return 0.0;
+      double sf = m_zones[idx].strength / 100.0 * 35.0;
+      double cf = MathMin(1.0, m_zones[idx].touchCount / 3.0) * 25.0;
+      double af = (m_zones[idx].lastTouchAge < 50) ? 25.0 : MathMax(0.0, 25.0 - (m_zones[idx].lastTouchAge - 50) * 0.3);
+      double hf = (m_zones[idx].htf_alignment == SR_HTF_ALIGNED) ? 15.0
+                : (m_zones[idx].htf_alignment == SR_HTF_NEUTRAL) ? 7.5 : 0.0;
       return MathMin(100.0, MathMax(0.0, sf + cf + af + hf));
+     }
+
+   void RefreshBounds(int idx, int touches)
+     {
+      double bm = CombinedBuffer(touches);
+      m_zones[idx].buffer_multiplier = bm;
+      m_zones[idx].high = m_zones[idx].price + m_clusterTol * bm * 0.5;
+      m_zones[idx].low  = m_zones[idx].price - m_clusterTol * bm * 0.5;
      }
 
 public:
@@ -219,6 +246,7 @@ public:
      }
 
    void SetDebug(bool d) { m_debug = d; }
+   void SetDataManager(IDataManager *data) {}
 
    void UpdateATR(double atr)
      {
@@ -232,39 +260,32 @@ public:
       int idx = FindCluster(price);
       if(idx >= 0)
         {
-         SRZoneExtended &z = m_zones[idx];
-         double w = 1.0 / (double)(z.touchCount + 1);
-         z.price = z.price * (1.0 - w) + price * w;
-         z.touchCount++;
-         z.lastTouchAge = barsAgo;
-         z.lastTouchTime = iTime(_Symbol, _Period, barsAgo);
-         z.last_reaction = MathAbs(iClose(_Symbol, _Period, 1) - price) / MathMax(m_atr, _Point);
-         double bm = CombinedBuffer(z.touchCount);
-         z.buffer_multiplier = bm;
-         z.high = z.price + m_clusterTol * bm * 0.5;
-         z.low  = z.price - m_clusterTol * bm * 0.5;
-         z.htf_alignment = CalcHTFAlignment(z.price, z.isSupport, htfPeriod);
-         z.strength = CalcStrength(z);
-         z.confidence = CalcConfidence(z);
+         double w = 1.0 / (double)(m_zones[idx].touchCount + 1);
+         m_zones[idx].price = m_zones[idx].price * (1.0 - w) + price * w;
+         m_zones[idx].touchCount++;
+         m_zones[idx].lastTouchAge = barsAgo;
+         m_zones[idx].lastTouchTime = iTime(_Symbol, _Period, barsAgo);
+         m_zones[idx].last_reaction = MathAbs(iClose(_Symbol, _Period, 1) - price) / MathMax(m_atr, _Point);
+         RefreshBounds(idx, m_zones[idx].touchCount);
+         m_zones[idx].htf_alignment = CalcHTFAlignment(m_zones[idx].price, m_zones[idx].isSupport, htfPeriod);
+         m_zones[idx].strength = CalcStrengthAt(idx);
+         m_zones[idx].confidence = CalcConfidenceAt(idx);
         }
       else if(m_count < SRZ_MAX_ZONES)
         {
-         SRZoneExtended &z = m_zones[m_count];
-         z.Init();
-         z.price = price;
-         z.touchCount = 1;
-         z.lastTouchAge = barsAgo;
-         z.lastTouchTime = iTime(_Symbol, _Period, barsAgo);
-         z.isSupport = isSupport;
-         z.isBroken = false;
-         z.formation_bars = barsAgo;
-         z.strength = 25.0;
-         z.confidence = 50.0;
-         double bm = CombinedBuffer(1);
-         z.buffer_multiplier = bm;
-         z.high = price + m_clusterTol * bm * 0.5;
-         z.low  = price - m_clusterTol * bm * 0.5;
-         z.htf_alignment = CalcHTFAlignment(price, isSupport, htfPeriod);
+         idx = m_count;
+         m_zones[idx].Init();
+         m_zones[idx].price = price;
+         m_zones[idx].touchCount = 1;
+         m_zones[idx].lastTouchAge = barsAgo;
+         m_zones[idx].lastTouchTime = iTime(_Symbol, _Period, barsAgo);
+         m_zones[idx].isSupport = isSupport;
+         m_zones[idx].isBroken = false;
+         m_zones[idx].formation_bars = barsAgo;
+         m_zones[idx].strength = 25.0;
+         m_zones[idx].confidence = 50.0;
+         RefreshBounds(idx, 1);
+         m_zones[idx].htf_alignment = CalcHTFAlignment(price, isSupport, htfPeriod);
          m_count++;
         }
       RebuildIndexes();
@@ -308,8 +329,8 @@ public:
          int excess = m_zones[i].formation_bars - SRZ_AGE_DECAY_START;
          m_zones[i].age_decay_factor = (excess > 0) ? MathPow(SRZ_AGE_DECAY_RATE, excess / 10.0) : 1.0;
          m_zones[i].htf_alignment = CalcHTFAlignment(m_zones[i].price, m_zones[i].isSupport, htfPeriod);
-         m_zones[i].strength = CalcStrength(m_zones[i]);
-         m_zones[i].confidence = CalcConfidence(m_zones[i]);
+         m_zones[i].strength = CalcStrengthAt(i);
+         m_zones[i].confidence = CalcConfidenceAt(i);
          if((oldStrength >= SRZ_MIN_STRENGTH) != (m_zones[i].strength >= SRZ_MIN_STRENGTH)) changed = true;
         }
       if(changed) RebuildIndexes();
@@ -337,10 +358,7 @@ public:
             m_zones[i].lastTouchTime = MathMax(m_zones[i].lastTouchTime, m_zones[j].lastTouchTime);
             m_zones[i].is_merged_zone = true;
             m_zones[i].merge_count++;
-            double bm = CombinedBuffer(m_zones[i].touchCount);
-            m_zones[i].buffer_multiplier = bm;
-            m_zones[i].high = m_zones[i].price + m_clusterTol * bm * 0.5;
-            m_zones[i].low  = m_zones[i].price - m_clusterTol * bm * 0.5;
+            RefreshBounds(i, m_zones[i].touchCount);
             m_zones[j].isBroken = true;
             merged++;
            }
@@ -355,12 +373,11 @@ public:
       int keep = 0;
       for(int i = 0; i < m_count; i++)
         {
-         const SRZoneExtended &z = m_zones[i];
          bool stale = false;
-         if(z.isBroken && z.lastTouchAge > 50) stale = true;
-         if(z.strength < SRZ_MIN_STRENGTH && z.lastTouchAge > 150) stale = true;
-         if(z.formation_bars > 500 && z.touchCount < 2) stale = true;
-         if(z.age_decay_factor < 0.5 && z.strength < 30.0) stale = true;
+         if(m_zones[i].isBroken && m_zones[i].lastTouchAge > 50) stale = true;
+         if(m_zones[i].strength < SRZ_MIN_STRENGTH && m_zones[i].lastTouchAge > 150) stale = true;
+         if(m_zones[i].formation_bars > 500 && m_zones[i].touchCount < 2) stale = true;
+         if(m_zones[i].age_decay_factor < 0.5 && m_zones[i].strength < 30.0) stale = true;
          if(!stale)
            {
             if(keep != i) m_zones[keep] = m_zones[i];
@@ -373,7 +390,7 @@ public:
 
    bool GetNearestSupport(double price, SRZoneExtended &out) const
      {
-      int pos = LowerBoundByPrice(m_supportIdx, m_supportCount, price) - 1;
+      int pos = LowerBoundSupport(price) - 1;
       while(pos >= 0)
         {
          int idx = m_supportIdx[pos];
@@ -386,7 +403,7 @@ public:
 
    bool GetNearestResistance(double price, SRZoneExtended &out) const
      {
-      int pos = LowerBoundByPrice(m_resistanceIdx, m_resistanceCount, price);
+      int pos = LowerBoundResistance(price);
       while(pos < m_resistanceCount)
         {
          int idx = m_resistanceIdx[pos];
@@ -403,7 +420,7 @@ public:
       double best = DBL_MAX;
       bool found = false;
 
-      int sPos = LowerBoundByPrice(m_supportIdx, m_supportCount, price - tol);
+      int sPos = LowerBoundSupport(price - tol);
       for(int p=sPos; p<m_supportCount; p++)
         {
          int idx = m_supportIdx[p];
@@ -415,7 +432,7 @@ public:
          if(d <= tol && d < best) { best = d; out = m_zones[idx]; found = true; }
         }
 
-      int rPos = LowerBoundByPrice(m_resistanceIdx, m_resistanceCount, price - tol);
+      int rPos = LowerBoundResistance(price - tol);
       for(int p=rPos; p<m_resistanceCount; p++)
         {
          int idx = m_resistanceIdx[p];
@@ -435,9 +452,11 @@ public:
               z.strength >= SRZ_MIN_STRENGTH && z.confidence >= 40.0);
      }
 
-   const SRZoneExtended *GetZone(int i) const
+   bool GetZone(int i, SRZoneExtended &out) const
      {
-      return (i >= 0 && i < m_count) ? &m_zones[i] : NULL;
+      if(i < 0 || i >= m_count) return false;
+      out = m_zones[i];
+      return true;
      }
 
    int GetCount() const { return m_count; }
