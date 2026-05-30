@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Analysis/ZoneManager.mqh — v2.04                                 |
+//| Analysis/ZoneManager.mqh - v2.05                                 |
 //| Supply/Demand zone detection via impulse-base candle method.     |
 //+------------------------------------------------------------------+
 #property strict
@@ -29,9 +29,9 @@ struct SDZone
      }
 
    double Midpoint() const { return (high + low) * 0.5; }
-   double Height()   const { return high - low; }
+   double Height() const { return high - low; }
    bool Contains(double price) const { return (price >= low && price <= high); }
-   double Strength()  const { return confidence * freshnessPct; }
+   double Strength() const { return confidence * freshnessPct; }
   };
 
 #define AZ_MAX_ZONES        30
@@ -67,7 +67,7 @@ private:
      {
       if(index < 0 || index >= m_zoneCount) return;
       if(!m_zones[index].isActive) return;
-      m_zones[index].isActive    = false;
+      m_zones[index].isActive = false;
       m_zones[index].consumedTime = TimeCurrent();
       m_totalZonesConsumed++;
      }
@@ -77,16 +77,15 @@ private:
       if(ZoneExists(zHigh, zLow)) return false;
       if(m_zoneCount >= AZ_MAX_ZONES) return false;
 
-      SDZone &z = m_zones[m_zoneCount];
-      z.Init();
-      z.high         = NormalizeDouble(zHigh, _Digits);
-      z.low          = NormalizeDouble(zLow,  _Digits);
-      z.isSupply     = isSupply;
-      z.createdTime  = t;
-      z.freshnessPct = 1.0;
-      z.isActive     = true;
-      z.confidence   = MathMin(1.0, 0.5 + impulseStrength * 0.1);
-      z.touchCount   = 0;
+      m_zones[m_zoneCount].Init();
+      m_zones[m_zoneCount].high = NormalizeDouble(zHigh, _Digits);
+      m_zones[m_zoneCount].low = NormalizeDouble(zLow, _Digits);
+      m_zones[m_zoneCount].isSupply = isSupply;
+      m_zones[m_zoneCount].createdTime = t;
+      m_zones[m_zoneCount].freshnessPct = 1.0;
+      m_zones[m_zoneCount].isActive = true;
+      m_zones[m_zoneCount].confidence = MathMin(1.0, 0.5 + impulseStrength * 0.1);
+      m_zones[m_zoneCount].touchCount = 0;
 
       m_zoneCount++;
       m_totalZonesCreated++;
@@ -147,15 +146,15 @@ private:
    void ScanImpulses(double atr)
      {
       double threshold = atr * AZ_IMPULSE_ATR;
-      int    scanEnd   = MathMin(AZ_LOOKBACK, (int)Bars(_Symbol,_Period) - AZ_IMPULSE_BARS - 2);
+      int scanEnd = MathMin(AZ_LOOKBACK, (int)Bars(_Symbol,_Period) - AZ_IMPULSE_BARS - 2);
 
       for(int shift = AZ_IMPULSE_BARS + 1; shift < scanEnd; shift++)
         {
          datetime barTime = iTime(_Symbol, _Period, shift);
          if(barTime <= (datetime)m_lastScanBarTime) continue;
 
-         bool   bullImpulse = true;
-         double bullMove    = 0;
+         bool bullImpulse = true;
+         double bullMove = 0;
          for(int j=0; j<AZ_IMPULSE_BARS; j++)
            {
             double o = iOpen(_Symbol,_Period,shift-j);
@@ -166,24 +165,24 @@ private:
 
          if(bullImpulse && bullMove >= threshold)
            {
-            int    baseShift = shift + 1;
+            int baseShift = shift + 1;
             double bO = iOpen(_Symbol,_Period,baseShift);
             double bC = iClose(_Symbol,_Period,baseShift);
             double bH = iHigh(_Symbol,_Period,baseShift);
             double bL = iLow(_Symbol,_Period,baseShift);
             double bRange = bH - bL;
-            double bBody  = MathAbs(bC - bO);
+            double bBody = MathAbs(bC - bO);
             if(bO > 0.0 && bC > 0.0 && bRange > 0 && bBody/bRange <= AZ_BASE_MAX_BODY)
               {
-               double zH       = MathMax(bO, bC);
-               double zL       = MathMin(bO, bC);
+               double zH = MathMax(bO, bC);
+               double zL = MathMin(bO, bC);
                double strength = bullMove / atr;
                TryAddZone(zH, zL, false, iTime(_Symbol, _Period, baseShift), strength);
               }
            }
 
-         bool   bearImpulse = true;
-         double bearMove    = 0;
+         bool bearImpulse = true;
+         double bearMove = 0;
          for(int j=0; j<AZ_IMPULSE_BARS; j++)
            {
             double o = iOpen(_Symbol,_Period,shift-j);
@@ -194,17 +193,17 @@ private:
 
          if(bearImpulse && bearMove >= threshold)
            {
-            int    baseShift = shift + 1;
+            int baseShift = shift + 1;
             double bO = iOpen(_Symbol,_Period,baseShift);
             double bC = iClose(_Symbol,_Period,baseShift);
             double bH = iHigh(_Symbol,_Period,baseShift);
             double bL = iLow(_Symbol,_Period,baseShift);
             double bRange = bH - bL;
-            double bBody  = MathAbs(bC - bO);
+            double bBody = MathAbs(bC - bO);
             if(bO > 0.0 && bC > 0.0 && bRange > 0 && bBody/bRange <= AZ_BASE_MAX_BODY)
               {
-               double zH       = MathMax(bO, bC);
-               double zL       = MathMin(bO, bC);
+               double zH = MathMax(bO, bC);
+               double zL = MathMin(bO, bC);
                double strength = bearMove / atr;
                TryAddZone(zH, zL, true, iTime(_Symbol, _Period, baseShift), strength);
               }
@@ -237,7 +236,6 @@ public:
      }
 
    virtual ~CAnalysisZoneManager() {}
-
    virtual string HandlerName() const override { return "ZoneManager"; }
 
    virtual void DeclareEvents() override
@@ -270,7 +268,7 @@ public:
       CompactZones();
 
       if(m_debugMode)
-         PrintFormat("[Zone v2.04] Active: %d | Created: %d | Consumed: %d",
+         PrintFormat("[Zone v2.05] Active: %d | Created: %d | Consumed: %d",
                      m_zoneCount, m_totalZonesCreated, m_totalZonesConsumed);
      }
 
@@ -288,16 +286,16 @@ public:
    bool IsNearZone(double price, double atrMult, SDZone &out) const
      {
       if(m_data == NULL) return false;
-      double atr  = m_data.GetATRPoints() * _Point;
-      double tol  = atr * atrMult;
+      double atr = m_data.GetATRPoints() * _Point;
+      double tol = atr * atrMult;
       double best = DBL_MAX;
-      bool   found = false;
+      bool found = false;
 
       for(int i=0; i<m_zoneCount; i++)
         {
          if(!m_zones[i].isActive) continue;
          double mid = (m_zones[i].high + m_zones[i].low) * 0.5;
-         double d   = MathAbs(price - mid);
+         double d = MathAbs(price - mid);
          if(d <= tol && d < best)
            { best = d; out = m_zones[i]; found = true; }
         }
@@ -343,11 +341,16 @@ public:
       return true;
      }
 
-   int    GetZoneCount()       const { return m_zoneCount;          }
-   int    GetTotalCreated()    const { return m_totalZonesCreated;  }
-   int    GetTotalConsumed()   const { return m_totalZonesConsumed; }
-   const  SDZone* GetZone(int i) const
-     { return (i>=0 && i<m_zoneCount) ? &m_zones[i] : NULL; }
+   int GetZoneCount() const { return m_zoneCount; }
+   int GetTotalCreated() const { return m_totalZonesCreated; }
+   int GetTotalConsumed() const { return m_totalZonesConsumed; }
+
+   bool GetZone(int i, SDZone &out) const
+     {
+      if(i < 0 || i >= m_zoneCount) return false;
+      out = m_zones[i];
+      return true;
+     }
 
    double GetAverageConfidence() const
      {
