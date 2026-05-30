@@ -1,8 +1,7 @@
 //+------------------------------------------------------------------+
-//| Core/IManager.mqh — CANONICAL v2.21                              |
+//| Core/IManager.mqh - CANONICAL v2.22                              |
 //| Base class for all PASR managers                                 |
 //+------------------------------------------------------------------+
-#pragma once
 #ifndef CORE_IMANAGER_MQH
 #define CORE_IMANAGER_MQH
 
@@ -38,8 +37,6 @@ protected:
 
    void DispatchEvent(const PASREvent &ev)
      {
-      // Legacy direct-dispatch helper. Kept for backwards compatibility.
-      // Prefer DispatchImmediate() for direct routing or QueueEvent() for queued delivery.
       DispatchImmediate(ev);
      }
 
