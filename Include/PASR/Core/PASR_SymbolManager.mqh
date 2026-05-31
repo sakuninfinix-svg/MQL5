@@ -1,12 +1,10 @@
 //+------------------------------------------------------------------+
-//| Core/PASR_SymbolManager.mqh — v8.01                              |
+//| Core/PASR_SymbolManager.mqh — v8.02                              |
 //| Multi-Symbol Manager with Correlation Control & Load Balancing    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_SYMBOL_MANAGER_MQH__
 #define __PASR_SYMBOL_MANAGER_MQH__
-
-// <Collections/List.mqh> is not required for this implementation.
 
 struct CSymbolData
   {
@@ -29,7 +27,7 @@ struct CSymbolData
    double                  max_tick_latency;
    double                  correlation_matrix[];
 
-   CSymbolData()
+   void Clear()
      {
       symbol = "";
       active = false;
@@ -50,6 +48,8 @@ struct CSymbolData
       max_tick_latency = 0.0;
       ArrayResize(correlation_matrix, 0);
      }
+
+   CSymbolData(){ Clear(); }
   };
 
 class CSymbolManager
@@ -104,24 +104,23 @@ public:
             continue;
            }
 
-         CSymbolData &sd = m_symbols[m_symbol_count];
-         sd = CSymbolData();
-         sd.symbol = sym;
-         sd.enabled = true;
-         sd.active = true;
-         sd.point = SymbolInfoDouble(sym, SYMBOL_POINT);
-         sd.digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
-         sd.volume_min = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
-         sd.volume_max = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
-         sd.volume_step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+         m_symbols[m_symbol_count].Clear();
+         m_symbols[m_symbol_count].symbol = sym;
+         m_symbols[m_symbol_count].enabled = true;
+         m_symbols[m_symbol_count].active = true;
+         m_symbols[m_symbol_count].point = SymbolInfoDouble(sym, SYMBOL_POINT);
+         m_symbols[m_symbol_count].digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+         m_symbols[m_symbol_count].volume_min = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+         m_symbols[m_symbol_count].volume_max = SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX);
+         m_symbols[m_symbol_count].volume_step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
 
          long fill_flags = SymbolInfoInteger(sym, SYMBOL_FILLING_MODE);
-         if((fill_flags & SYMBOL_FILLING_FOK) != 0) sd.filling_mode = ORDER_FILLING_FOK;
-         else if((fill_flags & SYMBOL_FILLING_IOC) != 0) sd.filling_mode = ORDER_FILLING_IOC;
-         else sd.filling_mode = ORDER_FILLING_RETURN;
+         if((fill_flags & SYMBOL_FILLING_FOK) != 0) m_symbols[m_symbol_count].filling_mode = ORDER_FILLING_FOK;
+         else if((fill_flags & SYMBOL_FILLING_IOC) != 0) m_symbols[m_symbol_count].filling_mode = ORDER_FILLING_IOC;
+         else m_symbols[m_symbol_count].filling_mode = ORDER_FILLING_RETURN;
 
-         ArrayResize(sd.correlation_matrix, count);
-         ArrayInitialize(sd.correlation_matrix, 0.0);
+         ArrayResize(m_symbols[m_symbol_count].correlation_matrix, count);
+         ArrayInitialize(m_symbols[m_symbol_count].correlation_matrix, 0.0);
          m_symbol_count++;
         }
 
@@ -135,18 +134,16 @@ public:
       int idx = FindSymbol(symbol);
       if(idx < 0) return false;
 
-      CSymbolData &sd = m_symbols[idx];
       datetime now = TimeCurrent();
-      double latency = (sd.last_tick_time > 0) ? (double)(now - sd.last_tick_time) : 0.0;
-
-      sd.tick_count++;
+      double latency = (m_symbols[idx].last_tick_time > 0) ? (double)(now - m_symbols[idx].last_tick_time) : 0.0;
+      m_symbols[idx].tick_count++;
       m_total_ticks++;
-      if(sd.avg_tick_latency == 0.0) sd.avg_tick_latency = latency;
-      else sd.avg_tick_latency = (sd.avg_tick_latency * (sd.tick_count - 1) + latency) / sd.tick_count;
-      sd.max_tick_latency = MathMax(sd.max_tick_latency, latency);
-      sd.current_price = (ask > 0.0) ? ask : bid;
-      sd.spread = (ask > 0.0 && bid > 0.0 && sd.point > 0.0) ? (ask - bid) / sd.point : 0.0;
-      sd.last_tick_time = tick_time;
+      if(m_symbols[idx].avg_tick_latency == 0.0) m_symbols[idx].avg_tick_latency = latency;
+      else m_symbols[idx].avg_tick_latency = (m_symbols[idx].avg_tick_latency * (m_symbols[idx].tick_count - 1) + latency) / m_symbols[idx].tick_count;
+      m_symbols[idx].max_tick_latency = MathMax(m_symbols[idx].max_tick_latency, latency);
+      m_symbols[idx].current_price = (ask > 0.0) ? ask : bid;
+      m_symbols[idx].spread = (ask > 0.0 && bid > 0.0 && m_symbols[idx].point > 0.0) ? (ask - bid) / m_symbols[idx].point : 0.0;
+      m_symbols[idx].last_tick_time = tick_time;
       return true;
      }
 
@@ -154,12 +151,11 @@ public:
      {
       int idx = FindSymbol(symbol);
       if(idx < 0) return false;
-      CSymbolData &sd = m_symbols[idx];
-      if(bar_time > sd.last_bar_time)
+      if(bar_time > m_symbols[idx].last_bar_time)
         {
-         sd.bar_count++;
+         m_symbols[idx].bar_count++;
          m_total_bars++;
-         sd.last_bar_time = bar_time;
+         m_symbols[idx].last_bar_time = bar_time;
          return true;
         }
       return false;
@@ -170,10 +166,9 @@ public:
       datetime current_bar = iTime(symbol, timeframe, 0);
       int idx = FindSymbol(symbol);
       if(idx < 0 || current_bar <= 0) return false;
-      CSymbolData &sd = m_symbols[idx];
-      if(current_bar > sd.last_bar_time)
+      if(current_bar > m_symbols[idx].last_bar_time)
         {
-         sd.last_bar_time = current_bar;
+         m_symbols[idx].last_bar_time = current_bar;
          return true;
         }
       return false;
@@ -186,8 +181,8 @@ public:
       while(attempts < m_symbol_count)
         {
          m_current_index = (m_current_index + 1) % m_symbol_count;
-         CSymbolData &sd = m_symbols[m_current_index];
-         if(sd.active && sd.enabled) return sd.symbol;
+         if(m_symbols[m_current_index].active && m_symbols[m_current_index].enabled)
+            return m_symbols[m_current_index].symbol;
          attempts++;
         }
       return "";
@@ -246,24 +241,23 @@ public:
 
       for(int i = 0; i < m_symbol_count; i++)
         {
-         CSymbolData &sd = m_symbols[i];
-         if(!SymbolSelect(sd.symbol, true))
+         if(!SymbolSelect(m_symbols[i].symbol, true))
            {
-            sd.active = false;
+            m_symbols[i].active = false;
             continue;
            }
 
-         long tradeMode = SymbolInfoInteger(sd.symbol, SYMBOL_TRADE_MODE);
+         long tradeMode = SymbolInfoInteger(m_symbols[i].symbol, SYMBOL_TRADE_MODE);
          if(tradeMode == SYMBOL_TRADE_MODE_DISABLED)
            {
-            sd.active = false;
+            m_symbols[i].active = false;
             continue;
            }
 
-         if(sd.avg_tick_latency > 1.0)
-            Print("WARNING: High latency for ", sd.symbol, ": ", sd.avg_tick_latency, "s");
+         if(m_symbols[i].avg_tick_latency > 1.0)
+            Print("WARNING: High latency for ", m_symbols[i].symbol, ": ", m_symbols[i].avg_tick_latency, "s");
 
-         if(sd.active && sd.enabled) m_active_count++;
+         if(m_symbols[i].active && m_symbols[i].enabled) m_active_count++;
         }
 
       Print("Rebalanced: ", m_active_count, "/", m_symbol_count, " symbols active");
@@ -278,11 +272,10 @@ public:
          ticks = 0; bars = 0; avg_lat = 0.0; max_lat = 0.0;
          return;
         }
-      CSymbolData &sd = m_symbols[idx];
-      ticks = sd.tick_count;
-      bars = sd.bar_count;
-      avg_lat = sd.avg_tick_latency;
-      max_lat = sd.max_tick_latency;
+      ticks = m_symbols[idx].tick_count;
+      bars = m_symbols[idx].bar_count;
+      avg_lat = m_symbols[idx].avg_tick_latency;
+      max_lat = m_symbols[idx].max_tick_latency;
      }
 
    void GetTotalStatistics(long &total_ticks, long &total_bars, int &active_symbols)
@@ -322,7 +315,6 @@ private:
 
    double CalculateSymbolCorrelation(const string sym1, const string sym2, const int bars)
      {
-      // Placeholder: real correlation should use CopyClose() returns.
       return 0.0;
      }
   };
