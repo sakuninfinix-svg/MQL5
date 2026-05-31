@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.12                                    |
+//| Trade/RiskManager.mqh — v2.13                                    |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -46,7 +46,6 @@ private:
    double  m_minLot;
    double  m_maxLot;
    double  m_lotStep;
-
    int     m_openTrades;
    int     m_consecLoss;
    double  m_dailyLoss;
@@ -58,9 +57,7 @@ private:
    double AccountBalance()    const { return ::AccountInfoDouble(ACCOUNT_BALANCE);     }
    double AccountEquity()     const { return ::AccountInfoDouble(ACCOUNT_EQUITY);      }
    double AccountFreeMargin() const { return ::AccountInfoDouble(ACCOUNT_MARGIN_FREE); }
-
-   datetime ServerDateMidnight() const
-     { return StringToTime(TimeToString(TimeCurrent(), TIME_DATE)); }
+   datetime ServerDateMidnight() const { return StringToTime(TimeToString(TimeCurrent(), TIME_DATE)); }
 
    double DailyLossPercent(double dailyPnl) const
      {
@@ -76,8 +73,7 @@ private:
       return ddPct >= m_maxDDPct;
      }
 
-   void ClearAccountedPnL()
-     { ArrayResize(m_accountedPnL, 0); }
+   void ClearAccountedPnL() { ArrayResize(m_accountedPnL, 0); }
 
    bool IsPnLAccounted(ulong ticket, double profit) const
      {
@@ -225,13 +221,12 @@ public:
       m_lastResetDay = ServerDateMidnight();
       ClearAccountedPnL();
       SyncOpenTradesFromBroker();
-      PrintFormat("[Risk] v2.12 Init OK: risk=%.1f%% daily=%.1f%% maxDD=%.1f%% maxTrades=%d open=%d",
+      PrintFormat("[Risk] v2.13 Init OK: risk=%.1f%% daily=%.1f%% maxDD=%.1f%% maxTrades=%d open=%d",
                   m_riskPct, m_dailyLossPct, m_maxDDPct, m_maxOpenTrades, m_openTrades);
       return true;
      }
 
    virtual string HandlerName() const override { return "RiskManager"; }
-
    virtual void OnNewBar() override
      { CheckDailyReset(); SyncOpenTradesFromBroker(); double eq = AccountEquity(); if(eq > m_peakEquity) m_peakEquity = eq; }
 
@@ -239,12 +234,8 @@ public:
      {
       switch(ev.id)
         {
-         case EVENT_ID_TRADE_OPEN:
-            OnTradeOpened();
-            break;
-         case EVENT_ID_TRADE_CLOSE:
-            HandleTradeClosed(ev.ticket, ev.profit);
-            break;
+         case EVENT_ID_TRADE_OPEN: OnTradeOpened(); break;
+         case EVENT_ID_TRADE_CLOSE: HandleTradeClosed(ev.ticket, ev.profit); break;
          case EVENT_ID_POSITION_UPDATE:
             if(ev.data1 == 1.0) SyncOpenTradesFromBroker();
             if(ev.profit != 0.0) HandleTradeClosed(ev.ticket, ev.profit);
@@ -282,8 +273,10 @@ public:
       double price = (orderType == ORDER_TYPE_SELL)
          ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
          : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double marginReq = 0;
-      OrderCalcMargin(orderType, _Symbol, lot, price, marginReq);
+      double marginReq = 0.0;
+      bool marginOk = OrderCalcMargin(orderType, _Symbol, lot, price, marginReq);
+      if(!marginOk)
+        { r.reason = "MarginCalcFailed(" + IntegerToString(GetLastError()) + ")"; return r; }
       if(marginReq > 0 && AccountFreeMargin() < marginReq * 1.2)
         { r.reason = StringFormat("InsufficientMargin(free=%.2f req=%.2f)", AccountFreeMargin(), marginReq * 1.2); return r; }
 
@@ -341,9 +334,7 @@ public:
       return NormaliseLot(riskMoney / (slPoints * valuePerPoint));
      }
 
-   void OnTradeOpened()
-     { SyncOpenTradesFromBroker(); }
-
+   void OnTradeOpened() { SyncOpenTradesFromBroker(); }
    void OnTradeClosed(double profit)
      {
       SyncOpenTradesFromBroker();
