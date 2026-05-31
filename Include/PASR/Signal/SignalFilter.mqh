@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalFilter.mqh — v1.00                                  |
-//| Pre-signal filter chain: spread, ATR, session, regime            |
+//| Signal/SignalFilter.mqh — v1.01                                  |
+//| Legacy pre-signal filter chain                                    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_FILTER_MQH__
@@ -8,20 +8,20 @@
 
 #include "../Core/IManager.mqh"
 
-struct FilterResult
+struct LegacyFilterResult
   {
    bool   passed;
-   string reason; // which filter rejected or "OK"
+   string reason;
    void Clear() { passed=true; reason="OK"; }
   };
 
 class CSignalFilter
   {
 private:
-   const StrategyConfig *m_cfg;
-   IDataManager         *m_data;
+   StrategyConfig  m_cfg;
+   IDataManager   *m_data;
 
-   bool CheckSpread(FilterResult &r) const
+   bool CheckSpread(LegacyFilterResult &r) const
      {
       double spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * _Point;
       double maxSpread = m_cfg.Signal.MaxSpreadPoints * _Point;
@@ -30,33 +30,32 @@ private:
       return true;
      }
 
-   bool CheckATR(FilterResult &r) const
+   bool CheckATR(LegacyFilterResult &r) const
      {
-      double atr = m_data.GetATRPoints();
+      double atr = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
       if(m_cfg.Signal.MinATRPoints > 0 && atr < m_cfg.Signal.MinATRPoints)
         { r.passed=false; r.reason="LowATR:"+DoubleToString(atr,1); return false; }
       return true;
      }
 
-   bool CheckSession(FilterResult &r) const
+   bool CheckSession(LegacyFilterResult &r) const
      {
       if(!m_cfg.Signal.UseSessionFilter) return true;
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
       int hm = dt.hour * 100 + dt.min;
-      // Default: allow London (0700-1600) + NY (1300-2200) overlap
       if(hm < 700 || hm > 2200)
         { r.passed=false; r.reason="OutOfSession"; return false; }
       return true;
      }
 
 public:
-   CSignalFilter(const StrategyConfig *cfg, IDataManager *data)
+   CSignalFilter(const StrategyConfig &cfg, IDataManager *data)
       : m_cfg(cfg), m_data(data) {}
 
-   FilterResult Run() const
+   LegacyFilterResult Run() const
      {
-      FilterResult r; r.Clear();
+      LegacyFilterResult r; r.Clear();
       if(!CheckSpread(r))  return r;
       if(!CheckATR(r))     return r;
       if(!CheckSession(r)) return r;
