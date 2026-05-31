@@ -1,17 +1,10 @@
 //+------------------------------------------------------------------+
-//| Analysis/AdaptiveParameterManager.mqh — v3.03                    |
+//| Analysis/AdaptiveParameterManager.mqh — v3.04                    |
 //| Dynamic SL/TP/lot sizing based on canonical market regime.        |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_ADAPTIVE_PARAMETER_MANAGER_MQH__
 #define __ANALYSIS_ADAPTIVE_PARAMETER_MANAGER_MQH__
-
-#ifdef __CORE_PASR_MASTER_MQH__
-#else
-  // Avoid including master header here to prevent circular includes.
-  class CDataManager;
-  class CEventBus;
-#endif
 
 #include "MarketRegimeDetector.mqh"
 #include "../Infra/DataManager.mqh"
@@ -53,23 +46,32 @@ private:
       int    max_pos;
      };
 
+   void SetProfile(SRegimeProfile &p, double sl, double tp, double risk, double entry, int maxpos) const
+     {
+      p.sl_mult = sl;
+      p.tp_mult = tp;
+      p.risk_mult = risk;
+      p.entry_mult = entry;
+      p.max_pos = maxpos;
+     }
+
    SRegimeProfile ProfileForRegime(EMarketRegime regime) const
      {
       SRegimeProfile p;
       switch(regime)
         {
-         case REGIME_RANGE:      p = {0.8, 1.2, 1.0, 0.9, 5}; break;
+         case REGIME_RANGE:      SetProfile(p, 0.8, 1.2, 1.0, 0.9, 5); break;
          case REGIME_TREND_UP:
-         case REGIME_TREND_DOWN: p = {1.5, 2.0, 1.2, 0.8, 2}; break;
-         case REGIME_VOLATILE:   p = {2.0, 1.5, 0.5, 0.8, 1}; break;
-         case REGIME_CRASH:      p = {3.0, 1.0, 0.1, 0.95, 0}; break;
-         case REGIME_SQUEEZE:    p = {0.7, 1.0, 0.6, 0.9, 2}; break;
-         default:                p = {1.0, 1.0, 1.0, 1.0, 3}; break;
+         case REGIME_TREND_DOWN: SetProfile(p, 1.5, 2.0, 1.2, 0.8, 2); break;
+         case REGIME_VOLATILE:   SetProfile(p, 2.0, 1.5, 0.5, 0.8, 1); break;
+         case REGIME_CRASH:      SetProfile(p, 3.0, 1.0, 0.1, 0.95, 0); break;
+         case REGIME_SQUEEZE:    SetProfile(p, 0.7, 1.0, 0.6, 0.9, 2); break;
+         default:                SetProfile(p, 1.0, 1.0, 1.0, 1.0, 3); break;
         }
       return p;
      }
 
-   void ApplyRegimeMultipliers(const SDynamicParams &params, EMarketRegime regime)
+   void ApplyRegimeMultipliers(SDynamicParams &params, EMarketRegime regime)
      {
       SRegimeProfile p = ProfileForRegime(regime);
       m_config.StopLossPoints      = m_baseSL   * params.sl_multiplier  * p.sl_mult;
@@ -142,9 +144,9 @@ public:
       if(regimeDetector == NULL)
         { Print("[AdaptiveParams] ERROR: regimeDetector is NULL"); return false; }
       m_regimeDetector = regimeDetector;
-      m_baseSL = (baseSL > 0) ? baseSL : 20.0;
-      m_baseTP = (baseTP > 0) ? baseTP : 40.0;
-      m_baseRisk = (baseRisk > 0) ? baseRisk : 1.0;
+      m_baseSL = (baseSL > 0.0) ? baseSL : 20.0;
+      m_baseTP = (baseTP > 0.0) ? baseTP : 40.0;
+      m_baseRisk = (baseRisk > 0.0) ? baseRisk : 1.0;
       m_cacheValid = false;
       m_lastBarTime = 0;
       return true;
@@ -203,6 +205,6 @@ public:
      }
   };
 
-typedef CAdaptiveParameterManager AdaptiveParameterManager;
+class AdaptiveParameterManager : public CAdaptiveParameterManager {};
 
 #endif // __ANALYSIS_ADAPTIVE_PARAMETER_MANAGER_MQH__
