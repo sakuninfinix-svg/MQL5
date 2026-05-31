@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/RegimeSignalSource.mqh — v1.04                            |
+//| Signal/RegimeSignalSource.mqh — v1.05                            |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_REGIME_SOURCE_MQH__
@@ -73,6 +73,11 @@ public:
      { return m_regime ? m_regime.GetRegime() : REGIME_UNKNOWN; }
   };
 
-typedef RegimeSignalSource CRegimeSignalSource;
+class CRegimeSignalSource : public RegimeSignalSource
+  {
+public:
+   CRegimeSignalSource(CRegimeFilter *regime, ENUM_REGIME_SOURCE_MODE mode=REGIME_MODE_VETO)
+      : RegimeSignalSource(regime, mode) {}
+  };
 
 #endif // __SIGNAL_REGIME_SOURCE_MQH__
