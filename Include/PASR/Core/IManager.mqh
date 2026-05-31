@@ -5,6 +5,8 @@
 #ifndef CORE_IMANAGER_MQH
 #define CORE_IMANAGER_MQH
 #include "IDataManager.mqh"
+#include "EventBus.mqh"
+#include "Config/Types.mqh"
 #define PASR_MAX_EVENT_ID 100
 
 class IManager : public IEventHandler

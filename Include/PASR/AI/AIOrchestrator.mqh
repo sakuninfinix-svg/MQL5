@@ -353,6 +353,10 @@ public:
       m_calib.SetThreshold(m_vetoThreshold);
       m_guard.SetVetoThreshold(m_driftVetoThreshold);
       m_trainer.SetEnsemble(m_ensemble);
+      
+      RefreshConfig();
+      ConfigureParameters(m_useAI, m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold);
+
       m_ready = true;
 
       DetectRegime();
@@ -383,7 +387,6 @@ public:
       if(ev.id == EVENT_ID_CONFIG_RELOAD)
         {
          OnConfigReload();
-         ConfigureParameters(m_useAI, m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold);
          return;
         }
       if(!m_ready) return;
@@ -405,11 +408,12 @@ public:
         {
          if(m_last_result.valid && m_feat != NULL)
            {
-            const double *last = m_feat.GetLastFeatures();
-            if(last != NULL) ArrayCopy(m_open_features.features, last);
-            m_open_features.valid = true;
-            m_open_features.bar_time = iTime(_Symbol, PERIOD_CURRENT, 1);
-            m_open_features_valid = true;
+            if(m_feat.GetLastFeatures(m_open_features.features))
+              {
+               m_open_features.valid = true;
+               m_open_features.bar_time = iTime(_Symbol, PERIOD_CURRENT, 1);
+               m_open_features_valid = true;
+              }
            }
         }
      }
@@ -522,10 +526,9 @@ public:
          m_open_features_valid = false;
          m_open_features.Reset();
         }
-      else
+      else if(m_feat.GetLastFeatures(sample.features))
         {
-         const double *last = m_feat.GetLastFeatures();
-         if(last != NULL) ArrayCopy(sample.features, last);
+         // feature vector copied successfully
         }
 
       m_last_label.Reset();
@@ -559,12 +562,19 @@ public:
 
    bool IsReady() const { return m_ready; }
    virtual bool IsHealthy() const override { return IsInitialized() && m_ready && m_useAI; }
-   const SAIInferenceResult &GetLastResult() const { return m_last_result; }
-   const SAIRiskDecision &GetLastDecision() const { return m_last_decision; }
-   const SAITradeLabel &GetLastLabel() const { return m_last_label; }
-   const SAIModelPerf &GetPerf() const { return m_perf; }
+   SAIInferenceResult GetLastResult() const { return m_last_result; }
+   SAIRiskDecision GetLastDecision() const { return m_last_decision; }
+   SAITradeLabel GetLastLabel() const { return m_last_label; }
+   SAIModelPerf GetPerf() const { return m_perf; }
    CAIFeatureBuilder *GetFeatureBuilder() { return m_feat; }
    CAIEnsemble *GetEnsemble() { return m_ensemble; }
+
+   virtual void OnConfigReload() override
+     {
+      IManager::OnConfigReload();
+      // Propagate internal parameter changes from m_cfg if necessary
+      ConfigureParameters(m_useAI, m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold);
+     }
   };
 
 string CAIOrchestrator::GetStrategyDescription() const

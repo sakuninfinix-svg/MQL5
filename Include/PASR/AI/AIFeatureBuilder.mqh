@@ -202,7 +202,13 @@ public:
      }
 
    virtual void DeclareEvents() override {}
-   virtual void OnEvent(const PASREvent &ev) override {}
+   virtual void OnEvent(const PASREvent &ev) override 
+     {
+      if(ev.id == EVENT_ID_CONFIG_RELOAD)
+        {
+         RefreshConfig();
+        }
+     }
 
    bool Build(SAIFeatureVector &out)
      {
@@ -317,7 +323,12 @@ public:
       m_pending_regime = (int)regime;
      }
 
-   const double *GetLastFeatures() const { return m_last_features; }
+   bool GetLastFeatures(double &dest[]) const
+     {
+      if(!m_last_valid) return false;
+      ArrayCopy(dest, m_last_features);
+      return true;
+     }
    bool IsValid() const { return m_last_valid; }
    int GetBuildCount() const { return m_build_count; }
   };

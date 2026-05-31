@@ -6,12 +6,14 @@
 #ifndef __SIGNAL_COOLDOWN_MANAGER_MQH__
 #define __SIGNAL_COOLDOWN_MANAGER_MQH__
 
-#include <Arrays\ArrayObj.mqh>
+#include <Arrays/ArrayObj.mqh>
 #include "../Data/SRStruct.mqh"
+#include "ISignalSource.mqh"
 #include "SignalConfig.mqh"
 
-struct SignalCooldownItem
+class SignalCooldownItem : public CObject
   {
+public:
    double          price;
    datetime        expiry;
    ENUM_SIGNAL_DIR direction;
@@ -21,8 +23,9 @@ struct SignalCooldownItem
    bool IsSameDirection(ENUM_SIGNAL_DIR dir) const { return direction == dir; }
   };
 
-struct FailedZoneItem
+class FailedZoneItem : public CObject
   {
+public:
    double          priceLevel;
    datetime        failTime;
    int             failBar;

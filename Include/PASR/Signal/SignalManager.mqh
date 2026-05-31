@@ -7,6 +7,7 @@
 #define __SIGNAL_SIGNAL_MANAGER_MQH__
 
 #include "../Core/IManager.mqh"
+#include "../Core/PipelineTypes.mqh"
 #include "ISignalSource.mqh"
 #include "SignalConfig.mqh"
 #include "SignalAggregator.mqh"
@@ -16,6 +17,30 @@
 #include "../Analysis/Pattern/PatternManager.mqh"
 #include "../Data/SRStruct.mqh"
 #include "../Data/RegimeTypes.mqh"
+
+struct SignalDecision
+  {
+   bool   valid;
+   int    orderType;
+   double signalPrice;
+   int    patternType;
+   double zonePrice;
+   int    signalShift;
+   string reason;
+
+   SignalDecision() { Clear(); }
+
+   void Clear()
+     {
+      valid       = false;
+      orderType   = ORDER_TYPE_BUY;
+      signalPrice = 0.0;
+      patternType = PATTERN_NONE;
+      zonePrice   = 0.0;
+      signalShift = 0;
+      reason      = "";
+     }
+  };
 
 class CPatternManager;
 class CSRManager;
@@ -79,7 +104,7 @@ private:
       m_configReady = true;
      }
 
-   void DispatchSignalEvent(SignalDecision &decision, double atrPoints,
+   void DispatchSignalEvent(const SignalDecision &decision, double atrPoints,
                             double support, double resistance)
      {
       if(m_bus == NULL)
@@ -359,8 +384,7 @@ public:
       return false;
      }
 
-   const CSignalConfig& GetConfig() const { return m_config; }
+   const CSignalConfig GetConfig() const { return m_config; }
   };
 
-typedef CSignalManager SignalManager;
 #endif // __SIGNAL_SIGNAL_MANAGER_MQH__

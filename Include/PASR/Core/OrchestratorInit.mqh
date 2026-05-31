@@ -6,6 +6,8 @@
 #ifndef __CORE_ORCHESTRATOR_INIT_MQH__
 #define __CORE_ORCHESTRATOR_INIT_MQH__
 
+#include "Orchestrator.mqh"
+
 int COrchestrator::Init(const StrategyConfig &cfg)
   {
    if(m_initialised)

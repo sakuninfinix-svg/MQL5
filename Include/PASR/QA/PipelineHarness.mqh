@@ -32,8 +32,8 @@
 #include "MockEventBus.mqh"
 #include "MockDataManager.mqh"
 #include "AssertHelpers.mqh"
-#include "../Core/PipelineEngine.mqh"
 #include "../Core/PipelineTypes.mqh"
+#include "../Core/PipelineEngine.mqh"
 
 #define HARNESS_MAX_STAGES   16
 #define HARNESS_MAX_CYCLES  512

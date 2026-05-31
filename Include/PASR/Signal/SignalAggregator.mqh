@@ -6,7 +6,7 @@
 #ifndef __SIGNAL_AGGREGATOR_MQH__
 #define __SIGNAL_AGGREGATOR_MQH__
 
-#include <Arrays\ArrayObj.mqh>
+#include <Arrays/ArrayObj.mqh>
 #include "ISignalSource.mqh"
 #include "SignalConfig.mqh"
 #include "SignalScorer.mqh"

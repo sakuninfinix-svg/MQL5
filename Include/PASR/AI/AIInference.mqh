@@ -11,7 +11,7 @@
 
 struct SMLPLayer
   {
-   double weights[][];
+   double weights[];
    double biases[];
    bool   relu;
    int    in_size;

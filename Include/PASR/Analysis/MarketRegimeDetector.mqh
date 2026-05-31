@@ -379,7 +379,7 @@ public:
       return m_current_regime;
      }
 
-   const SDynamicParams& GetParams() const { return m_params; }
+   SDynamicParams GetParams() const { return m_params; }
    EMarketRegime GetCurrentRegime() const { return m_current_regime; }
    EMarketRegime GetRegime() const { return m_current_regime; }
    string GetRegimeName(EMarketRegime regime) const { return MarketRegimeName(regime); }

@@ -6,7 +6,7 @@
 #ifndef __PASR_SYMBOL_MANAGER_MQH__
 #define __PASR_SYMBOL_MANAGER_MQH__
 
-#include <Collections\List.mqh>
+// <Collections/List.mqh> is not required for this implementation.
 
 struct CSymbolData
   {
@@ -82,7 +82,7 @@ public:
       for(int i = 0; i < m_symbol_count; i++) ArrayFree(m_symbols[i].correlation_matrix);
      }
 
-   bool Initialize(const string symbols_list[], const int count,
+   bool Initialize(const string &symbols_list[], const int count,
                    const double max_corr = 0.85, const bool enable_corr = true)
      {
       if(count <= 0 || count > 100)
@@ -292,11 +292,12 @@ public:
       active_symbols = m_active_count;
      }
 
-   CSymbolData* GetSymbolData(const string symbol)
+   bool GetSymbolData(const string symbol, CSymbolData &out)
      {
       int idx = FindSymbol(symbol);
-      if(idx < 0) return NULL;
-      return &m_symbols[idx];
+      if(idx < 0) return false;
+      out = m_symbols[idx];
+      return true;
      }
 
    int GetActiveCount() const { return m_active_count; }

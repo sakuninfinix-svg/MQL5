@@ -48,7 +48,7 @@ enum ENUM_TRADING_SESSION
 // Compatibility alias for legacy pipeline wording.
 #ifndef PASR_ENUM_SIGNAL_TYPE_ALIAS
 #define PASR_ENUM_SIGNAL_TYPE_ALIAS
-typedef ENUM_SIGNAL_DIR ENUM_SIGNAL_TYPE;
+#define ENUM_SIGNAL_TYPE ENUM_SIGNAL_DIR
 #endif
 
 struct SSignal

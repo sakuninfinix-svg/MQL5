@@ -8,7 +8,9 @@
 
 #ifdef __CORE_PASR_MASTER_MQH__
 #else
-  #error "Include <PASR/Core/PASR.mqh> instead of AdaptiveParameterManager.mqh directly."
+  // Avoid including master header here to prevent circular includes.
+  class CDataManager;
+  class CEventBus;
 #endif
 
 #include "MarketRegimeDetector.mqh"
@@ -167,7 +169,7 @@ public:
       if(curBarTime == m_lastBarTime && m_cacheValid) return true;
 
       EMarketRegime detectedRegime = m_regimeDetector.Detect(_Symbol, PERIOD_CURRENT, (DataManager*)m_data);
-      const SDynamicParams &params = m_regimeDetector.GetParams();
+      SDynamicParams params = m_regimeDetector.GetParams();
 
       m_config.CurrentRegime = detectedRegime;
       m_config.LastUpdateBar = (ulong)iBarShift(_Symbol, PERIOD_CURRENT, curBarTime);

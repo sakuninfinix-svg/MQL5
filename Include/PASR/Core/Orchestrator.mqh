@@ -9,10 +9,44 @@
 
 #ifdef __CORE_PASR_MASTER_MQH__
 #else
-  #error "Include <PASR/Core/PASR.mqh> instead of Orchestrator.mqh directly."
+  // When not building via the master PASR include, provide minimal
+  // dependencies here to avoid forcing a full include and creating
+  // circular includes.
+  #include "Config/Types.mqh"
+  #include "PipelineTypes.mqh"
+  class IManager;
+  class CDataManager;
+  class CAnalysisSRManager;
+  class CAnalysisZoneManager;
+  class CPatternManager;
+  class CSignalManager;
+  class CAIOrchestrator;
+  class CMarketRegimeDetector;
+  class CRegimeFilter;
+  class CRiskManager;
+  class CExecutionManager;
+  class CExitEngine;
+  class CRecoveryManager;
+  class CDashboardManager;
+  class CSanityManager;
+  class CTelemetryRecorder;
+  class CJournalManager;
+  class CAdaptiveParameterManager;
+  class CLatencyOptimizer;
+  class CAsyncOrderManager;
+  class CHighFreqTimer;
+  class CHealthMonitor;
+  class CSnapshotManager;
+  class CSessionState;
+  class CLatencySimulator;
+  class PatternSignalSource;
+  class SRSignalSource;
+  class AISignalSource;
+  class CRegimeSignalSource;
+  class CEventBus;
+  class CPipelineEngine;
+  class CConfigManager;
 #endif
-
-class CConfigManager;
 
 class COrchestrator
   {

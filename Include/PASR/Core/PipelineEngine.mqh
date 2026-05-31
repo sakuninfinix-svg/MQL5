@@ -6,9 +6,53 @@
 #ifndef __CORE_PIPELINE_ENGINE_MQH__
 #define __CORE_PIPELINE_ENGINE_MQH__
 
+#include <PASR/Core/PipelineTypes.mqh>
+#include <PASR/Core/Config/Types.mqh>
+#include <PASR/Core/Globals.mqh>
+#include <PASR/Analysis/SRZoneStore.mqh>
+#include <PASR/Analysis/SRManager.mqh>
+#include <PASR/Analysis/ZoneManager.mqh>
+#include <PASR/Analysis/Pattern/PatternManager.mqh>
+#include <PASR/AI/AIOrchestrator.mqh>
+#include <PASR/Signal/SignalManager.mqh>
+#include <PASR/Signal/RegimeFilter.mqh>
+#include <PASR/Analysis/MarketRegimeDetector.mqh>
+#include <PASR/Infra/DataManager.mqh>
+#include <PASR/Trade/TradePlan.mqh>
+#include <PASR/Trade/ExitEngine.mqh>
+#include <PASR/Trade/ExecutionManager.mqh>
+#include <PASR/Trade/RiskManager.mqh>
+#include <PASR/Trade/RecoveryManager.mqh>
+#include <PASR/UI/DashboardManager.mqh>
+#include <PASR/Analysis/AdaptiveParameterManager.mqh>
+#include <PASR/Infra/JournalManager.mqh>
+#include <Trade/Trade.mqh>
+
 #ifdef __CORE_PASR_MASTER_MQH__
 #else
-  #error "Include <PASR/Core/PASR.mqh> instead of PipelineEngine.mqh directly."
+  // Provide minimal forward declarations when not using master include
+  class CDataManager;
+  class CAnalysisSRManager;
+  class CAnalysisZoneManager;
+  class CPatternManager;
+  class CSignalManager;
+  class CAIOrchestrator;
+  class CRegimeFilter;
+  class CRiskManager;
+  class CExecutionManager;
+  class CExitEngine;
+  class CRecoveryManager;
+  class CDashboardManager;
+  class CJournalManager;
+  class CSanityManager;
+  class CTelemetryRecorder;
+  class CAdaptiveParameterManager;
+  class CMarketRegimeDetector;
+  class CLatencyOptimizer;
+  class CAsyncOrderManager;
+  class CHealthMonitor;
+  class CSnapshotManager;
+  class CTrade;
 #endif
 
 class CPipelineEngine
@@ -146,8 +190,9 @@ private:
    ENUM_STAGE_RESULT Stage_PatternRec(PipelineContext &ctx)
      {
       if(SkipIfNull(m_pattern, "PatternRec") == STAGE_SKIP) return STAGE_SKIP;
+      if(!ctx.new_bar) return STAGE_SKIP;
       m_stage_timer.Start();
-      m_pattern.OnTick();
+      // PatternManager updates on new-bar events via the event bus.
       if(m_profiling_enabled) m_stage_timer.Log("Stage4_PatternRec");
       return STAGE_OK;
      }
@@ -166,7 +211,7 @@ private:
       if(SkipIfNull(m_regime_det, "RegimeDet") == STAGE_SKIP) return STAGE_SKIP;
       m_stage_timer.Start();
       ctx.regime = m_regime_det.GetCurrentRegime();
-      const SDynamicParams &params = m_regime_det.GetParams();
+      SDynamicParams params = m_regime_det.GetParams();
       ctx.regime_confidence = MathMin(1.0, MathMax(0.0, params.trend_strength / 100.0));
       if(m_profiling_enabled) m_stage_timer.Log("Stage5_RegimeDet");
       return STAGE_OK;
@@ -203,7 +248,7 @@ private:
 
       if(m_ai_orch.PredictSignal(ctx.signal))
         {
-         const SAIInferenceResult &ai = m_ai_orch.GetLastResult();
+         SAIInferenceResult ai = m_ai_orch.GetLastResult();
          ctx.ai_score = (float)ai.score;
          ctx.ai_veto = ai.vetoed;
          ctx.drift_score = (float)ai.drift_score;
@@ -217,7 +262,7 @@ private:
          return STAGE_OK;
         }
 
-      const SAIInferenceResult &last = m_ai_orch.GetLastResult();
+      SAIInferenceResult last = m_ai_orch.GetLastResult();
       ctx.ai_score = (float)last.score;
       ctx.ai_veto = last.vetoed;
       ctx.drift_score = (float)last.drift_score;
@@ -333,7 +378,12 @@ private:
       m_stage_timer.Start();
 
       CTrade trade;
-      long cfgMagic = (m_data != NULL && m_data.GetConfig() != NULL) ? m_data.GetConfig().MagicNumber : 0;
+      StrategyConfig cfg;
+      if(m_data != NULL)
+         m_data.GetConfigCache(cfg);
+      else
+         cfg.MagicNumber = 0;
+      long cfgMagic = cfg.MagicNumber;
       if(cfgMagic > 0) trade.SetExpertMagicNumber(cfgMagic);
 
       for(int i = PositionsTotal() - 1; i >= 0; i--)

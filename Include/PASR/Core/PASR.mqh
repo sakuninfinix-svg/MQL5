@@ -19,8 +19,9 @@
 #include "PipelineTypes.mqh"
 
 // Layer 0b: Data types (used by multiple layers)
-#include "../Data/RegimeTypes.mqh"
-#include "../Data/SRStruct.mqh"
+#include <PASR/Data/RegimeTypes.mqh>
+#include <PASR/Data/SRStruct.mqh>
+#include <PASR/Data/SymbolScanner.mqh>
 
 // Layer 1: State & utility core
 #include "StateOwnershipMap.mqh"
@@ -30,43 +31,56 @@
 #include "HighFreqTimer.mqh"
 
 // Layer 2: Infra managers
-#include "../Infra/AdaptiveConfig.mqh"
-#include "../Infra/DataManager.mqh"
-#include "../Infra/HealthMonitor.mqh"
-#include "../Infra/SessionState.mqh"
-#include "../Infra/SnapshotManager.mqh"
-#include "../Infra/JournalManager.mqh"
-#include "../Infra/TelemetryRecorder.mqh"
-#include "../Infra/PerformanceReport.mqh"
-#include "../Infra/SanityManager.mqh"
-#include "../Infra/StateManager.mqh"
+#include <PASR/Infra/AdaptiveConfig.mqh>
+#include <PASR/Infra/DataManager.mqh>
+#include <PASR/Infra/HealthMonitor.mqh>
+#include <PASR/Infra/SessionState.mqh>
+#include <PASR/Infra/SnapshotManager.mqh>
+#include <PASR/Infra/JournalManager.mqh>
+#include <PASR/Infra/TelemetryRecorder.mqh>
+#include <PASR/Infra/PerformanceReport.mqh>
+#include <PASR/Infra/SanityManager.mqh>
+#include <PASR/Infra/StateManager.mqh>
 
 // Layer 3: Analysis managers
-#include "../Analysis/SRManager.mqh"
-#include "../Analysis/ZoneManager.mqh"
-#include "../Analysis/MarketRegimeDetector.mqh"
-#include "../Analysis/AdaptiveParameterManager.mqh"
-#include "../Analysis/Pattern/PatternManager.mqh"
+#include <PASR/Analysis/SRManager.mqh>
+#include <PASR/Analysis/ZoneManager.mqh>
+#include <PASR/Analysis/MarketRegimeDetector.mqh>
+#include <PASR/Analysis/AdaptiveParameterManager.mqh>
+#include <PASR/Analysis/Pattern/PatternManager.mqh>
+#include <PASR/Analysis/Pattern/CandleUtils.mqh>
+#include <PASR/Analysis/Pattern/FakeoutDetector.mqh>
+#include <PASR/Analysis/Pattern/PatternTypes.mqh>
+#include <PASR/Analysis/Pattern/ScoreEngine.mqh>
+#include <PASR/Analysis/SRDetector.mqh>
 
 // Layer 4: AI managers and signal sources
-#include "../AI/AITypes.mqh"
-#include "../AI/AIFeatureBuilder.mqh"
-#include "../AI/AIInference.mqh"
-#include "../AI/AIEnsemble.mqh"
-#include "../AI/AITrainer.mqh"
-#include "../AI/ConfidenceCalibrator.mqh"
-#include "../AI/OnlineLearningGuard.mqh"
-#include "../AI/AICalibrationBridge.mqh"
-#include "../AI/ModelRegistry.mqh"
-#include "../AI/ONNXBridge.mqh"
-#include "../AI/AIOrchestrator.mqh"
-#include "../AI/AISignalSource.mqh"
+#include <PASR/AI/AITypes.mqh>
+#include <PASR/AI/AIFeatureBuilder.mqh>
+#include <PASR/AI/AIInference.mqh>
+#include <PASR/AI/AIEnsemble.mqh>
+#include <PASR/AI/AITrainer.mqh>
+#include <PASR/AI/ConfidenceCalibrator.mqh>
+#include <PASR/AI/OnlineLearningGuard.mqh>
+#include <PASR/AI/AICalibrationBridge.mqh>
+#include <PASR/AI/ModelRegistry.mqh>
+#include <PASR/AI/ONNXBridge.mqh>
+#include <PASR/AI/AIOrchestrator.mqh>
+#include <PASR/AI/AISignalSource.mqh>
 
 // Layer 5: Signal managers
-#include "../Signal/SignalFilterPipeline.mqh"
-#include "../Signal/RegimeFilter.mqh"
-#include "../Signal/RegimeSignalSource.mqh"
-#include "../Signal/SignalManager.mqh"
+#include <PASR/Signal/SignalFilterPipeline.mqh>
+#include <PASR/Signal/RegimeFilter.mqh>
+#include <PASR/Signal/RegimeSignalSource.mqh>
+#include <PASR/Signal/SignalManager.mqh>
+#include <PASR/Signal/ISignalSource.mqh>
+#include <PASR/Signal/PatternSignalSource.mqh>
+#include <PASR/Signal/SignalAggregator.mqh>
+#include <PASR/Signal/SignalConfig.mqh>
+#include <PASR/Signal/SignalCooldownManager.mqh>
+#include <PASR/Signal/SignalFilter.mqh>
+#include <PASR/Signal/SignalScorer.mqh>
+#include <PASR/Signal/SRSignalSource.mqh>
 
 // Layer 6: Trade managers
 #include "../Trade/TradePlan.mqh"

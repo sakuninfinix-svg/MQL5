@@ -12,10 +12,10 @@
 #define __TRADE_RECOVERY_MANAGER_MQH__
 
 #include <Trade/Trade.mqh>
-#include "../Core/IManager.mqh"
-#include "../Data/DataManager.mqh"
-#include "../Analysis/Pattern/PatternManager.mqh"
-#include "../Data/RegimeTypes.mqh"
+#include <PASR/Core/IManager.mqh>
+#include <PASR/Data/DataManager.mqh>
+#include <PASR/Analysis/Pattern/PatternManager.mqh>
+#include <PASR/Data/RegimeTypes.mqh>
 #include "RecoveryEngine.mqh"
 
 #define RECOVERY_MIN_FLOATING_LOSS_ATR 0.50
