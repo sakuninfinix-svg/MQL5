@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Analysis/Pattern/PatternTypes.mqh — v2.02                        |
+//| Analysis/Pattern/PatternTypes.mqh — v2.03                        |
 //| Canonical pattern type definitions for PASR                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -7,9 +7,8 @@
 #define PATTERN_TYPES_MQH
 
 #include <Arrays/ArrayObj.mqh>
-#include "../../Data/RegimeTypes.mqh"
+#include <PASR/Data/RegimeTypes.mqh>
 
-// Enum Jenis Pola Candlestick Utama (Unified untuk PatternManager)
 enum ENUM_PATTERN_TYPE
   {
    PATTERN_NONE                = 0,
@@ -26,7 +25,9 @@ enum ENUM_PATTERN_TYPE
    PATTERN_EVENING_STAR        = 11
   };
 
-typedef ENUM_PATTERN_TYPE EPatternType;
+// MQL5 typedef aliasing of enum can be brittle in includes.
+// Keep legacy name as macro alias for old code.
+#define EPatternType ENUM_PATTERN_TYPE
 
 #define PATTERN_PINBAR_BULL   PATTERN_PINBAR
 #define PATTERN_PINBAR_BEAR   PATTERN_PINBAR
@@ -38,27 +39,27 @@ typedef ENUM_PATTERN_TYPE EPatternType;
 class SPatternSignal : public CObject
   {
 public:
-   EPatternType     type;
-   int              barIndex;
-   datetime         time;
-   double           open;
-   double           high;
-   double           low;
-   double           close;
-   double           bodySize;
-   double           upperWick;
-   double           lowerWick;
-   double           totalRange;
-   double           strength;
-   double           confidence;
-   EMarketRegime    detectedRegime;
+   ENUM_PATTERN_TYPE type;
+   int               barIndex;
+   datetime          time;
+   double            open;
+   double            high;
+   double            low;
+   double            close;
+   double            bodySize;
+   double            upperWick;
+   double            lowerWick;
+   double            totalRange;
+   double            strength;
+   double            confidence;
+   EMarketRegime     detectedRegime;
 
    SPatternSignal()
      {
       Clear();
      }
 
-   SPatternSignal(const SPatternSignal &src)
+   SPatternSignal(SPatternSignal &src)
      {
       Assign(src);
      }
@@ -68,14 +69,20 @@ public:
       type = PATTERN_NONE;
       barIndex = 0;
       time = 0;
-      open = high = low = close = 0.0;
-      bodySize = upperWick = lowerWick = totalRange = 0.0;
+      open = 0.0;
+      high = 0.0;
+      low = 0.0;
+      close = 0.0;
+      bodySize = 0.0;
+      upperWick = 0.0;
+      lowerWick = 0.0;
+      totalRange = 0.0;
       strength = 0.0;
       confidence = 0.0;
       detectedRegime = REGIME_UNKNOWN;
      }
 
-   void Assign(const SPatternSignal &src)
+   void Assign(SPatternSignal &src)
      {
       type = src.type;
       barIndex = src.barIndex;
@@ -127,28 +134,28 @@ class CPatternSignalArray : public CArrayObj
 public:
    CPatternSignalArray() { }
 
-   bool Add(const SPatternSignal &signal)
+   bool AddSignal(SPatternSignal &signal)
      {
       SPatternSignal *ptr = new SPatternSignal(signal);
       if(ptr == NULL) return false;
       return CArrayObj::Add(ptr);
      }
 
-   SPatternSignal *At(int index) const
+   SPatternSignal *AtSignal(int index) const
      {
       return (SPatternSignal*)CArrayObj::At(index);
      }
 
-   CPatternSignalArray *FilterByType(EPatternType type) const
+   CPatternSignalArray *FilterByType(ENUM_PATTERN_TYPE type) const
      {
       CPatternSignalArray *result = new CPatternSignalArray();
       if(result == NULL) return NULL;
 
       for(int i = 0; i < Total(); i++)
         {
-         SPatternSignal *sig = At(i);
+         SPatternSignal *sig = AtSignal(i);
          if(sig != NULL && sig.type == type)
-            result.Add(*sig);
+            result.AddSignal(*sig);
         }
       return result;
      }
@@ -160,9 +167,9 @@ public:
 
       for(int i = 0; i < Total(); i++)
         {
-         SPatternSignal *sig = At(i);
+         SPatternSignal *sig = AtSignal(i);
          if(sig != NULL && sig.strength >= minStrength)
-            result.Add(*sig);
+            result.AddSignal(*sig);
         }
       return result;
      }
