@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/JournalManager.mqh — v2.03                                 |
+//| Infra/JournalManager.mqh — v2.04                                 |
 //| Per-trade CSV journal + in-memory performance analytics.         |
 //+------------------------------------------------------------------+
 #property strict
@@ -141,7 +141,7 @@ private:
       return line + "\r\n";
      }
 
-   string CsvRow(const JournalEntry &e) const
+   string CsvRow(JournalEntry &e) const
      {
       string line = IntegerToString((long)e.ticket) + "," +
                     CsvEscape(TimeToString(e.timeOpen, TIME_DATE|TIME_SECONDS)) + "," +
@@ -159,7 +159,7 @@ private:
       return line + "\r\n";
      }
 
-   void AppendToCSV(const JournalEntry &e)
+   void AppendToCSV(JournalEntry &e)
      {
       if(!m_csvEnabled) return;
       string fn = CSVFilename();
@@ -170,8 +170,7 @@ private:
          PASRLogError("Journal", "CSV open failed: " + IntegerToString(GetLastError()));
          return;
         }
-      if(newFile || FileSize(h) == 0)
-         FileWriteString(h, CsvHeader());
+      if(newFile || FileSize(h) == 0) FileWriteString(h, CsvHeader());
       FileSeek(h, 0, SEEK_END);
       FileWriteString(h, CsvRow(e));
       FileClose(h);
@@ -184,7 +183,7 @@ private:
         {
          m_dailyPnL[m_dailyHead] = m_todayPnL;
          m_dailyHead = (m_dailyHead + 1) % JOURNAL_DAILY_SIZE;
-         m_todayPnL  = 0;
+         m_todayPnL = 0.0;
          m_todayDate = today;
         }
       m_todayPnL += pnl;
@@ -198,7 +197,7 @@ private:
       if(dd > m_maxDrawdown) m_maxDrawdown = dd;
      }
 
-   void StoreEntry(const JournalEntry &e)
+   void StoreEntry(JournalEntry &e)
      {
       m_buf[m_head] = e;
       m_head = (m_head + 1) % JOURNAL_BUF_SIZE;
@@ -248,7 +247,6 @@ public:
       JournalEntry e;
       e.Clear();
       e.ticket = ev.ticket;
-      e.timeOpen = 0;
       e.timeClose = TimeCurrent();
       e.symbol = _Symbol;
       e.pnl = ev.profit;
@@ -261,39 +259,39 @@ public:
    void SetCSVEnabled(bool b) { m_csvEnabled = b; }
    void SetCSVPrefix(string s) { if(s != "") m_csvPrefix = s; }
 
-   void OnPositionClosed(ulong ticket, datetime timeOpen, const TradePlan &plan,
+   void OnPositionClosed(ulong ticket, datetime timeOpen, TradePlan &plan,
                          double closePrice, double pnl, EMarketRegime regime,
                          ENUM_TRADING_SESSION session, double aiScore,
                          double driftScore, int ensembleModel,
-                         const SAIFeatureVector &fv, bool beDone,
+                         SAIFeatureVector &fv, bool beDone,
                          bool partialDone, bool runnerActive)
      {
       JournalEntry e;
       e.Clear();
-      e.ticket       = ticket;
-      e.timeOpen     = timeOpen;
-      e.timeClose    = TimeCurrent();
-      e.symbol       = _Symbol;
-      e.direction    = plan.direction;
-      e.entry        = plan.entryPrice;
-      e.sl           = plan.sl;
-      e.tp1          = plan.tp;
-      e.tp2          = plan.tp2;
-      e.closePrice   = closePrice;
-      e.lots         = plan.lot;
-      e.pnl          = pnl;
-      e.beDone       = beDone;
-      e.partialDone  = partialDone;
+      e.ticket = ticket;
+      e.timeOpen = timeOpen;
+      e.timeClose = TimeCurrent();
+      e.symbol = _Symbol;
+      e.direction = plan.direction;
+      e.entry = plan.entryPrice;
+      e.sl = plan.sl;
+      e.tp1 = plan.tp;
+      e.tp2 = plan.tp2;
+      e.closePrice = closePrice;
+      e.lots = plan.lot;
+      e.pnl = pnl;
+      e.beDone = beDone;
+      e.partialDone = partialDone;
       e.runnerActive = runnerActive;
-      e.regime       = regime;
-      e.session      = session;
-      e.aiScore      = aiScore;
-      e.driftScore   = driftScore;
-      e.ensembleModel= ensembleModel;
-      e.isWin        = (pnl > 0);
-      e.durationMin  = (timeOpen > 0) ? (int)((e.timeClose - timeOpen) / 60) : 0;
+      e.regime = regime;
+      e.session = session;
+      e.aiScore = aiScore;
+      e.driftScore = driftScore;
+      e.ensembleModel = ensembleModel;
+      e.isWin = (pnl > 0.0);
+      e.durationMin = (timeOpen > 0) ? (int)((e.timeClose - timeOpen) / 60) : 0;
       double riskPts = MathAbs(plan.entryPrice - plan.sl);
-      double pnlPts  = MathAbs(closePrice - plan.entryPrice);
+      double pnlPts = MathAbs(closePrice - plan.entryPrice);
       e.rr = (riskPts > 0) ? ((pnl > 0 ? 1 : -1) * pnlPts / riskPts) : 0;
       for(int i=0; i<AI_FEATURE_DIM; i++) e.features[i] = fv.features[i];
       StoreEntry(e);
@@ -302,7 +300,7 @@ public:
                   pnl, e.rr, aiScore, e.beDone?" [BE]":""));
      }
 
-   void LogEntry(const PipelineContext &ctx)
+   void LogEntry(PipelineContext &ctx)
      {
       if(!m_initialized) return;
       if(m_debugMode)
@@ -312,8 +310,7 @@ public:
 
    TradeStat GetStats(int last = 0) const
      {
-      TradeStat s;
-      ZeroMemory(s);
+      TradeStat s; ZeroMemory(s);
       int n = (last == 0 || last > m_count) ? m_count : last;
       if(n == 0) return s;
       double grossProfit=0, grossLoss=0, sumRR=0, sumWinRR=0, sumLossRR=0;
@@ -322,7 +319,7 @@ public:
       for(int i = 0; i < n; i++)
         {
          int idx = (m_head - 1 - i + JOURNAL_BUF_SIZE) % JOURNAL_BUF_SIZE;
-         const JournalEntry &e = m_buf[idx];
+         JournalEntry e = m_buf[idx];
          s.totalTrades++;
          equity += e.pnl;
          if(equity > peak) peak = equity;
@@ -353,7 +350,7 @@ public:
       double gp=0, gl=0;
       for(int i=0; i<m_count; i++)
         {
-         const JournalEntry &e = m_buf[i];
+         JournalEntry e = m_buf[i];
          if(e.regime != regime) continue;
          s.totalTrades++;
          if(e.isWin){ s.wins++; gp+=e.pnl; } else { s.losses++; gl-=e.pnl; }
@@ -373,7 +370,7 @@ public:
       double gp=0, gl=0;
       for(int i=0; i<m_count; i++)
         {
-         const JournalEntry &e = m_buf[i];
+         JournalEntry e = m_buf[i];
          if(e.session != session) continue;
          s.totalTrades++;
          if(e.isWin){ s.wins++; gp+=e.pnl; } else { s.losses++; gl-=e.pnl; }
@@ -398,11 +395,13 @@ public:
    int GetCount() const { return m_count; }
    double GetMaxDrawdown() const { return m_maxDrawdown; }
    double GetTodayPnL() const { return m_todayPnL; }
-   const JournalEntry* GetEntry(int i) const
+
+   bool GetEntry(int i, JournalEntry &out) const
      {
-      if(i < 0 || i >= m_count) return NULL;
+      if(i < 0 || i >= m_count) return false;
       int idx = (m_head - 1 - i + JOURNAL_BUF_SIZE) % JOURNAL_BUF_SIZE;
-      return &m_buf[idx];
+      out = m_buf[idx];
+      return true;
      }
   };
 
