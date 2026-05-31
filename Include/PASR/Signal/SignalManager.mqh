@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalManager.mqh — v4.07                                |
-//| Compile-safe signal orchestration adapter                         |
+//| Signal/SignalManager.mqh — v4.20                                |
+//| Signal layer orchestration with diagnostics snapshot              |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_SIGNAL_MANAGER_MQH__
@@ -43,6 +43,42 @@ struct SignalDecision
      }
   };
 
+struct SignalLayerSnapshot
+  {
+   bool            ready;
+   datetime        lastBarTime;
+   int             sourceCount;
+   int             cooldownCount;
+   int             failedZoneCount;
+   ENUM_SIGNAL_DIR lastDirection;
+   double          lastConfidence;
+   double          lastRawScore;
+   double          lastMultiplier;
+   int             lastConfluence;
+   bool            lastVetoed;
+   string          lastSources;
+   string          lastVetoReason;
+   string          lastReason;
+
+   void Clear()
+     {
+      ready = false;
+      lastBarTime = 0;
+      sourceCount = 0;
+      cooldownCount = 0;
+      failedZoneCount = 0;
+      lastDirection = SIGNAL_NONE;
+      lastConfidence = 0.0;
+      lastRawScore = 0.0;
+      lastMultiplier = 1.0;
+      lastConfluence = 0;
+      lastVetoed = false;
+      lastSources = "";
+      lastVetoReason = "";
+      lastReason = "";
+     }
+  };
+
 class CMarketRegime;
 
 class CSignalManager : public IManager
@@ -62,6 +98,26 @@ private:
    bool                    m_signalPending;
    datetime                m_lastProcessedBar;
    bool                    m_configReady;
+   AggregatedSignal        m_lastAggregated;
+   SignalLayerSnapshot     m_snapshot;
+
+   void RefreshSnapshot(const string reason = "")
+     {
+      m_snapshot.ready = m_configReady;
+      m_snapshot.lastBarTime = m_lastProcessedBar;
+      m_snapshot.sourceCount = m_aggregator.SourceCount();
+      m_snapshot.cooldownCount = m_cooldownMgr.GetActiveCooldownCount();
+      m_snapshot.failedZoneCount = m_cooldownMgr.GetActiveFailedZoneCount();
+      m_snapshot.lastDirection = m_lastAggregated.direction;
+      m_snapshot.lastConfidence = m_lastAggregated.normalizedScore;
+      m_snapshot.lastRawScore = m_lastAggregated.rawScore;
+      m_snapshot.lastMultiplier = m_lastAggregated.multiplierFactor;
+      m_snapshot.lastConfluence = m_lastAggregated.confluence;
+      m_snapshot.lastVetoed = m_lastAggregated.vetoed;
+      m_snapshot.lastSources = m_lastAggregated.contributingSources;
+      m_snapshot.lastVetoReason = m_aggregator.GetVetoReason();
+      m_snapshot.lastReason = reason;
+     }
 
    void EnsureConfigReady()
      {
@@ -72,13 +128,17 @@ private:
       m_cooldownMgr.Init(m_config);
       m_scorer.Init(m_config);
       m_configReady = true;
+      RefreshSnapshot("ConfigReady");
      }
 
 public:
    CSignalManager()
       : IManager(), m_pattern(NULL), m_sr(NULL), m_regime(NULL),
         m_signalPending(false), m_lastProcessedBar(0), m_configReady(false)
-     {}
+     {
+      m_lastAggregated.Clear();
+      m_snapshot.Clear();
+     }
 
    virtual string HandlerName() const override { return "SignalManager"; }
 
@@ -86,6 +146,7 @@ public:
      {
       if(!IManager::Init(data, bus)) return false;
       EnsureConfigReady();
+      RefreshSnapshot("Init");
       return true;
      }
 
@@ -93,15 +154,22 @@ public:
      {
       m_signalPending = false;
       m_cooldownMgr.Clear();
+      m_lastAggregated.Clear();
+      m_snapshot.Clear();
       IManager::Deinit();
      }
 
-   void SetPatternManager(CPatternManager *p) { m_pattern = p; }
-   void SetSRManager(CAnalysisSRManager *sr)  { m_sr      = sr; }
-   void SetRegimeManager(CMarketRegime *r)    { m_regime  = r; }
+   void SetPatternManager(CPatternManager *p) { m_pattern = p; RefreshSnapshot("PatternManagerBound"); }
+   void SetSRManager(CAnalysisSRManager *sr)  { m_sr      = sr; RefreshSnapshot("SRManagerBound"); }
+   void SetRegimeManager(CMarketRegime *r)    { m_regime  = r; RefreshSnapshot("RegimeManagerBound"); }
 
    bool RegisterSource(ISignalSource *src, double weight = 1.0)
-     { return m_aggregator.RegisterSource(src, weight); }
+     {
+      EnsureConfigReady();
+      bool ok = m_aggregator.RegisterSource(src, weight);
+      RefreshSnapshot(ok ? "SourceRegistered" : "SourceRejected");
+      return ok;
+     }
 
    int SourceCount() const { return m_aggregator.SourceCount(); }
 
@@ -110,16 +178,23 @@ public:
       EnsureConfigReady();
       SSignal out;
       out.Clear();
-      AggregatedSignal agg = m_aggregator.Aggregate();
-      if(agg.vetoed || agg.direction == SIGNAL_NONE) return out;
-      out.direction     = agg.direction;
-      out.confidence    = agg.normalizedScore;
-      out.primarySource = agg.contributingSources;
-      out.entryPrice    = (agg.direction == SIGNAL_BUY)
+
+      m_lastAggregated = m_aggregator.Aggregate();
+      if(m_lastAggregated.vetoed || m_lastAggregated.direction == SIGNAL_NONE)
+        {
+         RefreshSnapshot(m_lastAggregated.vetoed ? "Vetoed" : "NoSignal");
+         return out;
+        }
+
+      out.direction     = m_lastAggregated.direction;
+      out.confidence    = m_lastAggregated.normalizedScore;
+      out.primarySource = m_lastAggregated.contributingSources;
+      out.entryPrice    = (m_lastAggregated.direction == SIGNAL_BUY)
                           ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
                           : SymbolInfoDouble(_Symbol, SYMBOL_BID);
       out.slPoints      = 0.0;
       out.tpPoints      = 0.0;
+      RefreshSnapshot("Aggregated");
       return out;
      }
 
@@ -142,6 +217,8 @@ public:
       if(barOpenTime == 0 || barOpenTime == m_lastProcessedBar) return;
       EnsureConfigReady();
       m_lastProcessedBar = barOpenTime;
+      m_cooldownMgr.TickFailedZones();
+      RefreshSnapshot("NewBar");
      }
 
    virtual void OnConfigReload() override
@@ -153,6 +230,7 @@ public:
       m_cooldownMgr.Init(m_config);
       m_scorer.Init(m_config);
       m_configReady = true;
+      RefreshSnapshot("ConfigReload");
      }
 
    virtual void OnEvent(const PASREvent &ev) override
@@ -164,10 +242,13 @@ public:
          case EVENT_ID_CONFIG_RELOAD: OnConfigReload(); break;
          case EVENT_ID_EMERGENCY_STOP:
             m_signalPending = false;
+            m_lastAggregated.Clear();
+            RefreshSnapshot("EmergencyStop");
             if(m_config.GetDebugMode()) Log("Emergency Stop: Clearing pending signals.");
             break;
          case EVENT_ID_HEARTBEAT:
             m_cooldownMgr.CleanupExpired();
+            RefreshSnapshot("Heartbeat");
             break;
          default:
             break;
@@ -175,7 +256,10 @@ public:
      }
 
    void NotifyPatternFailure(bool isBuy, double zonePrice)
-     { m_cooldownMgr.RegisterFailure(isBuy, zonePrice); }
+     {
+      m_cooldownMgr.RegisterFailure(isBuy, zonePrice);
+      RefreshSnapshot("PatternFailure");
+     }
 
    bool HasPendingSignal(SignalDecision &outSignal)
      {
@@ -183,12 +267,34 @@ public:
         {
          outSignal       = m_pendingSignal;
          m_signalPending = false;
+         RefreshSnapshot("PendingSignalConsumed");
          return true;
         }
       return false;
      }
 
    const CSignalConfig GetConfig() const { return m_config; }
+   AggregatedSignal GetLastAggregated() const { return m_lastAggregated; }
+   SignalLayerSnapshot GetSnapshot() const { return m_snapshot; }
+   string GetLastVetoReason() const { return m_aggregator.GetVetoReason(); }
+
+   bool IsSignalLayerReady() const
+     {
+      return (m_configReady && m_aggregator.SourceCount() > 0);
+     }
+
+   void PrintDiagnostics() const
+     {
+      PrintFormat("[SignalManager] ready=%s sources=%d cooldown=%d failedZones=%d lastDir=%d conf=%.3f veto=%s reason=%s",
+                  IsSignalLayerReady() ? "true" : "false",
+                  m_snapshot.sourceCount,
+                  m_snapshot.cooldownCount,
+                  m_snapshot.failedZoneCount,
+                  (int)m_snapshot.lastDirection,
+                  m_snapshot.lastConfidence,
+                  m_snapshot.lastVetoed ? "true" : "false",
+                  m_snapshot.lastReason);
+     }
   };
 
 #endif // __SIGNAL_SIGNAL_MANAGER_MQH__
