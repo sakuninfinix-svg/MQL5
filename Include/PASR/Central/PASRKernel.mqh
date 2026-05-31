@@ -1,12 +1,12 @@
 //+------------------------------------------------------------------+
-//| Central/PASRKernel.mqh — v0.10                                    |
+//| Central/PASRKernel.mqh — v0.11                                    |
 //| Compatibility facade for Centralized Modular Pipeline migration    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_CENTRAL_KERNEL_MQH__
 #define __PASR_CENTRAL_KERNEL_MQH__
 
-// v0.10 intentionally delegates to the existing COrchestrator backend.
+// v0.11 intentionally delegates to the existing COrchestrator backend.
 // This allows EAs to migrate from COrchestrator to CPASRKernel without
 // changing runtime behavior while responsibilities are extracted gradually.
 
@@ -20,10 +20,11 @@ private:
    StrategyConfig     m_cfg;
    bool               m_ready;
    bool               m_debug;
+   bool               m_profiling_enabled;
 
 public:
    CPASRKernel()
-      : m_backend(NULL), m_ready(false), m_debug(false)
+      : m_backend(NULL), m_ready(false), m_debug(false), m_profiling_enabled(true)
      {
       m_services.Bind(&m_registry);
      }
@@ -40,6 +41,18 @@ public:
       m_lifecycle.SetDebugMode(enabled);
       if(m_backend != NULL)
          m_backend.SetDebugMode(enabled);
+     }
+
+   void SetProfilingEnabled(const bool enabled)
+     {
+      m_profiling_enabled = enabled;
+      if(m_backend != NULL)
+         m_backend.SetProfilingEnabled(enabled);
+     }
+
+   bool IsProfilingEnabled() const
+     {
+      return m_profiling_enabled;
      }
 
    int Init()
@@ -62,6 +75,7 @@ public:
         }
 
       m_backend.SetDebugMode(m_debug);
+      m_backend.SetProfilingEnabled(m_profiling_enabled);
       int rc = m_backend.Init(m_cfg);
       if(rc != INIT_SUCCEEDED)
         {
@@ -132,6 +146,26 @@ public:
    CServiceLocator* Services()
      {
       return &m_services;
+     }
+
+   CEventBus* GetEventBus() const
+     {
+      return (m_backend != NULL) ? m_backend.GetEventBus() : NULL;
+     }
+
+   CDataManager* GetDataManager() const
+     {
+      return (m_backend != NULL) ? m_backend.GetDataManager() : NULL;
+     }
+
+   CRiskManager* GetRiskManager() const
+     {
+      return (m_backend != NULL) ? m_backend.GetRiskManager() : NULL;
+     }
+
+   CDashboardManager* GetDashboard() const
+     {
+      return (m_backend != NULL) ? m_backend.GetDashboard() : NULL;
      }
 
    void BindBackendServices()
