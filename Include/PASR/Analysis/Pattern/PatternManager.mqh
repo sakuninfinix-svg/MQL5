@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Analysis/Pattern/PatternManager.mqh — v3.11                      |
+//| Analysis/Pattern/PatternManager.mqh — v3.12                      |
 //| Probabilistic regression-style pattern score for AI context       |
 //| Uses fixed ring buffer history to avoid heap churn in runtime.   |
 //+------------------------------------------------------------------+
@@ -406,7 +406,7 @@ public:
       m_lastScanBarTime = 0;
       m_totalPatternsDetected = 0;
       m_totalValidSignals = 0;
-      Print("[PatternManager] v3.11 Init OK");
+      Print("[PatternManager] v3.12 Init OK");
       return true;
      }
 
@@ -541,8 +541,12 @@ public:
       if(m_totalPatternsDetected == 0) return 0.0;
       return (double)m_totalValidSignals / (double)m_totalPatternsDetected * 100.0;
      }
-   const SPatternResult& GetLastResult() const { return m_lastResult; }
-   const SPatternFeatureSnapshot& GetLastFeatureSnapshot() const { return m_lastFeatures; }
+
+   SPatternResult GetLastResult() const { return m_lastResult; }
+   SPatternFeatureSnapshot GetLastFeatureSnapshot() const { return m_lastFeatures; }
+   void GetLastResult(SPatternResult &out) const { out = m_lastResult; }
+   void GetLastFeatureSnapshot(SPatternFeatureSnapshot &out) const { out = m_lastFeatures; }
+
    int GetHistoryCount() const { return m_historyCount; }
    bool GetHistoryAt(int idx, SPatternResult &out) const
      {
