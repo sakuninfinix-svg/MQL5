@@ -82,7 +82,10 @@
 #include "../UI/DashboardManager.mqh"
 #include "../QA/LatencySimulator.mqh"
 
-// Layer 8: Pipeline and legacy orchestration backend
+// Layer 8: Orchestration interfaces + legacy pipeline backend
+// PipelineStage is the forward-compatible split-stage interface.
+// CPipelineEngine remains in Core during the compatibility phase.
+#include "../Orchestration/PipelineStage.mqh"
 #include "PipelineEngine.mqh"
 
 // PipelineTypes temporarily maps DetectSession -> PASRDetectSession so included
