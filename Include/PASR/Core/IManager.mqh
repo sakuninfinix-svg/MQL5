@@ -4,9 +4,7 @@
 //+------------------------------------------------------------------+
 #ifndef CORE_IMANAGER_MQH
 #define CORE_IMANAGER_MQH
-
 #include "IDataManager.mqh"
-
 #define PASR_MAX_EVENT_ID 100
 
 class IManager : public IEventHandler
