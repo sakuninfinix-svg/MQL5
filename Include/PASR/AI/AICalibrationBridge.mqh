@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| AI/AICalibrationBridge.mqh — v1.01                               |
-//| Bridge: connects CConfidenceCalibrator to AdaptiveConfig         |
+//| AI/AICalibrationBridge.mqh                                       |
+//| copyright agsicentre                                             |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_CALIBRATION_BRIDGE_MQH__

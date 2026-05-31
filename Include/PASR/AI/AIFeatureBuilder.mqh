@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| AI/AIFeatureBuilder.mqh — v1.10                                  |
-//| 34-dimensional feature engineering for PASR AI subsystem          |
+//| AI/AIFeatureBuilder.mqh                                          |
+//| copyright agsicentre                                             |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_FEATURE_BUILDER_MQH__

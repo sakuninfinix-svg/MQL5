@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| AI/AIInference.mqh — v1.02                                       |
-//| Expert routing + MLP forward pass for PASR AI subsystem          |
+//| AI/AIInference.mqh                                               |
+//| copyright agsicentre                                             |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_INFERENCE_MQH__

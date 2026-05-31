@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| AI/AIEnsemble.mqh — v1.01                                        |
-//| Ensemble voting across multiple CAIInference models              |
+//| copyright agsicentre                                             |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ENSEMBLE_MQH__

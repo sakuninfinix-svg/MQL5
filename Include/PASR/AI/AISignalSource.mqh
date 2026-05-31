@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| AI/AISignalSource.mqh — v1.02                                    |
-//| Bridge: CAIOrchestrator inference score -> ISignalSource         |
+//| copyright agsicentre                                             |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_SIGNAL_SOURCE_MQH__

@@ -6,7 +6,7 @@
 #property copyright   "PASR EA © 2026"
 #property link        "https://agsicentre.wordpress.com"
 #property version     "1.02"
-#property description "PASR Model - Pure Pipeline Architecture (v13.02)"
+#property description "PASR (Price Action Support Resistance) "
 #property strict
 
 //--- Compilation Flags (controlled via master include)
