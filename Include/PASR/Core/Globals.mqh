@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/Globals.mqh - CANONICAL v2.16                               |
+//| Core/Globals.mqh - CANONICAL v2.17                               |
 //| Account-safe GV helpers, logging, validation, perf timer         |
 //+------------------------------------------------------------------+
 #ifndef CORE_GLOBALS_MQH
@@ -24,7 +24,7 @@ double GVGet(const string purpose, const double defaultVal = 0.0, const long mag
   }
 
 bool GVDelete(const string purpose, const long magic = 0, const string symbol = "")
-  { return GlobalVariableDelete(GVKey(purpose, magic, symbol)); }
+  { return GlobalVariableDel(GVKey(purpose, magic, symbol)); }
 
 bool GVExists(const string purpose, const long magic = 0, const string symbol = "")
   { return GlobalVariableCheck(GVKey(purpose, magic, symbol)); }
