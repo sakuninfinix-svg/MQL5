@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/SessionState.mqh — v1.03                                   |
+//| Infra/SessionState.mqh — v1.04                                   |
 //| SINGLE SOURCE OF TRUTH untuk semua session/equity state          |
 //+------------------------------------------------------------------+
 #property strict
@@ -25,13 +25,17 @@ struct SSessionSnapshot
    datetime          session_start;
    datetime          last_trade_time;
    datetime          today_midnight;
-                     SSessionSnapshot() :
-                        peak_equity(0), start_equity(0), current_equity(0),
-                        daily_pnl(0), weekly_pnl(0),
-                        max_drawdown(0), current_drawdown(0),
-                        open_positions(0), trades_today(0),
-                        session_start(0), last_trade_time(0),
-                        today_midnight(0) {}
+
+   void Reset()
+     {
+      peak_equity=0.0; start_equity=0.0; current_equity=0.0;
+      daily_pnl=0.0; weekly_pnl=0.0;
+      max_drawdown=0.0; current_drawdown=0.0;
+      open_positions=0; trades_today=0;
+      session_start=0; last_trade_time=0; today_midnight=0;
+     }
+
+   SSessionSnapshot(){ Reset(); }
   };
 
 class CSessionState : public IManager
@@ -69,7 +73,6 @@ public:
       m_snap.peak_equity    = m_snap.start_equity;
       m_snap.today_midnight = MidnightFloor(TimeCurrent());
       LoadFromGV();
-      if(m_bus != NULL) m_bus.Subscribe(this);
       PASRLogInfo("SessionState", "Initialized. Start equity=" + DoubleToString(m_snap.start_equity, 2));
       return true;
      }
@@ -117,7 +120,8 @@ public:
    void UpdateOpenPositions(int count)
      { if(m_snap.open_positions != count) m_snap.open_positions = count; }
 
-   const SSessionSnapshot *GetSnapshot() const { return &m_snap; }
+   void GetSnapshot(SSessionSnapshot &out) const { out = m_snap; }
+   SSessionSnapshot Snapshot() const { return m_snap; }
    double PeakEquity() const { return m_snap.peak_equity; }
    double DailyPnL() const { return m_snap.daily_pnl; }
    double GetDailyPnL() const { return m_snap.daily_pnl; }
