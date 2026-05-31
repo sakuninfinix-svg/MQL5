@@ -101,7 +101,7 @@ public:
 
    SFinalScore Calculate(SScoreComponents &components)
      {
-      SFinalScore final;
+      SFinalScore scoreResult;
       double weighted = (components.patternScore * m_wPattern) +
                         (components.rejectionScore * m_wRejection) +
                         (components.momentumScore * m_wMomentum) +
@@ -109,8 +109,8 @@ public:
                         (components.regimeScore * m_wRegime) +
                         (components.volumeScore * m_wVolume) +
                         (components.confluenceScore * m_wConfluence);
-      final.Calculate(weighted, m_minValidScore);
-      return final;
+      scoreResult.Calculate(weighted, m_minValidScore);
+      return scoreResult;
      }
 
    double CalculatePatternScore(int patternType, double baseScore)
@@ -197,7 +197,7 @@ public:
    double CalculateRegimeScore(EMarketRegime regime, int patternType, int direction)
      {
       double score = 0.0;
-      if(regime == REGIME_SIDEWAYS || regime == REGIME_CONSOLIDATION)
+      if(regime == REGIME_RANGE || regime == REGIME_TRANSITION)
         {
          if(patternType == 1 || patternType == 2 || patternType == 5) score += 0.20;
         }
@@ -207,7 +207,7 @@ public:
          if((regime == REGIME_TREND_UP && direction == 1) ||
             (regime == REGIME_TREND_DOWN && direction == -1)) score += 0.15;
         }
-      if(regime == REGIME_HIGH_VOLATILITY || regime == REGIME_CRASH) score -= 0.15;
+      if(regime == REGIME_VOLATILE || regime == REGIME_CRASH) score -= 0.15;
       return MathMax(0.0, score);
      }
 
