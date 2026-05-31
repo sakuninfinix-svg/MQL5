@@ -64,7 +64,7 @@ public:
 
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
-      if(!IManager::Init(this, bus)) return false;
+      if(!IManager::Init(GetPointer(this), bus)) return false;
       m_cfg = m_config;
       m_cfgDirty = false;
       m_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
