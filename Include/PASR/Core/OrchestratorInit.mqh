@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/OrchestratorInit.mqh — v2.00                                |
+//| Core/OrchestratorInit.mqh — v2.01                                |
 //| AI-primary orchestrator bootstrap                                |
 //+------------------------------------------------------------------+
 #property strict
@@ -83,9 +83,6 @@ int COrchestrator::Init(const StrategyConfig &cfg)
    if(m_regime != NULL)
       m_signal.SetRegimeManager(NULL);
 
-   // Rule sources stay registered only as fallback/context providers.
-   // AI is no longer registered as a voter here; CPipelineEngine asks
-   // CAIOrchestrator::PredictSignal() directly as the primary brain.
    m_srcPattern = new PatternSignalSource(m_pattern);
    if(m_srcPattern != NULL)
       m_signal.RegisterSource(m_srcPattern, 1.0);
@@ -116,10 +113,13 @@ int COrchestrator::Init(const StrategyConfig &cfg)
         }
       else
         {
+         double vetoThreshold = m_cfg.AI.MinConfidence;
+         double driftVetoThreshold = 0.60;
+         double highConfidenceThreshold = MathMax(0.75, m_cfg.AI.MinConfidence + 0.15);
          m_ai_orch.ConfigureParameters(m_cfg.AI.EnableAI,
-                                       m_cfg.AI.VetoThreshold,
-                                       m_cfg.AI.DriftVetoThreshold,
-                                       m_cfg.AI.HighConfidenceThreshold);
+                                       vetoThreshold,
+                                       driftVetoThreshold,
+                                       highConfidenceThreshold);
         }
      }
 
@@ -150,18 +150,15 @@ int COrchestrator::Init(const StrategyConfig &cfg)
       return INIT_FAILED;
      }
 
-   if(m_cfg.Journal.Enabled)
+   m_journal = new CJournalManager();
+   if(!InitManager(m_journal, "JournalManager"))
      {
-      m_journal = new CJournalManager();
-      if(!InitManager(m_journal, "JournalManager"))
+      Print("[Orchestrator] Journal init failed; continuing without journal");
+      if(m_journal != NULL)
         {
-         Print("[Orchestrator] Journal init failed; continuing without journal");
-         if(m_journal != NULL)
-           {
-            m_journal.Deinit();
-            delete m_journal;
-            m_journal = NULL;
-           }
+         m_journal.Deinit();
+         delete m_journal;
+         m_journal = NULL;
         }
      }
 
