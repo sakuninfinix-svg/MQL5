@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalAggregator.mqh — v1.04                              |
-//| Signal aggregation with voting, veto, and multiplier logic       |
+//| Signal/SignalAggregator.mqh — v1.20                              |
+//| Signal aggregation with voting, veto, multiplier, diagnostics     |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_AGGREGATOR_MQH__
@@ -45,6 +45,48 @@ struct AggregatedSignal
      }
   };
 
+struct SignalAggregatorSnapshot
+  {
+   int     sourceCount;
+   int     voterCount;
+   int     multiplierCount;
+   int     vetoCount;
+   double  totalVoterWeight;
+   double  bullScore;
+   double  bearScore;
+   double  multiplierFactor;
+   int     bullConfluence;
+   int     bearConfluence;
+   bool    vetoActive;
+   bool    vetoBuy;
+   bool    vetoSell;
+   string  vetoReason;
+   string  bullSources;
+   string  bearSources;
+   string  lastDecisionReason;
+
+   void Clear()
+     {
+      sourceCount = 0;
+      voterCount = 0;
+      multiplierCount = 0;
+      vetoCount = 0;
+      totalVoterWeight = 0.0;
+      bullScore = 0.0;
+      bearScore = 0.0;
+      multiplierFactor = 1.0;
+      bullConfluence = 0;
+      bearConfluence = 0;
+      vetoActive = false;
+      vetoBuy = false;
+      vetoSell = false;
+      vetoReason = "";
+      bullSources = "";
+      bearSources = "";
+      lastDecisionReason = "";
+     }
+  };
+
 class CRegisteredSource
   {
 private:
@@ -73,6 +115,12 @@ public:
    double           GetWeight() const { return m_weight; }
    ENUM_SOURCE_TYPE GetType()   const { return m_type;   }
 
+   string GetName() const
+     {
+      if(m_source == NULL) return "NULL";
+      return m_source.Name();
+     }
+
    string GetTypeString() const
      {
       switch(m_type)
@@ -92,6 +140,7 @@ private:
    int                m_sourceCount;
    const CSignalConfig *m_config;
    CSignalScorer      m_scorer;
+   SignalAggregatorSnapshot m_snapshot;
 
    double  m_totalVoterWeight;
    double  m_bullScore;
@@ -105,6 +154,7 @@ private:
    bool    m_vetoBuy;
    bool    m_vetoSell;
    string  m_vetoReason;
+   string  m_lastDecisionReason;
 
    void ResetState()
      {
@@ -120,6 +170,33 @@ private:
       m_vetoBuy          = false;
       m_vetoSell         = false;
       m_vetoReason       = "";
+      m_lastDecisionReason = "";
+     }
+
+   void RefreshSnapshot()
+     {
+      m_snapshot.Clear();
+      m_snapshot.sourceCount = m_sourceCount;
+      for(int i = 0; i < m_sourceCount; i++)
+        {
+         ENUM_SOURCE_TYPE t = m_sources[i].GetType();
+         if(t == SOURCE_TYPE_VOTER) m_snapshot.voterCount++;
+         else if(t == SOURCE_TYPE_MULT) m_snapshot.multiplierCount++;
+         else if(t == SOURCE_TYPE_VETO) m_snapshot.vetoCount++;
+        }
+      m_snapshot.totalVoterWeight = m_totalVoterWeight;
+      m_snapshot.bullScore = m_bullScore;
+      m_snapshot.bearScore = m_bearScore;
+      m_snapshot.multiplierFactor = m_multiplierFactor;
+      m_snapshot.bullConfluence = m_bullConfluence;
+      m_snapshot.bearConfluence = m_bearConfluence;
+      m_snapshot.vetoActive = m_vetoActive;
+      m_snapshot.vetoBuy = m_vetoBuy;
+      m_snapshot.vetoSell = m_vetoSell;
+      m_snapshot.vetoReason = m_vetoReason;
+      m_snapshot.bullSources = m_bullSources;
+      m_snapshot.bearSources = m_bearSources;
+      m_snapshot.lastDecisionReason = m_lastDecisionReason;
      }
 
    bool ProcessVetoSource(int idx, SignalResult &result)
@@ -131,6 +208,7 @@ private:
         {
          m_vetoActive = true;
          m_vetoReason = StringFormat("%s:%s", name, result.reason);
+         m_lastDecisionReason = "Hard veto: " + m_vetoReason;
          if(m_config != NULL && m_config.GetDebugMode())
             PrintFormat("[SignalAgg] VETO by %s: %s", name, result.reason);
          return false;
@@ -156,6 +234,7 @@ private:
          agg.time = TimeCurrent();
          agg.vetoed = true;
          m_vetoActive = true;
+         m_lastDecisionReason = "Contra veto blocked BUY: " + m_vetoReason;
         }
       else if(agg.direction == SIGNAL_SELL && m_vetoSell)
         {
@@ -163,6 +242,7 @@ private:
          agg.time = TimeCurrent();
          agg.vetoed = true;
          m_vetoActive = true;
+         m_lastDecisionReason = "Contra veto blocked SELL: " + m_vetoReason;
         }
      }
 
@@ -197,12 +277,16 @@ private:
 
 public:
    CSignalAggregator() : m_sourceCount(0), m_config(NULL), m_vetoActive(false), m_vetoBuy(false), m_vetoSell(false)
-     { ResetState(); }
+     {
+      ResetState();
+      m_snapshot.Clear();
+     }
 
    void Init(const CSignalConfig &config)
      {
       m_config = &config;
       m_scorer.Init(config);
+      RefreshSnapshot();
      }
 
    ~CSignalAggregator() { Clear(); }
@@ -211,6 +295,7 @@ public:
      {
       m_sourceCount = 0;
       ResetState();
+      RefreshSnapshot();
      }
 
    bool RegisterSource(ISignalSource *source, double weight = 1.0)
@@ -221,6 +306,7 @@ public:
       if(m_config != NULL && m_config.GetDebugMode())
          PrintFormat("[SignalAgg] Registered: %s (w=%.1f %s)", source.Name(), weight, m_sources[m_sourceCount].GetTypeString());
       m_sourceCount++;
+      RefreshSnapshot();
       return true;
      }
 
@@ -243,6 +329,7 @@ public:
          if(!ProcessVetoSource(i, result))
            {
             agg.vetoed = true;
+            RefreshSnapshot();
             return agg;
            }
         }
@@ -267,7 +354,13 @@ public:
          ProcessVoterSource(i, result);
         }
 
-      if(m_totalVoterWeight <= 0.0) return agg;
+      if(m_totalVoterWeight <= 0.0)
+        {
+         m_lastDecisionReason = "No voter weight";
+         RefreshSnapshot();
+         return agg;
+        }
+
       double normBull = (m_bullScore / m_totalVoterWeight) * m_multiplierFactor;
       double normBear = (m_bearScore / m_totalVoterWeight) * m_multiplierFactor;
       int    minConfluence = (m_config != NULL) ? m_config.GetMinConfluence() : 2;
@@ -282,6 +375,7 @@ public:
          agg.confluence          = m_bullConfluence;
          agg.contributingSources = m_bullSources;
          agg.urgency             = m_scorer.GetUrgencyLevel(normBull);
+         m_lastDecisionReason    = "BUY accepted";
         }
       else if(normBear > normBull && m_bearConfluence >= minConfluence && normBear >= minScore)
         {
@@ -292,8 +386,16 @@ public:
          agg.confluence          = m_bearConfluence;
          agg.contributingSources = m_bearSources;
          agg.urgency             = m_scorer.GetUrgencyLevel(normBear);
+         m_lastDecisionReason    = "SELL accepted";
         }
+      else
+        {
+         m_lastDecisionReason = StringFormat("No consensus bull=%.3f/%d bear=%.3f/%d minScore=%.3f minConf=%d",
+                                             normBull, m_bullConfluence, normBear, m_bearConfluence, minScore, minConfluence);
+        }
+
       ApplyContraVeto(agg);
+      RefreshSnapshot();
       return agg;
      }
 
@@ -301,6 +403,19 @@ public:
    double GetTotalVoterWeight()  const { return m_totalVoterWeight; }
    double GetMultiplierFactor()  const { return m_multiplierFactor; }
    string GetVetoReason()        const { return m_vetoReason;       }
+   string GetLastDecisionReason() const { return m_lastDecisionReason; }
+   SignalAggregatorSnapshot GetSnapshot() const { return m_snapshot; }
+
+   string DescribeSources() const
+     {
+      string text = "";
+      for(int i = 0; i < m_sourceCount; i++)
+        {
+         if(text != "") text += ";";
+         text += StringFormat("%s:%s:%.2f", m_sources[i].GetName(), m_sources[i].GetTypeString(), m_sources[i].GetWeight());
+        }
+      return text;
+     }
   };
 
 #endif // __SIGNAL_AGGREGATOR_MQH__
