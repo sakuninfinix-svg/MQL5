@@ -8,14 +8,10 @@
 
 #include "../Data/RegimeTypes.mqh"
 
-//--- Feature dimensionality
-// 0..25  : price/volatility/momentum/volume/structure/session/stat features
-// 26..33 : rich pattern-regression features
 #ifndef AI_FEATURE_DIM
 #define AI_FEATURE_DIM 34
 #endif
 
-//--- Confidence threshold defaults
 #ifndef AI_DEFAULT_CONF_THRESHOLD
 #define AI_DEFAULT_CONF_THRESHOLD  0.55
 #endif
@@ -26,7 +22,6 @@
 #define AI_MAX_CONF_THRESHOLD      0.90
 #endif
 
-//--- Model type enumeration
 enum ENUM_AI_MODEL_TYPE
   {
    AI_MODEL_NONE       = 0,
@@ -36,7 +31,6 @@ enum ENUM_AI_MODEL_TYPE
    AI_MODEL_ONLINE     = 4
   };
 
-//--- Risk-aware AI decision class
 enum ENUM_AI_DECISION_CLASS
   {
    AI_DECISION_NO_TRADE    = 0,
@@ -46,7 +40,6 @@ enum ENUM_AI_DECISION_CLASS
    AI_DECISION_STRONG_SELL = -2
   };
 
-//--- Label quality class for future supervised/offline training
 enum ENUM_AI_LABEL_CLASS
   {
    AI_LABEL_INVALID       = 0,
@@ -57,7 +50,15 @@ enum ENUM_AI_LABEL_CLASS
    AI_LABEL_BAD_SELL      = 5
   };
 
-//--- Inference result from a single forward pass
+enum EActiveStrategy
+  {
+   ACTIVE_STRATEGY_NONE        = 0,
+   ACTIVE_STRATEGY_RULE_BASED  = 1,
+   ACTIVE_STRATEGY_AI_ASSISTED = 2,
+   ACTIVE_STRATEGY_AI_PRIMARY  = 3,
+   ACTIVE_STRATEGY_DEFENSIVE   = 4
+  };
+
 struct SAIInferenceResult
   {
    double   score;
@@ -84,25 +85,144 @@ struct SAIInferenceResult
       drift_score = 0.0;
       ArrayInitialize(raw_outputs, 0.0);
      }
+
+   void Reset() { Clear(); }
   };
 
-//--- Feature vector used across AI bridge/trainer/calibration
 struct SAIFeatureVector
   {
    double   features[AI_FEATURE_DIM];
    datetime timestamp;
+   datetime bar_time;
    string   symbol;
    ENUM_TIMEFRAMES timeframe;
    EMarketRegime regime;
+   bool     valid;
 
    void Clear()
      {
       ArrayInitialize(features, 0.0);
       timestamp = 0;
+      bar_time = 0;
       symbol = "";
       timeframe = PERIOD_CURRENT;
       regime = REGIME_UNKNOWN;
+      valid = false;
      }
+
+   void Reset() { Clear(); }
+  };
+
+struct SAITrainSample
+  {
+   double   features[AI_FEATURE_DIM];
+   double   label;
+   double   weight;
+   datetime timestamp;
+   string   symbol;
+   EMarketRegime regime;
+
+   void Clear()
+     {
+      ArrayInitialize(features, 0.0);
+      label = 0.0;
+      weight = 1.0;
+      timestamp = 0;
+      symbol = "";
+      regime = REGIME_UNKNOWN;
+     }
+
+   void Reset() { Clear(); }
+  };
+
+struct SAIEnsembleVote
+  {
+   double scores[];
+   double weights[];
+   int    n_models;
+   double final_score;
+   double agreement;
+
+   void Clear()
+     {
+      ArrayResize(scores, 0);
+      ArrayResize(weights, 0);
+      n_models = 0;
+      final_score = 0.0;
+      agreement = 0.0;
+     }
+
+   void Reset() { Clear(); }
+  };
+
+struct SAIModelPerf
+  {
+   int    samples;
+   int    correct;
+   double accuracy;
+   double avg_confidence;
+   double avg_drift;
+   datetime last_update;
+
+   void Clear()
+     {
+      samples = 0;
+      correct = 0;
+      accuracy = 0.0;
+      avg_confidence = 0.0;
+      avg_drift = 0.0;
+      last_update = 0;
+     }
+
+   void Reset() { Clear(); }
+
+   void Update(bool is_correct, double conf, double drift)
+     {
+      samples++;
+      if(is_correct) correct++;
+      accuracy = (samples > 0) ? (double)correct / (double)samples : 0.0;
+      avg_confidence = ((avg_confidence * (samples - 1)) + conf) / samples;
+      avg_drift = ((avg_drift * (samples - 1)) + drift) / samples;
+      last_update = TimeCurrent();
+     }
+  };
+
+struct SAIRiskDecision
+  {
+   bool   allow_trade;
+   double risk_multiplier;
+   double confidence;
+   string reason;
+
+   void Clear()
+     {
+      allow_trade = false;
+      risk_multiplier = 1.0;
+      confidence = 0.0;
+      reason = "";
+     }
+
+   void Reset() { Clear(); }
+  };
+
+struct SAITradeLabel
+  {
+   ENUM_AI_LABEL_CLASS label_class;
+   double label;
+   double reward;
+   bool   valid;
+   string reason;
+
+   void Clear()
+     {
+      label_class = AI_LABEL_INVALID;
+      label = 0.0;
+      reward = 0.0;
+      valid = false;
+      reason = "";
+     }
+
+   void Reset() { Clear(); }
   };
 
 #endif // __AI_TYPES_MQH__
