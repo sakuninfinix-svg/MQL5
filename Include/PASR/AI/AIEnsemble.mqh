@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| AI/AIEnsemble.mqh — v1.01                                        |
-//| copyright agsicentre                                             |
+//| AI/AIEnsemble.mqh — v1.02                                        |
+//| Compile-safe AI ensemble wrapper                                 |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ENSEMBLE_MQH__
@@ -10,7 +10,6 @@
 #include "AIInference.mqh"
 
 #define AI_ENSEMBLE_MAX_MODELS 4
-static const int AI_ENSEMBLE_SEEDS[AI_ENSEMBLE_MAX_MODELS] = {42, 137, 271, 919};
 
 class CAIEnsemble : public IManager
   {
@@ -20,17 +19,26 @@ private:
    int           m_n_models;
    bool          m_ready;
 
-   double ComputeAgreement(const double &scores[])
+   int SeedAt(int idx) const
+     {
+      if(idx == 0) return 42;
+      if(idx == 1) return 137;
+      if(idx == 2) return 271;
+      return 919;
+     }
+
+   double ComputeAgreement(double &scores[])
      {
       int n = ArraySize(scores);
       if(n <= 1) return 1.0;
-      int pos = 0, neg = 0;
+      int pos = 0;
+      int neg = 0;
       for(int i = 0; i < n; i++)
         {
          if(scores[i] > 0.0) pos++;
          else if(scores[i] < 0.0) neg++;
         }
-      return (double)MathMax(pos, neg) / n;
+      return (double)MathMax(pos, neg) / (double)n;
      }
 
    void ReleaseModels()
@@ -66,9 +74,10 @@ public:
 
       for(int i = 0; i < 2; i++)
         {
-         m_models[m_n_models] = new CAIInference(AI_ENSEMBLE_SEEDS[i]);
+         int seed = SeedAt(i);
+         m_models[m_n_models] = new CAIInference(seed);
          if(m_models[m_n_models] == NULL) return false;
-         m_models[m_n_models].SetModelId(StringFormat("mlp_v2_m%d_s%d", i, AI_ENSEMBLE_SEEDS[i]));
+         m_models[m_n_models].SetModelId(StringFormat("mlp_v2_m%d_s%d", i, seed));
          if(!m_models[m_n_models].Init(data, bus))
            {
             ReleaseModels();
@@ -80,8 +89,7 @@ public:
 
       NormalizeWeights();
       m_ready = true;
-      PrintFormat("CAIEnsemble: %d models ready (seeds: %d, %d)",
-                  m_n_models, AI_ENSEMBLE_SEEDS[0], AI_ENSEMBLE_SEEDS[1]);
+      PrintFormat("CAIEnsemble: %d models ready", m_n_models);
       return true;
      }
 
@@ -94,7 +102,7 @@ public:
    virtual void DeclareEvents() override {}
    virtual void OnEvent(const PASREvent &ev) override {}
 
-   bool Vote(const SAIFeatureVector &fv, SAIEnsembleVote &out)
+   bool Vote(SAIFeatureVector &fv, SAIEnsembleVote &out)
      {
       out.Reset();
       if(!m_ready || m_n_models == 0) return false;
@@ -103,7 +111,8 @@ public:
       ArrayResize(out.weights, m_n_models);
       out.n_models = m_n_models;
 
-      double weighted_sum = 0.0, weight_total = 0.0;
+      double weighted_sum = 0.0;
+      double weight_total = 0.0;
       for(int i = 0; i < m_n_models; i++)
         {
          double score = 0.0;
