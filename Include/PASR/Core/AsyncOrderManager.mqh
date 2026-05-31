@@ -89,7 +89,6 @@ public:
          Print("[AsyncOrderManager] Order queue full!");
          return 0;
         }
-
       ulong order_id = GetUniqueOrderId();
       SAsyncOrder order;
       order.Reset();
@@ -107,7 +106,6 @@ public:
      {
       if(m_active_count == 0) return;
       SAsyncOrder order = m_orders[m_queue_head];
-
       if(order.state == AOS_PENDING)
         {
          if(SendOrderAsync(order))
@@ -120,7 +118,6 @@ public:
         {
          order.state = AOS_SENT;
         }
-
       m_orders[m_queue_head] = order;
      }
 
@@ -163,16 +160,16 @@ private:
 
    bool SendOrderAsync(SAsyncOrder &order)
      {
-      if(m_executor == NULL) return false;
       MqlTradeResult result;
-      bool success = m_executor.ExecuteOrder(order.request, result);
-      if(success)
+      ZeroMemory(result);
+      bool success = OrderSend(order.request, result);
+      if(success && (result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_PLACED))
         {
          order.ticket = result.order;
          return true;
         }
       order.state = AOS_REJECTED;
-      order.error_message = "Execution failed: " + EnumToString((ENUM_TRADE_RETURN_CODE)result.retcode);
+      order.error_message = "Execution failed retcode=" + IntegerToString((int)result.retcode);
       return false;
      }
   };
