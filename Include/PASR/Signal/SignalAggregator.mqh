@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalAggregator.mqh — v1.03                              |
+//| Signal/SignalAggregator.mqh — v1.04                              |
 //| Signal aggregation with voting, veto, and multiplier logic       |
 //+------------------------------------------------------------------+
 #property strict
@@ -122,10 +122,11 @@ private:
       m_vetoReason       = "";
      }
 
-   bool ProcessVetoSource(CRegisteredSource &reg, SignalResult &result)
+   bool ProcessVetoSource(int idx, SignalResult &result)
      {
-      string name = (reg.GetSource() != NULL) ? reg.GetSource().Name() : "VETO";
-
+      if(idx < 0 || idx >= m_sourceCount) return true;
+      ISignalSource *src = m_sources[idx].GetSource();
+      string name = (src != NULL) ? src.Name() : "VETO";
       if(result.direction == SIGNAL_NONE)
         {
          m_vetoActive = true;
@@ -134,7 +135,6 @@ private:
             PrintFormat("[SignalAgg] VETO by %s: %s", name, result.reason);
          return false;
         }
-
       if(result.direction == SIGNAL_BUY)
         {
          m_vetoSell = true;
@@ -156,8 +156,6 @@ private:
          agg.time = TimeCurrent();
          agg.vetoed = true;
          m_vetoActive = true;
-         if(m_config != NULL && m_config.GetDebugMode())
-            PrintFormat("[SignalAgg] CONTRA-VETO BUY: %s", m_vetoReason);
         }
       else if(agg.direction == SIGNAL_SELL && m_vetoSell)
         {
@@ -165,43 +163,41 @@ private:
          agg.time = TimeCurrent();
          agg.vetoed = true;
          m_vetoActive = true;
-         if(m_config != NULL && m_config.GetDebugMode())
-            PrintFormat("[SignalAgg] CONTRA-VETO SELL: %s", m_vetoReason);
         }
      }
 
-   void ProcessMultiplierSource(CRegisteredSource &reg, SignalResult &result)
+   void ProcessMultiplierSource(int idx, SignalResult &result)
      {
       if(result.confidence > 0.0)
          m_multiplierFactor *= result.confidence;
-      if(m_config != NULL && m_config.GetDebugMode() && reg.GetSource() != NULL)
-         PrintFormat("[SignalAgg] MULT %s: x%.2f (%s)", reg.GetSource().Name(), result.confidence, result.reason);
+      ISignalSource *src = m_sources[idx].GetSource();
+      if(m_config != NULL && m_config.GetDebugMode() && src != NULL)
+         PrintFormat("[SignalAgg] MULT %s: x%.2f (%s)", src.Name(), result.confidence, result.reason);
      }
 
-   void ProcessVoterSource(CRegisteredSource &reg, SignalResult &result)
+   void ProcessVoterSource(int idx, SignalResult &result)
      {
-      if(reg.GetSource() == NULL) return;
-      double weight = reg.GetWeight();
+      ISignalSource *src = m_sources[idx].GetSource();
+      if(src == NULL) return;
+      double weight = m_sources[idx].GetWeight();
       m_totalVoterWeight += weight;
       if(result.direction == SIGNAL_BUY)
         {
          m_bullScore += result.confidence * weight;
          m_bullConfluence++;
-         m_bullSources += (m_bullSources == "" ? "" : ",") + reg.GetSource().Name();
+         m_bullSources += (m_bullSources == "" ? "" : ",") + src.Name();
         }
       else if(result.direction == SIGNAL_SELL)
         {
          m_bearScore += result.confidence * weight;
          m_bearConfluence++;
-         m_bearSources += (m_bearSources == "" ? "" : ",") + reg.GetSource().Name();
+         m_bearSources += (m_bearSources == "" ? "" : ",") + src.Name();
         }
      }
 
 public:
    CSignalAggregator() : m_sourceCount(0), m_config(NULL), m_vetoActive(false), m_vetoBuy(false), m_vetoSell(false)
-     {
-      ResetState();
-     }
+     { ResetState(); }
 
    void Init(const CSignalConfig &config)
      {
@@ -239,12 +235,12 @@ public:
 
       for(int i = 0; i < m_sourceCount; i++)
         {
-         CRegisteredSource &reg = m_sources[i];
-         if(reg.GetType() != SOURCE_TYPE_VETO) continue;
-         if(reg.GetSource() == NULL) continue;
+         if(m_sources[i].GetType() != SOURCE_TYPE_VETO) continue;
+         ISignalSource *src = m_sources[i].GetSource();
+         if(src == NULL) continue;
          SignalResult result; result.Clear();
-         if(!reg.GetSource().Evaluate(result)) continue;
-         if(!ProcessVetoSource(reg, result))
+         if(!src.Evaluate(result)) continue;
+         if(!ProcessVetoSource(i, result))
            {
             agg.vetoed = true;
             return agg;
@@ -253,32 +249,27 @@ public:
 
       for(int i = 0; i < m_sourceCount; i++)
         {
-         CRegisteredSource &reg = m_sources[i];
-         if(reg.GetType() != SOURCE_TYPE_MULT) continue;
-         if(reg.GetSource() == NULL) continue;
+         if(m_sources[i].GetType() != SOURCE_TYPE_MULT) continue;
+         ISignalSource *src = m_sources[i].GetSource();
+         if(src == NULL) continue;
          SignalResult result; result.Clear();
-         if(!reg.GetSource().Evaluate(result)) continue;
-         ProcessMultiplierSource(reg, result);
+         if(!src.Evaluate(result)) continue;
+         ProcessMultiplierSource(i, result);
         }
 
       for(int i = 0; i < m_sourceCount; i++)
         {
-         CRegisteredSource &reg = m_sources[i];
-         if(reg.GetType() != SOURCE_TYPE_VOTER) continue;
-         if(reg.GetSource() == NULL) continue;
+         if(m_sources[i].GetType() != SOURCE_TYPE_VOTER) continue;
+         ISignalSource *src = m_sources[i].GetSource();
+         if(src == NULL) continue;
          SignalResult result; result.Clear();
-         if(!reg.GetSource().Evaluate(result)) continue;
-         ProcessVoterSource(reg, result);
+         if(!src.Evaluate(result)) continue;
+         ProcessVoterSource(i, result);
         }
 
       if(m_totalVoterWeight <= 0.0) return agg;
-
       double normBull = (m_bullScore / m_totalVoterWeight) * m_multiplierFactor;
       double normBear = (m_bearScore / m_totalVoterWeight) * m_multiplierFactor;
-
-      if(m_config != NULL && m_config.GetDebugMode())
-         PrintFormat("[SignalAgg] Scores BUY=%.3f SELL=%.3f (x%.2f mult)", normBull, normBear, m_multiplierFactor);
-
       int    minConfluence = (m_config != NULL) ? m_config.GetMinConfluence() : 2;
       double minScore      = (m_config != NULL) ? m_config.GetMinScore()      : 0.45;
 
@@ -302,7 +293,6 @@ public:
          agg.contributingSources = m_bearSources;
          agg.urgency             = m_scorer.GetUrgencyLevel(normBear);
         }
-
       ApplyContraVeto(agg);
       return agg;
      }
