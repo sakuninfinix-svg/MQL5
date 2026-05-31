@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Central/ServiceLocator.mqh — v0.10                                |
+//| Central/ServiceLocator.mqh — v0.11                                |
 //| Typed lookup facade for central PASR services/managers             |
 //+------------------------------------------------------------------+
 #property strict
@@ -39,67 +39,67 @@ public:
 
    CDataManager* Data() const
      {
-      return (CDataManager*)Lookup("DataManager");
+      return (CDataManager*)Lookup(PASR_MOD_DATA_MANAGER);
      }
 
    CAnalysisSRManager* SR() const
      {
-      return (CAnalysisSRManager*)Lookup("SRManager");
+      return (CAnalysisSRManager*)Lookup(PASR_MOD_SR_MANAGER);
      }
 
    CAnalysisZoneManager* Zone() const
      {
-      return (CAnalysisZoneManager*)Lookup("ZoneManager");
+      return (CAnalysisZoneManager*)Lookup(PASR_MOD_ZONE_MANAGER);
      }
 
    CPatternManager* Pattern() const
      {
-      return (CPatternManager*)Lookup("PatternManager");
+      return (CPatternManager*)Lookup(PASR_MOD_PATTERN_MANAGER);
      }
 
    CSignalManager* Signal() const
      {
-      return (CSignalManager*)Lookup("SignalManager");
+      return (CSignalManager*)Lookup(PASR_MOD_SIGNAL_MANAGER);
      }
 
    CAIOrchestrator* AI() const
      {
-      return (CAIOrchestrator*)Lookup("AIOrchestrator");
+      return (CAIOrchestrator*)Lookup(PASR_MOD_AI_ORCHESTRATOR);
      }
 
    CRegimeFilter* RegimeFilter() const
      {
-      return (CRegimeFilter*)Lookup("RegimeFilter");
+      return (CRegimeFilter*)Lookup(PASR_MOD_REGIME_FILTER);
      }
 
    CRiskManager* Risk() const
      {
-      return (CRiskManager*)Lookup("RiskManager");
+      return (CRiskManager*)Lookup(PASR_MOD_RISK_MANAGER);
      }
 
    CExecutionManager* Execution() const
      {
-      return (CExecutionManager*)Lookup("ExecutionManager");
+      return (CExecutionManager*)Lookup(PASR_MOD_EXECUTION_MANAGER);
      }
 
    CExitEngine* Exit() const
      {
-      return (CExitEngine*)Lookup("ExitEngine");
+      return (CExitEngine*)Lookup(PASR_MOD_EXIT_ENGINE);
      }
 
    CRecoveryManager* Recovery() const
      {
-      return (CRecoveryManager*)Lookup("RecoveryManager");
+      return (CRecoveryManager*)Lookup(PASR_MOD_RECOVERY_MANAGER);
      }
 
    CJournalManager* Journal() const
      {
-      return (CJournalManager*)Lookup("JournalManager");
+      return (CJournalManager*)Lookup(PASR_MOD_JOURNAL_MANAGER);
      }
 
    CDashboardManager* Dashboard() const
      {
-      return (CDashboardManager*)Lookup("DashboardManager");
+      return (CDashboardManager*)Lookup(PASR_MOD_DASHBOARD_MANAGER);
      }
   };
 
