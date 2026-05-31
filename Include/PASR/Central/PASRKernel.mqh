@@ -1,12 +1,12 @@
 //+------------------------------------------------------------------+
-//| Central/PASRKernel.mqh — v0.11                                    |
+//| Central/PASRKernel.mqh — v0.12                                    |
 //| Compatibility facade for Centralized Modular Pipeline migration    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_CENTRAL_KERNEL_MQH__
 #define __PASR_CENTRAL_KERNEL_MQH__
 
-// v0.11 intentionally delegates to the existing COrchestrator backend.
+// v0.12 intentionally delegates to the existing COrchestrator backend.
 // This allows EAs to migrate from COrchestrator to CPASRKernel without
 // changing runtime behavior while responsibilities are extracted gradually.
 
@@ -175,19 +175,19 @@ public:
          return;
 
       // owned=false because the legacy orchestrator still owns these objects.
-      m_registry.Register("DataManager",      m_backend.GetDataManager(),      false);
-      m_registry.Register("SRManager",        m_backend.GetSRManager(),        false);
-      m_registry.Register("ZoneManager",      m_backend.GetZoneManager(),      false);
-      m_registry.Register("PatternManager",   m_backend.GetPatternManager(),   false);
-      m_registry.Register("SignalManager",    m_backend.GetSignalManager(),    false);
-      m_registry.Register("AIOrchestrator",   m_backend.GetAIOrchestrator(),   false);
-      m_registry.Register("RegimeFilter",     m_backend.GetRegimeFilter(),     false);
-      m_registry.Register("RiskManager",      m_backend.GetRiskManager(),      false);
-      m_registry.Register("ExecutionManager", m_backend.GetExecManager(),      false);
-      m_registry.Register("ExitEngine",       m_backend.GetExitEngine(),       false);
-      m_registry.Register("RecoveryManager",  m_backend.GetRecoveryManager(),  false);
-      m_registry.Register("JournalManager",   m_backend.GetJournalManager(),   false);
-      m_registry.Register("DashboardManager", m_backend.GetDashboard(),        false);
+      m_registry.Register(PASR_MOD_DATA_MANAGER,      m_backend.GetDataManager(),      false);
+      m_registry.Register(PASR_MOD_SR_MANAGER,        m_backend.GetSRManager(),        false);
+      m_registry.Register(PASR_MOD_ZONE_MANAGER,      m_backend.GetZoneManager(),      false);
+      m_registry.Register(PASR_MOD_PATTERN_MANAGER,   m_backend.GetPatternManager(),   false);
+      m_registry.Register(PASR_MOD_SIGNAL_MANAGER,    m_backend.GetSignalManager(),    false);
+      m_registry.Register(PASR_MOD_AI_ORCHESTRATOR,   m_backend.GetAIOrchestrator(),   false);
+      m_registry.Register(PASR_MOD_REGIME_FILTER,     m_backend.GetRegimeFilter(),     false);
+      m_registry.Register(PASR_MOD_RISK_MANAGER,      m_backend.GetRiskManager(),      false);
+      m_registry.Register(PASR_MOD_EXECUTION_MANAGER, m_backend.GetExecManager(),      false);
+      m_registry.Register(PASR_MOD_EXIT_ENGINE,       m_backend.GetExitEngine(),       false);
+      m_registry.Register(PASR_MOD_RECOVERY_MANAGER,  m_backend.GetRecoveryManager(),  false);
+      m_registry.Register(PASR_MOD_JOURNAL_MANAGER,   m_backend.GetJournalManager(),   false);
+      m_registry.Register(PASR_MOD_DASHBOARD_MANAGER, m_backend.GetDashboard(),        false);
      }
   };
 
