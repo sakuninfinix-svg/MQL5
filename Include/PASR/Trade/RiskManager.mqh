@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.11                                    |
+//| Trade/RiskManager.mqh — v2.12                                    |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -163,8 +163,9 @@ private:
    bool ReadConfig()
      {
       if(m_data == NULL) { Print("[Risk] ERROR: DataManager NULL"); return false; }
-      const StrategyConfig *cfg = m_data.GetConfig();
-      if(cfg == NULL) { Print("[Risk] ERROR: GetConfig() NULL"); return false; }
+      StrategyConfig cfg = m_data.GetConfig();
+      m_cfg = cfg;
+      m_cfgDirty = false;
       m_riskPct       = cfg.Risk.RiskPercent;
       m_dailyLossPct  = cfg.Risk.MaxDailyLossPct;
       m_maxDDPct      = cfg.Risk.MaxDrawdownPct;
@@ -224,7 +225,7 @@ public:
       m_lastResetDay = ServerDateMidnight();
       ClearAccountedPnL();
       SyncOpenTradesFromBroker();
-      PrintFormat("[Risk] v2.11 Init OK: risk=%.1f%% daily=%.1f%% maxDD=%.1f%% maxTrades=%d open=%d",
+      PrintFormat("[Risk] v2.12 Init OK: risk=%.1f%% daily=%.1f%% maxDD=%.1f%% maxTrades=%d open=%d",
                   m_riskPct, m_dailyLossPct, m_maxDDPct, m_maxOpenTrades, m_openTrades);
       return true;
      }
@@ -329,55 +330,46 @@ public:
 
    double CalcLot(double slPoints) const
      {
-      if(slPoints <= 0) return m_minLot;
-      double basis = MathMin(AccountBalance(), AccountEquity());
-      double riskAmount = basis * m_riskPct / 100.0;
+      if(slPoints <= 0.0) return m_minLot;
+      double riskMoney = AccountBalance() * (m_riskPct / 100.0);
       double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
       double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-      if(tickValue <= 0 || tickSize <= 0) return m_minLot;
-      double pointValue = tickValue / (tickSize / _Point);
-      if(pointValue <= 0) return m_minLot;
-      return NormaliseLot(riskAmount / (slPoints * pointValue));
+      if(tickValue <= 0.0 || tickSize <= 0.0) return m_minLot;
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      double valuePerPoint = tickValue * point / tickSize;
+      if(valuePerPoint <= 0.0) return m_minLot;
+      return NormaliseLot(riskMoney / (slPoints * valuePerPoint));
      }
 
    void OnTradeOpened()
-     { SyncOpenTradesFromBroker(); if(m_debugMode) PrintFormat("[Risk] Opened. Open=%d", m_openTrades); }
+     { SyncOpenTradesFromBroker(); }
 
-   void OnTradeClosed(double profit = 0)
+   void OnTradeClosed(double profit)
      {
       SyncOpenTradesFromBroker();
-      if(profit < 0) m_consecLoss++; else m_consecLoss = 0;
-      if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
-        { m_circuitBroken = true; PrintFormat("[Risk] CIRCUIT BREAKER: %d consec losses.", m_consecLoss); }
-      CheckDailyLossBreaker(m_dailyLoss + profit);
+      m_consecLoss = (profit < 0.0) ? m_consecLoss + 1 : 0;
      }
 
    void SyncOpenTradesFromBroker()
      {
-      int count = 0;
-      long magic = m_cfg.MagicNumber;
+      int cnt = 0;
       for(int i = PositionsTotal() - 1; i >= 0; i--)
         {
          ulong ticket = PositionGetTicket(i);
          if(ticket == 0) continue;
          if(!PositionSelectByTicket(ticket)) continue;
-         if(magic > 0 && PositionGetInteger(POSITION_MAGIC) != magic) continue;
-         count++;
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol) cnt++;
         }
-      m_openTrades = count;
+      m_openTrades = cnt;
      }
 
-   void ResetCircuit()  { m_circuitBroken = false; m_consecLoss = 0; Print("[Risk] Circuit reset."); }
-
-   bool   IsCircuitBroken() const { return m_circuitBroken; }
-   int    GetOpenTrades()   const { return m_openTrades; }
-   int    GetConsecLoss()   const { return m_consecLoss; }
-   double GetDailyLoss()    const { return m_dailyLoss; }
-   double GetDailyLossPct() const { return DailyLossPercent(m_dailyLoss); }
+   bool IsTradingAllowed() const { return !m_circuitBroken; }
+   int  GetOpenTrades() const { return m_openTrades; }
    double GetDrawdownPct() const
-     { return (m_peakEquity > 0) ? (1.0 - AccountEquity() / m_peakEquity) * 100.0 : 0; }
-   bool IsTradingAllowed() const { return !m_circuitBroken && Check(0).allowed; }
-   bool IsTradingAllowed(const string) const { return IsTradingAllowed(); }
+     {
+      if(m_peakEquity <= 0.0) return 0.0;
+      return MathMax(0.0, (1.0 - AccountEquity() / m_peakEquity) * 100.0);
+     }
   };
 
 #endif // __TRADE_RISK_MANAGER_MQH__
