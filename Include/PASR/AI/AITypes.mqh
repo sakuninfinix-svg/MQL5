@@ -52,11 +52,13 @@ enum ENUM_AI_LABEL_CLASS
 
 enum EActiveStrategy
   {
-   ACTIVE_STRATEGY_NONE        = 0,
-   ACTIVE_STRATEGY_RULE_BASED  = 1,
-   ACTIVE_STRATEGY_AI_ASSISTED = 2,
-   ACTIVE_STRATEGY_AI_PRIMARY  = 3,
-   ACTIVE_STRATEGY_DEFENSIVE   = 4
+   STRAT_NONE          = 0,
+   STRAT_TREND_FOLLOW  = 1,
+   STRAT_RANGE_TRADING = 2,
+   STRAT_MEAN_REVERT   = 3,
+   STRAT_BREAKOUT      = 4,
+   STRAT_SCALP_AI      = 5,
+   STRAT_CONSERVATIVE  = 6
   };
 
 struct SAIInferenceResult
@@ -189,16 +191,32 @@ struct SAIModelPerf
 
 struct SAIRiskDecision
   {
-   bool   allow_trade;
-   double risk_multiplier;
-   double confidence;
-   string reason;
+   bool                   allow_trade;
+   int                    direction;
+   ENUM_AI_DECISION_CLASS decisionClass;
+   double                 risk_multiplier;
+   double                 riskMultiplier;
+   double                 confidence;
+   double                 failureProbability;
+   double                 expectedR;
+   double                 noTradePenalty;
+   double                 recommendedSL_ATR;
+   double                 recommendedTP_ATR;
+   string                 reason;
 
    void Clear()
      {
       allow_trade = false;
+      direction = 0;
+      decisionClass = AI_DECISION_NO_TRADE;
       risk_multiplier = 1.0;
+      riskMultiplier = 1.0;
       confidence = 0.0;
+      failureProbability = 1.0;
+      expectedR = 0.0;
+      noTradePenalty = 0.0;
+      recommendedSL_ATR = 1.0;
+      recommendedTP_ATR = 2.0;
       reason = "";
      }
 
@@ -208,18 +226,30 @@ struct SAIRiskDecision
 struct SAITradeLabel
   {
    ENUM_AI_LABEL_CLASS label_class;
-   double label;
-   double reward;
-   bool   valid;
-   string reason;
+   ENUM_AI_LABEL_CLASS labelClass;
+   double   label;
+   double   reward;
+   bool     valid;
+   string   reason;
+   datetime timestamp;
+   int      direction;
+   double   realizedR;
+   bool     hitTPBeforeSL;
+   double   durationBars;
 
    void Clear()
      {
       label_class = AI_LABEL_INVALID;
+      labelClass = AI_LABEL_INVALID;
       label = 0.0;
       reward = 0.0;
       valid = false;
       reason = "";
+      timestamp = 0;
+      direction = 0;
+      realizedR = 0.0;
+      hitTPBeforeSL = false;
+      durationBars = 0.0;
      }
 
    void Reset() { Clear(); }
