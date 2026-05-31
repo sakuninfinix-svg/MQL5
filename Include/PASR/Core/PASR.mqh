@@ -101,6 +101,7 @@
 // Layer 9: Centralized Modular Pipeline facade
 // These files are included after the legacy orchestrator so CPASRKernel can
 // delegate to COrchestrator during the non-breaking migration phase.
+#include "../Central/ModuleNames.mqh"
 #include "../Central/ModuleRegistry.mqh"
 #include "../Central/ServiceLocator.mqh"
 #include "../Central/LifecycleManager.mqh"
