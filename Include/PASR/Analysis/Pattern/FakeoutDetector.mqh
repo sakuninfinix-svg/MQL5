@@ -1,7 +1,6 @@
 //+------------------------------------------------------------------+
 //| FakeoutDetector.mqh                                              |
 //| Copyright 2026, Agsicentre                                       |
-//| Advanced fakeout detection for false breakout identification     |
 //+------------------------------------------------------------------+
 #ifndef __FAKEOUT_DETECTOR_MQH__
 #define __FAKEOUT_DETECTOR_MQH__
@@ -9,7 +8,6 @@
 #property strict
 
 #include "CandleUtils.mqh"
-#include "../Data/RegimeTypes.mqh"
 
 //+------------------------------------------------------------------+
 //| Fakeout Detection Result                                         |
