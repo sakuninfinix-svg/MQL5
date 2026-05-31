@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/PerformanceReport.mqh — v1.01                              |
+//| Infra/PerformanceReport.mqh — v1.02                              |
 //| Generates self-contained HTML performance report from journal.   |
 //+------------------------------------------------------------------+
 #property strict
@@ -11,7 +11,7 @@
 class CPerformanceReport
   {
 private:
-   CJournalManager *m_journal;  // non-owning
+   CJournalManager *m_journal;
    string           m_filePrefix;
 
    string H(string tag, string cls, string content) const
@@ -24,7 +24,7 @@ private:
    string FmtCcy(double v) const           { return StringFormat("%.2f",   v); }
    string FmtInt(int v)    const           { return IntegerToString(v); }
 
-   string BuildEquitySVG(const double &daily[], int n) const
+   string BuildEquitySVG(double &daily[], int n) const
      {
       if(n <= 1) return "";
       int W=500, H2=80;
@@ -59,8 +59,8 @@ private:
       int n = m_journal.GetCount();
       for(int i=0;i<n;i++)
         {
-         const JournalEntry *e = m_journal.GetEntry(i);
-         if(e==NULL) continue;
+         JournalEntry e;
+         if(!m_journal.GetEntry(i, e)) continue;
          int b = (int)(e.aiScore * 10);
          if(b<0) b=0;
          if(b>9) b=9;
@@ -121,8 +121,8 @@ private:
       int n = MathMin(50, m_journal.GetCount());
       for(int i=0;i<n;i++)
         {
-         const JournalEntry *e = m_journal.GetEntry(i);
-         if(e==NULL) continue;
+         JournalEntry e;
+         if(!m_journal.GetEntry(i, e)) continue;
          string cls = e.isWin ? "win" : "loss";
          string dir = (e.direction==SIGNAL_BUY) ? "BUY" : (e.direction==SIGNAL_SELL ? "SELL" : "NONE");
          string flags = (e.beDone?"BE ":"") + (e.partialDone?"PC ":"") + (e.runnerActive?"RUN":"");
@@ -152,46 +152,26 @@ public:
       m_journal.GetDailyPnL(dailyPnL);
       string svgCurve = BuildEquitySVG(dailyPnL, JOURNAL_DAILY_SIZE);
 
-      string css = "*{box-sizing:border-box;margin:0;padding:0}"
-                   "body{background:#0f0f13;color:#d4d4d8;font:14px/1.6 'Consolas',monospace;padding:24px}"
-                   "h1{font-size:20px;color:#e4e4e7;margin-bottom:16px}"
-                   "h2{font-size:14px;color:#a1a1aa;text-transform:uppercase;letter-spacing:.08em;margin:28px 0 10px;border-bottom:1px solid #27272a;padding-bottom:4px}"
-                   ".kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}"
-                   ".kpi{background:#18181b;border:1px solid #27272a;border-radius:8px;padding:14px 16px}"
-                   ".kpi-label{font-size:11px;color:#71717a;margin-bottom:4px}"
-                   ".kpi-val{font-size:22px;font-weight:700;color:#e4e4e7}"
-                   ".green,.win{color:#4ade80}.red,.loss{color:#f87171}"
-                   ".equity-box{background:#18181b;border:1px solid #27272a;border-radius:8px;padding:14px;margin-bottom:8px}"
-                   "table{width:100%;border-collapse:collapse;margin-bottom:8px}"
-                   "th{background:#18181b;color:#71717a;font-size:11px;text-transform:uppercase;padding:8px 10px;text-align:left;border-bottom:1px solid #27272a}"
-                   "td{padding:7px 10px;border-bottom:1px solid #1e1e24;font-size:13px}"
-                   "tr.win td{background:#052e16;} tr.loss td{background:#2d0a0a}"
-                   ".hbar{display:flex;align-items:center;gap:8px;margin:3px 0}.hlabel{width:70px;font-size:11px;color:#71717a}.hfill{height:14px;background:#4f46e5;border-radius:2px;min-width:2px}.hval{font-size:11px;color:#a1a1aa}";
+      string html = "<html><head><meta charset='utf-8'><title>PASR Report</title></head><body>";
+      html += "<h1>PASR Performance Report</h1>";
+      html += "<h2>Overview</h2>";
+      html += "<p>Total trades: " + IntegerToString(overall.totalTrades) + "</p>";
+      html += "<p>Win rate: " + FmtPct(overall.winRate) + "</p>";
+      html += "<p>Total PnL: " + FmtCcy(overall.totalPnL) + "</p>";
+      html += "<h2>Equity</h2>" + svgCurve;
+      html += "<h2>AI Score Histogram</h2>" + BuildAIHistogram();
+      html += "<h2>By Regime</h2><table>" + BuildRegimeRows() + "</table>";
+      html += "<h2>By Session</h2><table>" + BuildSessionRows() + "</table>";
+      html += "<h2>Recent Trades</h2><table>" + BuildTradeRows() + "</table>";
+      html += "</body></html>";
 
-      MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
-      string ts = StringFormat("%04d-%02d-%02d %02d:%02d", dt.year,dt.mon,dt.day,dt.hour,dt.min);
-      string body = "";
-      body += "<h1>PASR EA — Performance Report <small style='font-size:13px;color:#71717a'>" + ts + "</small></h1>";
-      body += "<div class='kpis'>";
-      body += "<div class='kpi'><div class='kpi-label'>Win Rate</div><div class='kpi-val'>"+FmtPct(overall.winRate)+"</div></div>";
-      body += "<div class='kpi'><div class='kpi-label'>Profit Factor</div><div class='kpi-val'>"+StringFormat("%.2f",overall.profitFactor)+"</div></div>";
-      body += "<div class='kpi'><div class='kpi-label'>Avg RR</div><div class='kpi-val'>"+FmtRR(overall.avgRR)+"</div></div>";
-      body += "<div class='kpi'><div class='kpi-label'>Max DD</div><div class='kpi-val red'>"+FmtCcy(overall.maxDrawdown)+"</div></div>";
-      body += "<div class='kpi'><div class='kpi-label'>Total Trades</div><div class='kpi-val'>"+FmtInt(overall.totalTrades)+"</div></div>";
-      body += "<div class='kpi'><div class='kpi-label'>Net PnL</div><div class='kpi-val'>"+FmtCcy(overall.totalPnL)+"</div></div>";
-      body += "</div>";
-      body += "<h2>Equity Curve</h2><div class='equity-box'>"+svgCurve+"</div>";
-      body += "<h2>Regime Performance</h2><table><tr>"+TH("Regime")+TH("Trades")+TH("Win")+TH("Avg RR")+TH("PF")+TH("PnL")+"</tr>"+BuildRegimeRows()+"</table>";
-      body += "<h2>Session Performance</h2><table><tr>"+TH("Session")+TH("Trades")+TH("Win")+TH("Avg RR")+TH("Avg AI")+TH("PnL")+"</tr>"+BuildSessionRows()+"</table>";
-      body += "<h2>AI Score Distribution</h2>"+BuildAIHistogram();
-      body += "<h2>Last 50 Trades</h2><table><tr>"+TH("Open")+TH("Dir")+TH("Entry")+TH("Close")+TH("PnL")+TH("RR")+TH("AI")+TH("Flags")+"</tr>"+BuildTradeRows()+"</table>";
-
-      string html = "<!doctype html><html><head><meta charset='utf-8'><style>"+css+"</style></head><body>"+body+"</body></html>";
-      string fn = StringFormat("%s_%04d%02d%02d.html", m_filePrefix, dt.year, dt.mon, dt.day);
+      string fn = m_filePrefix + "_" + TimeToString(TimeCurrent(), TIME_DATE) + ".html";
+      StringReplace(fn, ".", "");
+      StringReplace(fn, ":", "");
       int h = FileOpen(fn, FILE_WRITE|FILE_TXT|FILE_COMMON|FILE_ANSI);
       if(h == INVALID_HANDLE)
         {
-         PrintFormat("[Report] FileOpen failed: %s err=%d", fn, GetLastError());
+         Print("[Report] Failed to open report file: ", GetLastError());
          return false;
         }
       FileWriteString(h, html);
