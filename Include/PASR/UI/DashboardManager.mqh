@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| UI/DashboardManager.mqh — v2.03                                  |
+//| UI/DashboardManager.mqh — v2.04                                  |
 //| Runtime dashboard manager.                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -38,6 +38,10 @@ private:
    datetime         m_lastUpdate;
    int              m_updateIntervalSec;
    string           m_prefix;
+   SSignal          m_lastSignal;
+   double           m_aiScore;
+   EMarketRegime    m_regime;
+   double           m_sessionDD;
 
    void PushSignal(DashContext &ctx, ENUM_SIGNAL_DIR dir, double confidence, int source)
      {
@@ -49,9 +53,11 @@ private:
 
 public:
    CDashboardManager()
-      : IManager(), m_journal(NULL), m_lastUpdate(0), m_updateIntervalSec(1), m_prefix("PASR")
+      : IManager(), m_journal(NULL), m_lastUpdate(0), m_updateIntervalSec(1), m_prefix("PASR"),
+        m_aiScore(0.0), m_regime(REGIME_UNKNOWN), m_sessionDD(0.0)
      {
       m_ctx.Clear();
+      m_lastSignal.Clear();
      }
 
    virtual string HandlerName() const override { return "DashboardManager"; }
@@ -91,6 +97,39 @@ public:
       Update(m_ctx);
      }
 
+   void OnTimer()
+     {
+      OnTimerEvent();
+     }
+
+   void OnChartEvent(const int id, const long lparam, const double dparam, const string sparam)
+     {
+      if(id == CHARTEVENT_OBJECT_CLICK)
+         m_ctx.status = "Chart click: " + sparam;
+     }
+
+   void SetPipelineSignal(SSignal &signal)
+     {
+      m_lastSignal = signal;
+      PushSignal(m_ctx, signal.direction, signal.confidence, 0);
+     }
+
+   void SetAIScore(double aiScore)
+     {
+      m_aiScore = aiScore;
+     }
+
+   void SetRegime(EMarketRegime regime)
+     {
+      m_regime = regime;
+     }
+
+   void SetSessionDD(double dd)
+     {
+      m_sessionDD = dd;
+      m_ctx.drawdownPct = dd;
+     }
+
    void SetJournal(CJournalManager *journal) { m_journal = journal; }
    void SetPrefix(string prefix) { if(prefix != "") m_prefix = prefix; }
    void SetUpdateInterval(int seconds) { m_updateIntervalSec = MathMax(1, seconds); }
@@ -106,14 +145,15 @@ public:
       ctx.openPositions = PositionsTotal();
 
       if(m_data != NULL)
-        {
          ctx.dailyPnL = m_data.GetDailyProfit();
-        }
 
       string text = m_prefix + " Dashboard\n";
       text += "Balance: " + DoubleToString(ctx.balance, 2) + "\n";
       text += "Equity : " + DoubleToString(ctx.equity, 2) + "\n";
       text += "Daily : " + DoubleToString(ctx.dailyPnL, 2) + "\n";
+      text += "DD    : " + DoubleToString(m_sessionDD, 2) + "%\n";
+      text += "AI    : " + DoubleToString(m_aiScore, 3) + "\n";
+      text += "Regime: " + MarketRegimeName(m_regime) + "\n";
       text += "Open  : " + IntegerToString(ctx.openPositions) + "\n";
       text += "State : " + ctx.status;
       Comment(text);
