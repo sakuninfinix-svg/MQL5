@@ -1,18 +1,17 @@
 //+------------------------------------------------------------------+
 //|  PASR_MODULAR.mq5                                                |
 //|  Expert Advisor: PASR (Price Action Support Resistance)          |
-//|  Version: 13.02 — canonical QA/EventBus cleanup                  |
+//|  Version: 1.02                  |
 //|  Refactored: Centralized includes, removed dual-core conflict    |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
-#property link        "https://github.com/sakuninfinix-svg/MQL5"
-#property version     "13.02"
+#property link        "https://agsicentre.wordpress.com"
+#property version     "1.02"
 #property description "PASR Model - Pure Pipeline Architecture (v13.02)"
 #property strict
 
 //--- Compilation Flags (controlled via master include)
-// BUG-008 FIX: Renamed QA_BUILD -> PASR_QA_BUILD to match #ifdef guards.
-#define PASR_QA_BUILD     // Enable stress testing & chaos engineering
+#define PASR_QA_BUILD
 
 //--- SINGLE MASTER INCLUDE - All dependencies managed centrally
 #include <PASR/Core/PASR.mqh>

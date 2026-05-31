@@ -17,6 +17,33 @@ logs/
 # Dependencies
 Include/PASR/_cache_/
 Include/PASR/*_cache/
+.continue/
+Files/
+Images/
+Indicators/
+Profiles/
+Scripts/
+Experts/Advisors/
+Experts/Examples/
+Experts/Free Robots/
+Include/Arrays/
+Include/Canvas/
+Include/ChartObjects/
+Include/Charts/
+Include/Controls/
+Include/Expert/
+Include/Generic/
+Include/Math/
+Include/Graphics/
+Include/OpenCL/
+Include/Strings/
+Include/Trade/
+Include/Tools/
+Include/WinAPI
+Include/MovingAverages.mqh
+Include/VirtualKeys.mqh
+Include/StdLibErr.mqh
+Include/Object.mqh
 
 # Editor/IDE files
 .vscode/
