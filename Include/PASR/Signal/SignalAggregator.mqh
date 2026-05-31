@@ -1,15 +1,16 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalAggregator.mqh — v1.02                              |
+//| Signal/SignalAggregator.mqh — v1.03                              |
 //| Signal aggregation with voting, veto, and multiplier logic       |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_AGGREGATOR_MQH__
 #define __SIGNAL_AGGREGATOR_MQH__
 
-#include <Arrays/ArrayObj.mqh>
 #include "ISignalSource.mqh"
 #include "SignalConfig.mqh"
 #include "SignalScorer.mqh"
+
+#define PASR_MAX_SIGNAL_SOURCES 32
 
 enum ENUM_SOURCE_TYPE
   {
@@ -52,7 +53,14 @@ private:
    ENUM_SOURCE_TYPE  m_type;
 
 public:
-   CRegisteredSource(ISignalSource *src, double weight)
+   CRegisteredSource()
+     {
+      m_source = NULL;
+      m_weight = 0.0;
+      m_type = SOURCE_TYPE_MULT;
+     }
+
+   void Init(ISignalSource *src, double weight)
      {
       m_source = src;
       m_weight = weight;
@@ -80,9 +88,10 @@ public:
 class CSignalAggregator
   {
 private:
-   CArrayObj              m_sources;
-   const CSignalConfig   *m_config;
-   CSignalScorer          m_scorer;
+   CRegisteredSource  m_sources[PASR_MAX_SIGNAL_SOURCES];
+   int                m_sourceCount;
+   const CSignalConfig *m_config;
+   CSignalScorer      m_scorer;
 
    double  m_totalVoterWeight;
    double  m_bullScore;
@@ -113,9 +122,9 @@ private:
       m_vetoReason       = "";
      }
 
-   bool ProcessVetoSource(CRegisteredSource *reg, const SignalResult &result)
+   bool ProcessVetoSource(CRegisteredSource &reg, SignalResult &result)
      {
-      string name = (reg != NULL && reg.GetSource() != NULL) ? reg.GetSource().Name() : "VETO";
+      string name = (reg.GetSource() != NULL) ? reg.GetSource().Name() : "VETO";
 
       if(result.direction == SIGNAL_NONE)
         {
@@ -161,16 +170,17 @@ private:
         }
      }
 
-   void ProcessMultiplierSource(CRegisteredSource *reg, const SignalResult &result)
+   void ProcessMultiplierSource(CRegisteredSource &reg, SignalResult &result)
      {
       if(result.confidence > 0.0)
          m_multiplierFactor *= result.confidence;
-      if(m_config != NULL && m_config.GetDebugMode())
+      if(m_config != NULL && m_config.GetDebugMode() && reg.GetSource() != NULL)
          PrintFormat("[SignalAgg] MULT %s: x%.2f (%s)", reg.GetSource().Name(), result.confidence, result.reason);
      }
 
-   void ProcessVoterSource(CRegisteredSource *reg, const SignalResult &result)
+   void ProcessVoterSource(CRegisteredSource &reg, SignalResult &result)
      {
+      if(reg.GetSource() == NULL) return;
       double weight = reg.GetWeight();
       m_totalVoterWeight += weight;
       if(result.direction == SIGNAL_BUY)
@@ -188,7 +198,10 @@ private:
      }
 
 public:
-   CSignalAggregator() : m_config(NULL), m_vetoActive(false), m_vetoBuy(false), m_vetoSell(false) { ResetState(); }
+   CSignalAggregator() : m_sourceCount(0), m_config(NULL), m_vetoActive(false), m_vetoBuy(false), m_vetoSell(false)
+     {
+      ResetState();
+     }
 
    void Init(const CSignalConfig &config)
      {
@@ -198,20 +211,24 @@ public:
 
    ~CSignalAggregator() { Clear(); }
 
-   void Clear() { m_sources.Clear(); ResetState(); }
+   void Clear()
+     {
+      m_sourceCount = 0;
+      ResetState();
+     }
 
    bool RegisterSource(ISignalSource *source, double weight = 1.0)
      {
       if(source == NULL) return false;
-      CRegisteredSource *reg = new CRegisteredSource(source, weight);
-      if(reg == NULL) return false;
-      m_sources.Add(reg);
+      if(m_sourceCount >= PASR_MAX_SIGNAL_SOURCES) return false;
+      m_sources[m_sourceCount].Init(source, weight);
       if(m_config != NULL && m_config.GetDebugMode())
-         PrintFormat("[SignalAgg] Registered: %s (w=%.1f %s)", source.Name(), weight, reg.GetTypeString());
+         PrintFormat("[SignalAgg] Registered: %s (w=%.1f %s)", source.Name(), weight, m_sources[m_sourceCount].GetTypeString());
+      m_sourceCount++;
       return true;
      }
 
-   int SourceCount() const { return m_sources.Total(); }
+   int SourceCount() const { return m_sourceCount; }
 
    AggregatedSignal Aggregate()
      {
@@ -220,15 +237,13 @@ public:
       agg.time = TimeCurrent();
       ResetState();
 
-      for(int i = 0; i < m_sources.Total(); i++)
+      for(int i = 0; i < m_sourceCount; i++)
         {
-         CRegisteredSource *reg = (CRegisteredSource*)m_sources.At(i);
-         if(reg == NULL || reg.GetType() != SOURCE_TYPE_VETO) continue;
+         CRegisteredSource &reg = m_sources[i];
+         if(reg.GetType() != SOURCE_TYPE_VETO) continue;
          if(reg.GetSource() == NULL) continue;
-
          SignalResult result; result.Clear();
          if(!reg.GetSource().Evaluate(result)) continue;
-
          if(!ProcessVetoSource(reg, result))
            {
             agg.vetoed = true;
@@ -236,23 +251,21 @@ public:
            }
         }
 
-      for(int i = 0; i < m_sources.Total(); i++)
+      for(int i = 0; i < m_sourceCount; i++)
         {
-         CRegisteredSource *reg = (CRegisteredSource*)m_sources.At(i);
-         if(reg == NULL || reg.GetType() != SOURCE_TYPE_MULT) continue;
+         CRegisteredSource &reg = m_sources[i];
+         if(reg.GetType() != SOURCE_TYPE_MULT) continue;
          if(reg.GetSource() == NULL) continue;
-
          SignalResult result; result.Clear();
          if(!reg.GetSource().Evaluate(result)) continue;
          ProcessMultiplierSource(reg, result);
         }
 
-      for(int i = 0; i < m_sources.Total(); i++)
+      for(int i = 0; i < m_sourceCount; i++)
         {
-         CRegisteredSource *reg = (CRegisteredSource*)m_sources.At(i);
-         if(reg == NULL || reg.GetType() != SOURCE_TYPE_VOTER) continue;
+         CRegisteredSource &reg = m_sources[i];
+         if(reg.GetType() != SOURCE_TYPE_VOTER) continue;
          if(reg.GetSource() == NULL) continue;
-
          SignalResult result; result.Clear();
          if(!reg.GetSource().Evaluate(result)) continue;
          ProcessVoterSource(reg, result);
