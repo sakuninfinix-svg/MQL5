@@ -8,6 +8,11 @@
 #include "../Core/IManager.mqh"
 #include "../Core/Globals.mqh"
 
+#define PASR_DATA_SCAVENGE_INTERVAL_SEC    300
+#define PASR_DATA_DASHBOARD_THROTTLE_SEC   1
+#define PASR_DATA_ATR_UPDATE_INTERVAL_SEC  300
+#define PASR_DATA_TICK_EVENT_THROTTLE_SEC  1
+
 class CDataManager : public IManager
   {
 private:
@@ -26,11 +31,6 @@ private:
    int       m_tickEventCount;
 
    string    m_todayStr;
-
-   static const int  SCAVENGE_INTERVAL_SEC    = 300;
-   static const int  DASHBOARD_THROTTLE_SEC   = 1;
-   static const int  ATR_UPDATE_INTERVAL_SEC  = 300;
-   static const int  TICK_EVENT_THROTTLE_SEC  = 1;
 
    double FloatingPnL() const
      {
@@ -83,9 +83,9 @@ public:
    virtual void OnTick()
      {
       datetime now = TimeCurrent();
-      if(now - m_lastATRUpdate > ATR_UPDATE_INTERVAL_SEC)
+      if(now - m_lastATRUpdate > PASR_DATA_ATR_UPDATE_INTERVAL_SEC)
         { UpdateATRCache(); m_lastATRUpdate = now; }
-      if(now - m_lastScavengeTime > SCAVENGE_INTERVAL_SEC)
+      if(now - m_lastScavengeTime > PASR_DATA_SCAVENGE_INTERVAL_SEC)
         { ScavengeOldGVs(); m_lastScavengeTime = now; }
       RefreshDailyProfit();
      }
@@ -107,8 +107,8 @@ public:
    void OnTrade(const MqlTradeTransaction &trans)
      { RefreshDailyProfit(); }
 
-   const StrategyConfig *GetConfig() const
-     { return &m_config; }
+   StrategyConfig GetConfig() const
+     { return m_config; }
 
    void GetConfigCache(StrategyConfig &out) const
      { out = m_config; }
@@ -136,7 +136,7 @@ public:
    bool ShouldUpdateDashboard()
      {
       datetime now = TimeCurrent();
-      if(now - m_lastDashboardUpdate >= DASHBOARD_THROTTLE_SEC)
+      if(now - m_lastDashboardUpdate >= PASR_DATA_DASHBOARD_THROTTLE_SEC)
         { m_lastDashboardUpdate = now; return true; }
       return false;
      }
@@ -151,7 +151,7 @@ public:
          if(StringFind(name, prefix) != 0) continue;
          datetime varTime = GlobalVariableTime(name);
          if(varTime > 0 && TimeCurrent() - varTime > 7*24*3600)
-            GlobalVariableDelete(name);
+            GlobalVariableDel(name);
         }
      }
 
