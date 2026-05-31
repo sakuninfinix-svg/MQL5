@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/TelemetryRecorder.mqh — v2.02                              |
+//| Infra/TelemetryRecorder.mqh — v2.03                              |
 //| Telemetry metrics recorder                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -11,6 +11,8 @@
 #include "../Core/Events.mqh"
 #include "../Core/Globals.mqh"
 
+#define PASR_TELEMETRY_MAX_BUFFER 100
+
 struct STelemetryMetric
   {
    datetime timestamp;
@@ -19,6 +21,16 @@ struct STelemetryMetric
    string   unit;
    ulong    stage_id;
    string   symbol;
+
+   void Clear()
+     {
+      timestamp = 0;
+      metric_name = "";
+      value = 0.0;
+      unit = "";
+      stage_id = 0;
+      symbol = "";
+     }
   };
 
 class CTelemetryRecorder : public IManager
@@ -30,8 +42,7 @@ private:
    bool              m_is_open;
    datetime          m_last_flush;
    int               m_records_pending;
-   static const int  MAX_BUFFER = 100;
-   STelemetryMetric  m_buffer[100];
+   STelemetryMetric  m_buffer[PASR_TELEMETRY_MAX_BUFFER];
    int               m_buffer_count;
    ulong             m_total_records;
    ulong             m_pipeline_ticks;
@@ -41,10 +52,10 @@ private:
 
 public:
    CTelemetryRecorder()
-      : IManager(), m_is_open(false), m_last_flush(0), m_records_pending(0),
+      : IManager(), m_base_path(""), m_current_file(""), m_file_handle(INVALID_HANDLE),
+        m_is_open(false), m_last_flush(0), m_records_pending(0),
         m_buffer_count(0), m_total_records(0), m_pipeline_ticks(0),
-        m_execution_lags(0), m_avg_latency(0.0), m_max_slippage(0.0),
-        m_file_handle(INVALID_HANDLE)
+        m_execution_lags(0), m_avg_latency(0.0), m_max_slippage(0.0)
      {}
 
    ~CTelemetryRecorder()
@@ -65,7 +76,7 @@ public:
       m_base_path = "PASR\\Telemetry\\";
       OpenNewFile();
       WriteHeader();
-      PASRLogInfo("Telemetry", "v2.02 Initialized — recording to: " + m_base_path);
+      PASRLogInfo("Telemetry", "v2.03 Initialized — recording to: " + m_base_path);
       return true;
      }
 
@@ -94,14 +105,15 @@ public:
    void RecordMetric(const string name, double value,
                      const string unit, ulong stage_id=0, const string symbol="")
      {
-      if(m_buffer_count >= MAX_BUFFER) Flush();
-      STelemetryMetric &m = m_buffer[m_buffer_count];
-      m.timestamp   = TimeCurrent();
-      m.metric_name = name;
-      m.value       = value;
-      m.unit        = unit;
-      m.stage_id    = stage_id;
-      m.symbol      = (symbol == "") ? _Symbol : symbol;
+      if(m_buffer_count >= PASR_TELEMETRY_MAX_BUFFER) Flush();
+      if(m_buffer_count < 0 || m_buffer_count >= PASR_TELEMETRY_MAX_BUFFER) return;
+
+      m_buffer[m_buffer_count].timestamp   = TimeCurrent();
+      m_buffer[m_buffer_count].metric_name = name;
+      m_buffer[m_buffer_count].value       = value;
+      m_buffer[m_buffer_count].unit        = unit;
+      m_buffer[m_buffer_count].stage_id    = stage_id;
+      m_buffer[m_buffer_count].symbol      = (symbol == "") ? _Symbol : symbol;
       m_buffer_count++;
       m_records_pending++;
       m_total_records++;
@@ -152,16 +164,16 @@ private:
       FileWrite(m_file_handle, "Timestamp", "MetricName", "Value", "Unit", "StageID", "Symbol");
      }
 
-   void WriteRecord(const STelemetryMetric &m)
+   void WriteRecord(const STelemetryMetric &metric)
      {
       if(!m_is_open) return;
       FileWrite(m_file_handle,
-                TimeToString(m.timestamp, TIME_DATE|TIME_SECONDS),
-                m.metric_name,
-                DoubleToString(m.value, 6),
-                m.unit,
-                IntegerToString((long)m.stage_id),
-                m.symbol);
+                TimeToString(metric.timestamp, TIME_DATE|TIME_SECONDS),
+                metric.metric_name,
+                DoubleToString(metric.value, 6),
+                metric.unit,
+                IntegerToString((long)metric.stage_id),
+                metric.symbol);
      }
 
    void RecordPipelineLatency(const PASREvent &event)
