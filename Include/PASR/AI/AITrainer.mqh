@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AITrainer.mqh — v1.03                                         |
+//| AI/AITrainer.mqh — v1.04                                         |
 //| Online / offline trainer for PASR AI models                      |
 //+------------------------------------------------------------------+
 #property strict
@@ -43,7 +43,8 @@ private:
    double ComputeLoss()
      {
       if(m_count == 0) return 0.0;
-      double loss = 0.0, total_w = 0.0;
+      double loss = 0.0;
+      double total_w = 0.0;
       for(int i = 0; i < m_count; i++)
         {
          int idx = PhysicalIndexFromOldest(i);
@@ -59,17 +60,15 @@ private:
       if(m_ensemble == NULL) return;
       int n_models = m_ensemble.GetModelCount();
       if(n_models == 0) return;
-
       int n = MathMin(MathMin(m_count, mini_batch), AI_TRAINER_BUFFER_SIZE);
       for(int offset = n - 1; offset >= 0; offset--)
         {
          int idx = PhysicalIndexFromNewest(offset);
          if(idx < 0) continue;
-         SAITrainSample samp = m_buffer[idx];
          for(int m = 0; m < n_models; m++)
            {
             CAIInference *model = m_ensemble.GetModel(m);
-            if(model != NULL) model.SGDUpdate(samp.features, samp.label, m_lr * samp.weight);
+            if(model != NULL) model.SGDUpdate(m_buffer[idx].features, m_buffer[idx].label, m_lr * m_buffer[idx].weight);
            }
         }
      }
@@ -80,7 +79,7 @@ public:
         m_retrain_pending(false), m_retrain_freq(AI_TRAINER_RETRAIN_FREQ),
         m_min_samples(AI_TRAINER_MIN_RETRAIN), m_lr(0.001), m_ensemble(NULL)
      {
-      for(int i=0; i<AI_TRAINER_BUFFER_SIZE; i++)
+      for(int i = 0; i < AI_TRAINER_BUFFER_SIZE; i++)
          m_buffer[i].Reset();
      }
 
@@ -102,7 +101,7 @@ public:
 
    void SetEnsemble(CAIEnsemble *ens) { m_ensemble = ens; }
 
-   void AddSample(const SAITrainSample &sample)
+   void AddSample(SAITrainSample &sample)
      {
       m_buffer[m_head] = sample;
       m_head = (m_head + 1) % AI_TRAINER_BUFFER_SIZE;
@@ -115,18 +114,19 @@ public:
      {
       if(m_count < m_min_samples) return false;
       if(m_since_retrain < m_retrain_freq) return false;
-
       double loss_before = ComputeLoss();
       int mini_batch = MathMin(m_since_retrain, 32);
       RunSGD(mini_batch);
       double loss_after = ComputeLoss();
-
       PrintFormat("CAITrainer: Retrain (samples=%d, mini_batch=%d, loss %.4f->%.4f, lr=%.5f)",
                   m_count, mini_batch, loss_before, loss_after, m_lr);
-
-      PASREvent ev(EVENT_ID_ADAPTIVE_UPDATE, 5, loss_after, loss_before, "AI_MODEL_RETRAINED");
+      PASREvent ev;
+      ev.id = EVENT_ID_ADAPTIVE_UPDATE;
+      ev.priority = 5;
+      ev.data1 = loss_after;
+      ev.data2 = loss_before;
+      ev.comment = "AI_MODEL_RETRAINED";
       QueueEvent(ev);
-
       m_since_retrain = 0;
       m_retrain_pending = false;
       return true;
@@ -137,7 +137,7 @@ public:
    bool IsRetrainPending() const { return m_retrain_pending; }
    void SetRetrainFreq(int freq) { m_retrain_freq = MathMax(10, freq); }
    void SetMinSamples(int n) { m_min_samples = MathMax(10, n); }
-   void SetLearningRate(double lr) { m_lr = MathMax(1e-6, lr); }
+   void SetLearningRate(double lr) { m_lr = MathMax(0.000001, lr); }
   };
 
 #endif // __AI_TRAINER_MQH__
