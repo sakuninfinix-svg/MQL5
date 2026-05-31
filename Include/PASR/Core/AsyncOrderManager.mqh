@@ -1,195 +1,180 @@
 //+------------------------------------------------------------------+
-//|                                 AsyncOrderManager.mqh            |
-//|                        Copyright 2024, PASR Architecture         |
-//|                           Non-blocking Order Execution Engine    |
+//| Core/AsyncOrderManager.mqh                                       |
 //+------------------------------------------------------------------+
-#property copyright "Copyright 2024, PASR Architecture"
-#property link      "https://pasr.quant"
-#property version   "1.00"
-#property description "Manages async order execution with zero blocking"
+#property strict
+#ifndef __CORE_ASYNC_ORDER_MANAGER_MQH__
+#define __CORE_ASYNC_ORDER_MANAGER_MQH__
 
 #include "LatencyOptimizer.mqh"
 #include "../Trade/ExecutionManager.mqh"
 
-//--- Async order states
 enum EAsyncOrderState
-{
-   AOS_PENDING,      // Waiting to be sent
-   AOS_SENDING,      // Currently being sent (non-blocking)
-   AOS_SENT,         // Sent, awaiting confirmation
-   AOS_CONFIRMED,    // Broker confirmed
-   AOS_FILLED,       // Order filled
-   AOS_REJECTED,     // Rejected by broker
-   AOS_CANCELLED     // Cancelled by user/system
-};
+  {
+   AOS_PENDING,
+   AOS_SENDING,
+   AOS_SENT,
+   AOS_CONFIRMED,
+   AOS_FILLED,
+   AOS_REJECTED,
+   AOS_CANCELLED
+  };
 
-//--- Async order context
 struct SAsyncOrder
-{
-   ulong order_id;
-   MqlTradeRequest request;
+  {
+   ulong            order_id;
+   ulong            ticket;
+   MqlTradeRequest  request;
    EAsyncOrderState state;
-   datetime timestamp_created;
-   datetime timestamp_sent;
-   datetime timestamp_confirmed;
-   int retry_count;
-   string error_message;
-};
+   datetime         timestamp_created;
+   datetime         timestamp_sent;
+   datetime         timestamp_confirmed;
+   int              retry_count;
+   string           error_message;
 
-//+------------------------------------------------------------------+
-//| Class CAsyncOrderManager                                         |
-//+------------------------------------------------------------------+
+   void Reset()
+     {
+      order_id = 0;
+      ticket = 0;
+      ZeroMemory(request);
+      state = AOS_PENDING;
+      timestamp_created = 0;
+      timestamp_sent = 0;
+      timestamp_confirmed = 0;
+      retry_count = 0;
+      error_message = "";
+     }
+  };
+
 class CAsyncOrderManager
-{
+  {
 private:
-   SAsyncOrder* m_orders;
-   int m_max_orders;
-   int m_active_count;
-   
-   CLatencyOptimizer* m_optimizer;
-   CExecutionManager* m_executor;
-   
-   // Ring buffer for order queue
-   int m_queue_head;
-   int m_queue_tail;
-   
+   SAsyncOrder       m_orders[];
+   int               m_max_orders;
+   int               m_active_count;
+   CLatencyOptimizer *m_optimizer;
+   CExecutionManager *m_executor;
+   int               m_queue_head;
+   int               m_queue_tail;
+
+   void ResetOrders()
+     {
+      for(int i = 0; i < ArraySize(m_orders); i++)
+         m_orders[i].Reset();
+     }
+
 public:
-   CAsyncOrderManager() : m_max_orders(50), m_active_count(0), m_queue_head(0), m_queue_tail(0)
-   {
-      m_orders = new SAsyncOrder[m_max_orders];
-      ZeroMemory(m_orders, m_max_orders * sizeof(SAsyncOrder));
-   }
-   
-   ~CAsyncOrderManager()
-   {
-      if(m_orders != NULL)
-         delete[] m_orders;
-   }
-   
-   bool Initialize(CLatencyOptimizer* optimizer, CExecutionManager* executor)
-   {
+   CAsyncOrderManager()
+      : m_max_orders(50), m_active_count(0), m_optimizer(NULL), m_executor(NULL),
+        m_queue_head(0), m_queue_tail(0)
+     {
+      ArrayResize(m_orders, m_max_orders);
+      ResetOrders();
+     }
+
+   bool Initialize(CLatencyOptimizer *optimizer, CExecutionManager *executor)
+     {
       if(optimizer == NULL || executor == NULL)
          return false;
-      
       m_optimizer = optimizer;
       m_executor = executor;
-      
-      m_optimizer->EnableAsyncMode();
-      
+      m_optimizer.EnableAsyncMode();
       Print("[AsyncOrderManager] Initialized for non-blocking execution");
       return true;
-   }
-   
-   // Queue order for async execution (returns immediately)
-   ulong QueueOrder(const MqlTradeRequest& request)
-   {
+     }
+
+   ulong QueueOrder(const MqlTradeRequest &request)
+     {
       if(m_active_count >= m_max_orders)
-      {
+        {
          Print("[AsyncOrderManager] Order queue full!");
          return 0;
-      }
-      
+        }
+
       ulong order_id = GetUniqueOrderId();
-      SAsyncOrder& order = m_orders[m_queue_tail];
-      
+      SAsyncOrder order;
+      order.Reset();
       order.order_id = order_id;
       order.request = request;
       order.state = AOS_PENDING;
       order.timestamp_created = TimeCurrent();
-      order.retry_count = 0;
-      order.error_message = "";
-      
-      // Move tail pointer
+      m_orders[m_queue_tail] = order;
       m_queue_tail = (m_queue_tail + 1) % m_max_orders;
       m_active_count++;
-      
       return order_id;
-   }
-   
-   // Process pending orders (call from OnTick or OnTimer)
+     }
+
    void ProcessQueue()
-   {
+     {
       if(m_active_count == 0) return;
-      
-      // Process head of queue
-      SAsyncOrder& order = m_orders[m_queue_head];
-      
+      SAsyncOrder order = m_orders[m_queue_head];
+
       if(order.state == AOS_PENDING)
-      {
-         // Send order non-blocking
+        {
          if(SendOrderAsync(order))
-         {
+           {
             order.state = AOS_SENDING;
             order.timestamp_sent = TimeCurrent();
-         }
-      }
+           }
+        }
       else if(order.state == AOS_SENDING)
-      {
-         // Check if sent (in real impl, check result from OrderSend)
-         // For now, assume instant send in async mode
+        {
          order.state = AOS_SENT;
-      }
-   }
-   
-   // Update order state from trade transaction
-   void OnTradeTransaction(const MqlTradeTransaction& trans)
-   {
-      // Find matching order and update state
+        }
+
+      m_orders[m_queue_head] = order;
+     }
+
+   void OnTradeTransaction(const MqlTradeTransaction &trans)
+     {
       for(int i = 0; i < m_max_orders; i++)
-      {
+        {
          if(m_orders[i].order_id == trans.order && m_orders[i].state == AOS_SENT)
-         {
-            if(trans.type == TRADE_TRANSACTION_ORDER_PLACED)
+           {
+            if(trans.type == TRADE_TRANSACTION_ORDER_ADD)
                m_orders[i].state = AOS_CONFIRMED;
             else if(trans.type == TRADE_TRANSACTION_DEAL_ADD)
                m_orders[i].state = AOS_FILLED;
-            else if(trans.type == TRADE_TRANSACTION_ORDER_CANCELED)
+            else if(trans.type == TRADE_TRANSACTION_ORDER_DELETE)
                m_orders[i].state = AOS_CANCELLED;
-            
             m_orders[i].timestamp_confirmed = TimeCurrent();
             break;
-         }
-      }
-   }
-   
-   // Get order status
+           }
+        }
+     }
+
    EAsyncOrderState GetOrderState(ulong order_id) const
-   {
+     {
       for(int i = 0; i < m_max_orders; i++)
-      {
+        {
          if(m_orders[i].order_id == order_id)
             return m_orders[i].state;
-      }
+        }
       return AOS_REJECTED;
-   }
-   
-   // Get active order count
+     }
+
    int GetActiveCount() const { return m_active_count; }
-   
+
 private:
    ulong GetUniqueOrderId()
-   {
+     {
       static ulong counter = 0;
       return ++counter;
-   }
-   
-   bool SendOrderAsync(SAsyncOrder& order)
-   {
+     }
+
+   bool SendOrderAsync(SAsyncOrder &order)
+     {
       if(m_executor == NULL) return false;
-      
-      // In real implementation, this would call OrderSend asynchronously
-      // For now, delegate to executor
       MqlTradeResult result;
-      bool success = m_executor->ExecuteOrder(order.request, result);
-      
+      bool success = m_executor.ExecuteOrder(order.request, result);
       if(success)
-      {
+        {
          order.ticket = result.order;
          return true;
-      }
-      
+        }
       order.state = AOS_REJECTED;
-      order.error_message = "Execution failed: " + EnumToString((ENUM_TRADE_RETURN_CODES)result.retcode);
+      order.error_message = "Execution failed: " + EnumToString((ENUM_TRADE_RETURN_CODE)result.retcode);
       return false;
-   }
-};
+     }
+  };
+
+#endif // __CORE_ASYNC_ORDER_MANAGER_MQH__
