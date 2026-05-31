@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalScorer.mqh — v1.01                                  |
+//| Signal/SignalScorer.mqh — v1.02                                  |
 //| Signal scoring and quality assessment component                  |
 //+------------------------------------------------------------------+
 #property strict
@@ -7,6 +7,7 @@
 #define __SIGNAL_SCORER_MQH__
 
 #include "../Data/SRStruct.mqh"
+#include "../Trade/TradePlan.mqh"
 #include "SignalConfig.mqh"
 
 enum ENUM_SIGNAL_QUALITY
@@ -14,13 +15,6 @@ enum ENUM_SIGNAL_QUALITY
    SIGNAL_QUALITY_HIGH   = 0,
    SIGNAL_QUALITY_MEDIUM = 1,
    SIGNAL_QUALITY_LOW    = 2
-  };
-
-enum ENUM_SIGNAL_URGENCY
-  {
-   SIGNAL_URGENCY_HIGH   = 0,
-   SIGNAL_URGENCY_MEDIUM = 1,
-   SIGNAL_URGENCY_LOW    = 2
   };
 
 struct ScoredSignal
@@ -127,43 +121,6 @@ public:
      {
       if(m_config == NULL) return true;
       return score >= m_config.GetMinScore();
-     }
-
-   bool PassesMinConfluence(int confluence) const
-     {
-      if(m_config == NULL) return true;
-      return confluence >= m_config.GetMinConfluence();
-     }
-
-   ScoredSignal BuildScoredSignal(ENUM_SIGNAL_DIR direction,
-                                  double rawScore,
-                                  double totalWeight,
-                                  double multiplierFactor,
-                                  int confluenceCount,
-                                  const string &sources)
-     {
-      ScoredSignal sig;
-      sig.Clear();
-      sig.direction = direction;
-      sig.rawScore = rawScore;
-      sig.normalizedScore = NormalizeScore(rawScore, totalWeight);
-      sig.normalizedScore = ApplyMultiplier(sig.normalizedScore, multiplierFactor);
-      sig.confidence = sig.normalizedScore;
-      sig.confluence = confluenceCount;
-      sig.contributingSources = sources;
-      sig.time = TimeCurrent();
-      sig.quality = GetQualityTier(sig.normalizedScore * 100.0);
-      sig.urgency = GetUrgencyLevel(sig.normalizedScore);
-      return sig;
-     }
-
-   bool IsValidSignal(const ScoredSignal &sig) const
-     {
-      if(sig.direction == SIGNAL_NONE) return false;
-      if(!PassesMinScore(sig.normalizedScore)) return false;
-      if(!PassesMinConfluence(sig.confluence)) return false;
-      if(sig.urgency == SIGNAL_URGENCY_LOW) return false;
-      return true;
      }
   };
 
