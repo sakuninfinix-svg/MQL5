@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/SanityManager.mqh — v2.01                                  |
+//| Infra/SanityManager.mqh — v2.02                                  |
 //| Runtime tick sanity and circuit breaker                          |
 //+------------------------------------------------------------------+
 #property strict
@@ -40,17 +40,16 @@ private:
 public:
    CSanityManager() : IManager()
      {
-      m_state              = CIRCUIT_CLOSED;
+      m_state = CIRCUIT_CLOSED;
       m_consecutive_errors = 0;
-      m_last_tick_time     = 0;
-      m_trip_time          = 0;
-      m_last_bid           = 0.0;
-
-      m_config.max_stale_sec      = 30;
-      m_config.max_spread_points  = 20;
-      m_config.max_price_gap_pct  = 0.5;
-      m_config.trip_threshold     = 3;
-      m_config.reset_timeout_sec  = 60;
+      m_last_tick_time = 0;
+      m_trip_time = 0;
+      m_last_bid = 0.0;
+      m_config.max_stale_sec = 30;
+      m_config.max_spread_points = 20;
+      m_config.max_price_gap_pct = 0.5;
+      m_config.trip_threshold = 3;
+      m_config.reset_timeout_sec = 60;
      }
 
    virtual string HandlerName() const override { return "SanityManager"; }
@@ -61,8 +60,7 @@ public:
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
-      if(m_bus != NULL) m_bus.Subscribe(this);
-      PASRLogInfo(StringFormat("[SANITY] v2.01 — trip=%d reset=%ds stale=%ds",
+      PASRLogInfo("SANITY", StringFormat("v2.02 — trip=%d reset=%ds stale=%ds",
                               m_config.trip_threshold,
                               m_config.reset_timeout_sec,
                               m_config.max_stale_sec));
@@ -74,22 +72,22 @@ public:
       if(event.id == EVENT_ID_SYSTEM_INFO && StringFind(event.comment, "CIRCUIT_RESET") >= 0)
         {
          ResetCircuit();
-         PASRLogInfo("[SANITY] External circuit reset received.");
+         PASRLogInfo("SANITY", "External circuit reset received.");
         }
      }
 
-   bool Configure(const SSanityConfig &cfg)
+   bool Configure(SSanityConfig &cfg)
      { m_config = cfg; return true; }
 
-   bool ValidateTick(const MqlTick &tick)
+   bool ValidateTick(MqlTick &tick)
      {
       if(m_state == CIRCUIT_OPEN)
         {
          if(!TryResetBreaker()) return false;
         }
 
-      bool  is_valid = true;
-      string reason  = "";
+      bool is_valid = true;
+      string reason = "";
 
       if(!CheckFreshness(tick.time))
         { reason = "STALE_DATA"; is_valid = false; }
@@ -131,7 +129,7 @@ private:
       datetime elapsed = TimeCurrent() - tick_time;
       if(elapsed > m_config.max_stale_sec)
         {
-         PASRLogWarn(StringFormat("[SANITY] Stale tick: %ds old", (int)elapsed));
+         PASRLogWarn("SANITY", StringFormat("Stale tick: %ds old", (int)elapsed));
          return false;
         }
       return true;
@@ -160,25 +158,25 @@ private:
         { m_state = CIRCUIT_CLOSED; NotifyStateChange("CLOSED"); }
      }
 
-   void OnFailure(const string &reason)
+   void OnFailure(string reason)
      {
       m_consecutive_errors++;
-      string msg = StringFormat("[SANITY] reason=%s errors=%d/%d",
+      string msg = StringFormat("reason=%s errors=%d/%d",
                                 reason, m_consecutive_errors, m_config.trip_threshold);
       SendEvt(EVENT_ID_SYSTEM_WARNING, msg);
       if(m_consecutive_errors >= m_config.trip_threshold)
          TripBreaker(reason);
      }
 
-   void TripBreaker(const string &reason)
+   void TripBreaker(string reason)
      {
       if(m_state == CIRCUIT_OPEN) return;
-      m_state     = CIRCUIT_OPEN;
+      m_state = CIRCUIT_OPEN;
       m_trip_time = TimeCurrent();
-      string msg  = StringFormat("[CIRCUIT TRIPPED] %s — pausing %ds",
-                                 reason, m_config.reset_timeout_sec);
+      string msg = StringFormat("[CIRCUIT TRIPPED] %s — pausing %ds",
+                                reason, m_config.reset_timeout_sec);
       SendEvt(EVENT_ID_SYSTEM_CRITICAL, msg);
-      PASRLogError("*** " + msg);
+      PASRLogError("SANITY", msg);
      }
 
    bool TryResetBreaker()
@@ -189,20 +187,20 @@ private:
       return false;
      }
 
-   void NotifyStateChange(const string &state_name)
+   void NotifyStateChange(string state_name)
      {
-      string msg = "[SANITY] Circuit → " + state_name;
+      string msg = "Circuit -> " + state_name;
       SendEvt(EVENT_ID_SYSTEM_INFO, msg);
-      PASRLogInfo(msg);
+      PASRLogInfo("SANITY", msg);
      }
 
-   void SendEvt(ENUM_EVENT_ID id, const string &msg)
+   void SendEvt(ENUM_EVENT_ID id, string msg)
      {
       if(m_bus == NULL) return;
       PASREvent evt;
-      evt.id       = id;
+      evt.id = id;
       evt.priority = 50;
-      evt.comment  = msg;
+      evt.comment = msg;
       m_bus.Push(evt);
      }
   };
