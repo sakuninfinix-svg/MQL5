@@ -1,30 +1,78 @@
 //+------------------------------------------------------------------+
-//| Central/PASRKernel.mqh — v0.12                                    |
+//| Central/PASRKernel.mqh — v0.20                                   |
 //| Compatibility facade for Centralized Modular Pipeline migration    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_CENTRAL_KERNEL_MQH__
 #define __PASR_CENTRAL_KERNEL_MQH__
 
-// v0.12 intentionally delegates to the existing COrchestrator backend.
-// This allows EAs to migrate from COrchestrator to CPASRKernel without
-// changing runtime behavior while responsibilities are extracted gradually.
+// v0.20 still delegates runtime to COrchestrator, but adds central
+// readiness checks and service validation so later phases can extract
+// ownership gradually without changing the EA entrypoint.
+
+enum ENUM_PASR_KERNEL_STATE
+  {
+   PASR_KERNEL_STOPPED = 0,
+   PASR_KERNEL_STARTING = 1,
+   PASR_KERNEL_READY = 2,
+   PASR_KERNEL_FAILED = 3,
+   PASR_KERNEL_SHUTTING_DOWN = 4
+  };
 
 class CPASRKernel
   {
 private:
-   COrchestrator     *m_backend;
-   CModuleRegistry    m_registry;
-   CServiceLocator    m_services;
-   CLifecycleManager  m_lifecycle;
-   StrategyConfig     m_cfg;
-   bool               m_ready;
-   bool               m_debug;
-   bool               m_profiling_enabled;
+   COrchestrator          *m_backend;
+   CModuleRegistry         m_registry;
+   CServiceLocator         m_services;
+   CLifecycleManager       m_lifecycle;
+   StrategyConfig          m_cfg;
+   ENUM_PASR_KERNEL_STATE  m_state;
+   bool                    m_ready;
+   bool                    m_debug;
+   bool                    m_profiling_enabled;
+   string                  m_last_error;
+
+   void SetState(ENUM_PASR_KERNEL_STATE state, const string message = "")
+     {
+      m_state = state;
+      if(message != "") m_last_error = message;
+      if(m_debug)
+         PrintFormat("[PASRKernel] state=%d %s", (int)m_state, message);
+     }
+
+   bool RequireService(const string name)
+     {
+      if(!m_registry.Contains(name))
+        {
+         m_last_error = "Missing service: " + name;
+         Print("[PASRKernel] ", m_last_error);
+         return false;
+        }
+      return true;
+     }
+
+   bool ValidateBackendServices()
+     {
+      if(m_backend == NULL)
+        {
+         m_last_error = "Backend is NULL";
+         return false;
+        }
+
+      bool ok = true;
+      ok = RequireService(PASR_MOD_DATA_MANAGER)      && ok;
+      ok = RequireService(PASR_MOD_SIGNAL_MANAGER)    && ok;
+      ok = RequireService(PASR_MOD_RISK_MANAGER)      && ok;
+      ok = RequireService(PASR_MOD_EXECUTION_MANAGER) && ok;
+      ok = RequireService(PASR_MOD_EXIT_ENGINE)       && ok;
+      return ok;
+     }
 
 public:
    CPASRKernel()
-      : m_backend(NULL), m_ready(false), m_debug(false), m_profiling_enabled(true)
+      : m_backend(NULL), m_state(PASR_KERNEL_STOPPED), m_ready(false),
+        m_debug(false), m_profiling_enabled(true), m_last_error("")
      {
       m_services.Bind(&m_registry);
      }
@@ -66,10 +114,14 @@ public:
       if(m_ready)
          return INIT_SUCCEEDED;
 
+      SetState(PASR_KERNEL_STARTING);
       m_cfg = cfg;
+      m_last_error = "";
+
       m_backend = new COrchestrator();
       if(m_backend == NULL)
         {
+         SetState(PASR_KERNEL_FAILED, "Backend orchestrator allocation failed");
          Print("[PASRKernel] Backend orchestrator allocation failed");
          return INIT_FAILED;
         }
@@ -79,6 +131,7 @@ public:
       int rc = m_backend.Init(m_cfg);
       if(rc != INIT_SUCCEEDED)
         {
+         SetState(PASR_KERNEL_FAILED, "Backend orchestrator init failed");
          Print("[PASRKernel] Backend orchestrator init failed");
          delete m_backend;
          m_backend = NULL;
@@ -86,13 +139,25 @@ public:
         }
 
       BindBackendServices();
+      if(!ValidateBackendServices())
+        {
+         SetState(PASR_KERNEL_FAILED, m_last_error);
+         Shutdown(REASON_INITFAILED);
+         return INIT_FAILED;
+        }
+
       m_ready = true;
+      SetState(PASR_KERNEL_READY);
+      if(m_debug) m_registry.PrintSummary();
       Print("[PASRKernel] Centralized Modular Pipeline facade initialized");
       return INIT_SUCCEEDED;
      }
 
    void Shutdown(const int reason)
      {
+      if(m_state == PASR_KERNEL_SHUTTING_DOWN) return;
+      SetState(PASR_KERNEL_SHUTTING_DOWN);
+
       if(m_backend != NULL)
         {
          m_backend.OnDeinit(reason);
@@ -101,17 +166,18 @@ public:
         }
       m_registry.Clear(false);
       m_ready = false;
+      SetState(PASR_KERNEL_STOPPED);
      }
 
    void OnTick()
      {
-      if(m_backend != NULL)
+      if(m_ready && m_backend != NULL)
          m_backend.OnTick();
      }
 
    void OnTimer()
      {
-      if(m_backend != NULL)
+      if(m_ready && m_backend != NULL)
          m_backend.OnTimer();
      }
 
@@ -124,13 +190,23 @@ public:
                            const MqlTradeRequest &request,
                            const MqlTradeResult &result)
      {
-      if(m_backend != NULL)
+      if(m_ready && m_backend != NULL)
          m_backend.OnTradeTransaction(trans, request, result);
      }
 
    bool IsReady() const
      {
       return m_ready;
+     }
+
+   ENUM_PASR_KERNEL_STATE State() const
+     {
+      return m_state;
+     }
+
+   string LastError() const
+     {
+      return m_last_error;
      }
 
    COrchestrator* Backend() const
@@ -175,19 +251,19 @@ public:
          return;
 
       // owned=false because the legacy orchestrator still owns these objects.
-      m_registry.Register(PASR_MOD_DATA_MANAGER,      m_backend.GetDataManager(),      false);
-      m_registry.Register(PASR_MOD_SR_MANAGER,        m_backend.GetSRManager(),        false);
-      m_registry.Register(PASR_MOD_ZONE_MANAGER,      m_backend.GetZoneManager(),      false);
-      m_registry.Register(PASR_MOD_PATTERN_MANAGER,   m_backend.GetPatternManager(),   false);
-      m_registry.Register(PASR_MOD_SIGNAL_MANAGER,    m_backend.GetSignalManager(),    false);
-      m_registry.Register(PASR_MOD_AI_ORCHESTRATOR,   m_backend.GetAIOrchestrator(),   false);
-      m_registry.Register(PASR_MOD_REGIME_FILTER,     m_backend.GetRegimeFilter(),     false);
-      m_registry.Register(PASR_MOD_RISK_MANAGER,      m_backend.GetRiskManager(),      false);
-      m_registry.Register(PASR_MOD_EXECUTION_MANAGER, m_backend.GetExecManager(),      false);
-      m_registry.Register(PASR_MOD_EXIT_ENGINE,       m_backend.GetExitEngine(),       false);
-      m_registry.Register(PASR_MOD_RECOVERY_MANAGER,  m_backend.GetRecoveryManager(),  false);
-      m_registry.Register(PASR_MOD_JOURNAL_MANAGER,   m_backend.GetJournalManager(),   false);
-      m_registry.Register(PASR_MOD_DASHBOARD_MANAGER, m_backend.GetDashboard(),        false);
+      m_registry.RegisterOrReplace(PASR_MOD_DATA_MANAGER,      m_backend.GetDataManager(),      false);
+      m_registry.RegisterOrReplace(PASR_MOD_SR_MANAGER,        m_backend.GetSRManager(),        false);
+      m_registry.RegisterOrReplace(PASR_MOD_ZONE_MANAGER,      m_backend.GetZoneManager(),      false);
+      m_registry.RegisterOrReplace(PASR_MOD_PATTERN_MANAGER,   m_backend.GetPatternManager(),   false);
+      m_registry.RegisterOrReplace(PASR_MOD_SIGNAL_MANAGER,    m_backend.GetSignalManager(),    false);
+      m_registry.RegisterOrReplace(PASR_MOD_AI_ORCHESTRATOR,   m_backend.GetAIOrchestrator(),   false);
+      m_registry.RegisterOrReplace(PASR_MOD_REGIME_FILTER,     m_backend.GetRegimeFilter(),     false);
+      m_registry.RegisterOrReplace(PASR_MOD_RISK_MANAGER,      m_backend.GetRiskManager(),      false);
+      m_registry.RegisterOrReplace(PASR_MOD_EXECUTION_MANAGER, m_backend.GetExecManager(),      false);
+      m_registry.RegisterOrReplace(PASR_MOD_EXIT_ENGINE,       m_backend.GetExitEngine(),       false);
+      m_registry.RegisterOrReplace(PASR_MOD_RECOVERY_MANAGER,  m_backend.GetRecoveryManager(),  false);
+      m_registry.RegisterOrReplace(PASR_MOD_JOURNAL_MANAGER,   m_backend.GetJournalManager(),   false);
+      m_registry.RegisterOrReplace(PASR_MOD_DASHBOARD_MANAGER, m_backend.GetDashboard(),        false);
      }
   };
 
