@@ -1,14 +1,15 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalFilterPipeline.mqh — v1.04                         |
+//| Signal/SignalFilterPipeline.mqh — v1.05                         |
 //| Modular filter pipeline for signal validation                    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_FILTER_PIPELINE_MQH__
 #define __SIGNAL_FILTER_PIPELINE_MQH__
 
-#include <Arrays\ArrayObj.mqh>
 #include "../Data/SRStruct.mqh"
 #include "SignalConfig.mqh"
+
+#define PASR_MAX_CUSTOM_FILTERS 32
 
 struct FilterResult
   {
@@ -23,11 +24,11 @@ struct FilterResult
       filterName = "";
      }
 
-   void Reject(const string &filter, const string &msg)
+   void Reject(const string filter, const string msg)
      {
       passed     = false;
       filterName = filter;
-      this.reason = msg;
+      reason     = msg;
      }
   };
 
@@ -43,16 +44,28 @@ class CSignalFilterPipeline
   {
 private:
    const CSignalConfig *m_config;
-   CArrayObj            m_customFilters;
+   IFilter             *m_customFilters[PASR_MAX_CUSTOM_FILTERS];
+   int                  m_customFilterCount;
    string               m_currentFilterReason;
 
    bool HasRateIndex(const MqlRates &rates[], int index) const
      { return (index >= 0 && index < ArraySize(rates)); }
 
 public:
-   CSignalFilterPipeline() : m_config(NULL), m_currentFilterReason("") {}
+   CSignalFilterPipeline() : m_config(NULL), m_customFilterCount(0), m_currentFilterReason("")
+     {
+      for(int i=0; i<PASR_MAX_CUSTOM_FILTERS; i++) m_customFilters[i] = NULL;
+     }
+
    void Init(const CSignalConfig &config) { m_config = &config; }
-   void AddCustomFilter(IFilter *filter) { if(filter != NULL) m_customFilters.Add(filter); }
+
+   void AddCustomFilter(IFilter *filter)
+     {
+      if(filter == NULL) return;
+      if(m_customFilterCount >= PASR_MAX_CUSTOM_FILTERS) return;
+      m_customFilters[m_customFilterCount++] = filter;
+     }
+
    string GetCurrentReason() const { return m_currentFilterReason; }
 
    bool PassZoneTouchFilter(int shift, int dir, double zonePrice,
@@ -62,7 +75,6 @@ public:
       m_currentFilterReason = "";
       if(m_config == NULL) { result.Reject("ZoneTouch","Config not initialized"); return false; }
       if(!HasRateIndex(rates, shift)) { result.Reject("ZoneTouch","Insufficient candle data"); return false; }
-
       double extreme   = (dir == 1) ? rates[shift].low : rates[shift].high;
       double zoneWidth = (atrPoints * dynamicMult) * _Point;
       double mult      = (m_config.GetEntryMode() == MODE_SAFE) ? 0.5 : 1.0;
@@ -89,19 +101,16 @@ public:
          m_currentFilterReason = "Insufficient candle data";
          return false;
         }
-
       double o = rates[shift].open, h = rates[shift].high;
       double l = rates[shift].low, c = rates[shift].close;
       double range = h - l;
       double body = MathAbs(o - c);
-
       if(range > m_config.GetMaxSignalATR() * atrPoints * _Point)
         {
          result.Reject("Context","Signal too large");
          m_currentFilterReason = "Signal too large";
          return false;
         }
-
       bool rejectionClose = (dir == 1) ? (c > o) : (c < o);
       if(range > 0 && (body / range) > m_config.GetAntiBreakoutPct() && !rejectionClose)
         {
@@ -109,7 +118,6 @@ public:
          m_currentFilterReason = "Breakout candle: large body without rejection close";
          return false;
         }
-
       double threshold = atrPoints * m_config.GetMomentumThresholdATR() * _Point;
       int pushCount = 0;
       for(int i = 1; i <= 3; i++)
@@ -126,7 +134,6 @@ public:
                        : (curL > prevL || (curC > curO && curBody > threshold));
          if(isPush) pushCount++; else break;
         }
-
       if(pushCount < 1)
         {
          result.Reject("Context","No momentum push to zone");
@@ -176,7 +183,6 @@ public:
          result.reason = "No opposite zone; opportunity neutral";
          return true;
         }
-
       double target = oppositeZone;
       double profitDist = (dir == 1) ? (target - signalPrice) : (signalPrice - target);
       double slDist = MathAbs(signalPrice - zonePrice);
@@ -238,9 +244,9 @@ public:
    bool RunCustomFilters(int shift, const MqlRates &rates[], double atrPoints,
                          ENUM_SIGNAL_DIR dir, FilterResult &result)
      {
-      for(int i = 0; i < m_customFilters.Total(); i++)
+      for(int i = 0; i < m_customFilterCount; i++)
         {
-         IFilter *filter = (IFilter*)m_customFilters.At(i);
+         IFilter *filter = m_customFilters[i];
          if(filter != NULL && !filter.Apply(shift, rates, atrPoints, dir, result)) return false;
         }
       result.passed = true;
