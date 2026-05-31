@@ -3,7 +3,6 @@
 //| Centralized Modular PASR Expert Advisor                          |
 //+------------------------------------------------------------------+
 #property strict
-
 #include <PASR/Core/PASR.mqh>
 
 input bool InpDebugMode = true;
