@@ -1,14 +1,14 @@
 //+------------------------------------------------------------------+
-//| Central/PASRKernel.mqh — v0.20                                   |
+//| Central/PASRKernel.mqh — v0.21                                   |
 //| Compatibility facade for Centralized Modular Pipeline migration    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_CENTRAL_KERNEL_MQH__
 #define __PASR_CENTRAL_KERNEL_MQH__
 
-// v0.20 still delegates runtime to COrchestrator, but adds central
-// readiness checks and service validation so later phases can extract
-// ownership gradually without changing the EA entrypoint.
+// v0.21 still delegates runtime to COrchestrator, but binds more backend
+// services into the central registry so Phase 2 modules can resolve them
+// through CServiceLocator without taking ownership yet.
 
 enum ENUM_PASR_KERNEL_STATE
   {
@@ -264,6 +264,15 @@ public:
       m_registry.RegisterOrReplace(PASR_MOD_RECOVERY_MANAGER,  m_backend.GetRecoveryManager(),  false);
       m_registry.RegisterOrReplace(PASR_MOD_JOURNAL_MANAGER,   m_backend.GetJournalManager(),   false);
       m_registry.RegisterOrReplace(PASR_MOD_DASHBOARD_MANAGER, m_backend.GetDashboard(),        false);
+
+      // Phase 2 optional infra services. Literal names are used to avoid
+      // changing public ModuleNames macros during the compatibility phase.
+      m_registry.RegisterOrReplace("SanityManager",            m_backend.GetSanityManager(),    false);
+      m_registry.RegisterOrReplace("TelemetryRecorder",        m_backend.GetTelemetry(),        false);
+      m_registry.RegisterOrReplace("AdaptiveParameterManager", m_backend.GetAdaptiveManager(),  false);
+      m_registry.RegisterOrReplace("HealthMonitor",            m_backend.GetHealthMonitor(),    false);
+      m_registry.RegisterOrReplace("SnapshotManager",          m_backend.GetSnapshotManager(),  false);
+      m_registry.RegisterOrReplace("SessionState",             m_backend.GetSessionState(),     false);
      }
   };
 
