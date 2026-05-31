@@ -1,6 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AISignalSource.mqh — v1.02                                    |
-//| copyright agsicentre                                             |
+//| AI/AISignalSource.mqh — v1.03                                    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_SIGNAL_SOURCE_MQH__
@@ -49,11 +48,12 @@ public:
          return false;
         }
 
-      out.direction  = (result.direction > 0) ? SIGNAL_BUY
-                     : (result.direction < 0) ? SIGNAL_SELL
-                     : SIGNAL_NONE;
+      if(result.direction > 0) out.direction = SIGNAL_BUY;
+      else if(result.direction < 0) out.direction = SIGNAL_SELL;
+      else out.direction = SIGNAL_NONE;
+
       out.confidence = result.confidence;
-      out.reason     = StringFormat("%s score=%.3f drift=%.3f", m_name, result.score, result.drift_score);
+      out.reason = StringFormat("%s score=%.3f drift=%.3f", m_name, result.score, result.drift_score);
       return (out.direction != SIGNAL_NONE && out.confidence > 0.0);
      }
 
@@ -61,6 +61,10 @@ public:
    CAIOrchestrator* GetOrchestrator() { return m_ai; }
   };
 
-typedef CAISignalSource AISignalSource;
+class AISignalSource : public CAISignalSource
+  {
+public:
+   AISignalSource(CAIOrchestrator *ai) : CAISignalSource(ai) {}
+  };
 
 #endif // __AI_SIGNAL_SOURCE_MQH__
