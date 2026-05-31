@@ -58,21 +58,22 @@ Data → Analysis → Signal → AI → Risk → Execution → Journal
 
 ## Migrasi bertahap
 
-### Fase 1 — Non-breaking foundation
+### Fase 1 — Non-breaking foundation ✅
 
 - Tambahkan folder `Central/`.
 - Tambahkan `CPASRKernel` sebagai facade baru.
 - Tambahkan `CModuleRegistry` untuk daftar module.
 - Tambahkan `CServiceLocator` untuk lookup manager.
 - Tambahkan `CLifecycleManager` untuk init/deinit seragam.
-- Belum mengubah `Core/PASR.mqh`.
+- `Core/PASR.mqh` sudah menyertakan layer `Central/` setelah backend legacy.
 
-### Fase 2 — Adapter ke orchestrator lama
+### Fase 2 — Adapter ke orchestrator lama ✅
 
 - `CPASRKernel` menjalankan `COrchestrator` lama sebagai backend.
-- EA boleh mulai memakai `CPASRKernel`, tapi behavior tetap sama.
+- `Experts/PASR_MODULAR.mq5` sudah memakai `CPASRKernel g_kernel` sebagai entry point.
+- Runtime behavior masih didelegasikan ke orchestrator lama agar migrasi tetap aman.
 
-### Fase 3 — Extract responsibilities
+### Fase 3 — Extract responsibilities ⏳
 
 Pindahkan bertahap dari `Core/Orchestrator.mqh`:
 
@@ -81,11 +82,11 @@ Pindahkan bertahap dari `Core/Orchestrator.mqh`:
 - dependency access → `CServiceLocator`,
 - pipeline ownership → `CPASRKernel`.
 
-### Fase 4 — Split pipeline stages
+### Fase 4 — Split pipeline stages ⏳
 
 Pecah `CPipelineEngine` menjadi stage file kecil di `Orchestration/Stages/`.
 
-### Fase 5 — Clean master include
+### Fase 5 — Clean master include ⏳
 
 `Core/PASR.mqh` tetap menjadi master include, tetapi layer include menjadi:
 
@@ -104,4 +105,6 @@ Compatibility adapters
 
 ## Status
 
-Fase 1 dimulai sebagai migrasi aman. File di folder ini sengaja dibuat ringan agar tidak mengganggu compile lama sampai include resmi diaktifkan.
+Fase 1 dan Fase 2 sudah selesai secara struktural. Sistem sekarang memakai `CPASRKernel` sebagai facade pusat, tetapi manager allocation dan pipeline execution masih berada di backend `COrchestrator` lama.
+
+Langkah berikutnya adalah mengekstrak allocation dan lifecycle manager dari `Core/OrchestratorInit.mqh` ke `Central/` secara bertahap.
