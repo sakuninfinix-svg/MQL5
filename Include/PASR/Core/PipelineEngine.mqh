@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v2.03                                  |
-//| AI-primary pipeline with rule-based fallback/context stages       |
+//| Core/PipelineEngine.mqh — v2.10                                  |
+//| AI-primary pipeline with declarative stage registry               |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_PIPELINE_ENGINE_MQH__
@@ -9,6 +9,7 @@
 #include <PASR/Core/PipelineTypes.mqh>
 #include <PASR/Core/Config/Types.mqh>
 #include <PASR/Core/Globals.mqh>
+#include <PASR/Orchestration/PipelineStageRegistry.mqh>
 #include <PASR/Analysis/SRZoneStore.mqh>
 #include <PASR/Analysis/SRManager.mqh>
 #include <PASR/Analysis/ZoneManager.mqh>
@@ -30,7 +31,6 @@
 
 #ifdef __CORE_PASR_MASTER_MQH__
 #else
-  // Provide minimal forward declarations when not using master include
   class CDataManager;
   class CAnalysisSRManager;
   class CAnalysisZoneManager;
@@ -84,6 +84,7 @@ private:
    bool   m_debug_mode;
    bool   m_profiling_enabled;
    CPerfTimer m_stage_timer;
+   CPipelineStageRegistry m_stage_registry;
 
    ENUM_STAGE_RESULT SkipIfNull(const void *ptr, const string stageName)
      {
@@ -192,7 +193,6 @@ private:
       if(SkipIfNull(m_pattern, "PatternRec") == STAGE_SKIP) return STAGE_SKIP;
       if(!ctx.new_bar) return STAGE_SKIP;
       m_stage_timer.Start();
-      // PatternManager updates on new-bar events via the event bus.
       if(m_profiling_enabled) m_stage_timer.Log("Stage4_PatternRec");
       return STAGE_OK;
      }
@@ -450,6 +450,53 @@ private:
       return STAGE_OK;
      }
 
+   ENUM_STAGE_RESULT ExecuteStageById(const ENUM_PIPELINE_STAGE_ID id, PipelineContext &ctx)
+     {
+      switch(id)
+        {
+         case PIPE_STAGE_DATA_SYNC:       return Stage_DataSync(ctx);
+         case PIPE_STAGE_ANALYSIS_SR:     return Stage_AnalysisSR(ctx);
+         case PIPE_STAGE_ANALYSIS_ZONE:   return Stage_AnalysisZone(ctx);
+         case PIPE_STAGE_PATTERN_REC:     return Stage_PatternRec(ctx);
+         case PIPE_STAGE_REGIME_DET:      return Stage_RegimeDet(ctx);
+         case PIPE_STAGE_SIGNAL_GEN:      return Stage_SignalGen(ctx);
+         case PIPE_STAGE_AI_INFER:        return Stage_AIInfer(ctx);
+         case PIPE_STAGE_RISK_CHECK:      return Stage_RiskCheck(ctx);
+         case PIPE_STAGE_ADAPTIVE_PARAMS: return Stage_AdaptiveParams(ctx);
+         case PIPE_STAGE_EXECUTION:       return Stage_Execution(ctx);
+         case PIPE_STAGE_POSITION_MGMT:   return Stage_PosMgmt(ctx);
+         case PIPE_STAGE_RECOVERY:        return Stage_Recovery(ctx);
+         case PIPE_STAGE_DASHBOARD:       return Stage_Dashboard(ctx);
+         case PIPE_STAGE_JOURNAL:         return Stage_Journal(ctx);
+         default:                         return STAGE_SKIP;
+        }
+     }
+
+   ENUM_STAGE_RESULT RunRegisteredStages(PipelineContext &ctx)
+     {
+      ENUM_STAGE_RESULT r = STAGE_OK;
+      int total = m_stage_registry.Count();
+      for(int i = 0; i < total; i++)
+        {
+         ENUM_PIPELINE_STAGE_ID id = m_stage_registry.IdAt(i);
+         if(!m_stage_registry.IsEnabled(id))
+           {
+            m_stage_registry.Record(id, STAGE_SKIP);
+            continue;
+           }
+
+         r = ExecuteStageById(id, ctx);
+         m_stage_registry.Record(id, r);
+
+         if(r == STAGE_ABORT)
+           {
+            ctx.exit_reason = STAGE_ABORT;
+            return STAGE_ABORT;
+           }
+        }
+      return STAGE_OK;
+     }
+
 public:
    CPipelineEngine()
       : m_data(NULL), m_sr(NULL), m_zone(NULL), m_pattern(NULL), m_signal(NULL),
@@ -458,9 +505,16 @@ public:
         m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL), m_regime_det(NULL),
         m_optimizer(NULL), m_async_orders(NULL), m_health(NULL), m_snapshot(NULL),
         m_debug_mode(false), m_profiling_enabled(true)
-     {}
+     {
+      m_stage_registry.RegisterDefaultStages();
+     }
 
-   void SetDebugMode(bool on) { m_debug_mode = on; }
+   void SetDebugMode(bool on)
+     {
+      m_debug_mode = on;
+      m_stage_registry.SetDebugMode(on);
+     }
+
    void EnableProfiling(bool on) { m_profiling_enabled = on; }
 
    void InjectManagers(CDataManager *data, CAnalysisSRManager *sr, CAnalysisZoneManager *zone,
@@ -479,37 +533,56 @@ public:
       m_sanity=sanity; m_telemetry=telemetry; m_adaptive=adaptive;
       m_regime_det=regime_det; m_optimizer=optimizer; m_async_orders=async_orders;
       m_health=health; m_snapshot=snapshot;
+      if(m_stage_registry.Count() == 0)
+         m_stage_registry.RegisterDefaultStages();
+     }
+
+   bool EnableStage(ENUM_PIPELINE_STAGE_ID id, bool enabled)
+     {
+      return m_stage_registry.SetEnabled(id, enabled);
+     }
+
+   int StageCount() const
+     {
+      return m_stage_registry.Count();
+     }
+
+   string StageNameAt(int index) const
+     {
+      return m_stage_registry.NameAt(index);
+     }
+
+   void PrintStageSummary() const
+     {
+      m_stage_registry.PrintSummary();
      }
 
    ENUM_STAGE_RESULT ExecutePipeline(PipelineContext &ctx)
      {
-      ENUM_STAGE_RESULT r;
+      if(m_stage_registry.Count() == 0)
+         m_stage_registry.RegisterDefaultStages();
+
       if(ctx.health_status < 0)
         {
          ctx.exit_reason = STAGE_ABORT;
          ctx.exit_message = "Health gate: critical status";
          return STAGE_ABORT;
         }
+
       if(ctx.session_dd > 0.0 && ctx.max_session_dd > 0.0 && ctx.session_dd >= ctx.max_session_dd)
         {
-         Stage_Dashboard(ctx);
-         Stage_Journal(ctx);
+         ENUM_STAGE_RESULT rd = Stage_Dashboard(ctx);
+         m_stage_registry.Record(PIPE_STAGE_DASHBOARD, rd);
+         ENUM_STAGE_RESULT rj = Stage_Journal(ctx);
+         m_stage_registry.Record(PIPE_STAGE_JOURNAL, rj);
+         ctx.exit_reason = STAGE_SKIP;
          return STAGE_SKIP;
         }
-      if((r=Stage_DataSync(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_AnalysisSR(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_AnalysisZone(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_PatternRec(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_RegimeDet(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_SignalGen(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_AIInfer(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_RiskCheck(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_AdaptiveParams(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_Execution(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_PosMgmt(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_Recovery(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_Dashboard(ctx))==STAGE_ABORT) return r;
-      if((r=Stage_Journal(ctx))==STAGE_ABORT) return r;
+
+      ENUM_STAGE_RESULT result = RunRegisteredStages(ctx);
+      if(result == STAGE_ABORT)
+         return result;
+
       ctx.exit_reason = STAGE_OK;
       return STAGE_OK;
      }
