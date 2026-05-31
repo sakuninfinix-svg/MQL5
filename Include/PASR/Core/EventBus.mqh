@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/EventBus.mqh — v3.08                                       |
+//| Core/EventBus.mqh - v3.09                                       |
 //| High-performance event dispatch with fixed binary-heap queue     |
 //+------------------------------------------------------------------+
 #property strict
@@ -15,7 +15,7 @@ class IEventHandler
   {
 public:
    virtual void      OnEvent(const PASREvent &ev) = 0;
-   virtual string    HandlerName() const           = 0;
+   virtual string    HandlerName() const = 0;
    virtual bool      IsListening(ENUM_EVENT_ID id) const { return true; }
   };
 
@@ -45,10 +45,10 @@ private:
          int parent = i / 2;
          if(m_heap[parent].priority > m_heap[i].priority)
            {
-            PASREvent tmp  = m_heap[parent];
+            PASREvent tmp = m_heap[parent];
             m_heap[parent] = m_heap[i];
-            m_heap[i]      = tmp;
-            i              = parent;
+            m_heap[i] = tmp;
+            i = parent;
            }
          else break;
         }
@@ -64,10 +64,10 @@ private:
          if(r <= m_size && m_heap[r].priority < m_heap[smallest].priority) smallest = r;
          if(smallest != i)
            {
-            PASREvent tmp     = m_heap[smallest];
-            m_heap[smallest]  = m_heap[i];
-            m_heap[i]         = tmp;
-            i                 = smallest;
+            PASREvent tmp = m_heap[smallest];
+            m_heap[smallest] = m_heap[i];
+            m_heap[i] = tmp;
+            i = smallest;
            }
          else break;
         }
@@ -161,8 +161,8 @@ public:
    bool Pop(PASREvent &out)
      {
       if(m_size == 0) return false;
-      out        = m_heap[1];
-      m_heap[1]  = m_heap[m_size];
+      out = m_heap[1];
+      m_heap[1] = m_heap[m_size];
       m_size--;
       if(m_size > 0) SiftDown(1);
       m_stats.queue_depth = m_size;
@@ -201,17 +201,21 @@ public:
       return true;
      }
 
-   int  Depth()    const { return m_size; }
+   int  Depth() const { return m_size; }
    int  SubCount() const { return m_sub_count; }
-   bool IsEmpty()  const { return m_size == 0; }
-   void Clear()          { m_size = 0; m_stats.queue_depth = 0; }
+   bool IsEmpty() const { return m_size == 0; }
+   void Clear() { m_size = 0; m_stats.queue_depth = 0; }
 
-   const SEventBusStats *GetStats() const { return &m_stats; }
+   void GetStats(SEventBusStats &out) const { out = m_stats; }
+   SEventBusStats Stats() const { return m_stats; }
+
    void ResetStats()
      {
-      m_stats.total_pushed = m_stats.total_dropped = m_stats.total_drained = 0;
+      m_stats.total_pushed = 0;
+      m_stats.total_dropped = 0;
+      m_stats.total_drained = 0;
       m_stats.total_immediate = 0;
-      m_stats.peak_depth   = m_size;
+      m_stats.peak_depth = m_size;
      }
   };
 

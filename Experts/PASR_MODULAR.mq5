@@ -1,8 +1,7 @@
 //+------------------------------------------------------------------+
 //|  PASR_MODULAR.mq5                                                |
 //|  Expert Advisor: PASR (Price Action Support Resistance)          |
-//|  Version: 1.02                  |
-//|  Refactored: Centralized includes, removed dual-core conflict    |
+//|  Version: 1.02                                                   |
 //+------------------------------------------------------------------+
 #property copyright   "PASR EA © 2026"
 #property link        "https://agsicentre.wordpress.com"
@@ -134,12 +133,12 @@ sinput bool    InpJournalEnabled  = true;    // Enable CSV journal
 sinput bool    InpDebugLog        = false;   // Verbose debug logging
 
 //+------------------------------------------------------------------+
-//|  MODULE INSTANCES — PURE ORCHESTRATOR PIPELINE                   |
+//|  MODULE INSTANCES — CENTRALIZED MODULAR PIPELINE                 |
 //+------------------------------------------------------------------+
-COrchestrator        g_orch;             // Main pipeline coordinator
+CPASRKernel         g_kernel;           // Centralized facade + legacy backend adapter
 
 #ifdef PASR_QA_BUILD
-CQAStressTest        g_qa;               // Chaos engineering external QA tool
+CQAStressTest       g_qa;               // Chaos engineering external QA tool
 #endif
 
 struct SEAState
@@ -208,7 +207,7 @@ void QATestEventPoolExhaustion()
   {
    Print("[PASR][QA] Testing EventBus saturation fallback...");
 
-   CEventBus *bus = g_orch.GetEventBus();
+   CEventBus *bus = g_kernel.GetEventBus();
    if(bus == NULL)
      {
       Print("[PASR][QA] EventBus unavailable");
@@ -233,7 +232,7 @@ void QATestEventPoolExhaustion()
 
 void QATestCircuitBreaker(ENUM_RISK_CB_TYPE cb_type)
   {
-   CRiskManager *risk = g_orch.GetRiskManager();
+   CRiskManager *risk = g_kernel.GetRiskManager();
    if(risk == NULL)
      {
       Print("[PASR][QA] RiskManager unavailable");
@@ -267,7 +266,7 @@ void QATestCircuitBreaker(ENUM_RISK_CB_TYPE cb_type)
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   Print("[PASR] v13.02 Pure Pipeline Architecture booting...");
+   Print("[PASR] v13.03 Centralized Modular Pipeline booting...");
 
 #ifdef PASR_QA_BUILD
    if(InpEnableChaos)
@@ -297,16 +296,15 @@ int OnInit()
    cfg.Pattern.EnablePatterns = InpUsePatterns;
    cfg.Display.ShowDashboard = InpShowDash;
 
-   int result = g_orch.Init(cfg);
+   g_kernel.SetDebugMode(InpDebugLog);
+   g_kernel.SetProfilingEnabled(true);
+   int result = g_kernel.Init(cfg);
 
    if(result != INIT_SUCCEEDED)
      {
       Alert("[PASR] Initialization FAILED - check Experts log");
       return INIT_FAILED;
      }
-
-   g_orch.SetDebugMode(InpDebugLog);
-   g_orch.SetProfilingEnabled(true);
 
 #ifdef PASR_QA_BUILD
    if(!g_qa.Init(InpChaosFrequency, InpChaosSpreadMult, InpTestPoolExhaust))
@@ -318,10 +316,10 @@ int OnInit()
    EventSetTimer(1);
    g_state.initialized = true;
 
-   Print("[PASR] Boot complete — Pure Pipeline Architecture ready");
+   Print("[PASR] Boot complete — Centralized Modular Pipeline ready");
    Print("[PASR] Pipeline profiling: ENABLED");
-   Print("[PASR] All modules encapsulated in COrchestrator");
-   Print("[PASR] Event handlers delegate exclusively to g_orch");
+   Print("[PASR] Modules exposed through CPASRKernel service facade");
+   Print("[PASR] Event handlers delegate exclusively to g_kernel");
 
    return INIT_SUCCEEDED;
   }
@@ -340,7 +338,7 @@ void OnDeinit(const int reason)
    g_qa.PrintReport();
 #endif
 
-   g_orch.OnDeinit(reason);
+   g_kernel.OnDeinit(reason);
    g_state.Reset();
 
    if(InpShowDash && InpExportReport)
@@ -359,13 +357,13 @@ void OnTick()
    g_state.last_tick = TimeCurrent();
 
 #ifdef PASR_QA_BUILD
-   CEventBus *bus = g_orch.GetEventBus();
-   CRiskManager *risk = g_orch.GetRiskManager();
+   CEventBus *bus = g_kernel.GetEventBus();
+   CRiskManager *risk = g_kernel.GetRiskManager();
    if(bus != NULL && risk != NULL)
       g_qa.OnTick(_Symbol, *bus, *risk);
 #endif
 
-   g_orch.OnTick();
+   g_kernel.OnTick();
   }
 
 //+------------------------------------------------------------------+
@@ -374,7 +372,7 @@ void OnTick()
 void OnTimer()
   {
    if(!g_state.initialized) return;
-   g_orch.OnTimer();
+   g_kernel.OnTimer();
   }
 
 //+------------------------------------------------------------------+
@@ -386,7 +384,7 @@ void OnTradeTransaction(
       const MqlTradeResult      &res)
   {
    if(!g_state.initialized) return;
-   g_orch.OnTradeTransaction(trans, req, res);
+   g_kernel.OnTradeTransaction(trans, req, res);
   }
 
 //+------------------------------------------------------------------+
@@ -400,7 +398,7 @@ void OnChartEvent(const int    id,
    if(!g_state.initialized) return;
    if(id == CHARTEVENT_OBJECT_CLICK)
      {
-      CDashboardManager *dash = g_orch.GetDashboard();
+      CDashboardManager *dash = g_kernel.GetDashboard();
       if(dash != NULL) dash.OnChartEvent(id, lparam, dparam, sparam);
      }
   }

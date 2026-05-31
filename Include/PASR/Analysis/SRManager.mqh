@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Analysis/SRManager.mqh — v6.0.2                                  |
-//| Responsibility: PIPELINE ORCHESTRATOR — IManager adapter          |
+//| Analysis/SRManager.mqh - v6.0.3                                  |
+//| Responsibility: PIPELINE ORCHESTRATOR - IManager adapter          |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_SR_MANAGER_MQH__
@@ -32,7 +32,6 @@ private:
    int RegimeLookback() const
      {
       if(m_regime == NULL) return ASR_LOOKBACK_BASE;
-
       switch(m_regime.GetCurrentRegime())
         {
          case REGIME_RANGE:      return ASR_LOOKBACK_RANGING;
@@ -86,9 +85,9 @@ public:
       m_store.UpdateATR(atr);
 
       datetime barTime = iTime(_Symbol, _Period, 0);
-      int      barIdx  = iBarShift(_Symbol, _Period, barTime);
+      int barIdx = iBarShift(_Symbol, _Period, barTime);
       if(barIdx == m_lastScanBar && barTime == m_lastScanTime) return;
-      m_lastScanBar  = barIdx;
+      m_lastScanBar = barIdx;
       m_lastScanTime = barTime;
       m_scanCount++;
 
@@ -109,7 +108,7 @@ public:
       m_store.RemoveStale();
 
       if(m_debugMode)
-         PrintFormat("[SR v6.0.2] Scan #%llu | %d active | lookback=%d | ATR=%.5f",
+         PrintFormat("[SR v6.0.3] Scan #%I64u | %d active | lookback=%d | ATR=%.5f",
                      m_scanCount, m_store.GetActiveCount(), lookback, atr);
      }
 
@@ -123,7 +122,7 @@ public:
    bool GetNearestResistance(double price, SRZoneExtended &out) const { return m_store.GetNearestResistance(price, out); }
    bool IsNearValidZone(double price, double atrMult, SRZoneExtended &out) const { return m_store.IsNearValidZone(price, atrMult, out); }
    bool IsZoneValid(const SRZoneExtended &z) const { return m_store.IsZoneValid(z); }
-   const SRZoneExtended *GetZone(int i) const { return m_store.GetZone(i); }
+   bool GetZone(int i, SRZoneExtended &out) const { return m_store.GetZone(i, out); }
    int GetActiveCount() const { return m_store.GetActiveCount(); }
   };
 

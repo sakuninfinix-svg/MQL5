@@ -82,7 +82,10 @@
 #include "../UI/DashboardManager.mqh"
 #include "../QA/LatencySimulator.mqh"
 
-// Layer 8: Pipeline and orchestration
+// Layer 8: Orchestration interfaces + legacy pipeline backend
+// PipelineStage is the forward-compatible split-stage interface.
+// CPipelineEngine remains in Core during the compatibility phase.
+#include "../Orchestration/PipelineStage.mqh"
 #include "PipelineEngine.mqh"
 
 // PipelineTypes temporarily maps DetectSession -> PASRDetectSession so included
@@ -94,5 +97,14 @@
 
 #include "Orchestrator.mqh"
 #include "OrchestratorInit.mqh"
+
+// Layer 9: Centralized Modular Pipeline facade
+// These files are included after the legacy orchestrator so CPASRKernel can
+// delegate to COrchestrator during the non-breaking migration phase.
+#include "../Central/ModuleNames.mqh"
+#include "../Central/ModuleRegistry.mqh"
+#include "../Central/ServiceLocator.mqh"
+#include "../Central/LifecycleManager.mqh"
+#include "../Central/PASRKernel.mqh"
 
 #endif // __CORE_PASR_MASTER_MQH__
