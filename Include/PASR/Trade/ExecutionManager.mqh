@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/ExecutionManager.mqh — v3.07                               |
+//| Trade/ExecutionManager.mqh — v3.08                               |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -37,7 +37,6 @@ private:
       long stopsLevelPts = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
       if(stopsLevelPts <= 0) return;
       double stopLevel = stopsLevelPts * _Point * 1.1;
-
       if(dir == SIGNAL_BUY)
         {
          double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -86,7 +85,6 @@ private:
          result.ticket = m_trade.ResultOrder();
          return true;
         }
-
       return false;
      }
 
@@ -104,7 +102,7 @@ private:
       evUpdate.id       = EVENT_ID_POSITION_UPDATE;
       evUpdate.ticket   = result.ticket;
       evUpdate.priority = 15;
-      evUpdate.data1    = 1.0; // open/refresh signal for RiskManager::SyncOpenTradesFromBroker()
+      evUpdate.data1    = 1.0;
       evUpdate.comment  = "OrderPlaced";
       DispatchImmediate(evUpdate);
      }
@@ -123,7 +121,7 @@ public:
       m_trade.SetExpertMagicNumber(m_cfg.MagicNumber);
       m_trade.SetDeviationInPoints((int)MathMax(10.0, m_cfg.Market.SpreadFilterPips * 10.0));
       m_trade.SetTypeFilling(ORDER_FILLING_IOC);
-      Print("[Exec] v3.07 Init OK");
+      Print("[Exec] v3.08 Init OK");
       return true;
      }
 
@@ -180,9 +178,7 @@ public:
          return result;
         }
 
-      if(result.retcode == TRADE_RETCODE_REQUOTE ||
-         result.retcode == TRADE_RETCODE_PRICE_CHANGED ||
-         result.retcode == TRADE_RETCODE_OFF_QUOTES)
+      if(result.retcode == TRADE_RETCODE_REQUOTE || result.retcode == TRADE_RETCODE_PRICE_CHANGED)
         {
          m_has_pending = true;
          m_pending_plan = plan;
@@ -204,7 +200,7 @@ public:
       if(SendOnce(m_pending_plan, result))
         {
          ClearPendingRetry("RetrySuccess");
-         PrintFormat("[Exec] Retry success on attempt %d ticket=%llu", m_pending_retries + 1, result.ticket);
+         PrintFormat("[Exec] Retry success on attempt %d ticket=%I64u", m_pending_retries + 1, result.ticket);
          DispatchPositionOpened(m_pending_plan, result);
          return;
         }
@@ -212,22 +208,12 @@ public:
       m_pending_retries++;
       if(m_pending_retries >= m_maxRetries)
         {
-         ClearPendingRetry("RetryExhausted");
-         PrintFormat("[Exec] Retry exhausted after %d attempts. Last: %d %s", m_maxRetries, result.retcode, result.comment);
+         PrintFormat("[Exec] Retry failed permanently after %d attempts", m_pending_retries);
+         ClearPendingRetry("RetryLimit");
          return;
         }
-
-      int delayMs = m_retryDelayMs * (1 << m_pending_retries);
-      m_next_retry_ms = nowMs + (ulong)delayMs;
-      PrintFormat("[Exec] Retry %d/%d in %dms. Code=%d", m_pending_retries, m_maxRetries, delayMs, result.retcode);
+      m_next_retry_ms = GetTickCount64() + (ulong)m_retryDelayMs;
      }
-
-   void ManagePositions()
-     {
-      // Placeholder hook for Stage 11. Full exit/position integration is tracked separately.
-     }
-
-   bool HasPendingRetry() const { return m_has_pending; }
   };
 
 #endif // __TRADE_EXECUTION_MANAGER_MQH__

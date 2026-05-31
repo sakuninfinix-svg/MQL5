@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/RecoveryManager.mqh — v2.19                                |
+//| Trade/RecoveryManager.mqh — v2.20                                |
 //| Compile-safe recovery manager compatibility wrapper               |
 //+------------------------------------------------------------------+
 #property strict
@@ -28,34 +28,23 @@ struct RecoveryStats
 class CRecoveryManager : public IManager
   {
 private:
-   CTrade        m_trade;
-   CRecoveryEngine m_engine;
-   RecoveryStats m_stats;
-   bool          m_enabled;
-
-   double NormalizeVolumeSafe(double volume, string symbol)
-     {
-      double minLot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
-      double maxLot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
-      double step   = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
-      if(minLot <= 0.0) minLot = 0.01;
-      if(maxLot <= 0.0) maxLot = 100.0;
-      if(step <= 0.0) step = 0.01;
-      double v = MathMax(minLot, MathMin(maxLot, volume));
-      v = MathFloor(v / step) * step;
-      return NormalizeDouble(v, 2);
-     }
+   CTrade         m_trade;
+   RecoveryEngine m_engine;
+   RecoveryStats  m_stats;
+   bool           m_enabled;
 
 public:
    CRecoveryManager() : IManager(), m_enabled(true)
      {
       m_stats.Clear();
+      m_engine.Reset();
      }
 
    virtual string HandlerName() const override { return "RecoveryManager"; }
 
    virtual void DeclareEvents() override
      {
+      AddEvent(EVENT_ID_TRADE_OPEN);
       AddEvent(EVENT_ID_TRADE_CLOSE);
       AddEvent(EVENT_ID_NEW_BAR);
       AddEvent(EVENT_ID_CONFIG_RELOAD);
@@ -75,10 +64,13 @@ public:
 
    virtual void OnEvent(const PASREvent &ev) override
      {
-      if(ev.id == EVENT_ID_TRADE_CLOSE)
+      if(ev.id == EVENT_ID_TRADE_OPEN)
         {
-         // Recovery is intentionally conservative during compile-stabilization.
-         // The detailed legacy engine remains available for later re-integration.
+         int dir = (ev.data1 >= 0.0) ? 1 : -1;
+         OnTradeOpen(ev.ticket, dir, 0.0);
+        }
+      else if(ev.id == EVENT_ID_TRADE_CLOSE)
+        {
          if(ev.profit < 0.0)
            {
             m_stats.attempts++;
@@ -91,6 +83,27 @@ public:
         }
      }
 
+   void OnTradeOpen(ulong ticket, int direction, double entryPrice)
+     {
+      if(!m_enabled || ticket == 0) return;
+      m_engine.active = true;
+      m_engine.mainTicket = ticket;
+      m_engine.direction = direction;
+      m_engine.entryPrice = entryPrice;
+      m_engine.entryTime = TimeCurrent();
+      m_engine.state = TRADE_STATE_NORMAL;
+     }
+
+   virtual void OnPriceUpdate() override
+     {
+      // Compatibility hook for CPipelineEngine.
+     }
+
+   virtual void OnNewBar() override
+     {
+      // Compatibility hook for CPipelineEngine.
+     }
+
    virtual void OnConfigReload() override
      {
       IManager::OnConfigReload();
@@ -101,7 +114,7 @@ public:
    bool IsEnabled() const { return m_enabled; }
    virtual bool IsHealthy() const override { return IManager::IsHealthy(); }
    RecoveryStats GetStats() const { return m_stats; }
-   int GetActiveEngineCount() const { return 0; }
+   int GetActiveEngineCount() const { return m_engine.active ? 1 : 0; }
   };
 
 class RecoveryManager : public CRecoveryManager {};
