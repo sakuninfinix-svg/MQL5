@@ -12,9 +12,11 @@
 
 // Layer 0: Config + core primitives
 #include "Config/Types.mqh"
+#include "Config/Validator.mqh"
 #include "Globals.mqh"
 #include "Events.mqh"
 #include "EventBus.mqh"
+#include "Config/Manager.mqh"
 #include "IManager.mqh"
 #include "PipelineTypes.mqh"
 
