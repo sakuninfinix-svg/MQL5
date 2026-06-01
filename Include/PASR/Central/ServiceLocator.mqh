@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Central/ServiceLocator.mqh — v0.20                               |
+//| Central/ServiceLocator.mqh — v0.21                               |
 //| Typed lookup facade for central PASR services/managers             |
 //+------------------------------------------------------------------+
 #property strict
@@ -87,22 +87,22 @@ public:
      { return (CDashboardManager*)Lookup(PASR_MOD_DASHBOARD_MANAGER); }
 
    CSanityManager* Sanity() const
-     { return (CSanityManager*)Lookup("SanityManager"); }
+     { return (CSanityManager*)Lookup(PASR_MOD_SANITY_MANAGER); }
 
    CTelemetryRecorder* Telemetry() const
-     { return (CTelemetryRecorder*)Lookup("TelemetryRecorder"); }
+     { return (CTelemetryRecorder*)Lookup(PASR_MOD_TELEMETRY_RECORDER); }
 
    CAdaptiveParameterManager* Adaptive() const
-     { return (CAdaptiveParameterManager*)Lookup("AdaptiveParameterManager"); }
+     { return (CAdaptiveParameterManager*)Lookup(PASR_MOD_ADAPTIVE_MANAGER); }
 
    CHealthMonitor* Health() const
-     { return (CHealthMonitor*)Lookup("HealthMonitor"); }
+     { return (CHealthMonitor*)Lookup(PASR_MOD_HEALTH_MONITOR); }
 
    CSnapshotManager* Snapshot() const
-     { return (CSnapshotManager*)Lookup("SnapshotManager"); }
+     { return (CSnapshotManager*)Lookup(PASR_MOD_SNAPSHOT_MANAGER); }
 
    CSessionState* Session() const
-     { return (CSessionState*)Lookup("SessionState"); }
+     { return (CSessionState*)Lookup(PASR_MOD_SESSION_STATE); }
   };
 
 #endif // __PASR_CENTRAL_SERVICE_LOCATOR_MQH__
