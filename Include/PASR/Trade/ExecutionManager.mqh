@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/ExecutionManager.mqh — v3.08                               |
+//| Trade/ExecutionManager.mqh — v3.20                               |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -10,6 +10,40 @@
 #include "../Core/IManager.mqh"
 #include "../Core/PipelineTypes.mqh"
 #include "TradePlan.mqh"
+
+struct ExecutionSnapshot
+  {
+   bool             hasPending;
+   int              pendingRetries;
+   int              maxRetries;
+   ulong            nextRetryMs;
+   ENUM_EXEC_STATUS lastStatus;
+   ulong            lastTicket;
+   int              lastRetcode;
+   double           lastFillPrice;
+   double           lastLot;
+   ENUM_SIGNAL_DIR  lastDirection;
+   string           lastComment;
+   string           lastClearReason;
+   datetime         lastExecTime;
+
+   void Clear()
+     {
+      hasPending = false;
+      pendingRetries = 0;
+      maxRetries = 0;
+      nextRetryMs = 0;
+      lastStatus = EXEC_SKIP;
+      lastTicket = 0;
+      lastRetcode = 0;
+      lastFillPrice = 0.0;
+      lastLot = 0.0;
+      lastDirection = SIGNAL_NONE;
+      lastComment = "";
+      lastClearReason = "";
+      lastExecTime = 0;
+     }
+  };
 
 class CExecutionManager : public IManager
   {
@@ -22,13 +56,38 @@ private:
    TradePlan m_pending_plan;
    int       m_pending_retries;
    ulong     m_next_retry_ms;
+   ExecutionSnapshot m_snapshot;
+
+   void RefreshSnapshotFromResult(const TradePlan &plan, const SExecResult &result)
+     {
+      m_snapshot.hasPending = m_has_pending;
+      m_snapshot.pendingRetries = m_pending_retries;
+      m_snapshot.maxRetries = m_maxRetries;
+      m_snapshot.nextRetryMs = m_next_retry_ms;
+      m_snapshot.lastStatus = result.status;
+      m_snapshot.lastTicket = result.ticket;
+      m_snapshot.lastRetcode = result.retcode;
+      m_snapshot.lastFillPrice = result.fill_price;
+      m_snapshot.lastLot = plan.lot;
+      m_snapshot.lastDirection = plan.direction;
+      m_snapshot.lastComment = result.comment;
+      m_snapshot.lastExecTime = TimeCurrent();
+     }
 
    void ClearPendingRetry(const string reason)
      {
-      if(!m_has_pending) return;
+      if(!m_has_pending)
+        {
+         m_snapshot.lastClearReason = reason;
+         return;
+        }
       m_has_pending = false;
       m_pending_retries = 0;
       m_next_retry_ms = 0;
+      m_snapshot.hasPending = false;
+      m_snapshot.pendingRetries = 0;
+      m_snapshot.nextRetryMs = 0;
+      m_snapshot.lastClearReason = reason;
       if(m_debugMode) Print("[Exec] Pending retry cleared: ", reason);
      }
 
@@ -111,7 +170,10 @@ public:
    CExecutionManager()
       : IManager(), m_maxRetries(3), m_retryDelayMs(500),
         m_has_pending(false), m_pending_retries(0), m_next_retry_ms(0)
-     {}
+     {
+      m_snapshot.Clear();
+      m_snapshot.maxRetries = m_maxRetries;
+     }
 
    virtual string HandlerName() const override { return "ExecutionManager"; }
 
@@ -121,7 +183,8 @@ public:
       m_trade.SetExpertMagicNumber(m_cfg.MagicNumber);
       m_trade.SetDeviationInPoints((int)MathMax(10.0, m_cfg.Market.SpreadFilterPips * 10.0));
       m_trade.SetTypeFilling(ORDER_FILLING_IOC);
-      Print("[Exec] v3.08 Init OK");
+      m_snapshot.maxRetries = m_maxRetries;
+      Print("[Exec] v3.20 Init OK");
       return true;
      }
 
@@ -169,11 +232,13 @@ public:
         {
          result.status = EXEC_FAIL;
          result.comment = "NotInitialized";
+         RefreshSnapshotFromResult(plan, result);
          return result;
         }
 
       if(SendOnce(plan, result))
         {
+         RefreshSnapshotFromResult(plan, result);
          DispatchPositionOpened(plan, result);
          return result;
         }
@@ -187,6 +252,7 @@ public:
          result.status = EXEC_RETRYING;
          Print("[Exec] Queued for retry: ", result.retcode, " ", result.comment);
         }
+      RefreshSnapshotFromResult(plan, result);
       return result;
      }
 
@@ -199,6 +265,7 @@ public:
       SExecResult result;
       if(SendOnce(m_pending_plan, result))
         {
+         RefreshSnapshotFromResult(m_pending_plan, result);
          ClearPendingRetry("RetrySuccess");
          PrintFormat("[Exec] Retry success on attempt %d ticket=%I64u", m_pending_retries + 1, result.ticket);
          DispatchPositionOpened(m_pending_plan, result);
@@ -208,11 +275,32 @@ public:
       m_pending_retries++;
       if(m_pending_retries >= m_maxRetries)
         {
+         RefreshSnapshotFromResult(m_pending_plan, result);
          PrintFormat("[Exec] Retry failed permanently after %d attempts", m_pending_retries);
          ClearPendingRetry("RetryLimit");
          return;
         }
       m_next_retry_ms = GetTickCount64() + (ulong)m_retryDelayMs;
+      RefreshSnapshotFromResult(m_pending_plan, result);
+     }
+
+   ExecutionSnapshot GetSnapshot() const { return m_snapshot; }
+   bool HasPendingRetry() const { return m_has_pending; }
+
+   void PrintDiagnostics() const
+     {
+      PrintFormat("[ExecDiag] pending=%s retry=%d/%d lastStatus=%d ticket=%I64u ret=%d price=%.5f lot=%.2f dir=%d comment=%s clear=%s",
+                  m_snapshot.hasPending ? "true" : "false",
+                  m_snapshot.pendingRetries,
+                  m_snapshot.maxRetries,
+                  (int)m_snapshot.lastStatus,
+                  m_snapshot.lastTicket,
+                  m_snapshot.lastRetcode,
+                  m_snapshot.lastFillPrice,
+                  m_snapshot.lastLot,
+                  (int)m_snapshot.lastDirection,
+                  m_snapshot.lastComment,
+                  m_snapshot.lastClearReason);
      }
   };
 
