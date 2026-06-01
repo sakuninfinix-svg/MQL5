@@ -102,8 +102,9 @@ Remaining `PERF_METRICS` cleanup is tracked in Issue #181.
 | Fase 1 | Done | Add `Central/`, `CPASRKernel`, `CModuleRegistry`, `CServiceLocator`, `CLifecycleManager` |
 | Fase 2 | Done | `Experts/PASR_MODULAR.mq5` now uses `CPASRKernel g_kernel` |
 | Fase 3 | In progress | Extract allocation/lifecycle/dependency ownership from `Central/BackendAdapter*.mqh` |
-| Fase 4 | In progress | Add `Orchestration/`, `IPipelineStage`, and prepare split-stage adapters |
+| Fase 4 | In progress | Reduce direct dependency access and backend-owned compatibility services |
 | Fase 5 | Done | Move `CPipelineEngine` implementation to `Orchestration/`; keep `Core/PipelineEngine.mqh` as wrapper |
+| Fase 6 | Done | Split all primary runtime stages into `Orchestration/Stages/*Stage.mqh` delegates |
 
 ---
 

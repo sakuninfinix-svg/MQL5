@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| QA/SmokeTest.mqh — v3.00                                         |
-//| End-to-end smoke tests: Orchestrator Init + per-manager checks.  |
+//| End-to-end smoke tests: Kernel init + per-manager checks.        |
 //|                                                                  |
 //| PHILOSOPHY:                                                      |
 //|   Smoke tests do NOT test logic correctness — they verify that   |
@@ -28,7 +28,7 @@
 #define __QA_SMOKE_TEST_MQH__
 
 #include "Assertions.mqh"
-#include "../Core/Orchestrator.mqh"
+#include "../Core/PASR.mqh"
 #include "../Signal/RegimeFilter.mqh"
 #include "../Signal/RegimeSignalSource.mqh"
 #include "../Trade/RiskManager.mqh"
@@ -43,44 +43,47 @@ private:
    CAssertions m_assert;
 
    // ─────────────────────────────────────────────────────
-   // S01: Full Orchestrator Init — all managers must init OK
+   // S01: Full Kernel Init - all managers must init OK
    // ─────────────────────────────────────────────────────
-   void RunOrchestratorSmoke()
+   void RunKernelSmoke()
      {
-      m_assert.BeginSection("S01 Orchestrator");
+      m_assert.BeginSection("S01 Kernel");
 
-      COrchestrator orch;
-      int result = orch.Init();
+      CPASRKernel kernel;
+      int result = kernel.Init();
+      CServiceLocator *services = kernel.Services();
 
       m_assert.AreEqual("S01_init_returns_succeeded",
                         (int)INIT_SUCCEEDED, result);
+      m_assert.IsNotNull("S01_services_not_null",
+                         (void*)services);
       m_assert.IsNotNull("S01_data_manager_not_null",
-                         (void*)orch.GetDataManager());
+                         (services != NULL ? (void*)services.Data() : NULL));
       m_assert.IsNotNull("S01_sr_manager_not_null",
-                         (void*)orch.GetSRManager());
+                         (services != NULL ? (void*)services.SR() : NULL));
       m_assert.IsNotNull("S01_zone_manager_not_null",
-                         (void*)orch.GetZoneManager());
+                         (services != NULL ? (void*)services.Zone() : NULL));
       m_assert.IsNotNull("S01_signal_manager_not_null",
-                         (void*)orch.GetSignalManager());
+                         (services != NULL ? (void*)services.Signal() : NULL));
       m_assert.IsNotNull("S01_ai_orchestrator_not_null",
-                         (void*)orch.GetAIOrchestrator());
+                         (services != NULL ? (void*)services.AI() : NULL));
       m_assert.IsNotNull("S01_regime_filter_not_null",
-                         (void*)orch.GetRegimeFilter());
+                         (services != NULL ? (void*)services.RegimeFilter() : NULL));
       m_assert.IsNotNull("S01_risk_manager_not_null",
-                         (void*)orch.GetRiskManager());
+                         (services != NULL ? (void*)services.Risk() : NULL));
       m_assert.IsNotNull("S01_exec_manager_not_null",
-                         (void*)orch.GetExecManager());
+                         (services != NULL ? (void*)services.Execution() : NULL));
       m_assert.IsNotNull("S01_recovery_not_null",
-                         (void*)orch.GetRecoveryManager());
+                         (services != NULL ? (void*)services.Recovery() : NULL));
       m_assert.IsNotNull("S01_dashboard_not_null",
-                         (void*)orch.GetDashboard());
+                         (services != NULL ? (void*)services.Dashboard() : NULL));
 
       // Signal sources registered (4 in Phase 4: Pattern + SR + AI + Regime)
-      CSignalManager *sm = orch.GetSignalManager();
+      CSignalManager *sm = (services != NULL ? services.Signal() : NULL);
       if(sm != NULL)
          m_assert.AreEqual("S01_signal_sources_count", 4, sm.SourceCount());
 
-      orch.OnDeinit(0);  // verify clean shutdown
+      kernel.OnDeinit(0);  // verify clean shutdown
       m_assert.IsTrue("S01_deinit_no_crash", true);
 
       m_assert.EndSection();
@@ -95,9 +98,10 @@ private:
 
       CRegimeFilter rf;
       // GetRegime() before Init returns a valid enum (REGIME_UNKNOWN or default)
-      ENUM_MARKET_REGIME r = rf.GetRegime();
-      bool validEnum = (r == REGIME_TRENDING  ||
-                        r == REGIME_RANGING   ||
+      EMarketRegime r = rf.GetRegime();
+      bool validEnum = (r == REGIME_TREND_UP  ||
+                        r == REGIME_TREND_DOWN ||
+                        r == REGIME_RANGE     ||
                         r == REGIME_VOLATILE  ||
                         r == REGIME_SQUEEZE   ||
                         r == REGIME_UNKNOWN);
@@ -126,15 +130,12 @@ private:
       m_assert.BeginSection("S03 SignalManager v3");
 
       CSignalManager sm;
-      sm.SetMinConfluence(2);
-      sm.SetMinScore(0.45);
-      sm.SetCooldownBars(3);
-
-      // HasSignal false before any OnNewBar
-      m_assert.IsFalse("S03_no_signal_on_fresh", sm.HasSignal());
-
       // Source count starts at 0
       m_assert.AreEqual("S03_source_count_zero", 0, sm.SourceCount());
+      m_assert.IsFalse("S03_layer_not_ready_without_sources", sm.IsSignalLayerReady());
+
+      SSignal aggregate = sm.AggregateSignals();
+      m_assert.AreEqual("S03_aggregate_without_sources_none", (int)SIGNAL_NONE, (int)aggregate.direction);
 
       // Urgency enum ordering
       m_assert.IsTrue("S03_urgency_HIGH_is_0",
@@ -155,11 +156,12 @@ private:
       CRiskManager rm;
 
       // State checks on un-inited RM (all should be safe defaults)
-      m_assert.IsNear("S04_dd_zero",    0.0, rm.GetDrawdownPct(),  0.001);
-      m_assert.IsNear("S04_daily_zero", 0.0, rm.GetDailyLossPct(), 0.001);
-      m_assert.AreEqual("S04_consec_zero", 0, rm.GetConsecLoss());
+      RiskSnapshot snap = rm.GetSnapshot();
+      m_assert.IsNear("S04_dd_zero",    0.0, snap.drawdownPct,  0.001);
+      m_assert.IsNear("S04_daily_zero", 0.0, snap.dailyLossPctUsed, 0.001);
+      m_assert.AreEqual("S04_consec_zero", 0, snap.consecLoss);
       m_assert.AreEqual("S04_open_zero",   0, rm.GetOpenTrades());
-      m_assert.IsFalse("S04_not_broken",   rm.IsCircuitBroken());
+      m_assert.IsTrue("S04_trading_allowed", rm.IsTradingAllowed());
 
       // CalcLot with zero SL returns 0 (guard against div-by-zero)
       double lotZero = rm.CalcLot(0.0);
@@ -186,28 +188,13 @@ private:
       CDashboardManager *db = new CDashboardManager();
       m_assert.IsNotNull("S05_alloc_ok", (void*)db);
 
-      // Inject NULL deps (should not crash on read)
-      db.SetRiskManager(NULL);
-      db.SetSignalManager(NULL);
-      db.SetRegimeFilter(NULL);
-      m_assert.IsTrue("S05_null_inject_no_crash", true);
+      db.SetPrefix("PASR_QA");
+      db.SetUpdateInterval(1);
+      db.SetObservabilityText("smoke");
+      m_assert.IsTrue("S05_observability_roundtrip", db.GetObservabilityText() == "smoke");
 
-      // Inject real (stack) deps
-      CRiskManager   rm;
-      CSignalManager sm;
-      CRegimeFilter  rf;
-      db.SetRiskManager  (&rm);
-      db.SetSignalManager(&sm);
-      db.SetRegimeFilter (&rf);
-      m_assert.IsTrue("S05_real_inject_no_crash", true);
-
-      // Destroy must not crash
-      db.Destroy();
-      m_assert.IsTrue("S05_destroy_no_crash", true);
-
-      // Double destroy must be safe (idempotent)
-      db.Destroy();
-      m_assert.IsTrue("S05_double_destroy_safe", true);
+      db.Deinit();
+      m_assert.IsTrue("S05_deinit_no_crash", true);
 
       delete db;
       m_assert.IsTrue("S05_delete_no_crash", true);
@@ -222,7 +209,7 @@ public:
       Print("║  PASR Smoke Test Suite v3.00                     ║");
       Print("╚══════════════════════════════════════════════════╝");
 
-      RunOrchestratorSmoke();
+      RunKernelSmoke();
       RunRegimeSmoke();
       RunSignalV3Smoke();
       RunRiskSmoke();

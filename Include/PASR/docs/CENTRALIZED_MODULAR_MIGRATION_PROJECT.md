@@ -236,17 +236,44 @@ Checklist:
 
 - [x] `Orchestration/README.md` dibuat.
 - [x] `IPipelineStage` dibuat.
-- [x] Buat wrapper/adaptor stage pertama tanpa mengubah runtime:
+- [x] Buat wrapper/adaptor semua runtime stage utama tanpa mengubah runtime:
   - [x] `DataSyncStage.mqh`,
+  - [x] `AnalysisSRStage.mqh`,
+  - [x] `AnalysisZoneStage.mqh`,
+  - [x] `PatternStage.mqh`,
+  - [x] `RegimeStage.mqh`,
   - [x] `SignalStage.mqh`,
-  - [x] `RiskStage.mqh`.
+  - [x] `AIInferStage.mqh`,
+  - [x] `RiskStage.mqh`,
+  - [x] `AdaptiveParamsStage.mqh`,
+  - [x] `ExecutionStage.mqh`,
+  - [x] `PositionStage.mqh`,
+  - [x] `RecoveryStage.mqh`,
+  - [x] `DashboardStage.mqh`,
+  - [x] `JournalStage.mqh`.
 - [x] `CPipelineEngine` tetap sebagai sumber runtime sampai semua stage siap.
+- [x] Delegasikan semua runtime stage utama dari `CPipelineEngine`:
+  - [x] `DataSyncStage`,
+  - [x] `AnalysisSRStage`,
+  - [x] `AnalysisZoneStage`,
+  - [x] `PatternStage`,
+  - [x] `RegimeStage`,
+  - [x] `SignalStage`,
+  - [x] `AIInferStage`,
+  - [x] `RiskStage`,
+  - [x] `AdaptiveParamsStage`,
+  - [x] `ExecutionStage`,
+  - [x] `PositionStage`,
+  - [x] `RecoveryStage`,
+  - [x] `DashboardStage`,
+  - [x] `JournalStage`.
 
 Checkpoint 2026-06-01:
 
 - Adapter stage awal dibuat di `Orchestration/Stages/`.
-- Adapter default `IsEnabled() == false`, sehingga include aman dan tidak mengubah runtime behavior.
+- `DataSyncStage`, `AnalysisSRStage`, `AnalysisZoneStage`, `PatternStage`, `RegimeStage`, `SignalStage`, `AIInferStage`, `RiskStage`, `AdaptiveParamsStage`, `ExecutionStage`, `PositionStage`, `RecoveryStage`, `DashboardStage`, dan `JournalStage` sudah menjadi runtime implementation yang dipanggil oleh `CPipelineEngine`.
 - `Core/PASR.mqh` include adapter tersebut sebagai compile guard.
+- MetaEditor compile: `PASR_MODULAR`, `PASR_Smoke`, dan `PASR_PipelineHarness_Smoke` sama-sama `Result: 0 errors, 0 warnings`.
 
 Acceptance criteria:
 
@@ -264,7 +291,26 @@ Checklist:
 - [x] `Core/PipelineEngine.mqh` menjadi compatibility wrapper sementara.
 - [x] Update `Core/PASR.mqh` include order.
 - [x] Compile checkpoint.
-- [ ] Baru pecah stage satu per satu.
+- [x] Pecah semua runtime stage utama satu per satu.
+
+Checkpoint 2026-06-01:
+
+- `Stage_DataSync()` di `CPipelineEngine` sudah delegate ke `CDataSyncStage::Execute()`.
+- `Stage_AnalysisSR()` di `CPipelineEngine` sudah delegate ke `CAnalysisSRStage::Execute()`.
+- `Stage_AnalysisZone()` di `CPipelineEngine` sudah delegate ke `CAnalysisZoneStage::Execute()`.
+- `Stage_PatternRec()` di `CPipelineEngine` sudah delegate ke `CPatternStage::Execute()`.
+- `Stage_RegimeDet()` di `CPipelineEngine` sudah delegate ke `CRegimeStage::Execute()`.
+- `Stage_SignalGen()` di `CPipelineEngine` sudah delegate ke `CSignalStage::Execute()`.
+- `Stage_AIInfer()` di `CPipelineEngine` sudah delegate ke `CAIInferStage::Execute()`.
+- `Stage_RiskCheck()` di `CPipelineEngine` sudah delegate ke `CRiskStage::Execute()`.
+- `Stage_AdaptiveParams()` di `CPipelineEngine` sudah delegate ke `CAdaptiveParamsStage::Execute()`.
+- `Stage_Execution()` di `CPipelineEngine` sudah delegate ke `CExecutionStage::Execute()`.
+- `Stage_PosMgmt()` di `CPipelineEngine` sudah delegate ke `CPositionStage::Execute()`.
+- `Stage_Recovery()` di `CPipelineEngine` sudah delegate ke `CRecoveryStage::Execute()`.
+- `Stage_Dashboard()` di `CPipelineEngine` sudah delegate ke `CDashboardStage::Execute()`.
+- `Stage_Journal()` di `CPipelineEngine` sudah delegate ke `CJournalStage::Execute()`.
+- Behavior runtime dipertahankan: DataSync tetap update tick/price/ATR/session; AnalysisSR tetap dispatch event new-bar; AnalysisZone tetap menjalankan price/new-bar hooks; PatternRec tetap new-bar/profiling gate; RegimeDet tetap memilih `RegimeFilter` lalu fallback detector; SignalGen tetap menjalankan AI-primary plus rule fallback; AIInfer tetap mengisi health flag AI; RiskCheck tetap mengisi `ctx.risk_result`, `ctx.trading_allowed`, dan rejection message; Adaptive tetap hanya jalan saat new bar; Execution tetap build/execute `TradePlan` dan memanggil recovery hook saat trade open; PositionMgmt tetap filter magic number dan menutup posisi berdasarkan `ExitEngine`; Recovery tetap menjalankan price/new-bar hooks; Dashboard/Journal tetap menerima observability text terakhir.
+- MetaEditor compile: `PASR_MODULAR`, `PASR_Smoke`, dan `PASR_PipelineHarness_Smoke` sama-sama `Result: 0 errors, 0 warnings`.
 
 Checkpoint 2026-06-01:
 

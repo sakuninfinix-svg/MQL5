@@ -178,8 +178,8 @@ public:
       m_backend = new CBackendAdapter();
       if(m_backend == NULL)
         {
-         SetState(PASR_KERNEL_FAILED, "Backend orchestrator allocation failed");
-         Print("[PASRKernel] Backend orchestrator allocation failed");
+         SetState(PASR_KERNEL_FAILED, "Backend adapter allocation failed");
+         Print("[PASRKernel] Backend adapter allocation failed");
          return INIT_FAILED;
         }
 
@@ -189,8 +189,8 @@ public:
       int rc = m_backend.Init(m_cfg);
       if(rc != INIT_SUCCEEDED)
         {
-         SetState(PASR_KERNEL_FAILED, "Backend orchestrator init failed");
-         Print("[PASRKernel] Backend orchestrator init failed");
+         SetState(PASR_KERNEL_FAILED, "Backend adapter init failed");
+         Print("[PASRKernel] Backend adapter init failed");
          delete m_backend;
          m_backend = NULL;
          m_registry.Clear(true);

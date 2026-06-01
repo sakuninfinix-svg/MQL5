@@ -40,28 +40,32 @@ public:
               CMockEventBus(bool passthrough = false)
      : m_history_head(0), m_pushed_total(0), m_passthrough(passthrough)
      {
-      ArrayInitialize(m_history, 0);
+      Reset();
      }
 
-   //--- Override Push: record first, optionally deliver
-   virtual void Push(PASREvent &ev) override
+   bool Push(const PASREvent &ev)
      {
-      // Record in circular history
       m_history[m_history_head % MOCK_BUS_MAX_HISTORY] = ev;
       m_history_head++;
       m_pushed_total++;
 
-      // Optional passthrough to real bus delivery
       if(m_passthrough)
-         CEventBus::Push(ev);
+         return CEventBus::Push(ev);
+      return true;
+     }
+
+   void DispatchImmediate(const PASREvent &ev)
+     {
+      Push(ev);
+      if(m_passthrough)
+         CEventBus::DispatchImmediate(ev);
      }
 
    //--- Inject event directly to all subscribers (bypass history)
    //    Use this to simulate incoming events FROM external system
-   void InjectEvent(PASREvent &ev)
+   void InjectEvent(const PASREvent &ev)
      {
-      // Call real Deliver() which routes to subscribers
-      CEventBus::DeliverToSubscribers(ev);
+      CEventBus::DispatchImmediate(ev);
      }
 
    //--- Accessors ---------------------------------------------------
@@ -70,7 +74,7 @@ public:
 
    PASREvent     LastEvent() const
      {
-      if(m_pushed_total == 0) { PASREvent empty = {}; return empty; }
+      if(m_pushed_total == 0) { PASREvent empty; return empty; }
       int idx = (m_history_head - 1 + MOCK_BUS_MAX_HISTORY)
                 % MOCK_BUS_MAX_HISTORY;
       return m_history[idx];
@@ -85,7 +89,7 @@ public:
      }
 
    //--- Find first event with given id in history
-   bool          FindEvent(ENUM_PASR_EVENT_ID ev_id, PASREvent &ev) const
+   bool          FindEvent(ENUM_EVENT_ID ev_id, PASREvent &ev) const
      {
       int cap = MathMin(m_pushed_total, MOCK_BUS_MAX_HISTORY);
       for(int i = 0; i < cap; i++)
@@ -96,7 +100,7 @@ public:
      }
 
    //--- Count events with specific id
-   int           CountEvents(ENUM_PASR_EVENT_ID ev_id) const
+   int           CountEvents(ENUM_EVENT_ID ev_id) const
      {
       int cap   = MathMin(m_pushed_total, MOCK_BUS_MAX_HISTORY);
       int count = 0;
@@ -110,7 +114,11 @@ public:
      {
       m_history_head = 0;
       m_pushed_total = 0;
-      ArrayInitialize(m_history, 0);
+      for(int i = 0; i < MOCK_BUS_MAX_HISTORY; i++)
+        {
+         PASREvent empty;
+         m_history[i] = empty;
+        }
       // DO NOT reset subscribers — keep manager registrations intact
      }
   };

@@ -21,13 +21,15 @@ Bug aktif tidak lagi dikelola sebagai tabel panjang di README. Bug aktif harus h
 
 ## 2. Ringkasan Arsitektur
 
-PASR memakai arsitektur Pipeline Orchestration.
+PASR sedang dimigrasikan ke **Centralized Modular Pipeline Architecture**.
+Kontrol lifecycle, registry, dependency, dan pipeline ownership berada di `Central/`,
+sedangkan logic trading tetap berada di module domain.
 
 Prinsip utamanya:
 
 1. `OnTick()` harus ringan.
 2. Logic berat dijalankan dari `OnTimer()`.
-3. Semua module utama dikoordinasi oleh `COrchestrator`.
+3. Semua module utama diakses melalui `CPASRKernel`, dengan `CBackendAdapter` sebagai compatibility backend sementara.
 4. Komunikasi antar module memakai `CEventBus`.
 5. State harus dimiliki manager yang tepat, bukan tersebar di EA entry point.
 6. `Experts/PASR_MODULAR.mq5` hanya menjadi wrapper lifecycle EA.
@@ -192,7 +194,7 @@ Masalah:
 
 Dampak:
 
-`Experts/PASR_MODULAR.mq5` memakai master include tersebut, lalu mendeklarasikan `COrchestrator`. Jika master include kosong/placeholder, class dan dependency utama tidak terdefinisi.
+`Experts/PASR_MODULAR.mq5` memakai master include tersebut. Pada arsitektur saat ini EA mendeklarasikan `CPASRKernel`; jika master include kosong/placeholder, class dan dependency utama tidak terdefinisi.
 
 Arahan fix:
 
@@ -430,11 +432,11 @@ Kesimpulan:
 ```cpp
 #include <PASR/Core/PASR.mqh>
 
-COrchestrator orch;
+CPASRKernel kernel;
 
 int OnInit()
   {
-   if(orch.Init(cfg) != INIT_SUCCEEDED)
+   if(kernel.Init(cfg) != INIT_SUCCEEDED)
       return INIT_FAILED;
    EventSetTimer(1);
    return INIT_SUCCEEDED;
@@ -442,24 +444,24 @@ int OnInit()
 
 void OnTick()
   {
-   orch.OnTick();
+   kernel.OnTick();
   }
 
 void OnTimer()
   {
-   orch.OnTimer();
+   kernel.OnTimer();
   }
 
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
   {
-   orch.OnTradeTransaction(trans, request, result);
+   kernel.OnTradeTransaction(trans, request, result);
   }
 
 void OnDeinit(const int reason)
   {
-   orch.OnDeinit(reason);
+   kernel.OnDeinit(reason);
   }
 ```
 
