@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Trade/RiskManager.mqh — v2.13                                    |
+//| Trade/RiskManager.mqh — v2.20                                    |
 //| Copyright 2026, Agsicentre                                       |
 //+------------------------------------------------------------------+
 #property strict
@@ -32,6 +32,50 @@ struct RiskPnLRecord
    ulong    ticket;
    double   profit;
    datetime day;
+  };
+
+struct RiskSnapshot
+  {
+   bool     tradingAllowed;
+   bool     circuitBroken;
+   int      openTrades;
+   int      maxOpenTrades;
+   int      consecLoss;
+   int      maxConsecLoss;
+   double   dailyPnl;
+   double   dailyLossPctUsed;
+   double   dailyLossPctLimit;
+   double   drawdownPct;
+   double   maxDrawdownPct;
+   double   riskPct;
+   double   maxSpreadPts;
+   double   minLot;
+   double   maxLot;
+   double   lotStep;
+   datetime lastResetDay;
+   string   status;
+
+   void Clear()
+     {
+      tradingAllowed = false;
+      circuitBroken = false;
+      openTrades = 0;
+      maxOpenTrades = 0;
+      consecLoss = 0;
+      maxConsecLoss = 0;
+      dailyPnl = 0.0;
+      dailyLossPctUsed = 0.0;
+      dailyLossPctLimit = 0.0;
+      drawdownPct = 0.0;
+      maxDrawdownPct = 0.0;
+      riskPct = 0.0;
+      maxSpreadPts = 0.0;
+      minLot = 0.0;
+      maxLot = 0.0;
+      lotStep = 0.0;
+      lastResetDay = 0;
+      status = "";
+     }
   };
 
 class CRiskManager : public IManager
@@ -221,7 +265,7 @@ public:
       m_lastResetDay = ServerDateMidnight();
       ClearAccountedPnL();
       SyncOpenTradesFromBroker();
-      PrintFormat("[Risk] v2.13 Init OK: risk=%.1f%% daily=%.1f%% maxDD=%.1f%% maxTrades=%d open=%d",
+      PrintFormat("[Risk] v2.20 Init OK: risk=%.1f%% daily=%.1f%% maxDD=%.1f%% maxTrades=%d open=%d",
                   m_riskPct, m_dailyLossPct, m_maxDDPct, m_maxOpenTrades, m_openTrades);
       return true;
      }
@@ -360,6 +404,47 @@ public:
      {
       if(m_peakEquity <= 0.0) return 0.0;
       return MathMax(0.0, (1.0 - AccountEquity() / m_peakEquity) * 100.0);
+     }
+
+   RiskSnapshot GetSnapshot() const
+     {
+      RiskSnapshot s;
+      s.Clear();
+      s.tradingAllowed = IsTradingAllowed();
+      s.circuitBroken = m_circuitBroken;
+      s.openTrades = m_openTrades;
+      s.maxOpenTrades = m_maxOpenTrades;
+      s.consecLoss = m_consecLoss;
+      s.maxConsecLoss = m_maxConsecLoss;
+      s.dailyPnl = m_dailyLoss;
+      s.dailyLossPctUsed = DailyLossPercent(m_dailyLoss);
+      s.dailyLossPctLimit = m_dailyLossPct;
+      s.drawdownPct = GetDrawdownPct();
+      s.maxDrawdownPct = m_maxDDPct;
+      s.riskPct = m_riskPct;
+      s.maxSpreadPts = m_maxSpreadPts;
+      s.minLot = m_minLot;
+      s.maxLot = m_maxLot;
+      s.lotStep = m_lotStep;
+      s.lastResetDay = m_lastResetDay;
+      if(m_circuitBroken) s.status = "CircuitBroken";
+      else if(IsMaxDDActive()) s.status = "MaxDDActive";
+      else if(m_openTrades >= m_maxOpenTrades) s.status = "MaxTrades";
+      else s.status = "OK";
+      return s;
+     }
+
+   void PrintDiagnostics() const
+     {
+      RiskSnapshot s = GetSnapshot();
+      PrintFormat("[RiskDiag] allowed=%s circuit=%s open=%d/%d loss=%.2f pct=%.2f/%.2f dd=%.2f/%.2f consec=%d/%d status=%s",
+                  s.tradingAllowed ? "true" : "false",
+                  s.circuitBroken ? "true" : "false",
+                  s.openTrades, s.maxOpenTrades,
+                  s.dailyPnl, s.dailyLossPctUsed, s.dailyLossPctLimit,
+                  s.drawdownPct, s.maxDrawdownPct,
+                  s.consecLoss, s.maxConsecLoss,
+                  s.status);
      }
   };
 
