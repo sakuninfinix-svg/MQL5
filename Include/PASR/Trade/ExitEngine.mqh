@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| ExitEngine.mqh                                             v2.10 |
+//| ExitEngine.mqh                                             v2.11 |
 //| Smart Exit Logic for Position Management                         |
 //+------------------------------------------------------------------+
 #ifndef PASR_EXIT_ENGINE_MQH
@@ -85,7 +85,7 @@ private:
    bool  m_indicatorsReady;
    ExitSnapshot m_snapshot;
 
-   void RefreshSnapshot(const string symbol = "", ENUM_ORDER_TYPE position_type = ORDER_TYPE_BUY, ExitSignal *signal = NULL)
+   void RefreshSnapshotBase(const string symbol = "", ENUM_ORDER_TYPE position_type = ORDER_TYPE_BUY)
      {
       m_snapshot.indicatorsReady = m_indicatorsReady;
       m_snapshot.chandelierExits = m_chandelier_exits;
@@ -95,8 +95,13 @@ private:
       m_snapshot.totalExits = m_chandelier_exits + m_time_exits + m_structure_exits + m_fade_exits;
       if(symbol != "") m_snapshot.lastSymbol = symbol;
       m_snapshot.lastPositionType = (int)position_type;
-      if(signal != NULL) m_snapshot.lastSignal = *signal;
       m_snapshot.lastCheckTime = TimeCurrent();
+     }
+
+   void RefreshSnapshot(const string symbol, ENUM_ORDER_TYPE position_type, ExitSignal &signal)
+     {
+      RefreshSnapshotBase(symbol, position_type);
+      m_snapshot.lastSignal = signal;
      }
 
    bool InitIndicators()
@@ -111,7 +116,7 @@ private:
       if(m_hATR != INVALID_HANDLE) { IndicatorRelease(m_hATR); m_hATR = INVALID_HANDLE; }
       if(m_hRSI != INVALID_HANDLE) { IndicatorRelease(m_hRSI); m_hRSI = INVALID_HANDLE; }
       m_indicatorsReady = false;
-      RefreshSnapshot();
+      RefreshSnapshotBase();
      }
 
    double GetATRValue()
@@ -156,8 +161,8 @@ public:
          return false;
         }
       m_indicatorsReady = true;
-      RefreshSnapshot();
-      PrintFormat("[Exit] v2.10 Init OK — Chandelier ATR=%.1f Period=%d", CHANDELIER_ATR_MULT, CHANDELIER_PERIOD);
+      RefreshSnapshotBase();
+      PrintFormat("[Exit] v2.11 Init OK — Chandelier ATR=%.1f Period=%d", CHANDELIER_ATR_MULT, CHANDELIER_PERIOD);
       return true;
      }
 
