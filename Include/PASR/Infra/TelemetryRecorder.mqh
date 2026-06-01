@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/TelemetryRecorder.mqh — v2.20                              |
+//| Infra/TelemetryRecorder.mqh — v2.21                              |
 //| Telemetry metrics recorder + observability helpers               |
 //+------------------------------------------------------------------+
 #property strict
@@ -10,6 +10,7 @@
 #include "../Core/EventBus.mqh"
 #include "../Core/Events.mqh"
 #include "../Core/Globals.mqh"
+#include "../Observability/ObservabilityTypes.mqh"
 
 #define PASR_TELEMETRY_MAX_BUFFER 100
 
@@ -104,7 +105,7 @@ public:
       m_base_path = "PASR\\Telemetry\\";
       OpenNewFile();
       WriteHeader();
-      PASRLogInfo("Telemetry", "v2.20 Initialized — recording to: " + m_base_path);
+      PASRLogInfo("Telemetry", "v2.21 Initialized — recording to: " + m_base_path);
       return true;
      }
 
@@ -148,15 +149,20 @@ public:
       if(TimeCurrent() - m_last_flush > 5) Flush();
      }
 
-   void RecordObservabilityMetric(const string name, double value, const string unit="value")
+   void RecordObservabilityMetric(const string name, double value, const string unit=PASR_UNIT_VALUE)
      {
-      RecordMetric("Obs_" + name, value, unit, 0, _Symbol);
+      RecordMetric(PASR_OBS_PREFIX + name, value, unit, 0, _Symbol);
+     }
+
+   void RecordNamedObservabilityMetric(const string metricName, double value, const string unit=PASR_UNIT_VALUE)
+     {
+      RecordMetric(metricName, value, unit, 0, _Symbol);
      }
 
    void RecordObservabilityText(const string text)
      {
       m_last_observability = text;
-      RecordMetric("Obs_TextLength", (double)StringLen(text), "chars", 0, _Symbol);
+      RecordMetric(PASR_OBS_TEXT_LENGTH, (double)StringLen(text), PASR_UNIT_CHARS, 0, _Symbol);
       if(m_debugMode && text != "")
          PASRLogInfo("Telemetry", "OBS " + text);
      }
@@ -265,7 +271,7 @@ private:
      {
       double slippage = event.data1;
       string sym = (event.tag == "") ? _Symbol : event.tag;
-      RecordMetric("Execution_Slippage", slippage, "points", event.ticket, sym);
+      RecordMetric("Execution_Slippage", slippage, PASR_UNIT_POINTS, event.ticket, sym);
       if(slippage > m_max_slippage) m_max_slippage = slippage;
       m_execution_lags++;
      }
@@ -274,7 +280,7 @@ private:
      {
       double strength = event.data1;
       string sym = (event.tag == "") ? _Symbol : event.tag;
-      RecordMetric("Signal_Strength", strength, "normalized", event.ticket, sym);
+      RecordMetric("Signal_Strength", strength, PASR_UNIT_NORMALIZED, event.ticket, sym);
      }
   };
 
