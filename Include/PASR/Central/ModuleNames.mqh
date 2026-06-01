@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Central/ModuleNames.mqh — v0.10                                   |
+//| Central/ModuleNames.mqh — v0.20                                  |
 //| Canonical module names for PASR central registry                   |
 //+------------------------------------------------------------------+
 #property strict
@@ -19,5 +19,13 @@
 #define PASR_MOD_RECOVERY_MANAGER   "RecoveryManager"
 #define PASR_MOD_JOURNAL_MANAGER    "JournalManager"
 #define PASR_MOD_DASHBOARD_MANAGER  "DashboardManager"
+
+// Optional infra services used by the Centralized Modular Pipeline facade.
+#define PASR_MOD_SANITY_MANAGER     "SanityManager"
+#define PASR_MOD_TELEMETRY_RECORDER "TelemetryRecorder"
+#define PASR_MOD_ADAPTIVE_MANAGER   "AdaptiveParameterManager"
+#define PASR_MOD_HEALTH_MONITOR     "HealthMonitor"
+#define PASR_MOD_SNAPSHOT_MANAGER   "SnapshotManager"
+#define PASR_MOD_SESSION_STATE      "SessionState"
 
 #endif // __PASR_CENTRAL_MODULE_NAMES_MQH__
