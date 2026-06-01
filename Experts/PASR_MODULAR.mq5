@@ -9,6 +9,64 @@ input bool InpDebugMode = true;
 input bool InpEnableProfiling = true;
 input int  InpTimerSeconds = 1;
 
+input group "PASR Identity"
+input long   InpMagicNumber = 123456;
+input string InpEAName = "PASR_MODULAR";
+
+input group "Risk"
+input double InpLotSize = 0.01;
+input double InpRiskPercent = 1.0;
+input double InpSLMultiplier = 1.5;
+input double InpTPMultiplier = 2.5;
+input double InpMaxDailyLossPct = 3.0;
+input double InpMaxDrawdownPct = 10.0;
+input int    InpMaxOpenPositions = 3;
+input int    InpMaxConsecLoss = 5;
+input bool   InpUseBreakEven = true;
+input double InpBreakEvenATRMult = 1.0;
+input bool   InpUseTrailingStop = false;
+input double InpTrailATRMult = 1.0;
+input bool   InpRecoveryEnabled = true;
+input int    InpMaxRecoveryAttempts = 3;
+input int    InpRecoveryCooldownBars = 5;
+input double InpPartialClosePct = 0.5;
+input int    InpMaxTradeDurationDays = 0;
+
+input group "Market"
+input int    InpATRPeriod = 14;
+input int    InpADXPeriod = 14;
+input double InpADXTrendThreshold = 25.0;
+input double InpSpreadFilterPips = 3.0;
+input int    InpSessionStartHour = 0;
+input int    InpSessionEndHour = 23;
+input bool   InpFilterNewsTime = false;
+input int    InpNewsBufferMinutes = 30;
+
+input group "AI"
+input bool   InpEnableAI = false;
+input double InpAIMinConfidence = 0.60;
+input double InpAILearningRate = 0.001;
+input int    InpAITrainIntervalBars = 5;
+input int    InpAIReplayBufferSize = 512;
+input int    InpAIMinibatchSize = 32;
+input bool   InpAIPersistWeights = true;
+input string InpAIModelFileName = "PASR_weights.bin";
+
+input group "Pattern"
+input bool   InpEnablePatterns = true;
+input double InpMinPatternScore = 60.0;
+input int    InpPatternLookbackBars = 50;
+input double InpPinBarRatio = 2.0;
+input double InpEngulfMultiplier = 1.1;
+input bool   InpRequireConfirmation = true;
+
+input group "Display"
+input bool   InpShowDashboard = true;
+input bool   InpShowSignalArrows = true;
+input bool   InpEnableAlerts = false;
+input bool   InpEnablePushNotify = false;
+input int    InpFontSize = 9;
+
 CPASRKernel g_kernel;
 
 struct EAState
@@ -32,9 +90,60 @@ CQAStressTest g_qa;
 StrategyConfig BuildConfigFromInputs()
   {
    StrategyConfig cfg;
-   cfg.EAName = "PASR_MODULAR";
+
+   cfg.EAName = InpEAName;
    cfg.Version = "2.15.0";
-   cfg.MagicNumber = 123456;
+   cfg.MagicNumber = InpMagicNumber;
+
+   cfg.Risk.LotSize = InpLotSize;
+   cfg.Risk.RiskPercent = InpRiskPercent;
+   cfg.Risk.SLMultiplier = InpSLMultiplier;
+   cfg.Risk.TPMultiplier = InpTPMultiplier;
+   cfg.Risk.MaxDailyLossPct = InpMaxDailyLossPct;
+   cfg.Risk.MaxDrawdownPct = InpMaxDrawdownPct;
+   cfg.Risk.MaxOpenPositions = InpMaxOpenPositions;
+   cfg.Risk.MaxConsecLoss = InpMaxConsecLoss;
+   cfg.Risk.UseBreakEven = InpUseBreakEven;
+   cfg.Risk.BreakEvenATRMult = InpBreakEvenATRMult;
+   cfg.Risk.UseTrailingStop = InpUseTrailingStop;
+   cfg.Risk.TrailATRMult = InpTrailATRMult;
+   cfg.Risk.RecoveryEnabled = InpRecoveryEnabled;
+   cfg.Risk.MaxRecoveryAttempts = InpMaxRecoveryAttempts;
+   cfg.Risk.RecoveryCooldownBars = InpRecoveryCooldownBars;
+   cfg.Risk.PartialClosePct = InpPartialClosePct;
+   cfg.Risk.MaxTradeDurationDays = InpMaxTradeDurationDays;
+
+   cfg.Market.ATRPeriod = InpATRPeriod;
+   cfg.Market.ADXPeriod = InpADXPeriod;
+   cfg.Market.ADXTrendThreshold = InpADXTrendThreshold;
+   cfg.Market.SpreadFilterPips = InpSpreadFilterPips;
+   cfg.Market.SessionStartHour = InpSessionStartHour;
+   cfg.Market.SessionEndHour = InpSessionEndHour;
+   cfg.Market.FilterNewsTime = InpFilterNewsTime;
+   cfg.Market.NewsBufferMinutes = InpNewsBufferMinutes;
+
+   cfg.AI.EnableAI = InpEnableAI;
+   cfg.AI.MinConfidence = InpAIMinConfidence;
+   cfg.AI.LearningRate = InpAILearningRate;
+   cfg.AI.TrainIntervalBars = InpAITrainIntervalBars;
+   cfg.AI.ReplayBufferSize = InpAIReplayBufferSize;
+   cfg.AI.MinibatchSize = InpAIMinibatchSize;
+   cfg.AI.PersistWeights = InpAIPersistWeights;
+   cfg.AI.ModelFileName = InpAIModelFileName;
+
+   cfg.Pattern.EnablePatterns = InpEnablePatterns;
+   cfg.Pattern.MinPatternScore = InpMinPatternScore;
+   cfg.Pattern.LookbackBars = InpPatternLookbackBars;
+   cfg.Pattern.PinBarRatio = InpPinBarRatio;
+   cfg.Pattern.EngulfMultiplier = InpEngulfMultiplier;
+   cfg.Pattern.RequireConfirmation = InpRequireConfirmation;
+
+   cfg.Display.ShowDashboard = InpShowDashboard;
+   cfg.Display.ShowSignalArrows = InpShowSignalArrows;
+   cfg.Display.EnableAlerts = InpEnableAlerts;
+   cfg.Display.EnablePushNotify = InpEnablePushNotify;
+   cfg.Display.FontSize = InpFontSize;
+
    return cfg;
   }
 
