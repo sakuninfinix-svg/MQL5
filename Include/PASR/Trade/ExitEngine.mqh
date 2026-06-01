@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| ExitEngine.mqh                                             v2.04 |
+//| ExitEngine.mqh                                             v2.10 |
 //| Smart Exit Logic for Position Management                         |
 //+------------------------------------------------------------------+
 #ifndef PASR_EXIT_ENGINE_MQH
@@ -45,6 +45,34 @@ struct ExitSignal
      }
   };
 
+struct ExitSnapshot
+  {
+   bool       indicatorsReady;
+   ulong      chandelierExits;
+   ulong      timeExits;
+   ulong      structureExits;
+   ulong      fadeExits;
+   ulong      totalExits;
+   ExitSignal lastSignal;
+   datetime   lastCheckTime;
+   string     lastSymbol;
+   int        lastPositionType;
+
+   void Clear()
+     {
+      indicatorsReady = false;
+      chandelierExits = 0;
+      timeExits = 0;
+      structureExits = 0;
+      fadeExits = 0;
+      totalExits = 0;
+      lastSignal.Clear();
+      lastCheckTime = 0;
+      lastSymbol = "";
+      lastPositionType = -1;
+     }
+  };
+
 class CExitEngine : public IManager
   {
 private:
@@ -55,6 +83,21 @@ private:
    int   m_hATR;
    int   m_hRSI;
    bool  m_indicatorsReady;
+   ExitSnapshot m_snapshot;
+
+   void RefreshSnapshot(const string symbol = "", ENUM_ORDER_TYPE position_type = ORDER_TYPE_BUY, ExitSignal *signal = NULL)
+     {
+      m_snapshot.indicatorsReady = m_indicatorsReady;
+      m_snapshot.chandelierExits = m_chandelier_exits;
+      m_snapshot.timeExits = m_time_exits;
+      m_snapshot.structureExits = m_structure_exits;
+      m_snapshot.fadeExits = m_fade_exits;
+      m_snapshot.totalExits = m_chandelier_exits + m_time_exits + m_structure_exits + m_fade_exits;
+      if(symbol != "") m_snapshot.lastSymbol = symbol;
+      m_snapshot.lastPositionType = (int)position_type;
+      if(signal != NULL) m_snapshot.lastSignal = *signal;
+      m_snapshot.lastCheckTime = TimeCurrent();
+     }
 
    bool InitIndicators()
      {
@@ -68,13 +111,13 @@ private:
       if(m_hATR != INVALID_HANDLE) { IndicatorRelease(m_hATR); m_hATR = INVALID_HANDLE; }
       if(m_hRSI != INVALID_HANDLE) { IndicatorRelease(m_hRSI); m_hRSI = INVALID_HANDLE; }
       m_indicatorsReady = false;
+      RefreshSnapshot();
      }
 
    double GetATRValue()
      {
       if(m_hATR == INVALID_HANDLE) return 0.0;
       double buf[1];
-      // Use the last closed bar for consistency with Chandelier high/low sampling.
       if(CopyBuffer(m_hATR, 0, 1, 1, buf) <= 0) return 0.0;
       return buf[0];
      }
@@ -84,7 +127,6 @@ private:
       current = 0.0; prev = 0.0;
       if(m_hRSI == INVALID_HANDLE) return false;
       double buf[2];
-      // Closed-bar RSI values only; avoids intrabar profit-fade false exits.
       if(CopyBuffer(m_hRSI, 0, 1, 2, buf) < 2) return false;
       current = buf[0];
       prev = buf[1];
@@ -97,7 +139,7 @@ public:
         m_structure_exits(0), m_fade_exits(0),
         m_hATR(INVALID_HANDLE), m_hRSI(INVALID_HANDLE),
         m_indicatorsReady(false)
-     {}
+     { m_snapshot.Clear(); }
 
    ~CExitEngine() { CleanupIndicators(); }
 
@@ -114,7 +156,8 @@ public:
          return false;
         }
       m_indicatorsReady = true;
-      PrintFormat("[Exit] v2.04 Init OK — Chandelier ATR=%.1f Period=%d", CHANDELIER_ATR_MULT, CHANDELIER_PERIOD);
+      RefreshSnapshot();
+      PrintFormat("[Exit] v2.10 Init OK — Chandelier ATR=%.1f Period=%d", CHANDELIER_ATR_MULT, CHANDELIER_PERIOD);
       return true;
      }
 
@@ -146,7 +189,11 @@ public:
      {
       ExitSignal signal;
       signal.Clear();
-      if(!IsInitialized() || !m_indicatorsReady) return signal;
+      if(!IsInitialized() || !m_indicatorsReady)
+        {
+         RefreshSnapshot(symbol, position_type, signal);
+         return signal;
+        }
 
       double profit_pts = (position_type == ORDER_TYPE_BUY)
                           ? current_price - entry_price
@@ -160,6 +207,7 @@ public:
          signal.current_profit = profit_pts;
          signal.description = StringFormat("Chandelier stop %.5f", exit_level);
          m_chandelier_exits++;
+         RefreshSnapshot(symbol, position_type, signal);
          return signal;
         }
 
@@ -170,6 +218,7 @@ public:
          signal.current_profit = profit_pts;
          signal.description = "Market structure broken by close+ATR filter";
          m_structure_exits++;
+         RefreshSnapshot(symbol, position_type, signal);
          return signal;
         }
 
@@ -180,6 +229,7 @@ public:
          signal.current_profit = profit_pts;
          signal.description = "Momentum exhaustion";
          m_fade_exits++;
+         RefreshSnapshot(symbol, position_type, signal);
          return signal;
         }
 
@@ -192,9 +242,11 @@ public:
          signal.bars_held = barsHeld;
          signal.description = StringFormat("Time exit: %d bars held", barsHeld);
          m_time_exits++;
+         RefreshSnapshot(symbol, position_type, signal);
          return signal;
         }
 
+      RefreshSnapshot(symbol, position_type, signal);
       return signal;
      }
 
@@ -236,7 +288,6 @@ public:
       int needed = STRUCTURE_BREAK_LOOKBACK + 3;
       double closes[];
       ArraySetAsSeries(closes, true);
-      // Exclude the active candle; closes[0] is the last fully closed bar.
       if(CopyClose(symbol, PERIOD_CURRENT, 1, needed, closes) < needed) return false;
       double atr = GetATRValue();
       if(atr <= 0.0) return false;
@@ -263,11 +314,28 @@ public:
       return (idx < 0) ? 0 : idx;
      }
 
+   ExitSnapshot GetSnapshot() const { return m_snapshot; }
+
    void PrintStats()
      {
       ulong total = m_chandelier_exits + m_time_exits + m_structure_exits + m_fade_exits;
       PrintFormat("[Exit] === STATS === Chandelier:%d Time:%d Structure:%d Fade:%d Total:%d",
                   m_chandelier_exits, m_time_exits, m_structure_exits, m_fade_exits, total);
+     }
+
+   void PrintDiagnostics() const
+     {
+      PrintFormat("[ExitDiag] ready=%s total=%I64u chand=%I64u time=%I64u struct=%I64u fade=%I64u lastReason=%d profit=%.2f bars=%d desc=%s",
+                  m_snapshot.indicatorsReady ? "true" : "false",
+                  m_snapshot.totalExits,
+                  m_snapshot.chandelierExits,
+                  m_snapshot.timeExits,
+                  m_snapshot.structureExits,
+                  m_snapshot.fadeExits,
+                  (int)m_snapshot.lastSignal.reason,
+                  m_snapshot.lastSignal.current_profit,
+                  m_snapshot.lastSignal.bars_held,
+                  m_snapshot.lastSignal.description);
      }
   };
 
