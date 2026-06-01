@@ -110,6 +110,7 @@
 // PipelineStage is the forward-compatible split-stage interface.
 // CPipelineEngine is canonical in Orchestration; Core/PipelineEngine.mqh is a compatibility wrapper.
 #include <PASR/Orchestration/PipelineStage.mqh>
+#include <PASR/Orchestration/Stages/PipelineStageBase.mqh>
 #include <PASR/Orchestration/Stages/DataSyncStage.mqh>
 #include <PASR/Orchestration/Stages/SignalStage.mqh>
 #include <PASR/Orchestration/Stages/RiskStage.mqh>
