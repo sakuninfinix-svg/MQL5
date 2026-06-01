@@ -54,6 +54,35 @@ public:
       return true;
      }
 
+   bool InitCritical(IManager *module, const string name)
+     {
+      if(!InitOne(module, name))
+        {
+         PrintFormat("[Lifecycle] CRITICAL module failed: %s", name);
+         return false;
+        }
+      return true;
+     }
+
+   bool InitOptional(IManager *module, const string name)
+     {
+      if(!InitOne(module, name))
+        {
+         PrintFormat("[Lifecycle] OPTIONAL module disabled: %s", name);
+         return false;
+        }
+      return true;
+     }
+
+   void DeinitOne(IManager *module, const string name)
+     {
+      if(module == NULL)
+         return;
+      if(m_debug)
+         PrintFormat("[Lifecycle] Deinit %s", name);
+      module.Deinit();
+     }
+
    bool InitRegistered()
      {
       if(m_registry == NULL)

@@ -6,8 +6,8 @@
 #ifndef __PASR_CENTRAL_KERNEL_MQH__
 #define __PASR_CENTRAL_KERNEL_MQH__
 
-// v0.22 still delegates runtime to COrchestrator, but binds backend
-// services into the central registry through canonical module names.
+// v0.30 owns CPipelineEngine and uses CBackendAdapter as a temporary
+// manager/event provider while manager ownership moves into Central.
 
 enum ENUM_PASR_KERNEL_STATE
   {
@@ -21,10 +21,12 @@ enum ENUM_PASR_KERNEL_STATE
 class CPASRKernel
   {
 private:
-   COrchestrator          *m_backend;
+   CBackendAdapter        *m_backend;
    CModuleRegistry         m_registry;
    CServiceLocator         m_services;
    CLifecycleManager       m_lifecycle;
+   CPipelineEngine        *m_pipeline;
+   PipelineContext         m_pipeline_ctx;
    StrategyConfig          m_cfg;
    ENUM_PASR_KERNEL_STATE  m_state;
    bool                    m_ready;
@@ -68,9 +70,61 @@ private:
       return ok;
      }
 
+   bool RegisterBorrowedIfMissing(const string name, IManager *module)
+     {
+      if(module == NULL)
+         return false;
+      if(m_registry.Contains(name))
+         return true;
+      return m_registry.RegisterOrReplace(name, module, false);
+     }
+
+   bool InitPipeline()
+     {
+      if(m_backend == NULL)
+        {
+         m_last_error = "Cannot initialize pipeline without backend";
+         return false;
+        }
+
+      m_pipeline = CModuleFactory::CreatePipelineEngine();
+      if(m_pipeline == NULL)
+        {
+         m_last_error = "PipelineEngine allocation failed";
+         Print("[PASRKernel] ", m_last_error);
+         return false;
+        }
+
+      m_pipeline.SetDebugMode(m_debug);
+      m_pipeline.EnableProfiling(m_profiling_enabled);
+      m_pipeline.InjectManagers(m_backend.GetDataManager(),
+                                m_backend.GetSRManager(),
+                                m_backend.GetZoneManager(),
+                                m_backend.GetPatternManager(),
+                                m_backend.GetSignalManager(),
+                                m_backend.GetAIOrchestrator(),
+                                m_backend.GetRegimeFilter(),
+                                m_backend.GetRiskManager(),
+                                m_backend.GetExecManager(),
+                                m_backend.GetRecoveryManager(),
+                                m_backend.GetDashboard(),
+                                m_backend.GetJournalManager(),
+                                m_backend.GetEventBus(),
+                                m_backend.GetSanityManager(),
+                                m_backend.GetTelemetry(),
+                                m_backend.GetAdaptiveManager(),
+                                m_backend.GetRegimeDetector(),
+                                NULL,
+                                NULL,
+                                m_backend.GetHealthMonitor(),
+                                m_backend.GetSnapshotManager(),
+                                m_backend.GetExitEngine());
+      return true;
+     }
+
 public:
    CPASRKernel()
-      : m_backend(NULL), m_state(PASR_KERNEL_STOPPED), m_ready(false),
+      : m_backend(NULL), m_pipeline(NULL), m_state(PASR_KERNEL_STOPPED), m_ready(false),
         m_debug(false), m_profiling_enabled(true), m_last_error("")
      {
       m_services.Bind(&m_registry);
@@ -88,6 +142,8 @@ public:
       m_lifecycle.SetDebugMode(enabled);
       if(m_backend != NULL)
          m_backend.SetDebugMode(enabled);
+      if(m_pipeline != NULL)
+         m_pipeline.SetDebugMode(enabled);
      }
 
    void SetProfilingEnabled(const bool enabled)
@@ -95,6 +151,8 @@ public:
       m_profiling_enabled = enabled;
       if(m_backend != NULL)
          m_backend.SetProfilingEnabled(enabled);
+      if(m_pipeline != NULL)
+         m_pipeline.EnableProfiling(enabled);
      }
 
    bool IsProfilingEnabled() const
@@ -117,7 +175,7 @@ public:
       m_cfg = cfg;
       m_last_error = "";
 
-      m_backend = new COrchestrator();
+      m_backend = new CBackendAdapter();
       if(m_backend == NULL)
         {
          SetState(PASR_KERNEL_FAILED, "Backend orchestrator allocation failed");
@@ -127,6 +185,7 @@ public:
 
       m_backend.SetDebugMode(m_debug);
       m_backend.SetProfilingEnabled(m_profiling_enabled);
+      m_backend.BindOwnerRegistry(&m_registry, true);
       int rc = m_backend.Init(m_cfg);
       if(rc != INIT_SUCCEEDED)
         {
@@ -134,11 +193,19 @@ public:
          Print("[PASRKernel] Backend orchestrator init failed");
          delete m_backend;
          m_backend = NULL;
+         m_registry.Clear(true);
          return rc;
         }
 
       BindBackendServices();
       if(!ValidateBackendServices())
+        {
+         SetState(PASR_KERNEL_FAILED, m_last_error);
+         Shutdown(REASON_INITFAILED);
+         return INIT_FAILED;
+        }
+
+      if(!InitPipeline())
         {
          SetState(PASR_KERNEL_FAILED, m_last_error);
          Shutdown(REASON_INITFAILED);
@@ -157,13 +224,19 @@ public:
       if(m_state == PASR_KERNEL_SHUTTING_DOWN) return;
       SetState(PASR_KERNEL_SHUTTING_DOWN);
 
+      if(m_pipeline != NULL)
+        {
+         delete m_pipeline;
+         m_pipeline = NULL;
+        }
+
       if(m_backend != NULL)
         {
          m_backend.OnDeinit(reason);
          delete m_backend;
          m_backend = NULL;
         }
-      m_registry.Clear(false);
+      m_registry.Clear(true);
       m_ready = false;
       SetState(PASR_KERNEL_STOPPED);
      }
@@ -176,8 +249,17 @@ public:
 
    void OnTimer()
      {
-      if(m_ready && m_backend != NULL)
-         m_backend.OnTimer();
+      if(!m_ready || m_backend == NULL || m_pipeline == NULL)
+         return;
+
+      bool isNewBar = m_backend.ConsumeNewBarFlag();
+      m_backend.PreparePipelineContext(m_pipeline_ctx, isNewBar);
+      m_backend.DrainEventQueue();
+      m_backend.ProcessExecutionRetryQueue();
+      ENUM_STAGE_RESULT result = m_pipeline.ExecutePipeline(m_pipeline_ctx);
+      m_backend.DrainEventQueue();
+      if(m_debug && result == STAGE_ABORT)
+         PrintFormat("[PASRKernel] Pipeline ABORT: %s", m_pipeline_ctx.exit_message);
      }
 
    void OnDeinit(const int reason)
@@ -208,9 +290,14 @@ public:
       return m_last_error;
      }
 
-   COrchestrator* Backend() const
+   CBackendAdapter* Backend() const
      {
       return m_backend;
+     }
+
+   CPipelineEngine* Pipeline() const
+     {
+      return m_pipeline;
      }
 
    CModuleRegistry* Registry()
@@ -245,30 +332,28 @@ public:
 
    void BindBackendServices()
      {
-      m_registry.Clear(false);
       if(m_backend == NULL)
          return;
 
-      // owned=false because the legacy orchestrator still owns these objects.
-      m_registry.RegisterOrReplace(PASR_MOD_DATA_MANAGER,       m_backend.GetDataManager(),      false);
-      m_registry.RegisterOrReplace(PASR_MOD_SR_MANAGER,         m_backend.GetSRManager(),        false);
-      m_registry.RegisterOrReplace(PASR_MOD_ZONE_MANAGER,       m_backend.GetZoneManager(),      false);
-      m_registry.RegisterOrReplace(PASR_MOD_PATTERN_MANAGER,    m_backend.GetPatternManager(),   false);
-      m_registry.RegisterOrReplace(PASR_MOD_SIGNAL_MANAGER,     m_backend.GetSignalManager(),    false);
-      m_registry.RegisterOrReplace(PASR_MOD_AI_ORCHESTRATOR,    m_backend.GetAIOrchestrator(),   false);
-      m_registry.RegisterOrReplace(PASR_MOD_REGIME_FILTER,      m_backend.GetRegimeFilter(),     false);
-      m_registry.RegisterOrReplace(PASR_MOD_RISK_MANAGER,       m_backend.GetRiskManager(),      false);
-      m_registry.RegisterOrReplace(PASR_MOD_EXECUTION_MANAGER,  m_backend.GetExecManager(),      false);
-      m_registry.RegisterOrReplace(PASR_MOD_EXIT_ENGINE,        m_backend.GetExitEngine(),       false);
-      m_registry.RegisterOrReplace(PASR_MOD_RECOVERY_MANAGER,   m_backend.GetRecoveryManager(),  false);
-      m_registry.RegisterOrReplace(PASR_MOD_JOURNAL_MANAGER,    m_backend.GetJournalManager(),   false);
-      m_registry.RegisterOrReplace(PASR_MOD_DASHBOARD_MANAGER,  m_backend.GetDashboard(),        false);
-      m_registry.RegisterOrReplace(PASR_MOD_SANITY_MANAGER,     m_backend.GetSanityManager(),    false);
-      m_registry.RegisterOrReplace(PASR_MOD_TELEMETRY_RECORDER, m_backend.GetTelemetry(),        false);
-      m_registry.RegisterOrReplace(PASR_MOD_ADAPTIVE_MANAGER,   m_backend.GetAdaptiveManager(),  false);
-      m_registry.RegisterOrReplace(PASR_MOD_HEALTH_MONITOR,     m_backend.GetHealthMonitor(),    false);
-      m_registry.RegisterOrReplace(PASR_MOD_SNAPSHOT_MANAGER,   m_backend.GetSnapshotManager(),  false);
-      m_registry.RegisterOrReplace(PASR_MOD_SESSION_STATE,      m_backend.GetSessionState(),     false);
+      RegisterBorrowedIfMissing(PASR_MOD_DATA_MANAGER,       m_backend.GetDataManager());
+      RegisterBorrowedIfMissing(PASR_MOD_SR_MANAGER,         m_backend.GetSRManager());
+      RegisterBorrowedIfMissing(PASR_MOD_ZONE_MANAGER,       m_backend.GetZoneManager());
+      RegisterBorrowedIfMissing(PASR_MOD_PATTERN_MANAGER,    m_backend.GetPatternManager());
+      RegisterBorrowedIfMissing(PASR_MOD_SIGNAL_MANAGER,     m_backend.GetSignalManager());
+      RegisterBorrowedIfMissing(PASR_MOD_AI_ORCHESTRATOR,    m_backend.GetAIOrchestrator());
+      RegisterBorrowedIfMissing(PASR_MOD_REGIME_FILTER,      m_backend.GetRegimeFilter());
+      RegisterBorrowedIfMissing(PASR_MOD_RISK_MANAGER,       m_backend.GetRiskManager());
+      RegisterBorrowedIfMissing(PASR_MOD_EXECUTION_MANAGER,  m_backend.GetExecManager());
+      RegisterBorrowedIfMissing(PASR_MOD_EXIT_ENGINE,        m_backend.GetExitEngine());
+      RegisterBorrowedIfMissing(PASR_MOD_RECOVERY_MANAGER,   m_backend.GetRecoveryManager());
+      RegisterBorrowedIfMissing(PASR_MOD_JOURNAL_MANAGER,    m_backend.GetJournalManager());
+      RegisterBorrowedIfMissing(PASR_MOD_DASHBOARD_MANAGER,  m_backend.GetDashboard());
+      RegisterBorrowedIfMissing(PASR_MOD_SANITY_MANAGER,     m_backend.GetSanityManager());
+      RegisterBorrowedIfMissing(PASR_MOD_TELEMETRY_RECORDER, m_backend.GetTelemetry());
+      RegisterBorrowedIfMissing(PASR_MOD_ADAPTIVE_MANAGER,   m_backend.GetAdaptiveManager());
+      RegisterBorrowedIfMissing(PASR_MOD_HEALTH_MONITOR,     m_backend.GetHealthMonitor());
+      RegisterBorrowedIfMissing(PASR_MOD_SNAPSHOT_MANAGER,   m_backend.GetSnapshotManager());
+      RegisterBorrowedIfMissing(PASR_MOD_SESSION_STATE,      m_backend.GetSessionState());
      }
   };
 

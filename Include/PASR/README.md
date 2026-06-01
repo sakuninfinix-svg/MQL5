@@ -16,7 +16,7 @@ README ini berfungsi sebagai dokumentasi arsitektur, peta folder, panduan build,
 
 PASR sekarang bergerak menuju **Centralized Modular Pipeline Architecture**.
 
-Entry point EA memakai `CPASRKernel` sebagai pusat lifecycle dan service facade. Untuk fase kompatibilitas, `CPASRKernel` masih mendelegasikan runtime ke `COrchestrator` lama, sehingga behavior pipeline tetap sama sambil tanggung jawab dipindahkan bertahap ke `Central/` dan `Orchestration/`.
+Entry point EA memakai `CPASRKernel` sebagai pusat lifecycle, service facade, dan owner pipeline. Untuk fase kompatibilitas, `CPASRKernel` masih memakai `CBackendAdapter` sebagai backend manager/event adapter, tetapi timer pipeline dijalankan oleh kernel-owned `CPipelineEngine`.
 
 ```text
 Experts/PASR_MODULAR.mq5
@@ -25,7 +25,7 @@ CPASRKernel
         ↓
 CModuleRegistry + CServiceLocator + CLifecycleManager
         ↓
-COrchestrator compatibility backend
+CBackendAdapter compatibility backend
         ↓
 CPipelineEngine::ExecutePipeline(PipelineContext)
         ↓
@@ -44,6 +44,8 @@ CPipelineEngine::ExecutePipeline(PipelineContext)
 13 Dashboard
 14 Journal
 ```
+
+`CBackendAdapter` pada diagram di atas adalah compatibility backend untuk bootstrap/tick/trade events. Pipeline object, timer execution, dan lifetime manager berbasis `IManager` sudah dimiliki `CPASRKernel`. `COrchestrator` masih tersedia sebagai wrapper kompatibilitas untuk include lama.
 
 Runtime event flow tetap:
 
@@ -99,7 +101,7 @@ Remaining `PERF_METRICS` cleanup is tracked in Issue #181.
 |------|--------|-------|
 | Fase 1 | Done | Add `Central/`, `CPASRKernel`, `CModuleRegistry`, `CServiceLocator`, `CLifecycleManager` |
 | Fase 2 | Done | `Experts/PASR_MODULAR.mq5` now uses `CPASRKernel g_kernel` |
-| Fase 3 | In progress | Extract allocation/lifecycle/dependency ownership from `Core/Orchestrator*.mqh` |
+| Fase 3 | In progress | Extract allocation/lifecycle/dependency ownership from `Central/BackendAdapter*.mqh` |
 | Fase 4 | In progress | Add `Orchestration/` and `IPipelineStage` target interface |
 | Fase 5 | Pending | Move `CPipelineEngine` implementation out of `Core/` after compile stability |
 
@@ -125,7 +127,7 @@ S21-010 adalah dokumentasi issue yang diselesaikan oleh migrasi ini: README tida
 
 1. Compile-test `Experts/PASR_MODULAR.mq5` after `CPASRKernel` adoption.
 2. Fix any include/type errors introduced by `Central/` and `Orchestration/` headers.
-3. Extract manager allocation from `Core/OrchestratorInit.mqh` into a central factory/registry.
+3. Move remaining allocation/bootstrap code from `Central/BackendAdapterInit.mqh` into Central-owned services.
 4. Extract lifecycle init/deinit ordering into `CLifecycleManager`.
 5. Move `CPipelineEngine` implementation to `Orchestration/` only after compile stability.
 6. Decompose `Analysis/SRManager.mqh` and audit `Analysis/Pattern` after core compile is stable.
@@ -184,8 +186,10 @@ void OnDeinit(const int reason)
 | `Central/LifecycleManager.mqh` | v0.10 | Skeleton |
 | `Central/ModuleNames.mqh` | v0.10 | Active |
 | `Orchestration/PipelineStage.mqh` | v0.10 | Skeleton |
-| `Core/Orchestrator.mqh` | v3.11 | Compatibility backend |
-| `Core/PipelineEngine.mqh` | v2.03 | Compatibility backend |
+| `Central/BackendAdapter.mqh` | v3.11 | Compatibility backend |
+| `Core/Orchestrator.mqh` | v3.11 | Compatibility wrapper |
+| `Orchestration/PipelineEngine.mqh` | v2.20 | Canonical pipeline engine |
+| `Core/PipelineEngine.mqh` | v2.20 | Compatibility wrapper |
 | `Signal/SignalManager.mqh` | v4.02 | Stable |
 | `Trade/ExecutionManager.mqh` | v3.02 | Stable |
 | `Trade/RiskManager.mqh` | v2.02 | Stable |

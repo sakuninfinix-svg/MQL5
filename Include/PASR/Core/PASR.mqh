@@ -108,9 +108,12 @@
 
 // Layer 9: Orchestration interfaces + legacy pipeline backend
 // PipelineStage is the forward-compatible split-stage interface.
-// CPipelineEngine remains in Core during the compatibility phase.
+// CPipelineEngine is canonical in Orchestration; Core/PipelineEngine.mqh is a compatibility wrapper.
 #include <PASR/Orchestration/PipelineStage.mqh>
-#include "PipelineEngine.mqh"
+#include <PASR/Orchestration/Stages/DataSyncStage.mqh>
+#include <PASR/Orchestration/Stages/SignalStage.mqh>
+#include <PASR/Orchestration/Stages/RiskStage.mqh>
+#include <PASR/Orchestration/PipelineEngine.mqh>
 
 // PipelineTypes temporarily maps DetectSession -> PASRDetectSession so included
 // core pipeline code binds to the canonical helper. Undefine it before returning
@@ -119,16 +122,13 @@
 #undef DetectSession
 #endif
 
-#include "Orchestrator.mqh"
-#include "OrchestratorInit.mqh"
-
-// Layer 10: Centralized Modular Pipeline facade
-// These files are included after the legacy orchestrator so CPASRKernel can
-// delegate to COrchestrator during the non-breaking migration phase.
+// Layer 10: Centralized Modular Pipeline facade and compatibility backend
 #include <PASR/Central/ModuleNames.mqh>
 #include <PASR/Central/ModuleRegistry.mqh>
 #include <PASR/Central/ServiceLocator.mqh>
 #include <PASR/Central/LifecycleManager.mqh>
+#include <PASR/Central/BackendAdapter.mqh>
+#include <PASR/Central/BackendAdapterInit.mqh>
 #include <PASR/Central/PASRKernel.mqh>
 
 #endif // __CORE_PASR_MASTER_MQH__

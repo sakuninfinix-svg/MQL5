@@ -43,13 +43,29 @@ Data, Analysis, Signal, AI, Trade, Infra modules
 
 ## Status migrasi
 
-Saat ini `CPipelineEngine` masih berada di:
+Saat ini implementasi canonical `CPipelineEngine` berada di:
+
+```text
+Include/PASR/Orchestration/PipelineEngine.mqh
+```
+
+Include lama tetap aman melalui compatibility wrapper:
 
 ```text
 Include/PASR/Core/PipelineEngine.mqh
 ```
 
-Folder ini disiapkan sebagai target akhir. Migrasi dilakukan bertahap agar compile lama tetap aman.
+Migrasi dilakukan bertahap agar compile lama tetap aman.
+
+Adapter stage awal sudah tersedia dan di-include oleh master include sebagai compile guard:
+
+```text
+Include/PASR/Orchestration/Stages/DataSyncStage.mqh
+Include/PASR/Orchestration/Stages/SignalStage.mqh
+Include/PASR/Orchestration/Stages/RiskStage.mqh
+```
+
+Adapter tersebut default disabled dan belum dipakai oleh runtime lama.
 
 ## Target akhir
 

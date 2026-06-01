@@ -37,18 +37,23 @@ Sudah selesai:
 - `CModuleRegistry` dibuat.
 - `CServiceLocator` dibuat.
 - `CLifecycleManager` dibuat sebagai skeleton.
+- `CModuleFactory` dibuat sebagai titik allocation resmi tahap awal.
 - `ModuleNames.mqh` dibuat sebagai canonical module names.
 - `Experts/PASR_MODULAR.mq5` sudah memakai `CPASRKernel g_kernel`.
+- `CPASRKernel` sudah memiliki dan menjalankan `CPipelineEngine`.
+- `CPASRKernel` registry sudah menjadi owner lifetime untuk manager berbasis `IManager`.
 - `Orchestration/` dibuat.
 - `IPipelineStage` dibuat sebagai target interface split-stage.
 - `Core/PASR.mqh` sudah include `Central/` dan `Orchestration/` secara resmi.
 
 Masih compatibility backend:
 
-- `COrchestrator` masih memegang allocation manager.
-- `COrchestrator` masih memegang `OnTick`, `OnTimer`, `OnTradeTransaction` backend.
-- `CPipelineEngine` masih berada di `Core/PipelineEngine.mqh`.
-- `OrchestratorInit.mqh` masih menjadi bootstrap utama manager.
+- `COrchestrator` masih memegang orchestration init order, tetapi allocation module utama sudah melewati `CModuleFactory`.
+- `CBackendAdapter` masih memegang allocation/bootstrap code, `OnTick`, dan `OnTradeTransaction` backend, tetapi manager berbasis `IManager` didaftarkan sebagai owned di kernel registry.
+- `CBackendAdapter.OnTimer()` sudah compatibility no-op; timer pipeline dijalankan oleh `CPASRKernel`.
+- `CPipelineEngine` sudah berada di `Orchestration/PipelineEngine.mqh`; `Core/PipelineEngine.mqh` menjadi compatibility wrapper.
+- `CBackendAdapter` menjadi backend canonical di `Central/BackendAdapter.mqh`; `COrchestrator` hanya compatibility wrapper di `Core/Orchestrator.mqh`.
+- `Central/BackendAdapterInit.mqh` masih menjadi bootstrap utama manager.
 
 ## Migration Phases
 
@@ -58,17 +63,22 @@ Goal: memastikan kondisi setelah `CPASRKernel` adoption diketahui jelas.
 
 Checklist:
 
-- [ ] Compile `Experts/PASR_MODULAR.mq5` di MetaEditor.
-- [ ] Catat semua error compiler apa adanya.
-- [ ] Pisahkan error menjadi kategori:
-  - [ ] include order,
-  - [ ] unknown class/type,
-  - [ ] enum/macro conflict,
-  - [ ] missing method,
-  - [ ] legacy compile blocker,
-  - [ ] new Central migration blocker.
-- [ ] Fix hanya error yang muncul dari `Central/` dan `Orchestration/` dulu.
-- [ ] Jangan pindahkan `PipelineEngine` sebelum phase ini hijau.
+- [x] Compile `Experts/PASR_MODULAR.mq5` di MetaEditor.
+- [x] Catat semua error compiler apa adanya.
+- [x] Pisahkan error menjadi kategori:
+  - [x] include order,
+  - [x] unknown class/type,
+  - [x] enum/macro conflict,
+  - [x] missing method,
+  - [x] legacy compile blocker,
+  - [x] new Central migration blocker.
+- [x] Fix hanya error yang muncul dari `Central/` dan `Orchestration/` dulu.
+- [x] Jangan pindahkan `PipelineEngine` sebelum phase ini hijau.
+
+Checkpoint 2026-06-01:
+
+- MetaEditor compile command tanpa `/inc` menghasilkan `Result: 0 errors, 0 warnings`.
+- Command dengan `/inc:<MQL5>\Include` menghasilkan false positive include path `MQL5\Include\Include\...`; gunakan compile command tanpa `/inc` untuk baseline.
 
 Acceptance criteria:
 
@@ -105,23 +115,31 @@ Include/PASR/Central/ModuleFactory.mqh
 
 Checklist:
 
-- [ ] Buat `CModuleFactory`.
-- [ ] Pindahkan allocation sederhana satu per satu:
-  - [ ] `CEventBus`,
-  - [ ] `CDataManager`,
-  - [ ] `CAnalysisSRManager`,
-  - [ ] `CAnalysisZoneManager`,
-  - [ ] `CPatternManager`,
-  - [ ] `CSignalManager`,
-  - [ ] `CRiskManager`,
-  - [ ] `CExecutionManager`,
-  - [ ] `CExitEngine`.
-- [ ] Module opsional tetap boleh gagal tanpa mematikan EA:
-  - [ ] `CRegimeFilter`,
-  - [ ] `CAIOrchestrator`,
-  - [ ] `CJournalManager`,
-  - [ ] `CDashboardManager`.
-- [ ] Setelah setiap 2–3 module dipindah, compile checkpoint.
+- [x] Buat `CModuleFactory`.
+- [x] Pindahkan allocation sederhana satu per satu:
+  - [x] `CEventBus`,
+  - [x] `CDataManager`,
+  - [x] `CAnalysisSRManager`,
+  - [x] `CAnalysisZoneManager`,
+  - [x] `CPatternManager`,
+  - [x] `CSignalManager`,
+  - [x] `CRiskManager`,
+  - [x] `CExecutionManager`,
+  - [x] `CExitEngine`.
+- [x] Module opsional tetap boleh gagal tanpa mematikan EA:
+  - [x] `CRegimeFilter`,
+  - [x] `CAIOrchestrator`,
+  - [x] `CJournalManager`,
+  - [x] `CDashboardManager`.
+- [x] Setelah setiap 2–3 module dipindah, compile checkpoint.
+
+Checkpoint 2026-06-01:
+
+- Allocation di `Central/BackendAdapterInit.mqh` untuk module utama dan opsional sudah melalui `Central/CModuleFactory`.
+- Canonical backend init sudah pindah ke `Central/BackendAdapterInit.mqh`; `Core/OrchestratorInit.mqh` hanya wrapper.
+- Manager berbasis `IManager` yang berhasil init didaftarkan ke `CPASRKernel` registry dengan `owned=true`.
+- Runtime init order dan failure policy belum diubah.
+- MetaEditor compile: `Result: 0 errors, 0 warnings`.
 
 Acceptance criteria:
 
@@ -135,13 +153,23 @@ Goal: init/deinit order pindah dari `COrchestrator` ke `CLifecycleManager`.
 
 Checklist:
 
-- [ ] `CLifecycleManager` mengelola init order.
-- [ ] `CLifecycleManager` mengelola deinit reverse order.
-- [ ] `EventBus.Register()` dipanggil dari lifecycle manager.
-- [ ] Debug mode diteruskan dari kernel ke module.
-- [ ] Failure policy ditulis jelas:
-  - [ ] critical module fail = `INIT_FAILED`,
-  - [ ] optional module fail = warning + continue.
+- [x] `CLifecycleManager` mengelola init order.
+- [x] `CLifecycleManager` mengelola deinit reverse order.
+- [x] `EventBus.Register()` dipanggil dari lifecycle manager.
+- [x] Debug mode diteruskan dari kernel ke module.
+- [x] Failure policy ditulis jelas:
+  - [x] critical module fail = `INIT_FAILED`,
+  - [x] optional module fail = warning + continue.
+
+Checkpoint 2026-06-01:
+
+- `Central/BackendAdapterInit.mqh` memakai `CLifecycleManager::InitCritical()` untuk module critical.
+- Optional modules memakai `CLifecycleManager::InitOptional()` dan tetap warning + continue.
+- `Central/BackendAdapter.mqh::FreeAll()` memakai `CLifecycleManager::DeinitOne()` untuk manager berbasis `IManager` dalam urutan reverse yang sudah ada.
+- Canonical backend adapter berada di `Central/BackendAdapter.mqh`; `Core/Orchestrator.mqh` hanya wrapper `COrchestrator : CBackendAdapter`.
+- Saat kernel registry menjadi owner manager, backend tidak melakukan delete manager untuk mencegah double-delete; registry `Clear(true)` menjadi pemilik shutdown manager.
+- `CMarketRegimeDetector` tetap deinit langsung karena bukan turunan `IManager`.
+- MetaEditor compile: `Result: 0 errors, 0 warnings`.
 
 Critical modules:
 
@@ -175,7 +203,7 @@ Acceptance criteria:
 
 - Deinit order selalu reverse dari init order.
 - Tidak ada double-delete.
-- Registry ownership jelas: owned atau borrowed.
+- Registry ownership jelas: owned atau borrowed. *(Masih compatibility: kernel registry mem-bind backend services sebagai borrowed, backend orchestrator masih pemilik object.)*
 
 ### Phase 4 — Dependency Access Cleanup
 
@@ -183,10 +211,17 @@ Goal: domain module tidak mencari dependency secara liar.
 
 Checklist:
 
-- [ ] Semua nama module memakai `ModuleNames.mqh`.
-- [ ] `CServiceLocator` menjadi akses dependency typed.
+- [x] Semua nama module memakai `ModuleNames.mqh`.
+- [x] `CServiceLocator` menjadi akses dependency typed.
 - [ ] Kurangi penggunaan pointer lintas-domain langsung di pipeline.
-- [ ] Dokumentasikan dependency per module.
+- [x] Dokumentasikan dependency per module.
+
+Checkpoint 2026-06-01:
+
+- `ModuleNames.mqh` mencakup canonical names untuk manager utama, optional infra, dan runtime services non-`IManager`.
+- `Central/DEPENDENCIES.md` mencatat owner saat ini, registry state, dan lifecycle path per module.
+- Direct pointer injection di `CPipelineEngine::InjectManagers()` masih ada dan menjadi target Phase 4 lanjutan sebelum pipeline ownership dipindahkan.
+- Pipeline ownership sudah pindah ke `CPASRKernel`; direct pointer injection masih ada sebagai adapter boundary dari backend manager provider ke kernel-owned pipeline.
 
 Acceptance criteria:
 
@@ -201,11 +236,17 @@ Checklist:
 
 - [x] `Orchestration/README.md` dibuat.
 - [x] `IPipelineStage` dibuat.
-- [ ] Buat wrapper/adaptor stage pertama tanpa mengubah runtime:
-  - [ ] `DataSyncStage.mqh`,
-  - [ ] `SignalStage.mqh`,
-  - [ ] `RiskStage.mqh`.
-- [ ] `CPipelineEngine` tetap sebagai sumber runtime sampai semua stage siap.
+- [x] Buat wrapper/adaptor stage pertama tanpa mengubah runtime:
+  - [x] `DataSyncStage.mqh`,
+  - [x] `SignalStage.mqh`,
+  - [x] `RiskStage.mqh`.
+- [x] `CPipelineEngine` tetap sebagai sumber runtime sampai semua stage siap.
+
+Checkpoint 2026-06-01:
+
+- Adapter stage awal dibuat di `Orchestration/Stages/`.
+- Adapter default `IsEnabled() == false`, sehingga include aman dan tidak mengubah runtime behavior.
+- `Core/PASR.mqh` include adapter tersebut sebagai compile guard.
 
 Acceptance criteria:
 
@@ -218,12 +259,21 @@ Goal: pindahkan implementasi pipeline dari `Core/` ke `Orchestration/`.
 
 Checklist:
 
-- [ ] Buat `Include/PASR/Orchestration/PipelineEngine.mqh`.
-- [ ] Pindahkan `CPipelineEngine` secara utuh terlebih dahulu.
-- [ ] `Core/PipelineEngine.mqh` menjadi compatibility wrapper sementara.
-- [ ] Update `Core/PASR.mqh` include order.
-- [ ] Compile checkpoint.
+- [x] Buat `Include/PASR/Orchestration/PipelineEngine.mqh`.
+- [x] Pindahkan `CPipelineEngine` secara utuh terlebih dahulu.
+- [x] `Core/PipelineEngine.mqh` menjadi compatibility wrapper sementara.
+- [x] Update `Core/PASR.mqh` include order.
+- [x] Compile checkpoint.
 - [ ] Baru pecah stage satu per satu.
+
+Checkpoint 2026-06-01:
+
+- `CPipelineEngine` canonical implementation moved to `Include/PASR/Orchestration/PipelineEngine.mqh`.
+- `Include/PASR/Core/PipelineEngine.mqh` is now a compatibility wrapper.
+- `Core/PASR.mqh` includes the orchestration engine directly.
+- `CPASRKernel` allocates, injects, executes, and deletes `CPipelineEngine`.
+- `CBackendAdapter.OnTimer()` is a compatibility no-op.
+- MetaEditor compile: `Result: 0 errors, 0 warnings`.
 
 Acceptance criteria:
 
@@ -268,7 +318,7 @@ Migrasi dianggap selesai jika:
 
 - `Experts/PASR_MODULAR.mq5` memakai `CPASRKernel` secara penuh.
 - `CPASRKernel` tidak lagi hanya wrapper pasif, tetapi mengelola registry/lifecycle/pipeline ownership.
-- `COrchestrator` lama sudah menjadi adapter kecil atau dihapus.
+- `COrchestrator` lama sudah menjadi compatibility wrapper; backend canonical adalah `CBackendAdapter`.
 - `CPipelineEngine` berada di `Orchestration/`.
 - `Core/` hanya berisi primitive, event, interfaces, common types, dan master include.
 - Compile bersih atau hanya menyisakan issue lama yang terdokumentasi.

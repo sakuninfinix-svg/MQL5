@@ -2,7 +2,7 @@
 
 Central layer adalah pusat kontrol untuk migrasi **Centralized Modular Pipeline Architecture**.
 
-Tujuan folder ini bukan memindahkan semua logic trading ke satu tempat, tetapi memisahkan tanggung jawab pusat dari `Core/Orchestrator.mqh` yang saat ini masih memegang lifecycle, dependency, event routing, dan pipeline bootstrap sekaligus.
+Tujuan folder ini bukan memindahkan semua logic trading ke satu tempat, tetapi memisahkan tanggung jawab pusat dari backend lama. Compatibility backend sekarang berada di `Central/BackendAdapter.mqh`; wrapper lama di `Core/Orchestrator*.mqh` hanya dipertahankan untuk include lama.
 
 ## Prinsip
 
@@ -69,18 +69,19 @@ Data → Analysis → Signal → AI → Risk → Execution → Journal
 
 ### Fase 2 — Adapter ke orchestrator lama ✅
 
-- `CPASRKernel` menjalankan `COrchestrator` lama sebagai backend.
+- `CPASRKernel` menjalankan `CBackendAdapter` compatibility backend dari `Central/BackendAdapter.mqh`.
 - `Experts/PASR_MODULAR.mq5` sudah memakai `CPASRKernel g_kernel` sebagai entry point.
 - Runtime behavior masih didelegasikan ke orchestrator lama agar migrasi tetap aman.
 
 ### Fase 3 — Extract responsibilities ⏳
 
-Pindahkan bertahap dari `Core/Orchestrator.mqh`:
+Pindahkan bertahap dari backend adapter:
 
-- allocation manager → `CModuleRegistry`,
-- init/deinit order → `CLifecycleManager`,
+- allocation factory → `CModuleFactory` ✅,
+- module registry ownership → `CModuleRegistry`,
+- init/deinit order → `CLifecycleManager` ✅,
 - dependency access → `CServiceLocator`,
-- pipeline ownership → `CPASRKernel`.
+- pipeline ownership → `CPASRKernel` ✅.
 
 ### Fase 4 — Split pipeline stages ⏳
 
@@ -105,6 +106,10 @@ Compatibility adapters
 
 ## Status
 
-Fase 1 dan Fase 2 sudah selesai secara struktural. Sistem sekarang memakai `CPASRKernel` sebagai facade pusat, tetapi manager allocation dan pipeline execution masih berada di backend `COrchestrator` lama.
+Fase 1 dan Fase 2 sudah selesai secara struktural. Sistem sekarang memakai `CPASRKernel` sebagai facade pusat, dan allocation module utama/opsional sudah lewat `CModuleFactory`.
 
-Langkah berikutnya adalah mengekstrak allocation dan lifecycle manager dari `Core/OrchestratorInit.mqh` ke `Central/` secara bertahap.
+`CBackendAdapter` masih menjadi compatibility backend untuk manager allocation/bootstrap, tick processing, dan trade-transaction handling. Init manager utama sudah melewati `CLifecycleManager`, manager berbasis `IManager` sekarang owned oleh `CPASRKernel` registry, dan `CPASRKernel` sudah memiliki/menjalankan `CPipelineEngine`.
+
+Langkah berikutnya adalah memindahkan allocation/bootstrap code dan non-`IManager` runtime services dari backend adapter ke Central supaya backend bisa mengecil menjadi event adapter murni atau dihapus.
+
+Current ownership/dependency status is tracked in `Central/DEPENDENCIES.md`.
