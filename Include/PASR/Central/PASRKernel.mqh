@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Central/PASRKernel.mqh — v0.22                                   |
+//| Central/PASRKernel.mqh — v0.23                                   |
 //| Compatibility facade for Centralized Modular Pipeline migration    |
 //+------------------------------------------------------------------+
 #property strict
@@ -97,28 +97,33 @@ private:
 
       m_pipeline.SetDebugMode(m_debug);
       m_pipeline.EnableProfiling(m_profiling_enabled);
-      m_pipeline.InjectManagers(m_backend.GetDataManager(),
-                                m_backend.GetSRManager(),
-                                m_backend.GetZoneManager(),
-                                m_backend.GetPatternManager(),
-                                m_backend.GetSignalManager(),
-                                m_backend.GetAIOrchestrator(),
-                                m_backend.GetRegimeFilter(),
-                                m_backend.GetRiskManager(),
-                                m_backend.GetExecManager(),
-                                m_backend.GetRecoveryManager(),
-                                m_backend.GetDashboard(),
-                                m_backend.GetJournalManager(),
+
+      // Phase 4 cleanup: pipeline dependencies are now sourced from the
+      // central typed service locator wherever a module is registry-owned.
+      // Backend direct access remains only for compatibility-only services
+      // that are not yet represented as IManager registry entries.
+      m_pipeline.InjectManagers(m_services.Data(),
+                                m_services.SR(),
+                                m_services.Zone(),
+                                m_services.Pattern(),
+                                m_services.Signal(),
+                                m_services.AI(),
+                                m_services.RegimeFilter(),
+                                m_services.Risk(),
+                                m_services.Execution(),
+                                m_services.Recovery(),
+                                m_services.Dashboard(),
+                                m_services.Journal(),
                                 m_backend.GetEventBus(),
-                                m_backend.GetSanityManager(),
-                                m_backend.GetTelemetry(),
-                                m_backend.GetAdaptiveManager(),
+                                m_services.Sanity(),
+                                m_services.Telemetry(),
+                                m_services.Adaptive(),
                                 m_backend.GetRegimeDetector(),
                                 NULL,
                                 NULL,
-                                m_backend.GetHealthMonitor(),
-                                m_backend.GetSnapshotManager(),
-                                m_backend.GetExitEngine());
+                                m_services.Health(),
+                                m_services.Snapshot(),
+                                m_services.Exit());
       return true;
      }
 
