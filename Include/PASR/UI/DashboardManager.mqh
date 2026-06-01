@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| UI/DashboardManager.mqh — v2.04                                  |
-//| Runtime dashboard manager.                                       |
+//| UI/DashboardManager.mqh — v2.20                                  |
+//| Runtime dashboard manager with observability overlay.             |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __UI_DASHBOARD_MANAGER_MQH__
@@ -42,6 +42,7 @@ private:
    double           m_aiScore;
    EMarketRegime    m_regime;
    double           m_sessionDD;
+   string           m_observabilityText;
 
    void PushSignal(DashContext &ctx, ENUM_SIGNAL_DIR dir, double confidence, int source)
      {
@@ -54,7 +55,7 @@ private:
 public:
    CDashboardManager()
       : IManager(), m_journal(NULL), m_lastUpdate(0), m_updateIntervalSec(1), m_prefix("PASR"),
-        m_aiScore(0.0), m_regime(REGIME_UNKNOWN), m_sessionDD(0.0)
+        m_aiScore(0.0), m_regime(REGIME_UNKNOWN), m_sessionDD(0.0), m_observabilityText("")
      {
       m_ctx.Clear();
       m_lastSignal.Clear();
@@ -130,6 +131,16 @@ public:
       m_ctx.drawdownPct = dd;
      }
 
+   void SetObservabilityText(const string text)
+     {
+      m_observabilityText = text;
+     }
+
+   string GetObservabilityText() const
+     {
+      return m_observabilityText;
+     }
+
    void SetJournal(CJournalManager *journal) { m_journal = journal; }
    void SetPrefix(string prefix) { if(prefix != "") m_prefix = prefix; }
    void SetUpdateInterval(int seconds) { m_updateIntervalSec = MathMax(1, seconds); }
@@ -156,6 +167,8 @@ public:
       text += "Regime: " + MarketRegimeName(m_regime) + "\n";
       text += "Open  : " + IntegerToString(ctx.openPositions) + "\n";
       text += "State : " + ctx.status;
+      if(m_observabilityText != "")
+         text += "\nObs   : " + m_observabilityText;
       Comment(text);
      }
   };
