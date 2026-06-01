@@ -102,8 +102,8 @@ Remaining `PERF_METRICS` cleanup is tracked in Issue #181.
 | Fase 1 | Done | Add `Central/`, `CPASRKernel`, `CModuleRegistry`, `CServiceLocator`, `CLifecycleManager` |
 | Fase 2 | Done | `Experts/PASR_MODULAR.mq5` now uses `CPASRKernel g_kernel` |
 | Fase 3 | In progress | Extract allocation/lifecycle/dependency ownership from `Central/BackendAdapter*.mqh` |
-| Fase 4 | In progress | Add `Orchestration/` and `IPipelineStage` target interface |
-| Fase 5 | Pending | Move `CPipelineEngine` implementation out of `Core/` after compile stability |
+| Fase 4 | In progress | Add `Orchestration/`, `IPipelineStage`, and prepare split-stage adapters |
+| Fase 5 | Done | Move `CPipelineEngine` implementation to `Orchestration/`; keep `Core/PipelineEngine.mqh` as wrapper |
 
 ---
 
@@ -129,7 +129,7 @@ S21-010 adalah dokumentasi issue yang diselesaikan oleh migrasi ini: README tida
 2. Fix any include/type errors introduced by `Central/` and `Orchestration/` headers.
 3. Move remaining allocation/bootstrap code from `Central/BackendAdapterInit.mqh` into Central-owned services.
 4. Extract lifecycle init/deinit ordering into `CLifecycleManager`.
-5. Move `CPipelineEngine` implementation to `Orchestration/` only after compile stability.
+5. Split `CPipelineEngine` stages one by one after the canonical move remains compile-clean.
 6. Decompose `Analysis/SRManager.mqh` and audit `Analysis/Pattern` after core compile is stable.
 
 ---
@@ -180,7 +180,7 @@ void OnDeinit(const int reason)
 | File | Version | Status |
 |------|---------|--------|
 | `Core/PASR.mqh` | central include order | Active |
-| `Central/PASRKernel.mqh` | v0.12 | Compatibility facade |
+| `Central/PASRKernel.mqh` | v0.30 | Central facade and pipeline owner |
 | `Central/ModuleRegistry.mqh` | v0.10 | Active |
 | `Central/ServiceLocator.mqh` | v0.11 | Active |
 | `Central/LifecycleManager.mqh` | v0.10 | Skeleton |

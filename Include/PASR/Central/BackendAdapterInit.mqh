@@ -19,14 +19,14 @@ int CBackendAdapter::Init(const StrategyConfig &cfg)
    m_bus = CModuleFactory::CreateEventBus();
    if(m_bus == NULL)
      {
-      Print("[Orchestrator] EventBus allocation failed");
+      Print("[BackendAdapter] EventBus allocation failed");
       return INIT_FAILED;
      }
 
    m_data = CModuleFactory::CreateDataManager();
    if(m_data == NULL)
      {
-      Print("[Orchestrator] DataManager allocation failed");
+      Print("[BackendAdapter] DataManager allocation failed");
       FreeAll();
       return INIT_FAILED;
      }
@@ -36,7 +36,7 @@ int CBackendAdapter::Init(const StrategyConfig &cfg)
    m_lifecycle.SetDebugMode(m_debugMode);
    if(!m_lifecycle.InitCritical(m_data, PASR_MOD_DATA_MANAGER))
      {
-      Print("[Orchestrator] DataManager init failed");
+      Print("[BackendAdapter] DataManager init failed");
       FreeAll();
       return INIT_FAILED;
      }
@@ -63,7 +63,7 @@ int CBackendAdapter::Init(const StrategyConfig &cfg)
    m_regime = CModuleFactory::CreateRegimeFilter();
    if(!m_lifecycle.InitOptional(m_regime, PASR_MOD_REGIME_FILTER))
      {
-      Print("[Orchestrator] RegimeFilter init failed; continuing without regime context");
+      Print("[BackendAdapter] RegimeFilter init failed; continuing without regime context");
       if(m_regime != NULL)
         {
          m_regime.Deinit();
@@ -115,7 +115,7 @@ int CBackendAdapter::Init(const StrategyConfig &cfg)
       m_ai_orch = CModuleFactory::CreateAIOrchestrator();
       if(!m_lifecycle.InitOptional(m_ai_orch, PASR_MOD_AI_ORCHESTRATOR))
         {
-         Print("[Orchestrator] AI init failed; rule fallback remains available");
+         Print("[BackendAdapter] AI init failed; rule fallback remains available");
          if(m_ai_orch != NULL)
            {
             m_ai_orch.Deinit();
@@ -157,7 +157,7 @@ int CBackendAdapter::Init(const StrategyConfig &cfg)
    m_exit = CModuleFactory::CreateExitEngine();
    if(m_exit == NULL)
      {
-      Print("[Orchestrator] ExitEngine allocation failed");
+      Print("[BackendAdapter] ExitEngine allocation failed");
       FreeAll();
       return INIT_FAILED;
      }
@@ -170,7 +170,7 @@ int CBackendAdapter::Init(const StrategyConfig &cfg)
    m_journal = CModuleFactory::CreateJournalManager();
    if(!m_lifecycle.InitOptional(m_journal, PASR_MOD_JOURNAL_MANAGER))
      {
-      Print("[Orchestrator] Journal init failed; continuing without journal");
+      Print("[BackendAdapter] Journal init failed; continuing without journal");
       if(m_journal != NULL)
         {
          m_journal.Deinit();
@@ -189,7 +189,7 @@ int CBackendAdapter::Init(const StrategyConfig &cfg)
       m_dash = CModuleFactory::CreateDashboardManager();
       if(!m_lifecycle.InitOptional(m_dash, PASR_MOD_DASHBOARD_MANAGER))
         {
-         Print("[Orchestrator] Dashboard init failed; continuing without dashboard");
+         Print("[BackendAdapter] Dashboard init failed; continuing without dashboard");
          if(m_dash != NULL)
            {
             m_dash.Deinit();
@@ -212,7 +212,7 @@ int CBackendAdapter::Init(const StrategyConfig &cfg)
    m_new_bar_flag = false;
    m_initialised  = true;
 
-   Print("[Orchestrator] Backend managers bootstrap OK");
+   Print("[BackendAdapter] Backend managers bootstrap OK");
    return INIT_SUCCEEDED;
   }
 

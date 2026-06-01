@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Core/Orchestrator.mqh — v3.11                                    |
+//| Central/BackendAdapter.mqh - v3.11                               |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Agsicentre"
 #property strict
@@ -108,13 +108,13 @@ private:
      {
       if(mgr == NULL || m_bus == NULL) return;
       if(!m_bus.Register(mgr))
-         PrintFormat("[Orchestrator] Register failed for %s", mgr.HandlerName());
+         PrintFormat("[BackendAdapter] Register failed for %s", mgr.HandlerName());
      }
 
    bool InitManager(IManager *mgr, const string name)
      {
       if(mgr == NULL)
-        { PrintFormat("[Orchestrator] %s alloc failed", name); return false; }
+        { PrintFormat("[BackendAdapter] %s alloc failed", name); return false; }
       if(!m_lifecycle.InitCritical(mgr, name))
          return false;
       if(m_registry_owns_managers && m_owner_registry != NULL)
@@ -250,7 +250,7 @@ public:
      {
       EventKillTimer();
       m_initialised = false;
-      if(m_debugMode) PrintFormat("[Orchestrator] OnDeinit reason=%d", reason);
+      if(m_debugMode) PrintFormat("[BackendAdapter] OnDeinit reason=%d", reason);
      }
 
    void OnTradeTransaction(const MqlTradeTransaction &trans,

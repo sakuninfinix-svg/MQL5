@@ -48,7 +48,7 @@ Sudah selesai:
 
 Masih compatibility backend:
 
-- `COrchestrator` masih memegang orchestration init order, tetapi allocation module utama sudah melewati `CModuleFactory`.
+- `CBackendAdapter` masih memegang orchestration init order, tetapi allocation module utama sudah melewati `CModuleFactory`.
 - `CBackendAdapter` masih memegang allocation/bootstrap code, `OnTick`, dan `OnTradeTransaction` backend, tetapi manager berbasis `IManager` didaftarkan sebagai owned di kernel registry.
 - `CBackendAdapter.OnTimer()` sudah compatibility no-op; timer pipeline dijalankan oleh `CPASRKernel`.
 - `CPipelineEngine` sudah berada di `Orchestration/PipelineEngine.mqh`; `Core/PipelineEngine.mqh` menjadi compatibility wrapper.
@@ -149,7 +149,7 @@ Acceptance criteria:
 
 ### Phase 3 — Lifecycle Extraction
 
-Goal: init/deinit order pindah dari `COrchestrator` ke `CLifecycleManager`.
+Goal: init/deinit order pindah dari compatibility backend ke `CLifecycleManager`.
 
 Checklist:
 
@@ -203,7 +203,7 @@ Acceptance criteria:
 
 - Deinit order selalu reverse dari init order.
 - Tidak ada double-delete.
-- Registry ownership jelas: owned atau borrowed. *(Masih compatibility: kernel registry mem-bind backend services sebagai borrowed, backend orchestrator masih pemilik object.)*
+- Registry ownership jelas: manager berbasis `IManager` yang berhasil init dimiliki registry; non-`IManager` runtime services masih compatibility-owned oleh backend.
 
 ### Phase 4 — Dependency Access Cleanup
 
@@ -288,10 +288,10 @@ Goal: hapus jejak arsitektur lama yang membingungkan.
 Checklist:
 
 - [ ] Update `README_PASR.md`.
-- [ ] Update `Include/PASR/README.md`.
-- [ ] Update `Include/PASR/Central/README.md`.
-- [ ] Update `Include/PASR/Orchestration/README.md`.
-- [ ] Tandai file compatibility backend.
+- [x] Update `Include/PASR/README.md`.
+- [x] Update `Include/PASR/Central/README.md`.
+- [x] Update `Include/PASR/Orchestration/README.md`.
+- [x] Tandai file compatibility backend.
 - [ ] Hapus komentar yang menyebut pure pipeline sebagai arsitektur aktif.
 
 Acceptance criteria:
