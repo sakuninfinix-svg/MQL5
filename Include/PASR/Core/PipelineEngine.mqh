@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Core/PipelineEngine.mqh — v2.10                                  |
-//| AI-primary pipeline with declarative stage registry               |
+//| Core/PipelineEngine.mqh — v2.20                                  |
+//| AI-primary pipeline with declarative stage registry + observability|
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_PIPELINE_ENGINE_MQH__
@@ -27,6 +27,7 @@
 #include <PASR/UI/DashboardManager.mqh>
 #include <PASR/Analysis/AdaptiveParameterManager.mqh>
 #include <PASR/Infra/JournalManager.mqh>
+#include <PASR/Infra/TelemetryRecorder.mqh>
 #include <Trade/Trade.mqh>
 
 #ifdef __CORE_PASR_MASTER_MQH__
@@ -85,6 +86,15 @@ private:
    bool   m_profiling_enabled;
    CPerfTimer m_stage_timer;
    CPipelineStageRegistry m_stage_registry;
+   string m_last_observability;
+   ulong  m_observability_ticks;
+
+   string SignalDirText(ENUM_SIGNAL_DIR dir) const
+     {
+      if(dir == SIGNAL_BUY) return "BUY";
+      if(dir == SIGNAL_SELL) return "SELL";
+      return "NONE";
+     }
 
    ENUM_STAGE_RESULT SkipIfNull(const void *ptr, const string stageName)
      {
@@ -153,6 +163,102 @@ private:
         }
 
       m_ai_orch.InjectContext(srDist, zoneStrength, patternScore, ctx.regime);
+     }
+
+   string BuildObservabilityText(PipelineContext &ctx, ENUM_STAGE_RESULT result)
+     {
+      int sourceCount = 0;
+      int cooldowns = 0;
+      int failedZones = 0;
+      bool signalReady = false;
+      string signalReason = "";
+      if(m_signal != NULL)
+        {
+         SignalLayerSnapshot ss = m_signal.GetSnapshot();
+         sourceCount = ss.sourceCount;
+         cooldowns = ss.cooldownCount;
+         failedZones = ss.failedZoneCount;
+         signalReady = ss.ready;
+         signalReason = ss.lastReason;
+        }
+
+      string riskStatus = "NA";
+      int openTrades = PositionsTotal();
+      double dd = 0.0;
+      if(m_risk != NULL)
+        {
+         RiskSnapshot rs = m_risk.GetSnapshot();
+         riskStatus = rs.status;
+         openTrades = rs.openTrades;
+         dd = rs.drawdownPct;
+        }
+
+      int execStatus = (int)ctx.exec_result.status;
+      ulong ticket = ctx.exec_result.ticket;
+      int retcode = ctx.exec_result.retcode;
+      if(m_exec != NULL)
+        {
+         ExecutionSnapshot es = m_exec.GetSnapshot();
+         execStatus = (int)es.lastStatus;
+         ticket = es.lastTicket;
+         retcode = es.lastRetcode;
+        }
+
+      int exitReason = 0;
+      ulong exitTotal = 0;
+      if(m_exit != NULL)
+        {
+         ExitSnapshot xs = m_exit.GetSnapshot();
+         exitReason = (int)xs.lastSignal.reason;
+         exitTotal = xs.totalExits;
+        }
+
+      bool recoveryActive = false;
+      if(m_recovery != NULL)
+        {
+         RecoverySnapshot rec = m_recovery.GetSnapshot();
+         recoveryActive = rec.active;
+        }
+
+      return StringFormat("res=%d sig=%s %.2f src=%d ready=%s cd=%d fz=%d risk=%s dd=%.2f open=%d exec=%d ret=%d tk=%I64u exit=%d/%I64u rec=%s %s",
+                          (int)result,
+                          SignalDirText(ctx.signal.direction),
+                          ctx.signal.confidence,
+                          sourceCount,
+                          signalReady ? "Y" : "N",
+                          cooldowns,
+                          failedZones,
+                          riskStatus,
+                          dd,
+                          openTrades,
+                          execStatus,
+                          retcode,
+                          ticket,
+                          exitReason,
+                          exitTotal,
+                          recoveryActive ? "Y" : "N",
+                          signalReason);
+     }
+
+   void PublishObservability(PipelineContext &ctx, ENUM_STAGE_RESULT result)
+     {
+      m_last_observability = BuildObservabilityText(ctx, result);
+      m_observability_ticks++;
+
+      if(m_dash != NULL)
+         m_dash.SetObservabilityText(m_last_observability);
+
+      if(m_telemetry != NULL)
+        {
+         m_telemetry.RecordObservabilityText(m_last_observability);
+         m_telemetry.RecordObservabilityMetric("SignalConfidence", ctx.signal.confidence, "normalized");
+         m_telemetry.RecordObservabilityMetric("AIScore", ctx.ai_score, "score");
+         m_telemetry.RecordObservabilityMetric("SpreadPts", ctx.spread_pts, "points");
+         m_telemetry.RecordObservabilityMetric("Result", (double)result, "enum");
+        }
+
+      if(m_debug_mode && (ctx.new_bar || (m_observability_ticks % 100 == 0)))
+         Print("[PipelineObs] ", m_last_observability);
      }
 
    ENUM_STAGE_RESULT Stage_DataSync(PipelineContext &ctx)
@@ -435,6 +541,7 @@ private:
       m_dash.SetAIScore(ctx.ai_score);
       m_dash.SetRegime(ctx.regime);
       m_dash.SetSessionDD(ctx.session_dd);
+      m_dash.SetObservabilityText(m_last_observability);
       m_dash.OnTimer();
       if(m_profiling_enabled) m_stage_timer.Log("Stage13_Dashboard");
       return STAGE_OK;
@@ -446,6 +553,8 @@ private:
       if(!ctx.new_bar) return STAGE_SKIP;
       m_stage_timer.Start();
       m_journal.LogEntry(ctx);
+      if(m_debug_mode && m_last_observability != "")
+         Print("[JournalObs] ", m_last_observability);
       if(m_profiling_enabled) m_stage_timer.Log("Stage14_Journal");
       return STAGE_OK;
      }
@@ -504,7 +613,8 @@ public:
         m_recovery(NULL), m_dash(NULL), m_journal(NULL), m_bus(NULL),
         m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL), m_regime_det(NULL),
         m_optimizer(NULL), m_async_orders(NULL), m_health(NULL), m_snapshot(NULL),
-        m_debug_mode(false), m_profiling_enabled(true)
+        m_debug_mode(false), m_profiling_enabled(true), m_last_observability(""),
+        m_observability_ticks(0)
      {
       m_stage_registry.RegisterDefaultStages();
      }
@@ -552,6 +662,11 @@ public:
       return m_stage_registry.NameAt(index);
      }
 
+   string LastObservabilityText() const
+     {
+      return m_last_observability;
+     }
+
    void PrintStageSummary() const
      {
       m_stage_registry.PrintSummary();
@@ -566,11 +681,13 @@ public:
         {
          ctx.exit_reason = STAGE_ABORT;
          ctx.exit_message = "Health gate: critical status";
+         PublishObservability(ctx, STAGE_ABORT);
          return STAGE_ABORT;
         }
 
       if(ctx.session_dd > 0.0 && ctx.max_session_dd > 0.0 && ctx.session_dd >= ctx.max_session_dd)
         {
+         PublishObservability(ctx, STAGE_SKIP);
          ENUM_STAGE_RESULT rd = Stage_Dashboard(ctx);
          m_stage_registry.Record(PIPE_STAGE_DASHBOARD, rd);
          ENUM_STAGE_RESULT rj = Stage_Journal(ctx);
@@ -580,6 +697,7 @@ public:
         }
 
       ENUM_STAGE_RESULT result = RunRegisteredStages(ctx);
+      PublishObservability(ctx, result);
       if(result == STAGE_ABORT)
          return result;
 
