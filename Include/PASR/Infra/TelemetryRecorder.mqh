@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/TelemetryRecorder.mqh — v2.21                              |
+//| Infra/TelemetryRecorder.mqh — v2.22                              |
 //| Telemetry metrics recorder + observability helpers               |
 //+------------------------------------------------------------------+
 #property strict
@@ -105,7 +105,7 @@ public:
       m_base_path = "PASR\\Telemetry\\";
       OpenNewFile();
       WriteHeader();
-      PASRLogInfo("Telemetry", "v2.21 Initialized — recording to: " + m_base_path);
+      PASRLogInfo("Telemetry", "v2.22 Initialized — recording to: " + m_base_path);
       return true;
      }
 
@@ -261,7 +261,7 @@ private:
       double latency_us = event.data1;
       string stage_name = event.tag;
       ulong stage_id = event.ticket;
-      RecordMetric("Pipeline_Latency_" + stage_name, latency_us, "microseconds", stage_id);
+      RecordMetric(PASR_METRIC_PIPELINE_LATENCY_PREFIX + stage_name, latency_us, PASR_UNIT_MICROSECONDS, stage_id);
       m_pipeline_ticks++;
       if(m_pipeline_ticks > 0)
          m_avg_latency = (m_avg_latency * (m_pipeline_ticks-1) + latency_us) / m_pipeline_ticks;
@@ -271,7 +271,7 @@ private:
      {
       double slippage = event.data1;
       string sym = (event.tag == "") ? _Symbol : event.tag;
-      RecordMetric("Execution_Slippage", slippage, PASR_UNIT_POINTS, event.ticket, sym);
+      RecordMetric(PASR_METRIC_EXECUTION_SLIPPAGE, slippage, PASR_UNIT_POINTS, event.ticket, sym);
       if(slippage > m_max_slippage) m_max_slippage = slippage;
       m_execution_lags++;
      }
@@ -280,7 +280,7 @@ private:
      {
       double strength = event.data1;
       string sym = (event.tag == "") ? _Symbol : event.tag;
-      RecordMetric("Signal_Strength", strength, PASR_UNIT_NORMALIZED, event.ticket, sym);
+      RecordMetric(PASR_METRIC_SIGNAL_STRENGTH, strength, PASR_UNIT_NORMALIZED, event.ticket, sym);
      }
   };
 
