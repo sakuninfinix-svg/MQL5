@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Orchestration/Stages/DataSyncStage.mqh - v0.10                  |
+//| Orchestration/Stages/DataSyncStage.mqh - v0.20                   |
 //| Compatibility adapter scaffold for future split pipeline stages   |
 //+------------------------------------------------------------------+
 #property strict
@@ -8,39 +8,30 @@
 
 #include <PASR/Core/PipelineTypes.mqh>
 #include <PASR/Core/IManager.mqh>
-#include <PASR/Orchestration/PipelineStage.mqh>
+#include <PASR/Orchestration/Stages/PipelineStageBase.mqh>
 
-class CDataSyncStage : public IPipelineStage
+class CDataSyncStage : public CPipelineStageBase
   {
 private:
    IManager *m_manager;
-   bool      m_enabled;
 
 public:
-   CDataSyncStage() : m_manager(NULL), m_enabled(false) {}
+   CDataSyncStage() : CPipelineStageBase("DataSyncStage"), m_manager(NULL)
+     {
+      m_enabled = false;
+     }
 
    void Bind(IManager *manager)
      {
       m_manager = manager;
      }
 
-   void SetEnabled(const bool enabled)
-     {
-      m_enabled = enabled;
-     }
-
-   virtual string Name() const override { return "DataSyncStage"; }
-   virtual bool IsEnabled() const override { return m_enabled; }
-
    virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
      {
       if(!m_enabled)
          return STAGE_SKIP;
       if(m_manager == NULL)
-        {
-         ctx.exit_message = "DataSyncStage manager not bound";
-         return STAGE_FAIL;
-        }
+         return Abort(ctx, "DataSyncStage manager not bound");
       return STAGE_OK;
      }
   };
