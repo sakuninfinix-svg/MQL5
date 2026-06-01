@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Infra/TelemetryRecorder.mqh — v2.03                              |
-//| Telemetry metrics recorder                                       |
+//| Infra/TelemetryRecorder.mqh — v2.20                              |
+//| Telemetry metrics recorder + observability helpers               |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __INFRA_TELEMETRY_RECORDER_MQH__
@@ -33,6 +33,32 @@ struct STelemetryMetric
      }
   };
 
+struct TelemetrySnapshot
+  {
+   bool   isOpen;
+   int    bufferCount;
+   int    recordsPending;
+   ulong  totalRecords;
+   ulong  pipelineTicks;
+   ulong  executionLags;
+   double avgLatency;
+   double maxSlippage;
+   string currentFile;
+
+   void Clear()
+     {
+      isOpen = false;
+      bufferCount = 0;
+      recordsPending = 0;
+      totalRecords = 0;
+      pipelineTicks = 0;
+      executionLags = 0;
+      avgLatency = 0.0;
+      maxSlippage = 0.0;
+      currentFile = "";
+     }
+  };
+
 class CTelemetryRecorder : public IManager
   {
 private:
@@ -49,13 +75,15 @@ private:
    ulong             m_execution_lags;
    double            m_avg_latency;
    double            m_max_slippage;
+   string            m_last_observability;
 
 public:
    CTelemetryRecorder()
       : IManager(), m_base_path(""), m_current_file(""), m_file_handle(INVALID_HANDLE),
         m_is_open(false), m_last_flush(0), m_records_pending(0),
         m_buffer_count(0), m_total_records(0), m_pipeline_ticks(0),
-        m_execution_lags(0), m_avg_latency(0.0), m_max_slippage(0.0)
+        m_execution_lags(0), m_avg_latency(0.0), m_max_slippage(0.0),
+        m_last_observability("")
      {}
 
    ~CTelemetryRecorder()
@@ -76,7 +104,7 @@ public:
       m_base_path = "PASR\\Telemetry\\";
       OpenNewFile();
       WriteHeader();
-      PASRLogInfo("Telemetry", "v2.03 Initialized — recording to: " + m_base_path);
+      PASRLogInfo("Telemetry", "v2.20 Initialized — recording to: " + m_base_path);
       return true;
      }
 
@@ -118,6 +146,52 @@ public:
       m_records_pending++;
       m_total_records++;
       if(TimeCurrent() - m_last_flush > 5) Flush();
+     }
+
+   void RecordObservabilityMetric(const string name, double value, const string unit="value")
+     {
+      RecordMetric("Obs_" + name, value, unit, 0, _Symbol);
+     }
+
+   void RecordObservabilityText(const string text)
+     {
+      m_last_observability = text;
+      RecordMetric("Obs_TextLength", (double)StringLen(text), "chars", 0, _Symbol);
+      if(m_debugMode && text != "")
+         PASRLogInfo("Telemetry", "OBS " + text);
+     }
+
+   string GetLastObservabilityText() const { return m_last_observability; }
+
+   TelemetrySnapshot GetSnapshot() const
+     {
+      TelemetrySnapshot s;
+      s.Clear();
+      s.isOpen = m_is_open;
+      s.bufferCount = m_buffer_count;
+      s.recordsPending = m_records_pending;
+      s.totalRecords = m_total_records;
+      s.pipelineTicks = m_pipeline_ticks;
+      s.executionLags = m_execution_lags;
+      s.avgLatency = m_avg_latency;
+      s.maxSlippage = m_max_slippage;
+      s.currentFile = m_current_file;
+      return s;
+     }
+
+   void PrintDiagnostics() const
+     {
+      PrintFormat("[TelemetryDiag] open=%s buffer=%d pending=%d total=%I64u ticks=%I64u exec=%I64u avgLat=%.2f maxSlip=%.2f file=%s obs=%s",
+                  m_is_open ? "true" : "false",
+                  m_buffer_count,
+                  m_records_pending,
+                  m_total_records,
+                  m_pipeline_ticks,
+                  m_execution_lags,
+                  m_avg_latency,
+                  m_max_slippage,
+                  m_current_file,
+                  m_last_observability);
      }
 
    void Flush()
