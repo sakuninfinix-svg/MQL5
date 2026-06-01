@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Orchestration/PipelineStageRegistry.mqh — v0.10                  |
+//| Orchestration/PipelineStageRegistry.mqh — v0.20                  |
 //| Declarative stage table for Centralized Modular Pipeline          |
 //+------------------------------------------------------------------+
 #property strict
@@ -11,6 +11,21 @@
 #ifndef PASR_PIPELINE_STAGE_CAPACITY
 #define PASR_PIPELINE_STAGE_CAPACITY 32
 #endif
+
+#define PASR_STAGE_NAME_DATA_SYNC       "DataSync"
+#define PASR_STAGE_NAME_ANALYSIS_SR     "AnalysisSR"
+#define PASR_STAGE_NAME_ANALYSIS_ZONE   "AnalysisZone"
+#define PASR_STAGE_NAME_PATTERN_REC     "PatternRec"
+#define PASR_STAGE_NAME_REGIME_DET      "RegimeDet"
+#define PASR_STAGE_NAME_SIGNAL_GEN      "SignalGen"
+#define PASR_STAGE_NAME_AI_INFER        "AIInfer"
+#define PASR_STAGE_NAME_RISK_CHECK      "RiskCheck"
+#define PASR_STAGE_NAME_ADAPTIVE_PARAMS "AdaptiveParams"
+#define PASR_STAGE_NAME_EXECUTION       "Execution"
+#define PASR_STAGE_NAME_POSITION_MGMT   "PositionMgmt"
+#define PASR_STAGE_NAME_RECOVERY        "Recovery"
+#define PASR_STAGE_NAME_DASHBOARD       "Dashboard"
+#define PASR_STAGE_NAME_JOURNAL         "Journal"
 
 enum ENUM_PIPELINE_STAGE_ID
   {
@@ -123,20 +138,20 @@ public:
    void RegisterDefaultStages()
      {
       Clear();
-      RegisterStage(PIPE_STAGE_DATA_SYNC,       "DataSync",       true);
-      RegisterStage(PIPE_STAGE_ANALYSIS_SR,     "AnalysisSR",     true);
-      RegisterStage(PIPE_STAGE_ANALYSIS_ZONE,   "AnalysisZone",   true);
-      RegisterStage(PIPE_STAGE_PATTERN_REC,     "PatternRec",     true);
-      RegisterStage(PIPE_STAGE_REGIME_DET,      "RegimeDet",      true);
-      RegisterStage(PIPE_STAGE_SIGNAL_GEN,      "SignalGen",      true);
-      RegisterStage(PIPE_STAGE_AI_INFER,        "AIInfer",        true);
-      RegisterStage(PIPE_STAGE_RISK_CHECK,      "RiskCheck",      true);
-      RegisterStage(PIPE_STAGE_ADAPTIVE_PARAMS, "AdaptiveParams", true);
-      RegisterStage(PIPE_STAGE_EXECUTION,       "Execution",      true);
-      RegisterStage(PIPE_STAGE_POSITION_MGMT,   "PositionMgmt",   true);
-      RegisterStage(PIPE_STAGE_RECOVERY,        "Recovery",       true);
-      RegisterStage(PIPE_STAGE_DASHBOARD,       "Dashboard",      true);
-      RegisterStage(PIPE_STAGE_JOURNAL,         "Journal",        true);
+      RegisterStage(PIPE_STAGE_DATA_SYNC,       PASR_STAGE_NAME_DATA_SYNC,       true);
+      RegisterStage(PIPE_STAGE_ANALYSIS_SR,     PASR_STAGE_NAME_ANALYSIS_SR,     true);
+      RegisterStage(PIPE_STAGE_ANALYSIS_ZONE,   PASR_STAGE_NAME_ANALYSIS_ZONE,   true);
+      RegisterStage(PIPE_STAGE_PATTERN_REC,     PASR_STAGE_NAME_PATTERN_REC,     true);
+      RegisterStage(PIPE_STAGE_REGIME_DET,      PASR_STAGE_NAME_REGIME_DET,      true);
+      RegisterStage(PIPE_STAGE_SIGNAL_GEN,      PASR_STAGE_NAME_SIGNAL_GEN,      true);
+      RegisterStage(PIPE_STAGE_AI_INFER,        PASR_STAGE_NAME_AI_INFER,        true);
+      RegisterStage(PIPE_STAGE_RISK_CHECK,      PASR_STAGE_NAME_RISK_CHECK,      true);
+      RegisterStage(PIPE_STAGE_ADAPTIVE_PARAMS, PASR_STAGE_NAME_ADAPTIVE_PARAMS, true);
+      RegisterStage(PIPE_STAGE_EXECUTION,       PASR_STAGE_NAME_EXECUTION,       true);
+      RegisterStage(PIPE_STAGE_POSITION_MGMT,   PASR_STAGE_NAME_POSITION_MGMT,   true);
+      RegisterStage(PIPE_STAGE_RECOVERY,        PASR_STAGE_NAME_RECOVERY,        true);
+      RegisterStage(PIPE_STAGE_DASHBOARD,       PASR_STAGE_NAME_DASHBOARD,       true);
+      RegisterStage(PIPE_STAGE_JOURNAL,         PASR_STAGE_NAME_JOURNAL,         true);
      }
 
    bool SetEnabled(ENUM_PIPELINE_STAGE_ID id, bool enabled)
