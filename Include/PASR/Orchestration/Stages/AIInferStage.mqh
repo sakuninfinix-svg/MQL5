@@ -43,7 +43,10 @@ public:
       ctx.ai_result.model_healthy = (m_ai_orch.IsHealthy() && validation.modelHealthy);
       ctx.ai_result.score = last.score;
       ctx.ai_result.drift_index = last.drift_score;
-      ctx.ai_result.model_name = last.model_id;
+      ctx.ai_result.model_name = (last.model_id != "") ? last.model_id : validation.modelId;
+      ctx.ai_result.validation_valid = validation.valid;
+      ctx.ai_result.validation_reason = validation.reason;
+      ctx.ai_result.invalid_feature_index = validation.invalidIndex;
       if(!validation.valid && validation.reason != "")
          ctx.ai_veto = true;
       return STAGE_OK;

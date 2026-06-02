@@ -8,12 +8,88 @@
 #include "Assertions.mqh"
 #include "../Trade/ExecutionLedger.mqh"
 #include "../Trade/ExitConfirmationQueue.mqh"
+#include "../Trade/PositionRegistry.mqh"
+#include "../Infra/AccountSnapshot.mqh"
 #include "../AI/AIFeatureValidator.mqh"
+#include "../Signal/SignalDecisionEngine.mqh"
+
+class CMockSignalSource : public ISignalSource
+  {
+private:
+   string          m_name;
+   ENUM_SIGNAL_DIR m_direction;
+   double          m_confidence;
+   string          m_reason;
+   datetime        m_evaluatedAt;
+   bool            m_enabled;
+
+public:
+   CMockSignalSource()
+     {
+      Configure("Mock", SIGNAL_NONE, 0.0, "unset", 0, true);
+     }
+
+   void Configure(const string name,
+                  const ENUM_SIGNAL_DIR direction,
+                  const double confidence,
+                  const string reason,
+                  const datetime evaluatedAt = 0,
+                  const bool enabled = true)
+     {
+      m_name = name;
+      m_direction = direction;
+      m_confidence = confidence;
+      m_reason = reason;
+      m_evaluatedAt = evaluatedAt;
+      m_enabled = enabled;
+     }
+
+   virtual string Name() override
+     {
+      return m_name;
+     }
+
+   virtual bool Evaluate(SignalResult &out) override
+     {
+      if(!m_enabled) return false;
+      out.Clear();
+      out.direction = m_direction;
+      out.confidence = m_confidence;
+      out.reason = m_reason;
+      out.evaluatedAt = m_evaluatedAt;
+      return true;
+     }
+  };
 
 class CBusinessLogicHarness
   {
 private:
    CAssertions m_assert;
+
+   void TestStatePrimitives()
+     {
+      m_assert.BeginSection("StatePrimitives");
+
+      SAccountSnapshot account;
+      account.Clear();
+      m_assert.IsFalse("cleared account invalid", account.valid);
+      m_assert.IsFalse("cleared account not fresh", account.IsFresh());
+
+      SPositionSnapshot pos;
+      pos.Clear();
+      m_assert.IsFalse("cleared position invalid", pos.IsValid());
+      pos.ticket = 123;
+      pos.symbol = _Symbol;
+      pos.volume = 0.10;
+      m_assert.IsTrue("minimal position snapshot valid", pos.IsValid());
+
+      CPositionRegistry registry;
+      m_assert.AreEqual("empty registry count", 0, registry.Count());
+      m_assert.IsFalse("empty registry no position", registry.HasPosition());
+      m_assert.IsFalse("empty registry no overflow", registry.Overflow());
+
+      m_assert.EndSection();
+     }
 
    void TestExecutionLedger()
      {
@@ -104,7 +180,55 @@ private:
       queue.MarkConfirmed(2002, 6002, "BrokerDealOutPartial");
       m_assert.IsTrue("confirmed partial remembered", queue.HasConfirmedAction(2002, EXIT_ACTION_PARTIAL));
 
-     m_assert.EndSection();
+      m_assert.EndSection();
+     }
+
+   void TestSignalDecisionEngine()
+     {
+      m_assert.BeginSection("SignalDecisionEngine");
+
+      CSignalConfig config;
+      config.Init();
+
+      CMockSignalSource buyA;
+      CMockSignalSource buyB;
+      buyA.Configure("BuyA", SIGNAL_BUY, 0.80, "buy evidence A");
+      buyB.Configure("BuyB", SIGNAL_BUY, 0.75, "buy evidence B");
+
+      CSignalAggregator acceptedAgg;
+      acceptedAgg.Init(config);
+      acceptedAgg.RegisterSource(&buyA, 1.0);
+      acceptedAgg.RegisterSource(&buyB, 1.0);
+
+      CSignalDecisionEngine engine;
+      SignalDecisionResult decision = engine.Decide(acceptedAgg);
+      m_assert.IsTrue("aligned sources allow trade", decision.tradeAllowed);
+      m_assert.AreEqual("accepted direction buy", (int)SIGNAL_BUY, (int)decision.direction);
+      m_assert.AreEqual("accepted reason code", (int)SIGNAL_DECISION_ACCEPTED, (int)decision.reasonCode);
+      m_assert.IsNear("accepted confidence average", 0.775, decision.confidence, 0.000001);
+
+      CMockSignalSource sellA;
+      sellA.Configure("SellA", SIGNAL_SELL, 0.80, "sell evidence A");
+
+      CSignalAggregator conflictAgg;
+      conflictAgg.Init(config);
+      conflictAgg.RegisterSource(&buyA, 1.0);
+      conflictAgg.RegisterSource(&sellA, 1.0);
+      decision = engine.Decide(conflictAgg);
+      m_assert.IsFalse("opposed sources block trade", decision.tradeAllowed);
+      m_assert.IsTrue("conflict score captured", decision.conflictScore > 0.0);
+
+      CMockSignalSource staleBuy;
+      staleBuy.Configure("StaleBuy", SIGNAL_BUY, 0.95, "stale buy", TimeCurrent() - 1000);
+      CSignalAggregator staleAgg;
+      staleAgg.Init(config);
+      staleAgg.RegisterSource(&staleBuy, 1.0);
+      staleAgg.RegisterSource(&buyA, 1.0);
+      decision = engine.Decide(staleAgg);
+      m_assert.IsFalse("stale source blocks insufficient confluence", decision.tradeAllowed);
+      m_assert.AreEqual("stale reason code", (int)SIGNAL_DECISION_STALE, (int)decision.reasonCode);
+
+      m_assert.EndSection();
      }
 
    void TestAIFeatureValidator()
@@ -121,18 +245,34 @@ private:
       fv.timeframe = _Period;
       for(int i = 0; i < AI_FEATURE_DIM; i++)
          fv.features[i] = 0.5;
+      fv.features[0] = -0.25;
+      fv.features[1] = 0.25;
+      fv.features[2] = 0.0;
+      fv.features[3] = 0.5;
+      fv.features[19] = 0.0;
+      fv.features[20] = 1.0;
+      fv.features[21] = 0.0;
 
       AIFeatureValidationResult result;
       bool ok = validator.ValidateFeatures(fv, result);
       m_assert.IsTrue("valid features accepted", ok);
       m_assert.IsTrue("feature result valid", result.valid);
 
-      fv.features[3] = 99.0;
+      fv.features[8] = 1.5;
       ok = validator.ValidateFeatures(fv, result);
       m_assert.IsFalse("out-of-range feature rejected", ok);
-      m_assert.AreEqual("invalid index captured", 3, result.invalidIndex);
+      m_assert.AreEqual("invalid index captured", 8, result.invalidIndex);
+      m_assert.AreEqual("momentum group captured", 0, StringCompare(result.featureGroup, "momentum"));
 
-      fv.features[3] = 0.5;
+      fv.features[8] = 0.5;
+      fv.features[19] = 0.0;
+      fv.features[20] = 0.0;
+      fv.features[21] = 0.0;
+      ok = validator.ValidateFeatures(fv, result);
+      m_assert.IsFalse("invalid regime one-hot rejected", ok);
+      m_assert.AreEqual("one-hot group captured", 0, StringCompare(result.featureGroup, "regime_onehot"));
+
+      fv.features[20] = 1.0;
       fv.bar_time = 0;
       ok = validator.ValidateFeatures(fv, result);
       m_assert.IsFalse("missing bar time rejected", ok);
@@ -154,8 +294,10 @@ public:
      {
       QA::Reset();
       Print("[BusinessLogicHarness] Start");
+      TestStatePrimitives();
       TestExecutionLedger();
       TestExitConfirmationQueue();
+      TestSignalDecisionEngine();
       TestAIFeatureValidator();
       m_assert.PrintReport();
       if(QA::FailCount() == 0)

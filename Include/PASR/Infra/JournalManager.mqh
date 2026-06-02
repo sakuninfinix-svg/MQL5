@@ -37,6 +37,9 @@ struct JournalEntry
    double   aiScore;
    double   driftScore;
    int      ensembleModel;
+   string   aiModelId;
+   bool     aiValidationValid;
+   string   aiValidationReason;
    bool     beDone;
    bool     partialDone;
    bool     runnerActive;
@@ -47,7 +50,9 @@ struct JournalEntry
       ticket=0; timeOpen=0; timeClose=0; symbol=""; direction=SIGNAL_NONE;
       entry=0; sl=0; tp1=0; tp2=0; closePrice=0; lots=0; pnl=0; rr=0;
       durationMin=0; isWin=false; regime=REGIME_UNKNOWN; session=SESSION_UNKNOWN;
-      aiScore=0; driftScore=0; ensembleModel=-1; beDone=false; partialDone=false; runnerActive=false;
+      aiScore=0; driftScore=0; ensembleModel=-1; aiModelId="";
+      aiValidationValid=false; aiValidationReason="";
+      beDone=false; partialDone=false; runnerActive=false;
       ArrayInitialize(features, 0.0);
      }
   };
@@ -70,6 +75,44 @@ struct TradeStat
    double avgDuration;
   };
 
+struct JournalPipelineSnapshot
+  {
+   bool                 valid;
+   datetime             capturedAt;
+   ENUM_SIGNAL_DIR      direction;
+   double               entry;
+   double               sl;
+   double               tp1;
+   double               tp2;
+   double               lots;
+   EMarketRegime        regime;
+   ENUM_TRADING_SESSION session;
+   double               aiScore;
+   double               driftScore;
+   string               aiModelId;
+   bool                 aiValidationValid;
+   string               aiValidationReason;
+
+   void Clear()
+     {
+      valid = false;
+      capturedAt = 0;
+      direction = SIGNAL_NONE;
+      entry = 0.0;
+      sl = 0.0;
+      tp1 = 0.0;
+      tp2 = 0.0;
+      lots = 0.0;
+      regime = REGIME_UNKNOWN;
+      session = SESSION_UNKNOWN;
+      aiScore = 0.0;
+      driftScore = 0.0;
+      aiModelId = "";
+      aiValidationValid = false;
+      aiValidationReason = "";
+     }
+  };
+
 class CJournalManager : public IManager
   {
 private:
@@ -85,6 +128,7 @@ private:
    double       m_maxDrawdown;
    string       m_csvPrefix;
    bool         m_csvEnabled;
+   JournalPipelineSnapshot m_lastContext;
 
    datetime MidnightFloor(datetime t) const
      { return (datetime)((long)t - (long)t % 86400L); }
@@ -136,7 +180,7 @@ private:
 
    string CsvHeader() const
      {
-      string line = "ticket,time_open,time_close,symbol,direction,entry,sl,tp1,tp2,close_price,pnl,rr,lots,duration_min,regime,session,ai_score,drift,ensemble_model,be_done,partial_done,runner_active";
+      string line = "ticket,time_open,time_close,symbol,direction,entry,sl,tp1,tp2,close_price,pnl,rr,lots,duration_min,regime,session,ai_score,drift,ensemble_model,ai_model_id,ai_validation_valid,ai_validation_reason,be_done,partial_done,runner_active";
       for(int i=0; i<AI_FEATURE_DIM; i++) line += StringFormat(",f%02d", i);
       return line + "\r\n";
      }
@@ -154,6 +198,7 @@ private:
                     IntegerToString(e.durationMin) + "," + CsvEscape(MarketRegimeName(e.regime)) + "," +
                     CsvEscape(SessionName(e.session)) + "," + DoubleToString(e.aiScore,4) + "," +
                     DoubleToString(e.driftScore,4) + "," + CsvEscape(EnsembleName(e.ensembleModel)) + "," +
+                    CsvEscape(e.aiModelId) + "," + Bool01(e.aiValidationValid) + "," + CsvEscape(e.aiValidationReason) + "," +
                     Bool01(e.beDone) + "," + Bool01(e.partialDone) + "," + Bool01(e.runnerActive);
       for(int i=0; i<AI_FEATURE_DIM; i++) line += "," + DoubleToString(e.features[i],3);
       return line + "\r\n";
@@ -210,6 +255,36 @@ private:
       AppendToCSV(e);
      }
 
+   void CaptureContext(PipelineContext &ctx)
+     {
+      m_lastContext.Clear();
+      m_lastContext.valid = true;
+      m_lastContext.capturedAt = TimeCurrent();
+      m_lastContext.direction = (ctx.plan.direction != SIGNAL_NONE) ? ctx.plan.direction : ctx.signal.direction;
+      m_lastContext.entry = (ctx.plan.entryPrice > 0.0) ? ctx.plan.entryPrice : ctx.signal.entryPrice;
+      m_lastContext.sl = (ctx.plan.sl > 0.0) ? ctx.plan.sl : ctx.risk_result.stopLoss;
+      m_lastContext.tp1 = (ctx.plan.tp > 0.0) ? ctx.plan.tp : ctx.risk_result.takeProfit;
+      m_lastContext.tp2 = 0.0;
+      m_lastContext.lots = (ctx.plan.lot > 0.0) ? ctx.plan.lot : ctx.risk_result.lotSize;
+      m_lastContext.regime = ctx.regime;
+      m_lastContext.session = ctx.session;
+      m_lastContext.aiScore = ctx.ai_result.score;
+      m_lastContext.driftScore = ctx.ai_result.drift_index;
+      m_lastContext.aiModelId = ctx.ai_result.model_name;
+      m_lastContext.aiValidationValid = ctx.ai_result.validation_valid;
+      m_lastContext.aiValidationReason = ctx.ai_result.validation_reason;
+     }
+
+   double EstimateClosePrice(ENUM_SIGNAL_DIR dir) const
+     {
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      if(dir == SIGNAL_BUY && bid > 0.0) return bid;
+      if(dir == SIGNAL_SELL && ask > 0.0) return ask;
+      if(bid > 0.0 && ask > 0.0) return (bid + ask) * 0.5;
+      return 0.0;
+     }
+
 public:
    CJournalManager()
       : IManager(), m_head(0), m_count(0), m_totalTrades(0),
@@ -222,6 +297,7 @@ public:
       account.Capture();
       m_peakEquity = account.valid ? account.balance : 0.0;
       m_todayDate = MidnightFloor(TimeCurrent());
+      m_lastContext.Clear();
      }
 
    virtual string HandlerName() const override { return "JournalManager"; }
@@ -257,6 +333,27 @@ public:
       e.isWin = (ev.profit > 0.0);
       e.regime = REGIME_UNKNOWN;
       e.session = SESSION_UNKNOWN;
+      if(m_lastContext.valid)
+        {
+         e.direction = m_lastContext.direction;
+         e.entry = m_lastContext.entry;
+         e.sl = m_lastContext.sl;
+         e.tp1 = m_lastContext.tp1;
+         e.tp2 = m_lastContext.tp2;
+         e.closePrice = EstimateClosePrice(e.direction);
+         e.lots = m_lastContext.lots;
+         e.regime = m_lastContext.regime;
+         e.session = m_lastContext.session;
+         e.aiScore = m_lastContext.aiScore;
+         e.driftScore = m_lastContext.driftScore;
+         e.aiModelId = m_lastContext.aiModelId;
+         e.aiValidationValid = m_lastContext.aiValidationValid;
+         e.aiValidationReason = m_lastContext.aiValidationReason;
+         double riskPts = MathAbs(e.entry - e.sl);
+         double pnlPts = MathAbs(e.closePrice - e.entry);
+         e.rr = (riskPts > 0.0 && e.closePrice > 0.0) ? ((e.pnl > 0.0 ? 1.0 : -1.0) * pnlPts / riskPts) : 0.0;
+         e.durationMin = (m_lastContext.capturedAt > 0) ? (int)((e.timeClose - m_lastContext.capturedAt) / 60) : 0;
+        }
       StoreEntry(e);
      }
 
@@ -268,7 +365,9 @@ public:
                          ENUM_TRADING_SESSION session, double aiScore,
                          double driftScore, int ensembleModel,
                          SAIFeatureVector &fv, bool beDone,
-                         bool partialDone, bool runnerActive)
+                         bool partialDone, bool runnerActive,
+                         string aiModelId = "", bool aiValidationValid = false,
+                         string aiValidationReason = "")
      {
       JournalEntry e;
       e.Clear();
@@ -292,6 +391,9 @@ public:
       e.aiScore = aiScore;
       e.driftScore = driftScore;
       e.ensembleModel = ensembleModel;
+      e.aiModelId = aiModelId;
+      e.aiValidationValid = aiValidationValid;
+      e.aiValidationReason = aiValidationReason;
       e.isWin = (pnl > 0.0);
       e.durationMin = (timeOpen > 0) ? (int)((e.timeClose - timeOpen) / 60) : 0;
       double riskPts = MathAbs(plan.entryPrice - plan.sl);
@@ -307,9 +409,12 @@ public:
    void LogEntry(PipelineContext &ctx)
      {
       if(!m_initialized) return;
+      CaptureContext(ctx);
       if(m_debugMode)
          PASRLogInfo("Journal", StringFormat("Pipeline ctx: signal=%d ai=%.3f regime=%s",
                      (int)ctx.signal.direction, ctx.ai_score, MarketRegimeName(ctx.regime)));
+      if(m_debugMode && ctx.ai_result.validation_reason != "")
+         PASRLogInfo("Journal", "AI validation: " + ctx.ai_result.validation_reason);
      }
 
    TradeStat GetStats(int last = 0) const

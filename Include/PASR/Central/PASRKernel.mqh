@@ -42,6 +42,39 @@ private:
    ulong                   m_last_price_dispatch_ms;
    int                     m_price_dispatch_throttle_ms;
 
+   double ConfigDigest() const
+     {
+      double digest = 17.0;
+      digest = digest * 31.0 + (double)m_cfg.MagicNumber;
+      digest = digest * 31.0 + m_cfg.Risk.RiskPercent * 100.0;
+      digest = digest * 31.0 + m_cfg.Risk.LotSize * 1000.0;
+      digest = digest * 31.0 + m_cfg.Risk.SLMultiplier * 100.0;
+      digest = digest * 31.0 + m_cfg.Risk.TPMultiplier * 100.0;
+      digest = digest * 31.0 + m_cfg.Risk.MaxDailyLossPct * 100.0;
+      digest = digest * 31.0 + m_cfg.Risk.MaxDrawdownPct * 100.0;
+      digest = digest * 31.0 + (double)m_cfg.Risk.MaxOpenPositions;
+      digest = digest * 31.0 + (m_cfg.AI.EnableAI ? 1.0 : 0.0);
+      digest = digest * 31.0 + m_cfg.AI.MinConfidence * 1000.0;
+      digest = digest * 31.0 + m_cfg.Pattern.MinPatternScore;
+      digest = digest * 31.0 + (double)m_cfg.Pattern.LookbackBars;
+      digest = digest * 31.0 + m_cfg.Market.SpreadFilterPips * 100.0;
+      digest = digest * 31.0 + (double)m_cfg.Market.SessionStartHour;
+      digest = digest * 31.0 + (double)m_cfg.Market.SessionEndHour;
+      return MathMod(MathAbs(digest), 1000000007.0);
+     }
+
+   void PublishConfigTelemetry()
+     {
+      CTelemetryRecorder *telemetry = m_services.Telemetry();
+      if(telemetry == NULL)
+         return;
+      telemetry.RecordObservabilityMetric("ConfigDigest", ConfigDigest(), "hash");
+      telemetry.RecordObservabilityMetric("ConfigRiskPercent", m_cfg.Risk.RiskPercent, "percent");
+      telemetry.RecordObservabilityMetric("ConfigMaxOpenPositions", (double)m_cfg.Risk.MaxOpenPositions, "count");
+      telemetry.RecordObservabilityMetric("ConfigAIEnabled", m_cfg.AI.EnableAI ? 1.0 : 0.0, "bool");
+      telemetry.RecordObservabilityMetric("ConfigAIMinConfidence", m_cfg.AI.MinConfidence, "normalized");
+     }
+
    void SetState(ENUM_PASR_KERNEL_STATE state, const string message = "")
      {
       m_state = state;
@@ -398,17 +431,17 @@ private:
       if(regime != NULL)
          signal.SetRegimeManager(NULL);
 
-      m_src_pattern = new PatternSignalSource(pattern);
+      m_src_pattern = CModuleFactory::CreatePatternSignalSource(pattern);
       if(m_src_pattern != NULL)
          signal.RegisterSource(m_src_pattern, 1.0);
 
-      m_src_sr = new SRSignalSource(sr, data, 0.5);
+      m_src_sr = CModuleFactory::CreateSRSignalSource(sr, data, 0.5);
       if(m_src_sr != NULL)
          signal.RegisterSource(m_src_sr, 0.8);
 
       if(regime != NULL)
         {
-         m_src_regime = new CRegimeSignalSource(regime, REGIME_MODE_VETO);
+         m_src_regime = CModuleFactory::CreateRegimeSignalSource(regime, REGIME_MODE_VETO);
          if(m_src_regime != NULL)
             signal.RegisterSource(m_src_regime, 0.6);
         }
@@ -667,6 +700,7 @@ public:
          return INIT_FAILED;
         }
 
+      PublishConfigTelemetry();
       ResetRuntimeState();
       m_ready = true;
       SetState(PASR_KERNEL_READY);

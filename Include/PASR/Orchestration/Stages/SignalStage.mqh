@@ -127,6 +127,8 @@ public:
       if(!aiAvailable)
         {
          ctx.ai_result.model_healthy = false;
+         ctx.ai_result.validation_valid = false;
+         ctx.ai_result.validation_reason = "AI unavailable";
          ctx.exit_message = "AI unavailable; using rule fallback";
          return RuleFallbackSignal(ctx);
         }
@@ -134,12 +136,17 @@ public:
       if(m_ai_orch.PredictSignal(ctx.signal))
         {
          SAIInferenceResult ai = m_ai_orch.GetLastResult();
+         AIFeatureValidationResult validation = m_ai_orch.GetLastValidation();
          ctx.ai_score = (float)ai.score;
          ctx.ai_veto = ai.vetoed;
          ctx.drift_score = (float)ai.drift_score;
          ctx.ai_result.score = ctx.ai_score;
          ctx.ai_result.drift_index = ctx.drift_score;
-         ctx.ai_result.model_healthy = true;
+         ctx.ai_result.model_healthy = validation.modelHealthy;
+         ctx.ai_result.model_name = (ai.model_id != "") ? ai.model_id : validation.modelId;
+         ctx.ai_result.validation_valid = validation.valid;
+         ctx.ai_result.validation_reason = validation.reason;
+         ctx.ai_result.invalid_feature_index = validation.invalidIndex;
          ctx.signal_strength = ctx.signal.confidence;
          if(m_debug)
             PrintFormat("[Pipeline] AI_PRIMARY Signal: dir=%d conf=%.3f src=%s", (int)ctx.signal.direction, ctx.signal.confidence, ctx.signal.primarySource);
@@ -148,12 +155,17 @@ public:
         }
 
       SAIInferenceResult last = m_ai_orch.GetLastResult();
+      AIFeatureValidationResult validation = m_ai_orch.GetLastValidation();
       ctx.ai_score = (float)last.score;
       ctx.ai_veto = last.vetoed;
       ctx.drift_score = (float)last.drift_score;
       ctx.ai_result.score = ctx.ai_score;
       ctx.ai_result.drift_index = ctx.drift_score;
-      ctx.ai_result.model_healthy = true;
+      ctx.ai_result.model_healthy = validation.modelHealthy;
+      ctx.ai_result.model_name = (last.model_id != "") ? last.model_id : validation.modelId;
+      ctx.ai_result.validation_valid = validation.valid;
+      ctx.ai_result.validation_reason = validation.reason;
+      ctx.ai_result.invalid_feature_index = validation.invalidIndex;
       ctx.exit_message = last.vetoed ? last.veto_reason : "AI primary chose no trade";
       if(m_debug)
          PrintFormat("[Pipeline] AI_PRIMARY no trade: %s", ctx.exit_message);

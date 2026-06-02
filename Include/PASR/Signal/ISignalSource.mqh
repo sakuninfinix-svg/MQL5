@@ -13,8 +13,9 @@ struct SignalResult
    ENUM_SIGNAL_DIR direction;
    double          confidence;  // 0.0-1.0
    string          reason;
+   datetime        evaluatedAt;
 
-   void Clear() { direction=SIGNAL_NONE; confidence=0.0; reason=""; }
+   void Clear() { direction=SIGNAL_NONE; confidence=0.0; reason=""; evaluatedAt=0; }
   };
 
 class ISignalSource

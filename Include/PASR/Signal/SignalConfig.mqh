@@ -19,6 +19,7 @@ struct SignalConfigData
    int      MinConfluence;
    double   MinScore;
    double   MinDominanceGap;
+   int      MaxSourceAgeSeconds;
    int      SignalCooldownBars;
    bool     ExitOnOpposite;
 
@@ -48,6 +49,7 @@ struct SignalConfigData
       MinConfluence                  = 2;
       MinScore                       = 0.55;
       MinDominanceGap                = 0.12;
+      MaxSourceAgeSeconds            = 120;
       SignalCooldownBars             = 3;
       ExitOnOpposite                 = false;
 
@@ -98,6 +100,7 @@ public:
    int      GetMinConfluence()               const { return m_config.MinConfluence; }
    double   GetMinScore()                    const { return m_config.MinScore; }
    double   GetMinDominanceGap()             const { return m_config.MinDominanceGap; }
+   int      GetMaxSourceAgeSeconds()         const { return m_config.MaxSourceAgeSeconds; }
    int      GetSignalCooldownBars()          const { return m_config.SignalCooldownBars; }
    bool     GetExitOnOpposite()              const { return m_config.ExitOnOpposite; }
 

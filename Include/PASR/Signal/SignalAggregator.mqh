@@ -51,6 +51,7 @@ struct SignalAggregatorSnapshot
    int     voterCount;
    int     multiplierCount;
    int     vetoCount;
+   int     staleSourceCount;
    double  totalVoterWeight;
    double  bullScore;
    double  bearScore;
@@ -73,6 +74,7 @@ struct SignalAggregatorSnapshot
       voterCount = 0;
       multiplierCount = 0;
       vetoCount = 0;
+      staleSourceCount = 0;
       totalVoterWeight = 0.0;
       bullScore = 0.0;
       bearScore = 0.0;
@@ -159,6 +161,7 @@ private:
    bool    m_vetoSell;
    string  m_vetoReason;
    string  m_lastDecisionReason;
+   int     m_staleSourceCount;
 
    void ResetState()
      {
@@ -175,6 +178,7 @@ private:
       m_vetoSell         = false;
       m_vetoReason       = "";
       m_lastDecisionReason = "";
+      m_staleSourceCount = 0;
      }
 
    void RefreshSnapshot()
@@ -189,6 +193,7 @@ private:
          else if(t == SOURCE_TYPE_VETO) m_snapshot.vetoCount++;
         }
       m_snapshot.totalVoterWeight = m_totalVoterWeight;
+      m_snapshot.staleSourceCount = m_staleSourceCount;
       m_snapshot.bullScore = m_bullScore;
       m_snapshot.bearScore = m_bearScore;
       m_snapshot.conflictScore = MathMin(m_bullScore, m_bearScore);
@@ -203,6 +208,26 @@ private:
       m_snapshot.bullSources = m_bullSources;
       m_snapshot.bearSources = m_bearSources;
       m_snapshot.lastDecisionReason = m_lastDecisionReason;
+     }
+
+   bool IsFresh(SignalResult &result, const string sourceName)
+     {
+      if(result.evaluatedAt == 0)
+        {
+         result.evaluatedAt = TimeCurrent();
+         return true;
+        }
+      int maxAge = (m_config != NULL) ? m_config.GetMaxSourceAgeSeconds() : 120;
+      if(maxAge <= 0) return true;
+      int age = (int)(TimeCurrent() - result.evaluatedAt);
+      if(age <= maxAge) return true;
+      m_staleSourceCount++;
+      if(m_lastDecisionReason == "")
+         m_lastDecisionReason = StringFormat("Stale signal source ignored: %s age=%d max=%d",
+                                             sourceName, age, maxAge);
+      if(m_config != NULL && m_config.GetDebugMode())
+         PrintFormat("[SignalAgg] STALE %s: age=%d max=%d", sourceName, age, maxAge);
+      return false;
      }
 
    bool ProcessVetoSource(int idx, SignalResult &result)
@@ -332,6 +357,7 @@ public:
          if(src == NULL) continue;
          SignalResult result; result.Clear();
          if(!src.Evaluate(result)) continue;
+         if(!IsFresh(result, src.Name())) continue;
          if(!ProcessVetoSource(i, result))
            {
             agg.vetoed = true;
@@ -347,6 +373,7 @@ public:
          if(src == NULL) continue;
          SignalResult result; result.Clear();
          if(!src.Evaluate(result)) continue;
+         if(!IsFresh(result, src.Name())) continue;
          ProcessMultiplierSource(i, result);
         }
 
@@ -357,6 +384,7 @@ public:
          if(src == NULL) continue;
          SignalResult result; result.Clear();
          if(!src.Evaluate(result)) continue;
+         if(!IsFresh(result, src.Name())) continue;
          ProcessVoterSource(i, result);
         }
 

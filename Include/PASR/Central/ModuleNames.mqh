@@ -29,7 +29,7 @@
 #define PASR_MOD_SNAPSHOT_MANAGER   "SnapshotManager"
 #define PASR_MOD_SESSION_STATE      "SessionState"
 
-// Non-IManager runtime services tracked by central documentation/future adapters.
+// Non-IManager runtime services tracked by central documentation and adapters.
 #define PASR_MOD_EVENT_BUS          "EventBus"
 #define PASR_MOD_PIPELINE_ENGINE    "PipelineEngine"
 #define PASR_MOD_LATENCY_OPTIMIZER  "LatencyOptimizer"

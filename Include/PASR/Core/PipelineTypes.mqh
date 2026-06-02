@@ -136,7 +136,21 @@ struct SAIResult
    double            drift_index;
    bool              model_healthy;
    string            model_name;
-   SAIResult() : score(0), drift_index(0), model_healthy(true), model_name("") {}
+   bool              validation_valid;
+   string            validation_reason;
+   int               invalid_feature_index;
+   SAIResult() : score(0), drift_index(0), model_healthy(true), model_name(""),
+                 validation_valid(false), validation_reason(""), invalid_feature_index(-1) {}
+   void Clear()
+     {
+      score = 0.0;
+      drift_index = 0.0;
+      model_healthy = true;
+      model_name = "";
+      validation_valid = false;
+      validation_reason = "";
+      invalid_feature_index = -1;
+     }
   };
 
 struct StageMetrics
@@ -279,7 +293,7 @@ struct PipelineContext
       session = SESSION_UNKNOWN;
       signal.Clear();
       signal_strength = 0;
-      ZeroMemory(ai_result);
+      ai_result.Clear();
       ai_score = 0;
       drift_score = 0;
       ai_veto = false;

@@ -23,6 +23,7 @@ Options:
     --currency  C       Deposit currency (default: USD)
 
 Requirements:
+    pip install MetaTrader5
     pip install pandas numpy matplotlib
     MetaTrader5 terminal must be installed (Windows only for actual runs).
     On non-Windows / CI, harness generates mock equity curves for testing.
@@ -40,11 +41,11 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
+import MetaTrader5 as mt5
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-DEFAULT_MT5    = r"C:\Program Files\MetaTrader 5\terminal64.exe"
 DEFAULT_EA     = "PASR_MODULAR"
 DEFAULT_SYMBOL = "EURUSD"
 DEFAULT_TF     = "H1"
@@ -54,6 +55,31 @@ DEFAULT_WINDOWS = 6
 DEFAULT_IS_RATIO = 0.70
 DEFAULT_DEPOSIT  = 10000
 DEFAULT_CURRENCY = "USD"
+
+def discover_mt5_path():
+    """Try to find MT5 terminal path automatically via MetaTrader5 library."""
+    if not mt5.initialize():
+        return None
+
+    info = mt5.terminal_info()
+    path = None
+    if info is not None:
+        # terminal_path is the directory where terminal64.exe resides
+        path = os.path.join(info.path, "terminal64.exe")
+
+    mt5.shutdown()
+    return path
+
+def get_default_output_dir():
+    """Get standard MQL5/Files directory."""
+    if not mt5.initialize():
+        return "wf_output"
+
+    data_path = mt5.terminal_info().data_path
+    out_path = os.path.join(data_path, "MQL5", "Files", "PASR_WF")
+
+    mt5.shutdown()
+    return out_path
 
 
 # ---------------------------------------------------------------------------
@@ -361,8 +387,11 @@ def generate_wf_html(windows, results, stats, args, out_dir: str):
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    auto_path = discover_mt5_path()
+    auto_out  = get_default_output_dir()
+
     parser = argparse.ArgumentParser(description="PASR Walk-Forward Harness")
-    parser.add_argument("--mt5",       default=DEFAULT_MT5)
+    parser.add_argument("--mt5",       default=auto_path if auto_path else "terminal64.exe")
     parser.add_argument("--ea",        default=DEFAULT_EA)
     parser.add_argument("--symbol",    default=DEFAULT_SYMBOL)
     parser.add_argument("--tf",        default=DEFAULT_TF)
@@ -370,7 +399,7 @@ def main():
     parser.add_argument("--end",       default=DEFAULT_END)
     parser.add_argument("--windows",   type=int,   default=DEFAULT_WINDOWS)
     parser.add_argument("--is-ratio",  type=float, default=DEFAULT_IS_RATIO, dest="is_ratio")
-    parser.add_argument("--out",       default="wf_output")
+    parser.add_argument("--out",       default=auto_out)
     parser.add_argument("--deposit",   type=int,   default=DEFAULT_DEPOSIT)
     parser.add_argument("--currency",  default=DEFAULT_CURRENCY)
     args = parser.parse_args()

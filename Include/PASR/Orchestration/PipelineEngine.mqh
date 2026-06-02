@@ -229,7 +229,11 @@ private:
          recoveryActive = rec.active;
         }
 
-      return StringFormat("res=%d sig=%s %.2f src=%d ready=%s cd=%d fz=%d risk=%s dd=%.2f open=%d exec=%d ret=%d tk=%I64u exit=%d/%I64u rec=%s %s",
+      string aiReason = ctx.ai_result.validation_reason;
+      if(StringLen(aiReason) > 48)
+         aiReason = StringSubstr(aiReason, 0, 48);
+
+      return StringFormat("res=%d sig=%s %.2f src=%d ready=%s cd=%d fz=%d ai=%s val=%s drift=%.3f risk=%s dd=%.2f open=%d exec=%d ret=%d tk=%I64u exit=%d/%I64u rec=%s %s %s",
                           (int)result,
                           SignalDirText(ctx.signal.direction),
                           ctx.signal.confidence,
@@ -237,6 +241,9 @@ private:
                           signalReady ? "Y" : "N",
                           cooldowns,
                           failedZones,
+                          ctx.ai_result.model_healthy ? "Y" : "N",
+                          ctx.ai_result.validation_valid ? "Y" : "N",
+                          ctx.ai_result.drift_index,
                           riskStatus,
                           dd,
                           openTrades,
@@ -246,6 +253,7 @@ private:
                           exitReason,
                           exitTotal,
                           recoveryActive ? "Y" : "N",
+                          aiReason,
                           signalReason);
      }
 
@@ -262,6 +270,11 @@ private:
          m_telemetry.RecordObservabilityText(m_last_observability);
          m_telemetry.RecordObservabilityMetric("SignalConfidence", ctx.signal.confidence, "normalized");
          m_telemetry.RecordObservabilityMetric("AIScore", ctx.ai_score, "score");
+         m_telemetry.RecordObservabilityMetric("AIDrift", ctx.ai_result.drift_index, "index");
+         m_telemetry.RecordObservabilityMetric("AIValidationValid", ctx.ai_result.validation_valid ? 1.0 : 0.0, "bool");
+         m_telemetry.RecordObservabilityMetric("AIModelHealthy", ctx.ai_result.model_healthy ? 1.0 : 0.0, "bool");
+         if(ctx.ai_result.invalid_feature_index >= 0)
+            m_telemetry.RecordObservabilityMetric("AIInvalidFeatureIndex", (double)ctx.ai_result.invalid_feature_index, "index");
          m_telemetry.RecordObservabilityMetric("SpreadPts", ctx.spread_pts, "points");
          m_telemetry.RecordObservabilityMetric("Result", (double)result, "enum");
         }

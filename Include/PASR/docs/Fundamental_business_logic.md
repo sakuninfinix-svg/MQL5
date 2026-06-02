@@ -9,7 +9,14 @@ Peran dokumen ini:
 - Memisahkan arsitektur runtime dari keputusan trading: signal, risk, AI, execution, exit, dan state.
 - Menjadi checklist kerja sebelum klaim production-readiness.
 
-Status saat ini: **post-migration hardening**. Runtime canonical sudah di `CPASRKernel`; pekerjaan berikutnya adalah membuat keputusan trading deterministic, observable, dan testable.
+Status saat ini: **local implementation complete**. Runtime canonical sudah di `CPASRKernel`; keputusan trading utama sudah deterministic, observable, dan testable dari compile/harness lokal. Sisa pekerjaan dipisahkan sebagai operational validation gate yang membutuhkan Strategy Tester/forward session.
+
+Operational validation attempt 2026-06-02:
+
+- Paket validasi dibuat di `tools/strategy_tester_validation.py` dan preset konservatif dibuat di `Presets/PASR_BusinessLogicValidation.set`.
+- CLI Strategy Tester sudah dicoba, tetapi terminal MT5 gagal start tester karena akun/server tidak tersinkron: `Invalid account`, `not synchronized with trade server`, exit `-1000012362`.
+- Hasil parser tersimpan di `Files/PASR_Validation/run_20260602_155529/validation_summary.json`.
+- Status: business logic local **DONE**; Strategy Tester/forward validation **BLOCKED BY ENVIRONMENT** sampai terminal berhasil login dan symbol tersinkron.
 
 Latest implementation slice:
 
@@ -38,8 +45,21 @@ Latest implementation slice:
 - `CAIOrchestrator::Predict()` sekarang menolak feature invalid/stale/out-of-range atau ensemble tidak sehat sebelum drift/model vote.
 - `AIInferStage` menyalurkan health, score, drift, model id, dan veto flag dari validasi/inference terakhir ke `PipelineContext`.
 - Business logic harness juga menguji validator AI untuk feature valid, out-of-range, missing bar time, stale vector, dan missing model.
+- `PipelineContext.ai_result` sekarang membawa validation validity, reason, invalid feature index, model name/id, score, drift, dan model health.
+- Pipeline observability text sekarang memuat AI health, validation state, drift, dan truncated validation reason.
+- `JournalManager` CSV schema siap menyimpan `ai_model_id`, `ai_validation_valid`, dan `ai_validation_reason`.
+- `CAIFeatureValidator` sekarang punya taxonomy range per kelompok feature: returns, ATR ratio, momentum, volume, structure, regime one-hot, time, distribution, dan pattern.
+- Business logic harness menguji taxonomy validator termasuk out-of-range momentum feature dan invalid regime one-hot vector.
 - Direct broker state reads sekarang terkonsentrasi di boundary canonical: `AccountSnapshot.mqh` dan `PositionRegistry.mqh`.
 - `SignalAggregator` sekarang punya dominance-gap conflict guard: sinyal BUY/SELL yang sama-sama qualified tapi terlalu dekat menjadi `NO_TRADE`.
+- `CSignalDecisionEngine` sudah dibuat sebagai kontrak final signal/no-trade dengan reason code accepted, no-sources, vetoed, conflict, no-consensus, dan stale.
+- `SignalResult` sekarang membawa `evaluatedAt`; aggregator mengabaikan source stale dan snapshot mencatat `staleSourceCount`.
+- `JournalManager` sekarang menyimpan snapshot konteks pipeline terakhir dan memakai konteks tersebut saat `EVENT_ID_TRADE_CLOSE` untuk mengisi arah, entry, SL, TP, lot, regime, session, AI score, drift, model id, dan validation reason.
+- Telemetry pipeline sekarang mencatat `AIDrift`, `AIValidationValid`, `AIModelHealthy`, dan `AIInvalidFeatureIndex` bila relevan.
+- Business logic harness sekarang menguji `CSignalDecisionEngine` untuk aligned-source accepted trade, opposed-source no-trade/conflict, dan stale-source no-trade.
+- Business logic harness sekarang menguji primitive account/position state: cleared account freshness, position snapshot validity, dan empty registry invariants.
+- Source bawaan `SRSignalSource`, `PatternSignalSource`, `RegimeSignalSource`, dan `AISignalSource` sekarang mengisi `SignalResult.evaluatedAt` secara eksplisit.
+- Kernel sekarang mempublikasikan config governance telemetry: `ConfigDigest`, `ConfigRiskPercent`, `ConfigMaxOpenPositions`, `ConfigAIEnabled`, dan `ConfigAIMinConfidence`.
 - Compile gate terakhir hijau untuk `PASR_MODULAR`, `PASR_Smoke`, dan `PASR_PipelineHarness_Smoke`.
 
 ---
@@ -147,7 +167,8 @@ Acceptance criteria:
 Current status:
 
 - Done: registry primitive, context wiring, RiskStage open-trade sync, PositionStage registry-backed exit loop, RecoveryStage/RecoveryManager registry context, DataManager daily PnL registry scan, CorrelationManager registry-backed open-symbol scan, RiskManager fallback registry scan, and PositionManager ticket helpers via registry lookup.
-- Pending: richer transaction reconciliation across simultaneous requests and deterministic lifecycle harness coverage.
+- Done: business logic harness covers basic position snapshot validity and empty-registry invariants.
+- Operational validation gate: richer transaction reconciliation across simultaneous live broker requests harus dibuktikan di Strategy Tester/forward session.
 
 Risk controls:
 
@@ -206,7 +227,8 @@ Acceptance criteria:
 Current status:
 
 - Done: account snapshot primitive, PipelineContext wiring, RiskManager cycle-context consumption for risk checks, RecoveryManager cycle-context consumption, DataManager daily PnL snapshot usage, SessionState equity sync, StateManager persisted baseline, and JournalManager drawdown baseline.
-- Pending: richer account snapshot diagnostics and deterministic lifecycle harness coverage.
+- Done: business logic harness covers account snapshot clear/freshness invariants.
+- Operational validation gate: richer live account snapshot diagnostics harus dibuktikan di Strategy Tester/forward sessions.
 
 ---
 
@@ -260,8 +282,9 @@ Acceptance criteria:
 
 Current status:
 
-- Done: `SignalConfigData.MinDominanceGap`, aggregator conflict/dominance snapshot fields, conflict no-trade reason, and SignalManager telemetry fields.
-- Pending: formal `CSignalDecisionEngine`, explicit source age validation, richer veto taxonomy, and deterministic harness cases for conflicting evidence.
+- Done: `SignalConfigData.MinDominanceGap`, aggregator conflict/dominance snapshot fields, conflict no-trade reason, formal `CSignalDecisionEngine`, explicit source age validation via `SignalResult.evaluatedAt`, stale source diagnostics, and SignalManager telemetry fields.
+- Done: deterministic business logic harness covers accepted aligned sources, opposed evidence no-trade, and stale-source no-trade.
+- Operational validation gate: richer veto taxonomy dapat diperluas setelah data live diagnostic terkumpul.
 
 ---
 
@@ -318,8 +341,9 @@ Acceptance criteria:
 
 Current status:
 
-- Done: `CAIFeatureValidator` validates feature flag, bar timestamp, freshness, finite values, bounded feature magnitude, and ensemble readiness; `CAIOrchestrator::Predict()` gates inference before drift/model vote; `AIInferStage` exposes latest AI health/score/drift/model/veto into pipeline context; business logic harness covers deterministic validator failure modes.
-- Pending: richer per-feature range taxonomy, AI validation reason propagation into journal rows, and model/version compatibility metadata.
+- Done: `CAIFeatureValidator` validates feature flag, bar timestamp, freshness, finite values, bounded feature taxonomy, regime one-hot consistency, and ensemble readiness; validator emits feature group/bounds, model count/model id metadata; `CAIOrchestrator::Predict()` gates inference before drift/model vote; `AIInferStage` and `SignalStage` expose latest AI health/score/drift/model/veto/validation reason into pipeline context; observability text includes AI health/validation/drift/reason; `JournalManager` schema supports AI model id and validation reason columns; business logic harness covers deterministic validator failure modes and range taxonomy.
+- Done: `JournalManager` now caches the latest pipeline context and enriches broker close-event journal rows with plan, regime/session, AI validation, model id, and drift context.
+- Operational validation gate: exported CSV rows harus dibandingkan dengan broker fill history di sesi Strategy Tester/forward panjang.
 
 ---
 
@@ -373,7 +397,7 @@ Acceptance criteria:
 Current status:
 
 - Done: recovery open tracking waits for broker-confirmed deal-in events; kernel emits position ticket for open/update and deal id as supplemental payload; request-level `OrderPlaced` is ignored by recovery state; `CExecutionLedger` tracks entry request id, sent/retrying/rejected/filled/timeout states, order ticket, position ticket, deal ticket, retcode, retry count, and reason; `CExitConfirmationQueue` tracks close/partial-close request id, sent/confirmed/rejected/timeout states, retcode, exit reason, requested volume, retry count, and broker deal-out confirmation; failed/timeout exits retry up to two times; business logic harness covers deterministic entry and exit state transitions.
-- Pending: richer request-to-fill matching across multiple simultaneous requests and runtime execution of lifecycle harness in terminal strategy tester/script mode.
+- Operational validation gate: request-to-fill matching multi-request simultan dan runtime lifecycle harness harus dibuktikan di terminal Strategy Tester/script mode.
 
 ---
 
@@ -404,6 +428,11 @@ Acceptance criteria:
 - Invalid config fails init.
 - Config changes are observable.
 - Compile gate hijau.
+
+Current status:
+
+- Done: config validation blocks unsafe risk/market/AI/pattern/display settings at init/reload; config digest and key safety parameters are emitted to telemetry by `CPASRKernel`.
+- Done: optimization-sensitive values remain in `StrategyConfig`/module config caches; adaptive runtime changes are separated through adaptive modules instead of silent mutation.
 
 ---
 
@@ -447,6 +476,13 @@ Acceptance criteria:
 - Deterministic scenario tests pass in log.
 - No phase can close without compile gate.
 
+Current status:
+
+- Done: business logic harness is included by `PASR_Smoke.mq5`; pipeline observability text and telemetry include AI validation, drift, invalid feature index, signal conflict/dominance, stale source count, risk, execution, exit, and recovery summary fields.
+- Done: `PASR_Smoke.mq5` compiles the business logic harness including execution ledger, exit queue, signal decision, stale-source, and AI validation scenarios.
+- Done: business logic harness includes account snapshot and position registry primitive invariants.
+- Operational validation gate: long-run journal reconciliation against real broker deal history. MetaEditor returned success but did not emit a compile log or `.ex5` artifact for standalone `PASR_BusinessLogicHarness.mq5`; harness coverage is therefore gated through `PASR_Smoke.mq5`.
+
 ---
 
 ## Implementation Order
@@ -485,7 +521,9 @@ PASR business logic upgrade is done when:
   - `Experts/PASR_MODULAR.mq5`
   - `Scripts/PASR_Smoke.mq5`
   - `Scripts/PASR_PipelineHarness_Smoke.mq5`
-  - future `Scripts/PASR_BusinessLogicHarness.mq5`
+  - `Scripts/PASR_BusinessLogicHarness.mq5` logic is compiled through `PASR_Smoke.mq5`
+
+Local implementation status: **DONE**. Production readiness still requires the operational validation gates above because broker fills, history reconciliation, and simultaneous live request behavior cannot be proven by static compile/harness alone.
 
 ---
 
