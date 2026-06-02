@@ -52,6 +52,7 @@ public:
         }
       if(ctx.signal.direction == SIGNAL_NONE) return STAGE_SKIP;
       if(!ctx.risk_result.allowed) return STAGE_SKIP;
+      if(ctx.trading_allowed == false) return STAGE_SKIP;
       m_timer.Start();
 
       TradePlan plan;
@@ -62,8 +63,11 @@ public:
       plan.tp = ctx.risk_result.takeProfit;
       plan.lot = ctx.risk_result.lotSize;
       plan.slPoints = ctx.signal.slPoints;
-      plan.comment = StringFormat("PASR|AI_PRIMARY|%.0f", ctx.signal.confidence * 100.0);
-      plan.valid = (plan.direction != SIGNAL_NONE && plan.lot > 0 && plan.sl > 0 && plan.tp > 0);
+      plan.comment = StringFormat("PASR|%s|%.0f", ctx.signal.primarySource, ctx.signal.confidence * 100.0);
+      bool buyStopsOk = (plan.direction == SIGNAL_BUY && plan.sl < plan.entryPrice && plan.tp > plan.entryPrice);
+      bool sellStopsOk = (plan.direction == SIGNAL_SELL && plan.sl > plan.entryPrice && plan.tp < plan.entryPrice);
+      plan.valid = (plan.direction != SIGNAL_NONE && plan.lot > 0 && plan.entryPrice > 0 &&
+                    plan.sl > 0 && plan.tp > 0 && (buyStopsOk || sellStopsOk));
 
       ctx.plan.direction = plan.direction;
       ctx.plan.entryPrice = plan.entryPrice;

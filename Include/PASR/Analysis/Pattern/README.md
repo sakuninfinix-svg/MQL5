@@ -1,40 +1,33 @@
-# Analysis/Pattern/ — Per-Pattern Class Scaffold
+# Analysis/Pattern
 
-> Status: Reserved for future refactoring sprint
+Folder ini adalah tempat yang tepat untuk candlestick pattern recognition karena pattern adalah bagian dari domain analysis, bukan signal execution atau central orchestration.
 
-## Purpose
+Runtime canonical saat ini:
 
-This directory is a scaffold placeholder for the future split of
-`Analysis/PatternManager.mqh` into individual pattern detector classes.
-
-## Planned Structure
-
-```
-Pattern/
-  IPatternDetector.mqh         — interface: Detect(bars[], &result)
-  Detectors/
-    BullishEngulfing.mqh
-    BearishEngulfing.mqh  
-    PinBar.mqh
-    InsideBar.mqh
-    MorningStar.mqh
-    EveningStar.mqh
-    ThreeWhiteSoldiers.mqh
-    ThreeBlackCrows.mqh
-    Doji.mqh
-    HammerHangingMan.mqh
+```text
+PatternTypes.mqh
+PatternManager.mqh
 ```
 
-## Current State
+`CPatternManager` adalah `IManager` yang dimiliki `CPASRKernel` melalui registry. Runtime pipeline memanggilnya dari `Orchestration/Stages/PatternStage.mqh` pada `new_bar`, lalu hasil terakhir dipakai oleh:
 
-All pattern detection logic currently lives in `../PatternManager.mqh`.
-Do NOT split prematurely — wait until PatternManager exceeds ~500 lines
-or when adding >3 new pattern types.
+- `Signal/PatternSignalSource.mqh`
+- `Orchestration/Stages/SignalStage.mqh`
+- AI feature injection melalui `SPatternFeatureSnapshot`
 
-## Migration Trigger
+## Policy
 
-When PatternManager.mqh > 500 lines OR pattern count > 10:
-1. Create `IPatternDetector.mqh` interface
-2. Move each pattern to its own `Detectors/XYZ.mqh`
-3. PatternManager becomes a registry+aggregator
-4. Update PipelineEngine Stage_PatternRec accordingly
+- Jangan menambah sub-pipeline lokal di folder ini selama `CPatternManager` masih cukup kecil dan compile-clean.
+- Jangan menyimpan scaffold strategi yang tidak di-wire ke `PatternStage`.
+- Tambahkan pattern baru langsung ke manager hanya jika kompleksitasnya masih wajar.
+- Jika jumlah pattern atau kompleksitas sudah terlalu besar, buat refactor nyata yang langsung terhubung ke `PatternStage` dan compile gate.
+
+## Compile Gates
+
+Setelah mengubah folder ini, compile:
+
+```text
+Experts/PASR_MODULAR.mq5
+Scripts/PASR_Smoke.mq5
+Scripts/PASR_PipelineHarness_Smoke.mq5
+```

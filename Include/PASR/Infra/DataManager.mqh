@@ -26,6 +26,7 @@ private:
    datetime  m_lastDashboardUpdate;
 
    int       m_atrHandle;
+   int       m_atrPeriod;
    datetime  m_lastATRUpdate;
    datetime  m_lastTickEventTime;
    int       m_tickEventCount;
@@ -53,7 +54,7 @@ public:
        m_startBalance(AccountInfoDouble(ACCOUNT_BALANCE)),
        m_consecutiveLosses(0),
        m_lastScavengeTime(0), m_lastDashboardUpdate(0),
-       m_atrHandle(INVALID_HANDLE), m_lastATRUpdate(0),
+       m_atrHandle(INVALID_HANDLE), m_atrPeriod(14), m_lastATRUpdate(0),
        m_lastTickEventTime(0), m_tickEventCount(0),
        m_todayStr("")
      {}
@@ -70,7 +71,9 @@ public:
       m_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
       m_todayStr = TimeToString(TimeCurrent(), TIME_DATE);
       RefreshDailyProfit();
+      m_atrPeriod = MathMax(1, m_config.Market.ATRPeriod);
       InitializeATRHandle();
+      UpdateATRCache();
       return true;
      }
 
@@ -118,6 +121,14 @@ public:
       m_config = cfg;
       m_cfg    = cfg;
       m_cfgDirty = false;
+      int newPeriod = MathMax(1, cfg.Market.ATRPeriod);
+      if(newPeriod != m_atrPeriod)
+        {
+         m_atrPeriod = newPeriod;
+         ReleaseATRHandle();
+         InitializeATRHandle();
+         UpdateATRCache();
+        }
      }
 
    double GetATRPoints() const         { return m_atrPoints;         }
@@ -158,7 +169,7 @@ public:
    void InitializeATRHandle()
      {
       if(m_atrHandle != INVALID_HANDLE) return;
-      m_atrHandle = iATR(_Symbol, _Period, 14);
+      m_atrHandle = iATR(_Symbol, _Period, MathMax(1, m_atrPeriod));
       if(m_atrHandle == INVALID_HANDLE)
          PASRLogWarn("DataManager", "Failed to create ATR handle");
       else
@@ -176,7 +187,10 @@ public:
       if(m_atrHandle == INVALID_HANDLE) return;
       double buf[1];
       if(CopyBuffer(m_atrHandle, 0, 0, 1, buf) > 0 && buf[0] > 0)
-         m_atrPoints = buf[0];
+        {
+         double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+         m_atrPoints = (point > 0.0) ? buf[0] / point : 0.0;
+        }
      }
   };
 

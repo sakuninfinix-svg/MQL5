@@ -49,9 +49,6 @@
 
 // Layer 3: Analysis base modules and helpers
 #include <PASR/Analysis/Pattern/PatternTypes.mqh>
-#include <PASR/Analysis/Pattern/CandleUtils.mqh>
-#include <PASR/Analysis/Pattern/FakeoutDetector.mqh>
-#include <PASR/Analysis/Pattern/ScoreEngine.mqh>
 #include <PASR/Analysis/Pattern/PatternManager.mqh>
 #include <PASR/Analysis/SRDetector.mqh>
 #include <PASR/Analysis/SRManager.mqh>
@@ -133,13 +130,12 @@
 #undef DetectSession
 #endif
 
-// Layer 10: Centralized Modular Pipeline facade and compatibility backend
+// Layer 10: Centralized Modular Pipeline facade
 #include <PASR/Central/ModuleNames.mqh>
 #include <PASR/Central/ModuleRegistry.mqh>
 #include <PASR/Central/ServiceLocator.mqh>
 #include <PASR/Central/LifecycleManager.mqh>
-#include <PASR/Central/BackendAdapter.mqh>
-#include <PASR/Central/BackendAdapterInit.mqh>
+#include <PASR/Central/ModuleFactory.mqh>
 #include <PASR/Central/PASRKernel.mqh>
 
 #endif // __CORE_PASR_MASTER_MQH__

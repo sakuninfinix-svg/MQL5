@@ -8,7 +8,7 @@
 
 ## Ringkasan
 
-Sebelum menambah kompleksitas besar seperti Path Architecture, multi-symbol penuh, atau refactor besar lain, PASR perlu menstabilkan fondasi logika bisnis dan state management.
+Setelah runtime dipusatkan ke `CPASRKernel`, fokus berikutnya adalah menstabilkan fondasi logika bisnis dan state management.
 
 Masalah di dokumen ini bukan sekadar bug teknis. Sebagian menyentuh risiko eksekusi trading langsung: double processing, lot calculation mismatch, AI inference tanpa input valid, dan exit yang gagal tanpa konfirmasi.
 
@@ -234,9 +234,9 @@ Lihat Issue #192.
 
 ---
 
-## Migration Readiness Checklist
+## Post-Migration Hardening Checklist
 
-Sebelum migrasi arsitektur besar, minimal fondasi berikut harus stabil:
+Setelah migrasi arsitektur pusat, minimal fondasi berikut harus stabil sebelum PASR dianggap layak untuk validasi trading serius:
 
 | Checkpoint | Target |
 |------------|--------|
@@ -251,7 +251,7 @@ Sebelum migrasi arsitektur besar, minimal fondasi berikut harus stabil:
 | AI feature validation | Guard terhadap NaN/Inf/uninitialized |
 | State ownership map | Ownership state ditegakkan atau minimal didiagnosis |
 
-Rekomendasi: jangan melakukan migrasi arsitektur besar sebelum sebagian besar checkpoint di atas berstatus stabil.
+Rekomendasi: jangan menambah kompleksitas trading baru sebelum sebagian besar checkpoint di atas berstatus stabil.
 
 ---
 
@@ -259,7 +259,7 @@ Rekomendasi: jangan melakukan migrasi arsitektur besar sebelum sebagian besar ch
 
 - README: ringkasan dan onboarding.
 - `Include/PASR/dokumentasi.md`: dokumentasi detail utama.
-- File ini: audit fundamental business logic.
+- File ini: audit fundamental business logic pasca-migrasi.
 - GitHub Issues: pekerjaan aktif yang harus ditutup.
 
 © 2026 Agsicentre — PASR EA. All rights reserved.

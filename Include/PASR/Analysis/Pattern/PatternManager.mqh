@@ -117,6 +117,16 @@ private:
    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
    double SafeDiv(double a, double b) const { return (MathAbs(b) <= DBL_EPSILON) ? 0.0 : a / b; }
 
+   void ApplyConfig()
+     {
+      if(!m_cfg.Pattern.EnablePatterns)
+        {
+         m_minConfluenceScore = 2.0;
+         return;
+        }
+      m_minConfluenceScore = Clamp01(m_cfg.Pattern.MinPatternScore / 100.0);
+     }
+
    void ClearHistory()
      {
       for(int i=0; i<PATTERN_HISTORY_CAPACITY; i++)
@@ -400,6 +410,7 @@ public:
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
+      ApplyConfig();
       ClearHistory();
       m_lastResult.Clear();
       m_lastFeatures.Clear();
@@ -428,7 +439,11 @@ public:
         {
          case EVENT_ID_NEW_BAR:
             m_lastScanBarTime = 0;
-            if(m_cfgDirty && m_data != NULL) RefreshConfig();
+            if(m_cfgDirty && m_data != NULL)
+              {
+               RefreshConfig();
+               ApplyConfig();
+              }
             break;
          case EVENT_ID_CONFIG_RELOAD:
             m_cfgDirty = true;
@@ -447,7 +462,11 @@ public:
       if(shift + 2 >= ArraySize(rates)) { outResult.reason = "Insufficient bars"; return false; }
 
       datetime curTime = rates[shift].time;
-      if(curTime == m_lastScanBarTime && m_lastResult.found) { outResult = m_lastResult; return outResult.found; }
+      if(curTime == m_lastScanBarTime)
+        {
+         outResult = m_lastResult;
+         return outResult.found;
+        }
 
       SPatternVote votes[5];
       for(int i = 0; i < 5; i++) votes[i].Reset();
@@ -459,6 +478,10 @@ public:
 
       for(int i = 0; i < 5; i++)
          if(votes[i].valid) votes[i].regimeWeight = CalculateRegimeWeight(currentRegime, votes[i].type, votes[i].dir);
+
+      int validVotes = 0;
+      for(int i = 0; i < 5; i++)
+         if(votes[i].valid) validVotes++;
 
       double buyScore = AggregateProbability(votes, 1);
       double sellScore = AggregateProbability(votes, -1);
@@ -477,7 +500,8 @@ public:
       m_lastFeatures.reclaimQuality = AggregateFeature(votes, featureDir, 2);
       m_lastFeatures.followThrough = AggregateFeature(votes, featureDir, 3);
 
-      m_totalPatternsDetected++;
+      if(validVotes > 0)
+         m_totalPatternsDetected++;
       m_lastScanBarTime = curTime;
 
       if(finalScore < m_minConfluenceScore)

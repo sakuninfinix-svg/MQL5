@@ -24,6 +24,12 @@ public:
    static CRegimeFilter* CreateRegimeFilter()
      { return new CRegimeFilter(); }
 
+   static CMarketRegimeDetector* CreateMarketRegimeDetector()
+     { return new CMarketRegimeDetector(); }
+
+   static CAdaptiveParameterManager* CreateAdaptiveParameterManager()
+     { return new CAdaptiveParameterManager(); }
+
    static CPatternManager* CreatePatternManager()
      { return new CPatternManager(); }
 
@@ -44,6 +50,18 @@ public:
 
    static CRecoveryManager* CreateRecoveryManager()
      { return new CRecoveryManager(); }
+
+   static CSanityManager* CreateSanityManager()
+     { return new CSanityManager(); }
+
+   static CTelemetryRecorder* CreateTelemetryRecorder()
+     { return new CTelemetryRecorder(); }
+
+   static CHealthMonitor* CreateHealthMonitor()
+     { return new CHealthMonitor(); }
+
+   static CSessionState* CreateSessionState()
+     { return new CSessionState(); }
 
    static CJournalManager* CreateJournalManager()
      { return new CJournalManager(); }

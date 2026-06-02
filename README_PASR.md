@@ -14,6 +14,8 @@
 Untuk detail panjang, gunakan:
 
 - `Include/PASR/README.md` — ringkasan dokumentasi PASR di dalam folder include.
+- `Include/PASR/docs/DOCUMENTATION.md` — indeks dokumen teknis yang masih aktif.
+- `Include/PASR/docs/ARCHITECTURE.md` — arsitektur runtime canonical saat ini.
 - `Include/PASR/dokumentasi.md` — dokumentasi detail, sprint history, dan issue mapping.
 - `Include/PASR/docs/fundamental-business-logic-audit.md` — audit risiko fundamental business logic.
 - GitHub Issues — sumber utama bug aktif, backlog, dan rencana refactor.
@@ -22,7 +24,7 @@ Untuk detail panjang, gunakan:
 
 ## Current Architecture Direction
 
-PASR saat ini diarahkan ke arsitektur **Pipeline Orchestration**:
+PASR saat ini memakai arsitektur **Centralized Modular Pipeline**:
 
 ```text
 OnTick()
@@ -42,7 +44,7 @@ Target desain:
 
 1. `OnTick()` tetap ringan.
 2. Analisis berat berjalan pada timer/new-bar pipeline.
-3. `COrchestrator` menjadi coordinator utama lifecycle manager.
+3. `CPASRKernel` menjadi coordinator utama lifecycle, registry, runtime event loop, dan pipeline.
 4. Manager berkomunikasi lewat `CEventBus` dan kontrak interface yang jelas.
 5. State trading tidak tersebar tanpa owner.
 6. Bug aktif tidak disimpan di README, tetapi di GitHub Issues.
@@ -81,7 +83,9 @@ MQL5/
 │   └── PASR.mq5               # Legacy monolith, do not extend
 │
 └── Include/PASR/
-    ├── Core/                  # EventBus, Events, IManager, Orchestrator, Pipeline
+    ├── Core/                  # EventBus, Events, IManager, master include, utilities
+    ├── Central/               # CPASRKernel, registry, service locator, lifecycle, factory
+    ├── Orchestration/         # Canonical pipeline engine and split stages
     ├── Analysis/              # SR, Zone, MarketRegime, AdaptiveParameter, Pattern
     ├── Signal/                # SignalManager, signal filters/sources
     ├── Trade/                 # Execution, Risk, Recovery, Exit, Position, Correlation
@@ -177,21 +181,21 @@ Do not interpret older claims such as “institutional-grade,” “80–100 pai
 
 1. Open `Experts/PASR_MODULAR.mq5` in MetaEditor.
 2. Compile with `#property strict` enabled.
-3. Resolve compile blockers first: #180, #181, #182, #183.
-4. Run/verify QA once compile is stable: #196.
-5. Only after the compile path is stable, continue deeper refactor work.
+3. Use `CPASRKernel` as the canonical runtime entry.
+4. Run/verify QA compile gates once compile is stable.
+5. Use `CPASRKernel` only; do not reintroduce legacy runtime compatibility callers.
 
 Minimal intended EA lifecycle:
 
 ```cpp
 #include <PASR/Core/PASR.mqh>
 
-COrchestrator orch;
+CPASRKernel kernel;
 
 int OnInit()
   {
    // Build/load StrategyConfig here.
-   if(orch.Init(cfg) != INIT_SUCCEEDED)
+   if(kernel.Init(cfg) != INIT_SUCCEEDED)
       return INIT_FAILED;
 
    EventSetTimer(1);
@@ -200,24 +204,24 @@ int OnInit()
 
 void OnTick()
   {
-   orch.OnTick();
+   kernel.OnTick();
   }
 
 void OnTimer()
   {
-   orch.OnTimer();
+   kernel.OnTimer();
   }
 
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
   {
-   orch.OnTradeTransaction(trans, request, result);
+   kernel.OnTradeTransaction(trans, request, result);
   }
 
 void OnDeinit(const int reason)
   {
-   orch.OnDeinit(reason);
+   kernel.OnDeinit(reason);
   }
 ```
 
@@ -225,7 +229,7 @@ void OnDeinit(const int reason)
 
 ## Recommended Work Order
 
-1. Fix current compile blockers.
+1. Keep `Experts/PASR_MODULAR.mq5`, `PASR_Smoke`, and `PASR_PipelineHarness_Smoke` compile-clean.
 2. Confirm master include and interface contracts.
 3. Validate risk/account/position state ownership.
 4. Validate AI feature inputs and fallback behavior.

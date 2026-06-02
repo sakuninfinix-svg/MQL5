@@ -50,6 +50,32 @@ public:
          return STAGE_SKIP;
 
       m_timer.Start();
+      MqlRates rates[];
+      ArraySetAsSeries(rates, true);
+      int copied = CopyRates(_Symbol, _Period, 0, 8, rates);
+      if(copied < 4)
+        {
+         if(m_debug) Print("[Pipeline] PatternRec SKIP: insufficient rates");
+         if(m_profiling) m_timer.Log("Stage4_PatternRec");
+         return STAGE_SKIP;
+        }
+
+      double atrPoints = ctx.atr_points;
+      if(atrPoints <= 0.0)
+         atrPoints = 1.0;
+
+      EMarketRegime regime = (ctx.regime == REGIME_UNKNOWN) ? REGIME_RANGE : ctx.regime;
+      SPatternResult result;
+      bool found = m_pattern.Detect(rates, 1, atrPoints, regime, result);
+      if(m_debug)
+        {
+         if(found)
+            PrintFormat("[Pipeline] PatternRec OK: type=%d dir=%d score=%.3f reason=%s",
+                        (int)result.type, result.direction, result.confluenceScore, result.reason);
+         else
+            Print("[Pipeline] PatternRec SKIP: ", result.reason);
+        }
+
       if(m_profiling) m_timer.Log("Stage4_PatternRec");
       return STAGE_OK;
      }

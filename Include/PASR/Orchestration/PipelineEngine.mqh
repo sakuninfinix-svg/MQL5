@@ -63,12 +63,56 @@
   class CTelemetryRecorder;
   class CAdaptiveParameterManager;
   class CMarketRegimeDetector;
-  class CLatencyOptimizer;
-  class CAsyncOrderManager;
-  class CHealthMonitor;
-  class CSnapshotManager;
   class CTrade;
 #endif
+
+struct SPipelineDependencies
+  {
+   CDataManager              *data;
+   CAnalysisSRManager        *sr;
+   CAnalysisZoneManager      *zone;
+   CPatternManager           *pattern;
+   CSignalManager            *signal;
+   CAIOrchestrator           *ai_orch;
+   CRegimeFilter             *regime;
+   CRiskManager              *risk;
+   CExecutionManager         *exec;
+   CExitEngine               *exit_engine;
+   CRecoveryManager          *recovery;
+   CDashboardManager         *dash;
+   CJournalManager           *journal;
+   CEventBus                 *bus;
+   CSanityManager            *sanity;
+   CTelemetryRecorder        *telemetry;
+   CAdaptiveParameterManager *adaptive;
+   CMarketRegimeDetector     *regime_det;
+   SPipelineDependencies()
+     {
+      Clear();
+     }
+
+   void Clear()
+     {
+      data = NULL;
+      sr = NULL;
+      zone = NULL;
+      pattern = NULL;
+      signal = NULL;
+      ai_orch = NULL;
+      regime = NULL;
+      risk = NULL;
+      exec = NULL;
+      exit_engine = NULL;
+      recovery = NULL;
+      dash = NULL;
+      journal = NULL;
+      bus = NULL;
+      sanity = NULL;
+      telemetry = NULL;
+      adaptive = NULL;
+      regime_det = NULL;
+     }
+  };
 
 class CPipelineEngine
   {
@@ -91,11 +135,6 @@ private:
    CTelemetryRecorder        *m_telemetry;
    CAdaptiveParameterManager *m_adaptive;
    CMarketRegimeDetector     *m_regime_det;
-   CLatencyOptimizer         *m_optimizer;
-   CAsyncOrderManager        *m_async_orders;
-   CHealthMonitor            *m_health;
-   CSnapshotManager          *m_snapshot;
-
    bool   m_debug_mode;
    bool   m_profiling_enabled;
    CPerfTimer m_stage_timer;
@@ -355,7 +394,6 @@ public:
         m_ai_orch(NULL), m_regime(NULL), m_risk(NULL), m_exec(NULL), m_exit(NULL),
         m_recovery(NULL), m_dash(NULL), m_journal(NULL), m_bus(NULL),
         m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL), m_regime_det(NULL),
-        m_optimizer(NULL), m_async_orders(NULL), m_health(NULL), m_snapshot(NULL),
         m_debug_mode(false), m_profiling_enabled(true), m_last_observability(""),
         m_observability_ticks(0)
      {
@@ -399,22 +437,13 @@ public:
       m_journal_stage.EnableProfiling(on);
      }
 
-   void InjectManagers(CDataManager *data, CAnalysisSRManager *sr, CAnalysisZoneManager *zone,
-      CPatternManager *pattern, CSignalManager *signal, CAIOrchestrator *ai_orch,
-      CRegimeFilter *regime, CRiskManager *risk, CExecutionManager *exec,
-      CRecoveryManager *recovery, CDashboardManager *dash, CJournalManager *journal,
-      CEventBus *bus, CSanityManager *sanity, CTelemetryRecorder *telemetry,
-      CAdaptiveParameterManager *adaptive, CMarketRegimeDetector *regime_det,
-      CLatencyOptimizer *optimizer=NULL, CAsyncOrderManager *async_orders=NULL,
-      CHealthMonitor *health=NULL, CSnapshotManager *snapshot=NULL,
-      CExitEngine *exit_engine=NULL)
+   void InjectDependencies(const SPipelineDependencies &deps)
      {
-      m_data=data; m_sr=sr; m_zone=zone; m_pattern=pattern; m_signal=signal;
-      m_ai_orch=ai_orch; m_regime=regime; m_risk=risk; m_exec=exec;
-      m_exit=exit_engine; m_recovery=recovery; m_dash=dash; m_journal=journal; m_bus=bus;
-      m_sanity=sanity; m_telemetry=telemetry; m_adaptive=adaptive;
-      m_regime_det=regime_det; m_optimizer=optimizer; m_async_orders=async_orders;
-      m_health=health; m_snapshot=snapshot;
+      m_data=deps.data; m_sr=deps.sr; m_zone=deps.zone; m_pattern=deps.pattern; m_signal=deps.signal;
+      m_ai_orch=deps.ai_orch; m_regime=deps.regime; m_risk=deps.risk; m_exec=deps.exec;
+      m_exit=deps.exit_engine; m_recovery=deps.recovery; m_dash=deps.dash; m_journal=deps.journal; m_bus=deps.bus;
+      m_sanity=deps.sanity; m_telemetry=deps.telemetry; m_adaptive=deps.adaptive;
+      m_regime_det=deps.regime_det;
       m_data_stage.Bind(m_data);
       m_analysis_sr_stage.Bind(m_sr, m_bus);
       m_analysis_zone_stage.Bind(m_zone);
@@ -463,8 +492,10 @@ public:
       if(bus == NULL || data == NULL)
          return false;
 
-      InjectManagers(data, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                     NULL, NULL, NULL, bus, NULL, NULL, NULL, NULL);
+      SPipelineDependencies deps;
+      deps.data = data;
+      deps.bus = bus;
+      InjectDependencies(deps);
       return true;
      }
 

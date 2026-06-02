@@ -1,151 +1,116 @@
-# PASR Framework — Architecture Reference
+# PASR Architecture
 
-> **Version**: 3.0 (Layered Architecture)
-> **Date**: 2026-05-20
-> **Author**: Agsicentre
+PASR is an MQL5 Expert Advisor framework built around a centralized runtime kernel and a modular trading pipeline.
 
----
+Current canonical entrypoint:
 
-## Overview
+```mql5
+#include <PASR/Core/PASR.mqh>
 
-PASR (Price Action Support/Resistance) is an MQL5 Expert Advisor framework built on a strict 7-layer clean architecture. Each layer has a clear responsibility boundary and may only depend on layers below it.
-
----
-
-## Layer Map
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  LAYER 0 — ENTRY POINT                                  │
-│  PASR.mqh (master include)  │  Globals.mqh              │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 1 — CORE / FOUNDATION                            │
-│  Core/IManager.mqh          │  Core/EventBus.mqh        │
-│  Core/Events.mqh            │  Core/Config/Types.mqh    │
-│                             │  Core/Config/Manager.mqh  │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 2 — INFRASTRUCTURE                               │
-│  Infra/DataManager.mqh      │  Infra/MarketManager.mqh  │
-│  Infra/ZoneManager.mqh                                  │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 3 — ANALYSIS                                     │
-│  Analysis/SRManager.mqh     │  Analysis/MarketRegime.mqh│
-│  Analysis/Pattern/PatternManager.mqh  (+ Evaluators,   │
-│                              ScoreEngine)               │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 4 — SIGNAL / INTELLIGENCE                        │
-│  Signal/SignalManager.mqh   │  Signal/AI/AIOrchestrator │
-│  Signal/AI/AIInference.mqh  │  Signal/AI/AITrainer.mqh  │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 5 — TRADE / EXECUTION                            │
-│  Trade/ExecutionManager.mqh │  Trade/RecoveryManager.mqh│
-├─────────────────────────────────────────────────────────┤
-│  LAYER 6 — UI / PRESENTATION (read-only)                │
-│  UI/DashboardManager.mqh                                │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 7 — QA / DEVTOOLS (never in production)          │
-│  QA/Audit.mqh  │  QA/Test.mqh  │  QA/Optimizations.mqh │
-└─────────────────────────────────────────────────────────┘
+CPASRKernel kernel;
 ```
 
----
+`CPASRKernel` owns lifecycle, service lookup, manager registry, runtime event flow, trade transaction routing, and pipeline execution. Legacy runtime compatibility adapters have been removed; new callers must use the kernel directly.
 
-## Dependency Rules (Enforcement)
+## Runtime Flow
 
-| Layer | MAY include | MUST NOT include |
-|-------|-------------|------------------|
-| Core | Core/ only | anything else |
-| Infra | Core/ | Analysis+, Signal+, Trade+, UI |
-| Analysis | Core/, Infra/ | Signal+, Trade+, UI |
-| Signal | Core/, Infra/, Analysis/ | Trade+, UI |
-| Trade | Core/, Infra/ | Signal/, UI |
-| UI | Core/, Infra/ (read) | Trade/, Signal/ (direct include) |
-| QA | ALL | (never included by prod) |
-
----
-
-## Migration Progress
-
-Old numbered files at root (`0.EventBus.mqh` → `12.MarketRegime.mqh`) remain
-during transition. Each is migrated to its new layer path, tested, then
-the old file becomes a 1-line shim:
-
-```cpp
-// DEPRECATED — use Core/EventBus.mqh
-#include "Core/EventBus.mqh"
+```text
+Experts/PASR_MODULAR.mq5
+        |
+        v
+CPASRKernel
+        |
+        +-- CModuleRegistry
+        +-- CServiceLocator
+        +-- CLifecycleManager
+        +-- CPipelineEngine
+                |
+                v
+        Orchestration/Stages/*
 ```
 
-### Status Table
+EA event handlers are intentionally thin:
 
-| Old File | New Path | Status |
-|----------|----------|--------|
-| IManager.mqh | Core/IManager.mqh | ⏳ Pending |
-| 0.EventBus.mqh | Core/EventBus.mqh | ⏳ Pending |
-| 1.Events.mqh | Core/Events.mqh | ⏳ Pending |
-| 2.Config.Types.mqh | Core/Config/Types.mqh | ⏳ Pending |
-| 2.Config.Manager.mqh | Core/Config/Manager.mqh | ⏳ Pending |
-| 3.MarketManager.mqh | Infra/MarketManager.mqh | ⏳ Pending |
-| 3.ZoneManager.mqh | Infra/ZoneManager.mqh | ⏳ Pending |
-| 10.DataManager.mqh | Infra/DataManager.mqh | ⏳ Pending |
-| 4.SRManager.mqh | Analysis/SRManager.mqh | ⏳ Pending |
-| 12.MarketRegime.mqh | Analysis/MarketRegime.mqh | ⏳ Pending |
-| 9.PatternManager.mqh | Analysis/Pattern/ | ✅ Done |
-| 5.SignalManager.mqh | Signal/SignalManager.mqh | ⏳ Pending |
-| 7.CAIOrchestrator.mqh | Signal/AI/ (14 files, 26-dim) | ✅ Done v4.02 |
-| 6.ExecutionManager.mqh | Trade/ExecutionManager.mqh | ⏳ Pending |
-| 8.RecoveryManager.mqh | Trade/RecoveryManager.mqh | ⏳ Pending |
-| 11.DashboardManager.mqh | UI/DashboardManager.mqh | ✅ Done |
-| PASR.Audit.mqh | QA/Audit.mqh | ⏳ Pending |
-| PASR.Test.mqh | QA/Test.mqh | ⏳ Pending |
-| PASR.Optimizations.mqh | QA/Optimizations.mqh | ⏳ Pending |
-
----
-
-## Key Design Decisions
-
-### 1. Config Injection (not pull)
-DataManager does NOT include ConfigManager. Config is injected:
-```cpp
-dataManager.InitConfigCache(cfg); // called by EA OnInit
+```text
+OnInit()             -> kernel.Init(config)
+OnTick()             -> kernel.OnTick()
+OnTimer()            -> kernel.OnTimer()
+OnTradeTransaction() -> kernel.OnTradeTransaction(...)
+OnDeinit()           -> kernel.OnDeinit(reason)
 ```
 
-### 2. GlobalVariable Key Safety
-All GV keys prefixed with account login:
-```cpp
-string key = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
-           + "_PASR_" + symbol + "_" + (string)magic;
+Heavy analysis and trading decisions run from the timer-driven pipeline, not directly from `OnTick()`.
+
+## Include Layers
+
+The master include is `Include/PASR/Core/PASR.mqh`. It controls include order and should be the only include needed by EA callers.
+
+Current include order:
+
+| Layer | Scope |
+| --- | --- |
+| 0 | Config and core primitives |
+| 0b | Cross-layer data-only types |
+| 1 | Core utilities |
+| 2 | Infra managers and data providers |
+| 3 | Analysis modules |
+| 4 | Trade primitive types |
+| 5 | AI modules |
+| 6 | Signal modules |
+| 7 | Trade managers |
+| 8 | UI and QA helpers |
+| 9 | Orchestration interfaces, stages, and pipeline engine |
+| 10 | Central kernel, registry, service locator, lifecycle, factory |
+
+## Pipeline Stages
+
+`CPipelineEngine` is canonical in `Include/PASR/Orchestration/PipelineEngine.mqh`.
+
+Runtime stage delegates live in `Include/PASR/Orchestration/Stages/`:
+
+```text
+01 DataSync
+02 AnalysisSR
+03 AnalysisZone
+04 PatternRec
+05 RegimeDetect
+06 SignalGen
+07 AIInference
+08 RiskCheck
+09 AdaptiveParams
+10 Execution
+11 PositionMgmt
+12 Recovery
+13 Dashboard
+14 Journal
 ```
 
-### 3. AI Thread Safety
-AIInference runs on tick thread (O(layers), zero alloc).
-AITrainer runs on deferred NewBar event only.
-Backpropagation never blocks OnTick().
+Pipeline dependencies cross the orchestration boundary through `SPipelineDependencies`. Runtime context values such as health/session metrics are prepared by the kernel before execution.
 
-### 4. Dashboard Throttle
-Dashboard renders at maximum 1 Hz:
-```cpp
-if(GetMicrosecondCount() - m_lastRenderUs < 1000000UL) return;
+## Ownership Rules
+
+- `CPASRKernel` owns non-`IManager` runtime services such as `EventBus`, fallback market regime detector, signal sources, and the pipeline engine.
+- `CModuleRegistry` owns registered `IManager` instances when they are successfully initialized with `owned=true`.
+- `CLifecycleManager` controls init/deinit order and reverse shutdown.
+- `CServiceLocator` is the typed lookup boundary for managers used by the kernel and pipeline.
+- Domain logic stays in domain folders: `Analysis/`, `Signal/`, `AI/`, `Trade/`, `Infra/`, `Data/`, `UI/`, and `QA/`.
+
+## Dependency Policy
+
+- Do not reintroduce legacy runtime adapters.
+- Do not make domain modules pull dependencies through ad hoc globals.
+- Prefer registry/service-locator lookup in central runtime code.
+- Keep `OnTick()` light; expensive work belongs in timer/new-bar pipeline stages.
+- Keep trading formulas and AI/risk behavior separate from architecture cleanup unless the change explicitly targets business logic.
+
+## Verification Gates
+
+After changing architecture or include ownership, compile:
+
+```text
+Experts/PASR_MODULAR.mq5
+Scripts/PASR_Smoke.mq5
+Scripts/PASR_PipelineHarness_Smoke.mq5
 ```
 
----
-
-## Event Flow
-
-```
-OnTick()
-  └─► EventBus.Dispatch(PriceUpdateEvent)
-        ├─► DataManager.OnPriceUpdate()   [cache check only]
-        ├─► MarketRegime.OnPriceUpdate()  [regime read only]
-        ├─► SignalManager.OnPriceUpdate() [AI inference only]
-        └─► DashboardManager.OnPriceUpdate() [throttled 1Hz]
-
-OnNewBar()
-  └─► EventBus.Dispatch(NewBarEvent)
-        ├─► DataManager.OnNewBar()        [update indicators]
-        ├─► SRManager.OnNewBar()          [recalc S/R levels]
-        ├─► PatternManager.OnNewBar()     [scan patterns]
-        ├─► MarketRegime.OnNewBar()       [full regime update]
-        ├─► SignalManager.OnNewBar()      [generate signal]
-        ├─► AITrainer.OnNewBar()          [deferred backprop]
-        └─► ExecutionManager.OnNewBar()   [trail/BE/partial]
-```
+The expected migration baseline is `0 errors, 0 warnings` for all three.

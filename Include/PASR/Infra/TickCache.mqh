@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//| Infra/Optimizations/TickCache.mqh — High-Performance Tick Filter |
+//| Infra/TickCache.mqh - Tick duplicate filter                      |
 //+------------------------------------------------------------------+
 #property strict
-#ifndef TOOLS_TICK_CACHE_MQH
-#define TOOLS_TICK_CACHE_MQH
+#ifndef INFRA_TICK_CACHE_MQH
+#define INFRA_TICK_CACHE_MQH
 
 class CTickCache
   {
@@ -81,19 +81,6 @@ public:
       out = m_last_tick;
      }
 
-   bool HasPriceChange(double threshold = 1.0) const
-     {
-      if(!m_initialized) return false;
-      double price_change = MathAbs(m_last_tick.bid - m_prev_bid);
-      return (price_change >= threshold * _Point);
-     }
-
-   bool HasVolumeChange() const
-     {
-      if(!m_initialized) return false;
-      return (m_last_tick.volume != m_prev_volume);
-     }
-
    bool IsNewBar(ENUM_TIMEFRAMES timeframe = PERIOD_CURRENT) const
      {
       if(!m_initialized) return false;
@@ -141,4 +128,4 @@ public:
      }
   };
 
-#endif // TOOLS_TICK_CACHE_MQH
+#endif // INFRA_TICK_CACHE_MQH
