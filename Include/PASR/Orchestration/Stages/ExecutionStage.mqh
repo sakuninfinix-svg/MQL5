@@ -96,12 +96,6 @@ public:
          return STAGE_ABORT;
         }
 
-      if(ctx.exec_result.status == EXEC_OK && m_recovery != NULL)
-        {
-         int dir = (plan.direction == SIGNAL_BUY) ? 1 : -1;
-         m_recovery.OnTradeOpen(ctx.exec_result.ticket, dir, plan.entryPrice);
-        }
-
       if(m_debug)
          PrintFormat("[Pipeline] Execution status=%d ticket=%I64u price=%.5f lot=%.2f", (int)ctx.exec_result.status, ctx.exec_result.ticket, plan.entryPrice, plan.lot);
       if(m_profiling) m_timer.Log("Stage10_Execution");

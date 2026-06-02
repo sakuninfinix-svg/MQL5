@@ -21,6 +21,24 @@ Latest implementation slice:
 - `PositionStage` memakai registry snapshot untuk loop exit management, bukan scan raw ad hoc di stage.
 - `DataManager` menghitung daily PnL dari account snapshot lokal dan `CPositionRegistry`.
 - `CorrelationManager` memakai `CPositionRegistry` untuk membaca simbol posisi terbuka.
+- `SessionState`, `StateManager`, dan `JournalManager` memakai `SAccountSnapshot` untuk equity/balance baseline.
+- `PositionManager` helper ticket sekarang membaca detail posisi lewat `CPositionRegistry`, bukan direct ticket-select.
+- `RecoveryManager` menerima cycle account/position context dari `RecoveryStage`, reconcile ticket aktif lewat registry, dan reset state saat tracked position sudah hilang.
+- `RecoveryManager` tidak lagi menjadikan `OrderPlaced` sebagai posisi confirmed; tracking recovery dimulai dari broker `DEAL_ENTRY_IN` event.
+- `CPASRKernel` trade transaction event memakai position ticket untuk broker open/update event dan menyimpan deal id di payload tambahan.
+- `CExecutionLedger` sudah dibuat untuk entry request lifecycle: request id, sent/retrying/rejected/filled/timeout, order ticket, position ticket, deal ticket, retcode, dan reason.
+- `ExecutionManager` sekarang memperbarui ledger saat request dikirim, retry queued, retry limit, broker deal-in confirmed, reject, atau broker confirmation timeout.
+- `CExitConfirmationQueue` sudah dibuat untuk close lifecycle: requested/sent/confirmed/rejected/timeout, request id, position ticket, deal ticket, retcode, exit reason, dan reason text.
+- `PositionStage` tidak mengirim close duplikat saat ticket masih pending; close request ditandai sent/rejected dari retcode, lalu confirmed oleh broker `DEAL_ENTRY_OUT`.
+- Partial-close semantics sudah aktif: satu kali per posisi, trigger di half target, volume dinormalisasi ke min/step broker, dan status final tetap menunggu broker confirmation.
+- Failed/timeout exit request sekarang retryable maksimal dua kali, dengan action lama dipertahankan (`full close` atau `partial close`).
+- `CBusinessLogicHarness` sudah dibuat untuk deterministic lifecycle checks pada `CExecutionLedger` dan `CExitConfirmationQueue`.
+- `PASR_Smoke.mq5` sekarang menjalankan business logic harness selain smoke test utama.
+- `CAIFeatureValidator` sudah dibuat untuk guard feature/model sebelum inference AI.
+- `CAIOrchestrator::Predict()` sekarang menolak feature invalid/stale/out-of-range atau ensemble tidak sehat sebelum drift/model vote.
+- `AIInferStage` menyalurkan health, score, drift, model id, dan veto flag dari validasi/inference terakhir ke `PipelineContext`.
+- Business logic harness juga menguji validator AI untuk feature valid, out-of-range, missing bar time, stale vector, dan missing model.
+- Direct broker state reads sekarang terkonsentrasi di boundary canonical: `AccountSnapshot.mqh` dan `PositionRegistry.mqh`.
 - `SignalAggregator` sekarang punya dominance-gap conflict guard: sinyal BUY/SELL yang sama-sama qualified tapi terlalu dekat menjadi `NO_TRADE`.
 - Compile gate terakhir hijau untuk `PASR_MODULAR`, `PASR_Smoke`, dan `PASR_PipelineHarness_Smoke`.
 
@@ -128,8 +146,8 @@ Acceptance criteria:
 
 Current status:
 
-- Done: registry primitive, context wiring, RiskStage open-trade sync, PositionStage registry-backed exit loop, DataManager daily PnL registry scan, and CorrelationManager registry-backed open-symbol scan.
-- Pending: transaction reconciliation, PositionManager raw ticket helper fallback cleanup, and confirmed close/partial-close ledger.
+- Done: registry primitive, context wiring, RiskStage open-trade sync, PositionStage registry-backed exit loop, RecoveryStage/RecoveryManager registry context, DataManager daily PnL registry scan, CorrelationManager registry-backed open-symbol scan, RiskManager fallback registry scan, and PositionManager ticket helpers via registry lookup.
+- Pending: richer transaction reconciliation across simultaneous requests and deterministic lifecycle harness coverage.
 
 Risk controls:
 
@@ -187,8 +205,8 @@ Acceptance criteria:
 
 Current status:
 
-- Done: account snapshot primitive, PipelineContext wiring, RiskManager cycle-context consumption for risk checks, and DataManager daily PnL snapshot usage.
-- Pending: RecoveryManager, SessionState, StateManager, JournalManager, and fallback account diagnostics still need explicit snapshot integration.
+- Done: account snapshot primitive, PipelineContext wiring, RiskManager cycle-context consumption for risk checks, RecoveryManager cycle-context consumption, DataManager daily PnL snapshot usage, SessionState equity sync, StateManager persisted baseline, and JournalManager drawdown baseline.
+- Pending: richer account snapshot diagnostics and deterministic lifecycle harness coverage.
 
 ---
 
@@ -267,7 +285,7 @@ CAIOrchestrator::Predict()
 
 Proposed files:
 
-- `Include/PASR/AI/AIFeatureValidator.mqh`
+- `Include/PASR/AI/AIFeatureValidator.mqh` - **created**
 - update `AI/AIFeatureBuilder.mqh`
 - update `AI/AIOrchestrator.mqh`
 - update `AI/AITypes.mqh`
@@ -298,6 +316,11 @@ Acceptance criteria:
 - AI feature validation is visible in telemetry/journal.
 - Compile gate hijau.
 
+Current status:
+
+- Done: `CAIFeatureValidator` validates feature flag, bar timestamp, freshness, finite values, bounded feature magnitude, and ensemble readiness; `CAIOrchestrator::Predict()` gates inference before drift/model vote; `AIInferStage` exposes latest AI health/score/drift/model/veto into pipeline context; business logic harness covers deterministic validator failure modes.
+- Pending: richer per-feature range taxonomy, AI validation reason propagation into journal rows, and model/version compatibility metadata.
+
 ---
 
 ## Phase 5 - Execution and Exit Confirmation
@@ -323,8 +346,8 @@ CExecutionLedger
 
 Proposed files:
 
-- `Include/PASR/Trade/ExecutionLedger.mqh`
-- `Include/PASR/Trade/ExitConfirmationQueue.mqh`
+- `Include/PASR/Trade/ExecutionLedger.mqh` - **created**
+- `Include/PASR/Trade/ExitConfirmationQueue.mqh` - **created**
 - update `Trade/ExecutionManager.mqh`
 - update `Trade/ExitEngine.mqh`
 - update `Trade/RecoveryManager.mqh`
@@ -346,6 +369,11 @@ Acceptance criteria:
 - Partial close state updates only after confirmation.
 - Retry policy is bounded and reason-coded.
 - Compile gate hijau.
+
+Current status:
+
+- Done: recovery open tracking waits for broker-confirmed deal-in events; kernel emits position ticket for open/update and deal id as supplemental payload; request-level `OrderPlaced` is ignored by recovery state; `CExecutionLedger` tracks entry request id, sent/retrying/rejected/filled/timeout states, order ticket, position ticket, deal ticket, retcode, retry count, and reason; `CExitConfirmationQueue` tracks close/partial-close request id, sent/confirmed/rejected/timeout states, retcode, exit reason, requested volume, retry count, and broker deal-out confirmation; failed/timeout exits retry up to two times; business logic harness covers deterministic entry and exit state transitions.
+- Pending: richer request-to-fill matching across multiple simultaneous requests and runtime execution of lifecycle harness in terminal strategy tester/script mode.
 
 ---
 
@@ -402,6 +430,7 @@ QA scripts to add or extend:
 - `Scripts/PASR_Smoke.mq5`
 - `Scripts/PASR_PipelineHarness_Smoke.mq5`
 - `Scripts/PASR_BusinessLogicHarness.mq5`
+- `Include/PASR/QA/BusinessLogicHarness.mqh` - **created**
 
 Test scenarios:
 

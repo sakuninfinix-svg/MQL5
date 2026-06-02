@@ -12,6 +12,7 @@
 #include "AITrainer.mqh"
 #include "ConfidenceCalibrator.mqh"
 #include "OnlineLearningGuard.mqh"
+#include "AIFeatureValidator.mqh"
 #include "../Core/IManager.mqh"
 #include "../Core/PipelineTypes.mqh"
 
@@ -23,6 +24,8 @@ private:
    CAITrainer            *m_trainer;
    CConfidenceCalibrator *m_calib;
    COnlineLearningGuard  *m_guard;
+   CAIFeatureValidator    m_validator;
+   AIFeatureValidationResult m_last_validation;
 
    SAIInferenceResult     m_last_result;
    SAIRiskDecision        m_last_decision;
@@ -62,6 +65,8 @@ private:
       m_last_result = out_result;
       m_last_decision.Reset();
       m_last_decision.reason = reason;
+      m_last_validation.Clear();
+      m_last_validation.reason = reason;
      }
 
    void ReleaseIndicator(int &handle)
@@ -297,6 +302,7 @@ public:
       m_last_label.Reset();
       m_perf.Reset();
       m_open_features.Reset();
+      m_last_validation.Clear();
      }
 
    ~CAIOrchestrator() { ReleaseComponents(); }
@@ -439,6 +445,18 @@ public:
          SetUnavailable(out_result, "Feature build failed");
          return false;
         }
+      if(fv.timestamp <= 0)
+         fv.timestamp = TimeCurrent();
+      if(fv.symbol == "")
+         fv.symbol = _Symbol;
+      if(fv.timeframe == PERIOD_CURRENT)
+         fv.timeframe = _Period;
+
+      if(!m_validator.Validate(fv, m_ensemble, m_last_validation))
+        {
+         SetUnavailable(out_result, "AI validation failed: " + m_last_validation.reason);
+         return false;
+        }
 
       double drift = m_guard.ComputeDrift(fv);
       if(m_guard.ShouldVeto(drift))
@@ -563,6 +581,7 @@ public:
    bool IsReady() const { return m_ready; }
    virtual bool IsHealthy() const override { return IsInitialized() && m_ready && m_useAI; }
    SAIInferenceResult GetLastResult() const { return m_last_result; }
+   AIFeatureValidationResult GetLastValidation() const { return m_last_validation; }
    SAIRiskDecision GetLastDecision() const { return m_last_decision; }
    SAITradeLabel GetLastLabel() const { return m_last_label; }
    SAIModelPerf GetPerf() const { return m_perf; }

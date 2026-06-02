@@ -10,6 +10,7 @@
 #include "../Core/EventBus.mqh"
 #include "../Core/Events.mqh"
 #include "../Core/Globals.mqh"
+#include "AccountSnapshot.mqh"
 
 struct SSessionSnapshot
   {
@@ -54,6 +55,13 @@ private:
    static const string GV_LAST_TRADE;
    static const string GV_TODAY_MIDNIGHT;
 
+   double SnapshotEquity(const double fallback = 0.0) const
+     {
+      SAccountSnapshot account;
+      account.Capture();
+      return account.valid ? account.equity : fallback;
+     }
+
 public:
    CSessionState() : IManager(), m_magic(0), m_gv_enabled(true), m_stale_cleaned(false) {}
    ~CSessionState() { Deinit(); }
@@ -68,7 +76,7 @@ public:
       if(!IManager::Init(data, bus)) return false;
       CleanStaleGV();
       m_snap.session_start  = TimeCurrent();
-      m_snap.start_equity   = AccountInfoDouble(ACCOUNT_EQUITY);
+      m_snap.start_equity   = SnapshotEquity();
       m_snap.current_equity = m_snap.start_equity;
       m_snap.peak_equity    = m_snap.start_equity;
       m_snap.today_midnight = MidnightFloor(TimeCurrent());
@@ -99,7 +107,7 @@ public:
 
    void SyncEquity()
      {
-      m_snap.current_equity = AccountInfoDouble(ACCOUNT_EQUITY);
+      m_snap.current_equity = SnapshotEquity(m_snap.current_equity);
       RecalcDrawdown();
      }
 

@@ -5,8 +5,7 @@
 //| CHANGELOG:                                                       |
 //|   v3.01 (2026-05-27) Phase 1 audit fix:                         |
 //|     - Removed stale ../Core/PASR.Types.mqh include.              |
-//|     - Added PositionSelectByTicket() after PositionGetTicket()   |
-//|       before reading position properties.                        |
+//|     - Position property helpers use PositionRegistry snapshots.  |
 //|   v3.00 (2026-05-24) Sprint 3A:                                 |
 //|     BUG-T09: Rewrite API to match IManager::Init(data,bus) /   |
 //|              Deinit() — old Initialize(bus) was not a true      |
@@ -19,9 +18,9 @@
 //|   v2.00 (2026-05-23) Sprint 5:                                  |
 //|     - Added ScanPositions(PipelineContext &ctx)                 |
 //|     - Fills ctx.positions_count and ctx.position_ticket         |
-//|     - Single MT5 PositionsTotal() call per pipeline cycle       |
+//|     - Single registry scan per pipeline cycle                   |
 //|     - Magic number filter: only counts positions with InpMagic  |
-//|     - Replaces ad-hoc PositionGetTicket loop in pipeline        |
+//|     - Replaces ad-hoc position loops in pipeline                |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __TRADE_POSITION_MANAGER_MQH__
@@ -40,9 +39,17 @@ private:
    string            m_symbol;         // Symbol filter
 
    // Cache (filled by ScanPositions, valid for current pipeline cycle)
-   int               m_cached_count;   // PositionsTotal() filtered result
+   int               m_cached_count;   // Filtered registry count
    ulong             m_cached_ticket;  // First matching position ticket
    datetime          m_cache_time;     // Timestamp of last scan
+
+   bool              SnapshotByTicket(const ulong ticket, SPositionSnapshot &out) const
+     {
+      if(ticket == 0) return false;
+      CPositionRegistry registry;
+      registry.Scan(m_symbol, m_magic);
+      return registry.FindByTicket(ticket, out);
+     }
 
 public:
               CPositionManager()
@@ -134,38 +141,38 @@ public:
    //--- Per-position helpers (use after ScanPositions) --------------
    double            GetPositionProfit(ulong ticket) const
      {
-      if(!PositionSelectByTicket(ticket)) return 0.0;
-      return PositionGetDouble(POSITION_PROFIT);
+      SPositionSnapshot pos;
+      return SnapshotByTicket(ticket, pos) ? pos.profit : 0.0;
      }
 
    double            GetPositionSL(ulong ticket) const
      {
-      if(!PositionSelectByTicket(ticket)) return 0.0;
-      return PositionGetDouble(POSITION_SL);
+      SPositionSnapshot pos;
+      return SnapshotByTicket(ticket, pos) ? pos.sl : 0.0;
      }
 
    double            GetPositionTP(ulong ticket) const
      {
-      if(!PositionSelectByTicket(ticket)) return 0.0;
-      return PositionGetDouble(POSITION_TP);
+      SPositionSnapshot pos;
+      return SnapshotByTicket(ticket, pos) ? pos.tp : 0.0;
      }
 
    double            GetPositionOpenPrice(ulong ticket) const
      {
-      if(!PositionSelectByTicket(ticket)) return 0.0;
-      return PositionGetDouble(POSITION_PRICE_OPEN);
+      SPositionSnapshot pos;
+      return SnapshotByTicket(ticket, pos) ? pos.open_price : 0.0;
      }
 
    ENUM_POSITION_TYPE GetPositionType(ulong ticket) const
      {
-      if(!PositionSelectByTicket(ticket)) return WRONG_VALUE;
-      return (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      SPositionSnapshot pos;
+      return SnapshotByTicket(ticket, pos) ? pos.type : (ENUM_POSITION_TYPE)WRONG_VALUE;
      }
 
    datetime          GetPositionOpenTime(ulong ticket) const
      {
-      if(!PositionSelectByTicket(ticket)) return 0;
-      return (datetime)PositionGetInteger(POSITION_TIME);
+      SPositionSnapshot pos;
+      return SnapshotByTicket(ticket, pos) ? pos.open_time : 0;
      }
 
    //--- Batch query helpers ------------------------------------------

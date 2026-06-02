@@ -10,6 +10,9 @@
 #include "../Core/IManager.mqh"
 #include "../Core/PipelineTypes.mqh"
 #include "TradePlan.mqh"
+#include "ExecutionLedger.mqh"
+
+#define PASR_EXEC_LEDGER_TIMEOUT_SEC 120
 
 struct ExecutionSnapshot
   {
@@ -26,6 +29,11 @@ struct ExecutionSnapshot
    string           lastComment;
    string           lastClearReason;
    datetime         lastExecTime;
+   ulong            lastRequestId;
+   ENUM_EXEC_LEDGER_STATE ledgerState;
+   ulong            ledgerPositionTicket;
+   ulong            ledgerDealTicket;
+   string           ledgerReason;
 
    void Clear()
      {
@@ -42,6 +50,11 @@ struct ExecutionSnapshot
       lastComment = "";
       lastClearReason = "";
       lastExecTime = 0;
+      lastRequestId = 0;
+      ledgerState = EXEC_LEDGER_IDLE;
+      ledgerPositionTicket = 0;
+      ledgerDealTicket = 0;
+      ledgerReason = "";
      }
   };
 
@@ -57,6 +70,17 @@ private:
    int       m_pending_retries;
    ulong     m_next_retry_ms;
    ExecutionSnapshot m_snapshot;
+   CExecutionLedger  m_ledger;
+
+   void SyncLedgerSnapshot()
+     {
+      ExecutionLedgerSnapshot ledger = m_ledger.GetSnapshot();
+      m_snapshot.lastRequestId = ledger.requestId;
+      m_snapshot.ledgerState = ledger.state;
+      m_snapshot.ledgerPositionTicket = ledger.positionTicket;
+      m_snapshot.ledgerDealTicket = ledger.dealTicket;
+      m_snapshot.ledgerReason = ledger.reason;
+     }
 
    void RefreshSnapshotFromResult(const TradePlan &plan, const SExecResult &result)
      {
@@ -72,6 +96,7 @@ private:
       m_snapshot.lastDirection = plan.direction;
       m_snapshot.lastComment = result.comment;
       m_snapshot.lastExecTime = TimeCurrent();
+      SyncLedgerSnapshot();
      }
 
    void ClearPendingRetry(const string reason)
@@ -88,6 +113,7 @@ private:
       m_snapshot.pendingRetries = 0;
       m_snapshot.nextRetryMs = 0;
       m_snapshot.lastClearReason = reason;
+      SyncLedgerSnapshot();
       if(m_debugMode) Print("[Exec] Pending retry cleared: ", reason);
      }
 
@@ -142,6 +168,7 @@ private:
          result.status = EXEC_OK;
          result.executed = true;
          result.ticket = m_trade.ResultOrder();
+         m_ledger.MarkSent(result.ticket, result.retcode, result.comment);
          return true;
         }
       return false;
@@ -211,11 +238,15 @@ public:
             ClearPendingRetry("EmergencyStop");
             break;
          case EVENT_ID_TRADE_OPEN:
+            if(ev.comment == "BrokerDealIn")
+               m_ledger.MarkFilled(ev.ticket, (ulong)ev.data2, "BrokerDealIn");
             ClearPendingRetry("TradeOpenEvent");
+            SyncLedgerSnapshot();
             break;
          case EVENT_ID_POSITION_UPDATE:
             if(ev.data1 == 1.0 || ev.ticket > 0)
                ClearPendingRetry("PositionUpdateEvent");
+            SyncLedgerSnapshot();
             break;
          case EVENT_ID_TRADE_CLOSE:
             if(m_debugMode) PrintFormat("[Exec] Trade close observed ticket=%I64u", ev.ticket);
@@ -228,6 +259,7 @@ public:
    SExecResult Execute(const TradePlan &plan)
      {
       SExecResult result;
+      m_ledger.StartRequest(plan);
       if(!IsInitialized())
         {
          result.status = EXEC_FAIL;
@@ -250,7 +282,12 @@ public:
          m_pending_retries = 0;
          m_next_retry_ms = GetTickCount64() + (ulong)m_retryDelayMs;
          result.status = EXEC_RETRYING;
+         m_ledger.MarkRetrying(result.retcode, m_pending_retries, result.comment);
          Print("[Exec] Queued for retry: ", result.retcode, " ", result.comment);
+        }
+      else if(result.status != EXEC_OK)
+        {
+         m_ledger.MarkRejected(result.retcode, result.comment);
         }
       RefreshSnapshotFromResult(plan, result);
       return result;
@@ -258,6 +295,11 @@ public:
 
    void ProcessRetryQueue()
      {
+      if(m_ledger.IsStale(PASR_EXEC_LEDGER_TIMEOUT_SEC))
+        {
+         m_ledger.MarkTimeout("BrokerConfirmationTimeout");
+         SyncLedgerSnapshot();
+        }
       if(!m_has_pending) return;
       ulong nowMs = GetTickCount64();
       if(nowMs < m_next_retry_ms) return;
@@ -275,16 +317,19 @@ public:
       m_pending_retries++;
       if(m_pending_retries >= m_maxRetries)
         {
+         m_ledger.MarkRejected(result.retcode, "RetryLimit:" + result.comment);
          RefreshSnapshotFromResult(m_pending_plan, result);
          PrintFormat("[Exec] Retry failed permanently after %d attempts", m_pending_retries);
          ClearPendingRetry("RetryLimit");
          return;
         }
       m_next_retry_ms = GetTickCount64() + (ulong)m_retryDelayMs;
+      m_ledger.MarkRetrying(result.retcode, m_pending_retries, result.comment);
       RefreshSnapshotFromResult(m_pending_plan, result);
      }
 
    ExecutionSnapshot GetSnapshot() const { return m_snapshot; }
+   ExecutionLedgerSnapshot GetLedgerSnapshot() const { return m_ledger.GetSnapshot(); }
    bool HasPendingRetry() const { return m_has_pending; }
 
    void PrintDiagnostics() const

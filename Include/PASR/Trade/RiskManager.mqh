@@ -104,9 +104,29 @@ private:
    bool    m_hasCyclePositions;
    RiskPnLRecord m_accountedPnL[];
 
-   double AccountBalance()    const { return (m_hasCycleAccount && m_cycleAccount.valid) ? m_cycleAccount.balance : ::AccountInfoDouble(ACCOUNT_BALANCE); }
-   double AccountEquity()     const { return (m_hasCycleAccount && m_cycleAccount.valid) ? m_cycleAccount.equity : ::AccountInfoDouble(ACCOUNT_EQUITY); }
-   double AccountFreeMargin() const { return (m_hasCycleAccount && m_cycleAccount.valid) ? m_cycleAccount.free_margin : ::AccountInfoDouble(ACCOUNT_MARGIN_FREE); }
+   double AccountBalance() const
+     {
+      if(m_hasCycleAccount && m_cycleAccount.valid) return m_cycleAccount.balance;
+      SAccountSnapshot account;
+      account.Capture();
+      return account.valid ? account.balance : 0.0;
+     }
+
+   double AccountEquity() const
+     {
+      if(m_hasCycleAccount && m_cycleAccount.valid) return m_cycleAccount.equity;
+      SAccountSnapshot account;
+      account.Capture(m_peakEquity);
+      return account.valid ? account.equity : 0.0;
+     }
+
+   double AccountFreeMargin() const
+     {
+      if(m_hasCycleAccount && m_cycleAccount.valid) return m_cycleAccount.free_margin;
+      SAccountSnapshot account;
+      account.Capture();
+      return account.valid ? account.free_margin : 0.0;
+     }
    datetime ServerDateMidnight() const { return StringToTime(TimeToString(TimeCurrent(), TIME_DATE)); }
 
    double DailyLossPercent(double dailyPnl) const
@@ -121,17 +141,9 @@ private:
       if(m_hasCyclePositions)
          return m_cycleFloatingPnL;
 
-      double pnl = 0.0;
-      for(int i = PositionsTotal() - 1; i >= 0; i--)
-        {
-         ulong ticket = PositionGetTicket(i);
-         if(ticket == 0) continue;
-         if(!PositionSelectByTicket(ticket)) continue;
-         if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-         if(m_cfg.MagicNumber != 0 && PositionGetInteger(POSITION_MAGIC) != m_cfg.MagicNumber) continue;
-         pnl += PositionGetDouble(POSITION_PROFIT);
-        }
-      return pnl;
+      CPositionRegistry positions;
+      positions.Scan(_Symbol, (long)m_cfg.MagicNumber);
+      return positions.FloatingPnL();
      }
 
    double DailyPnlIncludingFloating() const
@@ -444,17 +456,9 @@ public:
 
    void SyncOpenTradesFromBroker()
      {
-      int cnt = 0;
-      for(int i = PositionsTotal() - 1; i >= 0; i--)
-        {
-         ulong ticket = PositionGetTicket(i);
-         if(ticket == 0) continue;
-         if(!PositionSelectByTicket(ticket)) continue;
-         if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-         if(m_cfg.MagicNumber != 0 && PositionGetInteger(POSITION_MAGIC) != m_cfg.MagicNumber) continue;
-         cnt++;
-        }
-      m_openTrades = cnt;
+      CPositionRegistry positions;
+      positions.Scan(_Symbol, (long)m_cfg.MagicNumber);
+      m_openTrades = positions.Count();
      }
 
    void SyncOpenTradesFromSnapshot(const int openTrades)

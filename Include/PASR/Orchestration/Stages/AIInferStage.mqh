@@ -38,7 +38,14 @@ public:
          return STAGE_SKIP;
       if(m_ai_orch == NULL)
          return STAGE_SKIP;
-      ctx.ai_result.model_healthy = m_ai_orch.IsHealthy();
+      SAIInferenceResult last = m_ai_orch.GetLastResult();
+      AIFeatureValidationResult validation = m_ai_orch.GetLastValidation();
+      ctx.ai_result.model_healthy = (m_ai_orch.IsHealthy() && validation.modelHealthy);
+      ctx.ai_result.score = last.score;
+      ctx.ai_result.drift_index = last.drift_score;
+      ctx.ai_result.model_name = last.model_id;
+      if(!validation.valid && validation.reason != "")
+         ctx.ai_veto = true;
       return STAGE_OK;
      }
   };

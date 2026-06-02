@@ -7,6 +7,7 @@
 
 #include "../Core/IManager.mqh"
 #include "PositionManager.mqh"
+#include "ExitConfirmationQueue.mqh"
 
 #define CHANDELIER_ATR_MULT          3.0
 #define CHANDELIER_PERIOD            22
@@ -15,6 +16,7 @@
 #define PROFIT_FADE_SHORT_THRESHOLD  35.0
 #define STRUCTURE_BREAK_LOOKBACK     5
 #define STRUCTURE_BREAK_ATR_FACTOR   0.30
+#define EXIT_CONFIRM_TIMEOUT_SEC     120
 
 enum ExitReason
   {
@@ -57,6 +59,7 @@ struct ExitSnapshot
    datetime   lastCheckTime;
    string     lastSymbol;
    int        lastPositionType;
+   ExitConfirmationSnapshot confirmation;
 
    void Clear()
      {
@@ -70,6 +73,7 @@ struct ExitSnapshot
       lastCheckTime = 0;
       lastSymbol = "";
       lastPositionType = -1;
+      confirmation.Clear();
      }
   };
 
@@ -84,6 +88,7 @@ private:
    int   m_hRSI;
    bool  m_indicatorsReady;
    ExitSnapshot m_snapshot;
+   CExitConfirmationQueue m_confirmations;
 
    void RefreshSnapshotBase(const string symbol = "", ENUM_ORDER_TYPE position_type = ORDER_TYPE_BUY)
      {
@@ -96,6 +101,7 @@ private:
       if(symbol != "") m_snapshot.lastSymbol = symbol;
       m_snapshot.lastPositionType = (int)position_type;
       m_snapshot.lastCheckTime = TimeCurrent();
+      m_snapshot.confirmation = m_confirmations.GetSnapshot();
      }
 
    void RefreshSnapshot(const string symbol, ENUM_ORDER_TYPE position_type, ExitSignal &signal)
@@ -177,16 +183,80 @@ public:
       AddEvent(EVENT_ID_PRICE_UPDATE);
       AddEvent(EVENT_ID_NEW_BAR);
       AddEvent(EVENT_ID_EMERGENCY_STOP);
+      AddEvent(EVENT_ID_TRADE_CLOSE);
      }
 
    virtual void OnEvent(const PASREvent &ev) override
      {
       if(ev.id == EVENT_ID_EMERGENCY_STOP && m_debugMode)
          Print("[Exit] EMERGENCY_STOP received — RecoveryManager owns emergency closing.");
+      if(ev.id == EVENT_ID_TRADE_CLOSE)
+        {
+         ulong positionTicket = (ev.data2 > 0.0) ? (ulong)ev.data2 : ev.ticket;
+         m_confirmations.MarkConfirmed(positionTicket, ev.ticket, ev.comment);
+         RefreshSnapshotBase();
+        }
      }
 
-   virtual void OnPriceUpdate() override {}
-   virtual void OnNewBar() override {}
+   virtual void OnPriceUpdate() override
+     {
+      m_confirmations.MarkTimeouts(EXIT_CONFIRM_TIMEOUT_SEC);
+      RefreshSnapshotBase();
+     }
+
+   virtual void OnNewBar() override
+     {
+      m_confirmations.MarkTimeouts(EXIT_CONFIRM_TIMEOUT_SEC);
+      RefreshSnapshotBase();
+     }
+
+   bool HasPendingClose(const ulong positionTicket) const
+     {
+      return m_confirmations.HasPendingClose(positionTicket);
+     }
+
+   bool HasConfirmedPartial(const ulong positionTicket) const
+     {
+      return m_confirmations.HasConfirmedAction(positionTicket, EXIT_ACTION_PARTIAL);
+     }
+
+   bool HasRetryableExit(const ulong positionTicket) const
+     {
+      return m_confirmations.HasRetryableExit(positionTicket);
+     }
+
+   bool PrepareExitRetry(const ulong positionTicket, ENUM_EXIT_REQUEST_ACTION &action, double &volume, int &exitReason, string &reason)
+     {
+      bool ok = m_confirmations.PrepareRetry(positionTicket, action, volume, exitReason, reason);
+      RefreshSnapshotBase();
+      return ok;
+     }
+
+   ulong RequestClose(const ulong positionTicket, const ExitReason reason, const string description)
+     {
+      ulong requestId = m_confirmations.RequestClose(positionTicket, (int)reason, description);
+      RefreshSnapshotBase();
+      return requestId;
+     }
+
+   ulong RequestPartialClose(const ulong positionTicket, const ExitReason reason, const double volume, const string description)
+     {
+      ulong requestId = m_confirmations.RequestPartial(positionTicket, (int)reason, volume, description);
+      RefreshSnapshotBase();
+      return requestId;
+     }
+
+   void MarkCloseSent(const ulong positionTicket, const int retcode, const string reason)
+     {
+      m_confirmations.MarkSent(positionTicket, retcode, reason);
+      RefreshSnapshotBase();
+     }
+
+   void MarkCloseRejected(const ulong positionTicket, const int retcode, const string reason)
+     {
+      m_confirmations.MarkRejected(positionTicket, retcode, reason);
+      RefreshSnapshotBase();
+     }
 
    ExitSignal CheckExit(const string symbol, ENUM_ORDER_TYPE position_type,
                         double entry_price, double current_price,
@@ -341,6 +411,18 @@ public:
                   m_snapshot.lastSignal.current_profit,
                   m_snapshot.lastSignal.bars_held,
                   m_snapshot.lastSignal.description);
+      PrintFormat("[ExitDiag] closeQueue pending=%d confirmed=%d rejected=%d timeout=%d lastReq=%I64u lastTicket=%I64u state=%d action=%d vol=%.2f retry=%d reason=%s",
+                  m_snapshot.confirmation.pendingCount,
+                  m_snapshot.confirmation.confirmedCount,
+                  m_snapshot.confirmation.rejectedCount,
+                  m_snapshot.confirmation.timeoutCount,
+                  m_snapshot.confirmation.lastRequestId,
+                  m_snapshot.confirmation.lastPositionTicket,
+                  m_snapshot.confirmation.lastState,
+                  m_snapshot.confirmation.lastAction,
+                  m_snapshot.confirmation.lastRequestedVolume,
+                  m_snapshot.confirmation.lastRetryCount,
+                  m_snapshot.confirmation.lastReason);
      }
   };
 

@@ -191,7 +191,9 @@ private:
 
    void UpdateDrawdown(double pnl)
      {
-      double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+      SAccountSnapshot account;
+      account.Capture(m_peakEquity);
+      double balance = account.valid ? account.balance : m_peakEquity;
       if(balance > m_peakEquity) m_peakEquity = balance;
       double dd = m_peakEquity - balance;
       if(dd > m_maxDrawdown) m_maxDrawdown = dd;
@@ -216,7 +218,9 @@ public:
         m_csvPrefix("PASR_Journal"), m_csvEnabled(true)
      {
       ArrayInitialize(m_dailyPnL, 0.0);
-      m_peakEquity = AccountInfoDouble(ACCOUNT_BALANCE);
+      SAccountSnapshot account;
+      account.Capture();
+      m_peakEquity = account.valid ? account.balance : 0.0;
       m_todayDate = MidnightFloor(TimeCurrent());
      }
 

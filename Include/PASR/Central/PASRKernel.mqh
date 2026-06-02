@@ -233,6 +233,9 @@ private:
          return;
 
       ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+      ENUM_DEAL_TYPE dealType = (ENUM_DEAL_TYPE)HistoryDealGetInteger(trans.deal, DEAL_TYPE);
+      double direction = (dealType == DEAL_TYPE_SELL) ? -1.0 : 1.0;
+      ulong positionTicket = (trans.position > 0) ? trans.position : trans.deal;
       double profit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT) +
                       HistoryDealGetDouble(trans.deal, DEAL_SWAP) +
                       HistoryDealGetDouble(trans.deal, DEAL_COMMISSION);
@@ -246,7 +249,9 @@ private:
       if(entry == DEAL_ENTRY_IN)
         {
          ev.id = EVENT_ID_TRADE_OPEN;
-         ev.data1 = 1.0;
+         ev.ticket = positionTicket;
+         ev.data1 = direction;
+         ev.data2 = (double)trans.deal;
          ev.comment = "BrokerDealIn";
          m_event_bus.DispatchImmediate(ev);
         }
@@ -254,6 +259,7 @@ private:
         {
          ev.id = EVENT_ID_TRADE_CLOSE;
          ev.data1 = -1.0;
+         ev.data2 = (double)positionTicket;
          ev.comment = "BrokerDealOut";
          m_event_bus.DispatchImmediate(ev);
         }
@@ -262,7 +268,7 @@ private:
       update.id = EVENT_ID_POSITION_UPDATE;
       update.priority = 10;
       update.timestamp = TimeCurrent();
-      update.ticket = (trans.position > 0) ? trans.position : trans.deal;
+      update.ticket = positionTicket;
       update.profit = 0.0;
       update.data1 = (entry == DEAL_ENTRY_IN) ? 1.0 : -1.0;
       update.comment = "BrokerDealUpdate";

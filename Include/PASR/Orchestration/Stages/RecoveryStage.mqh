@@ -59,6 +59,7 @@ public:
         }
 
       m_timer.Start();
+      m_recovery.SetCycleContext(ctx.account, ctx.positions);
       m_recovery.OnPriceUpdate();
       if(ctx.new_bar) m_recovery.OnNewBar();
       if(m_profiling) m_timer.Log("Stage12_Recovery");

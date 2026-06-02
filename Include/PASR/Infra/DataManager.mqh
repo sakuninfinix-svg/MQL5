@@ -71,7 +71,7 @@ public:
       m_cfg = m_config;
       m_cfgDirty = false;
       RefreshAccountState();
-      m_startBalance = m_account.valid ? m_account.balance : AccountInfoDouble(ACCOUNT_BALANCE);
+      m_startBalance = m_account.valid ? m_account.balance : 0.0;
       m_todayStr = TimeToString(TimeCurrent(), TIME_DATE);
       RefreshDailyProfit();
       m_atrPeriod = MathMax(1, m_config.Market.ATRPeriod);
@@ -102,7 +102,7 @@ public:
       if(barDate != m_todayStr)
         {
          RefreshAccountState();
-         m_startBalance = m_account.valid ? m_account.balance : AccountInfoDouble(ACCOUNT_BALANCE);
+         m_startBalance = m_account.valid ? m_account.balance : m_startBalance;
          m_dailyProfit  = 0.0;
          m_todayStr     = barDate;
          if(m_debugMode)
@@ -146,7 +146,7 @@ public:
    void RefreshDailyProfit()
      {
       RefreshAccountState();
-      double balance = m_account.valid ? m_account.balance : AccountInfoDouble(ACCOUNT_BALANCE);
+      double balance = m_account.valid ? m_account.balance : m_startBalance;
       m_dailyProfit = (balance - m_startBalance) + FloatingPnL();
      }
 
@@ -160,7 +160,8 @@ public:
 
    void ScavengeOldGVs()
      {
-      string prefix = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_PASR_";
+      RefreshAccountState();
+      string prefix = IntegerToString((int)m_account.login) + "_PASR_";
       int count = GlobalVariablesTotal();
       for(int i = count-1; i >= 0; i--)
         {
