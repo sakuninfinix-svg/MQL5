@@ -128,6 +128,7 @@ private:
    CExecutionManager         *m_exec;
    CExitEngine               *m_exit;
    CRecoveryManager          *m_recovery;
+   CPositionManager          *m_position_manager;
    CDashboardManager         *m_dash;
    CJournalManager           *m_journal;
    CEventBus                 *m_bus;
@@ -191,7 +192,7 @@ private:
         }
 
       string riskStatus = "NA";
-      int openTrades = PositionsTotal();
+      int openTrades = ctx.positions.Count();
       double dd = 0.0;
       if(m_risk != NULL)
         {
@@ -392,7 +393,7 @@ public:
    CPipelineEngine()
       : m_data(NULL), m_sr(NULL), m_zone(NULL), m_pattern(NULL), m_signal(NULL),
         m_ai_orch(NULL), m_regime(NULL), m_risk(NULL), m_exec(NULL), m_exit(NULL),
-        m_recovery(NULL), m_dash(NULL), m_journal(NULL), m_bus(NULL),
+        m_recovery(NULL), m_position_manager(NULL), m_dash(NULL), m_journal(NULL), m_bus(NULL),
         m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL), m_regime_det(NULL),
         m_debug_mode(false), m_profiling_enabled(true), m_last_observability(""),
         m_observability_ticks(0)
@@ -444,6 +445,7 @@ public:
       m_exit=deps.exit_engine; m_recovery=deps.recovery; m_dash=deps.dash; m_journal=deps.journal; m_bus=deps.bus;
       m_sanity=deps.sanity; m_telemetry=deps.telemetry; m_adaptive=deps.adaptive;
       m_regime_det=deps.regime_det;
+      m_position_manager = NULL;
       m_data_stage.Bind(m_data);
       m_analysis_sr_stage.Bind(m_sr, m_bus);
       m_analysis_zone_stage.Bind(m_zone);
@@ -454,7 +456,7 @@ public:
       m_risk_stage.Bind(m_risk);
       m_adaptive_stage.Bind(m_adaptive);
       m_execution_stage.Bind(m_exec, m_recovery);
-      m_position_stage.Bind(m_exit, m_data);
+      m_position_stage.Bind(m_exit, m_data, m_position_manager);
       m_recovery_stage.Bind(m_recovery);
       m_dashboard_stage.Bind(m_dash);
       m_journal_stage.Bind(m_journal);

@@ -57,6 +57,11 @@ public:
         }
       if(ctx.signal.direction == SIGNAL_NONE) return STAGE_SKIP;
       m_timer.Start();
+      if(ctx.positions.CapturedAt() == 0)
+         ctx.positions.Scan(_Symbol, m_risk.MagicNumber());
+      if(!ctx.account.valid)
+         ctx.account.Capture();
+      m_risk.SetCycleContext(ctx.account, ctx.positions);
       ctx.risk_result = m_risk.CheckRisk(ctx.signal);
       if(!ctx.risk_result.allowed)
         {

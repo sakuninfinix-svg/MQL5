@@ -33,6 +33,7 @@
 
 // Layer 2: Infra managers and data providers
 #include <PASR/Infra/AdaptiveConfig.mqh>
+#include <PASR/Infra/AccountSnapshot.mqh>
 #include <PASR/Infra/DataManager.mqh>
 #include <PASR/Infra/HealthMonitor.mqh>
 #include <PASR/Infra/SessionState.mqh>
@@ -88,6 +89,7 @@
 #include <PASR/Signal/SignalManager.mqh>
 
 // Layer 7: Trade managers
+#include <PASR/Trade/PositionRegistry.mqh>
 #include <PASR/Trade/PositionManager.mqh>
 #include <PASR/Trade/ExitEngine.mqh>
 #include <PASR/Trade/RiskManager.mqh>

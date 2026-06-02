@@ -7,6 +7,8 @@
 
 #include "../Core/IManager.mqh"
 #include "../Core/Globals.mqh"
+#include "../Infra/AccountSnapshot.mqh"
+#include "../Trade/PositionRegistry.mqh"
 
 #define PASR_DATA_SCAVENGE_INTERVAL_SEC    300
 #define PASR_DATA_DASHBOARD_THROTTLE_SEC   1
@@ -32,26 +34,26 @@ private:
    int       m_tickEventCount;
 
    string    m_todayStr;
+   SAccountSnapshot m_account;
+   CPositionRegistry m_positions;
 
    double FloatingPnL() const
      {
-      double floating = 0.0;
-      int total = PositionsTotal();
-      for(int i = total - 1; i >= 0; i--)
-        {
-         ulong ticket = PositionGetTicket(i);
-         if(ticket == 0) continue;
-         if(!PositionSelectByTicket(ticket)) continue;
-         floating += PositionGetDouble(POSITION_PROFIT);
-        }
-      return floating;
+      return m_positions.FloatingPnL();
+     }
+
+   void RefreshAccountState()
+     {
+      double peak = (m_account.valid && m_account.equity > 0.0) ? MathMax(m_account.equity, m_startBalance) : m_startBalance;
+      m_account.Capture(peak);
+      m_positions.Scan("", 0);
      }
 
 public:
    CDataManager()
      : IManager(),
        m_atrPoints(0.0), m_dailyProfit(0.0),
-       m_startBalance(AccountInfoDouble(ACCOUNT_BALANCE)),
+       m_startBalance(0.0),
        m_consecutiveLosses(0),
        m_lastScavengeTime(0), m_lastDashboardUpdate(0),
        m_atrHandle(INVALID_HANDLE), m_atrPeriod(14), m_lastATRUpdate(0),
@@ -68,7 +70,8 @@ public:
       if(!IManager::Init(GetPointer(this), bus)) return false;
       m_cfg = m_config;
       m_cfgDirty = false;
-      m_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+      RefreshAccountState();
+      m_startBalance = m_account.valid ? m_account.balance : AccountInfoDouble(ACCOUNT_BALANCE);
       m_todayStr = TimeToString(TimeCurrent(), TIME_DATE);
       RefreshDailyProfit();
       m_atrPeriod = MathMax(1, m_config.Market.ATRPeriod);
@@ -98,7 +101,8 @@ public:
       string barDate = TimeToString(bar.time, TIME_DATE);
       if(barDate != m_todayStr)
         {
-         m_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+         RefreshAccountState();
+         m_startBalance = m_account.valid ? m_account.balance : AccountInfoDouble(ACCOUNT_BALANCE);
          m_dailyProfit  = 0.0;
          m_todayStr     = barDate;
          if(m_debugMode)
@@ -141,7 +145,9 @@ public:
 
    void RefreshDailyProfit()
      {
-      m_dailyProfit = (AccountInfoDouble(ACCOUNT_BALANCE) - m_startBalance) + FloatingPnL();
+      RefreshAccountState();
+      double balance = m_account.valid ? m_account.balance : AccountInfoDouble(ACCOUNT_BALANCE);
+      m_dailyProfit = (balance - m_startBalance) + FloatingPnL();
      }
 
    bool ShouldUpdateDashboard()

@@ -54,6 +54,8 @@ struct SignalAggregatorSnapshot
    double  totalVoterWeight;
    double  bullScore;
    double  bearScore;
+   double  conflictScore;
+   double  dominanceGap;
    double  multiplierFactor;
    int     bullConfluence;
    int     bearConfluence;
@@ -74,6 +76,8 @@ struct SignalAggregatorSnapshot
       totalVoterWeight = 0.0;
       bullScore = 0.0;
       bearScore = 0.0;
+      conflictScore = 0.0;
+      dominanceGap = 0.0;
       multiplierFactor = 1.0;
       bullConfluence = 0;
       bearConfluence = 0;
@@ -187,6 +191,8 @@ private:
       m_snapshot.totalVoterWeight = m_totalVoterWeight;
       m_snapshot.bullScore = m_bullScore;
       m_snapshot.bearScore = m_bearScore;
+      m_snapshot.conflictScore = MathMin(m_bullScore, m_bearScore);
+      m_snapshot.dominanceGap = MathAbs(m_bullScore - m_bearScore);
       m_snapshot.multiplierFactor = m_multiplierFactor;
       m_snapshot.bullConfluence = m_bullConfluence;
       m_snapshot.bearConfluence = m_bearConfluence;
@@ -365,8 +371,22 @@ public:
       double normBear = (m_bearScore / m_totalVoterWeight) * m_multiplierFactor;
       int    minConfluence = (m_config != NULL) ? m_config.GetMinConfluence() : 2;
       double minScore      = (m_config != NULL) ? m_config.GetMinScore()      : 0.45;
+      double minGap        = (m_config != NULL) ? m_config.GetMinDominanceGap() : 0.12;
+      double conflictScore = MathMin(normBull, normBear);
+      double dominanceGap  = MathAbs(normBull - normBear);
 
-      if(normBull > normBear && m_bullConfluence >= minConfluence && normBull >= minScore)
+      bool bullQualified = (m_bullConfluence >= minConfluence && normBull >= minScore);
+      bool bearQualified = (m_bearConfluence >= minConfluence && normBear >= minScore);
+
+      if(bullQualified && bearQualified && dominanceGap < minGap)
+        {
+         m_lastDecisionReason = StringFormat("Conflict no-trade bull=%.3f bear=%.3f gap=%.3f minGap=%.3f",
+                                             normBull, normBear, dominanceGap, minGap);
+         RefreshSnapshot();
+         return agg;
+        }
+
+      if(normBull > normBear && bullQualified)
         {
          agg.direction           = SIGNAL_BUY;
          agg.rawScore            = m_bullScore;
@@ -377,7 +397,7 @@ public:
          agg.urgency             = m_scorer.GetUrgencyLevel(normBull);
          m_lastDecisionReason    = "BUY accepted";
         }
-      else if(normBear > normBull && m_bearConfluence >= minConfluence && normBear >= minScore)
+      else if(normBear > normBull && bearQualified)
         {
          agg.direction           = SIGNAL_SELL;
          agg.rawScore            = m_bearScore;
@@ -390,8 +410,9 @@ public:
         }
       else
         {
-         m_lastDecisionReason = StringFormat("No consensus bull=%.3f/%d bear=%.3f/%d minScore=%.3f minConf=%d",
-                                             normBull, m_bullConfluence, normBear, m_bearConfluence, minScore, minConfluence);
+         m_lastDecisionReason = StringFormat("No consensus bull=%.3f/%d bear=%.3f/%d conflict=%.3f gap=%.3f minScore=%.3f minConf=%d",
+                                             normBull, m_bullConfluence, normBear, m_bearConfluence,
+                                             conflictScore, dominanceGap, minScore, minConfluence);
         }
 
       ApplyContraVeto(agg);

@@ -9,6 +9,8 @@
 #include "Events.mqh"
 #include "../Data/RegimeTypes.mqh"
 #include "../Signal/ISignalSource.mqh"
+#include "../Infra/AccountSnapshot.mqh"
+#include "../Trade/PositionRegistry.mqh"
 
 #define STAGE_TIMEOUT_US   50000
 #define STAGE_COUNT        15
@@ -209,6 +211,8 @@ struct PipelineContext
    datetime          bar_time;
    bool              new_bar;
    bool              market_open;
+   SAccountSnapshot  account;
+   CPositionRegistry positions;
 
    EMarketRegime          regime;
    double                 regime_confidence;
@@ -268,6 +272,8 @@ struct PipelineContext
       bar_time = 0;
       new_bar = false;
       market_open = false;
+      account.Clear();
+      positions.Clear();
       regime = REGIME_UNKNOWN;
       regime_confidence = 0;
       session = SESSION_UNKNOWN;

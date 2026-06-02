@@ -40,6 +40,7 @@ private:
       ctx.bar_time = iTime(_Symbol, _Period, 0);
       ctx.market_open = (ctx.bid > 0.0 && ctx.ask > 0.0);
       ctx.session = PASRDetectSession();
+      ctx.account.Capture();
      }
 
 public:

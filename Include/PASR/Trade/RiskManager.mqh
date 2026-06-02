@@ -98,11 +98,15 @@ private:
    double  m_peakEquity;
    datetime m_lastResetDay;
    bool    m_circuitBroken;
+   SAccountSnapshot m_cycleAccount;
+   bool    m_hasCycleAccount;
+   double  m_cycleFloatingPnL;
+   bool    m_hasCyclePositions;
    RiskPnLRecord m_accountedPnL[];
 
-   double AccountBalance()    const { return ::AccountInfoDouble(ACCOUNT_BALANCE);     }
-   double AccountEquity()     const { return ::AccountInfoDouble(ACCOUNT_EQUITY);      }
-   double AccountFreeMargin() const { return ::AccountInfoDouble(ACCOUNT_MARGIN_FREE); }
+   double AccountBalance()    const { return (m_hasCycleAccount && m_cycleAccount.valid) ? m_cycleAccount.balance : ::AccountInfoDouble(ACCOUNT_BALANCE); }
+   double AccountEquity()     const { return (m_hasCycleAccount && m_cycleAccount.valid) ? m_cycleAccount.equity : ::AccountInfoDouble(ACCOUNT_EQUITY); }
+   double AccountFreeMargin() const { return (m_hasCycleAccount && m_cycleAccount.valid) ? m_cycleAccount.free_margin : ::AccountInfoDouble(ACCOUNT_MARGIN_FREE); }
    datetime ServerDateMidnight() const { return StringToTime(TimeToString(TimeCurrent(), TIME_DATE)); }
 
    double DailyLossPercent(double dailyPnl) const
@@ -114,6 +118,9 @@ private:
 
    double FloatingPnL() const
      {
+      if(m_hasCyclePositions)
+         return m_cycleFloatingPnL;
+
       double pnl = 0.0;
       for(int i = PositionsTotal() - 1; i >= 0; i--)
         {
@@ -283,8 +290,12 @@ public:
       m_sessionStartHour(0), m_sessionEndHour(23),
       m_minLot(0.01), m_maxLot(10.0), m_lotStep(0.01),
       m_openTrades(0), m_consecLoss(0), m_dailyLoss(0),
-      m_peakEquity(0), m_lastResetDay(0), m_circuitBroken(false)
-     { ArrayResize(m_accountedPnL, 0); }
+      m_peakEquity(0), m_lastResetDay(0), m_circuitBroken(false),
+      m_hasCycleAccount(false), m_cycleFloatingPnL(0.0), m_hasCyclePositions(false)
+     {
+      m_cycleAccount.Clear();
+      ArrayResize(m_accountedPnL, 0);
+     }
 
    virtual void DeclareEvents() override
      {
@@ -446,7 +457,40 @@ public:
       m_openTrades = cnt;
      }
 
+   void SyncOpenTradesFromSnapshot(const int openTrades)
+     {
+      if(openTrades >= 0)
+         m_openTrades = openTrades;
+     }
+
+   void SetCycleSnapshot(const SAccountSnapshot &account, const int openTrades)
+     {
+      m_cycleAccount = account;
+      m_hasCycleAccount = account.valid;
+      m_hasCyclePositions = false;
+      m_cycleFloatingPnL = 0.0;
+      SyncOpenTradesFromSnapshot(openTrades);
+      if(m_hasCycleAccount && m_cycleAccount.equity > m_peakEquity)
+         m_peakEquity = m_cycleAccount.equity;
+     }
+
+   void SetCycleContext(const SAccountSnapshot &account, const CPositionRegistry &positions)
+     {
+      SetCycleSnapshot(account, positions.Count());
+      m_cycleFloatingPnL = positions.FloatingPnL();
+      m_hasCyclePositions = (positions.CapturedAt() > 0);
+     }
+
+   void ClearCycleSnapshot()
+     {
+      m_hasCycleAccount = false;
+      m_hasCyclePositions = false;
+      m_cycleFloatingPnL = 0.0;
+      m_cycleAccount.Clear();
+     }
+
    bool IsTradingAllowed() const { return !m_circuitBroken; }
+   long MagicNumber() const { return (long)m_cfg.MagicNumber; }
    int  GetOpenTrades() const { return m_openTrades; }
    double GetDrawdownPct() const
      {

@@ -113,20 +113,9 @@ public:
    //    zero additional MT5 API calls.
    void              ScanPositions(PipelineContext &ctx)
      {
-      int    count  = 0;
-      ulong  ticket = 0;
-      int    total  = PositionsTotal();
-
-      for(int i = 0; i < total; i++)
-        {
-         ulong t = PositionGetTicket(i);
-         if(t == 0) continue;
-         if(!PositionSelectByTicket(t)) continue;
-         if(m_symbol != "" && PositionGetString(POSITION_SYMBOL) != m_symbol) continue;
-         if(m_magic  != 0  && PositionGetInteger(POSITION_MAGIC) != m_magic)  continue;
-         count++;
-         if(ticket == 0) ticket = t; // Store first match
-        }
+      ctx.positions.Scan(m_symbol, m_magic);
+      int count = ctx.positions.Count();
+      ulong ticket = ctx.positions.FirstTicket();
 
       ctx.positions_count  = count;
       ctx.position_ticket  = ticket;
@@ -182,17 +171,9 @@ public:
    //--- Batch query helpers ------------------------------------------
    double            TotalFloatingPnL() const
      {
-      double pnl = 0.0;
-      int total  = PositionsTotal();
-      for(int i = 0; i < total; i++)
-        {
-         ulong t = PositionGetTicket(i);
-         if(t == 0) continue;
-         if(!PositionSelectByTicket(t)) continue;
-         if(m_magic != 0 && PositionGetInteger(POSITION_MAGIC) != m_magic) continue;
-         pnl += PositionGetDouble(POSITION_PROFIT);
-        }
-      return pnl;
+      CPositionRegistry registry;
+      registry.Scan(m_symbol, m_magic);
+      return registry.FloatingPnL();
      }
   };
 

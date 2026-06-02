@@ -196,12 +196,13 @@ public:
          if(!m_data.PlayNextBar()) break;
 
          PipelineContext ctx;
-         ZeroMemory(ctx);
+         ctx.Reset();
          ctx.new_bar   = true;
          ctx.bar_time  = m_data.m_current_bar.time;
          ctx.bid       = m_data.m_current_bar.close - _Point;
          ctx.ask       = m_data.m_current_bar.close + _Point;
          ctx.atr       = 0.00080; // synthetic ATR
+         ctx.atr_points = 80.0;
 
          ulong t_start = GetMicrosecondCount();
          bool all_ok   = true;

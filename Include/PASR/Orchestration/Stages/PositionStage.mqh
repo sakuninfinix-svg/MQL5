@@ -11,6 +11,7 @@
 #include <PASR/Core/Globals.mqh>
 #include <PASR/Infra/DataManager.mqh>
 #include <PASR/Trade/ExitEngine.mqh>
+#include <PASR/Trade/PositionManager.mqh>
 #include <PASR/Orchestration/PipelineStage.mqh>
 #include <Trade/Trade.mqh>
 
@@ -19,6 +20,7 @@ class CPositionStage : public IPipelineStage
 private:
    CExitEngine  *m_exit;
    CDataManager *m_data;
+   CPositionManager *m_positions;
    bool          m_enabled;
    bool          m_debug;
    bool          m_profiling;
@@ -26,13 +28,14 @@ private:
 
 public:
    CPositionStage()
-      : m_exit(NULL), m_data(NULL), m_enabled(true), m_debug(false), m_profiling(true)
+      : m_exit(NULL), m_data(NULL), m_positions(NULL), m_enabled(true), m_debug(false), m_profiling(true)
      {}
 
-   void Bind(CExitEngine *exit_engine, CDataManager *data)
+   void Bind(CExitEngine *exit_engine, CDataManager *data, CPositionManager *positions = NULL)
      {
       m_exit = exit_engine;
       m_data = data;
+      m_positions = positions;
      }
 
    void SetEnabled(const bool enabled) { m_enabled = enabled; }
@@ -62,20 +65,25 @@ public:
       long cfgMagic = cfg.MagicNumber;
       if(cfgMagic > 0) trade.SetExpertMagicNumber(cfgMagic);
 
-      for(int i = PositionsTotal() - 1; i >= 0; i--)
+      if(m_positions != NULL)
+         m_positions.ScanPositions(ctx);
+      else
+         ctx.positions.Scan(_Symbol, cfgMagic);
+
+      ctx.positions_count = ctx.positions.Count();
+      ctx.position_ticket = ctx.positions.FirstTicket();
+      ctx.has_position = ctx.positions.HasPosition();
+
+      for(int i = 0; i < ctx.positions.Count(); i++)
         {
-         ulong ticket = PositionGetTicket(i);
-         if(ticket == 0) continue;
-         if(!PositionSelectByTicket(ticket)) continue;
-
-         long magic = PositionGetInteger(POSITION_MAGIC);
-         if(cfgMagic > 0 && magic != cfgMagic) continue;
-
-         string sym = PositionGetString(POSITION_SYMBOL);
-         ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+         SPositionSnapshot pos;
+         if(!ctx.positions.GetAt(i, pos)) continue;
+         ulong ticket = pos.ticket;
+         string sym = pos.symbol;
+         ENUM_POSITION_TYPE posType = pos.type;
          ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-         double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-         datetime entryTime = (datetime)PositionGetInteger(POSITION_TIME);
+         double entryPrice = pos.open_price;
+         datetime entryTime = pos.open_time;
          double curPrice = (orderType == ORDER_TYPE_BUY)
                            ? SymbolInfoDouble(sym, SYMBOL_BID)
                            : SymbolInfoDouble(sym, SYMBOL_ASK);

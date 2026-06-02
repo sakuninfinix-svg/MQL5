@@ -53,6 +53,8 @@ struct SignalLayerSnapshot
    ENUM_SIGNAL_DIR lastDirection;
    double          lastConfidence;
    double          lastRawScore;
+   double          lastConflictScore;
+   double          lastDominanceGap;
    double          lastMultiplier;
    int             lastConfluence;
    bool            lastVetoed;
@@ -70,6 +72,8 @@ struct SignalLayerSnapshot
       lastDirection = SIGNAL_NONE;
       lastConfidence = 0.0;
       lastRawScore = 0.0;
+      lastConflictScore = 0.0;
+      lastDominanceGap = 0.0;
       lastMultiplier = 1.0;
       lastConfluence = 0;
       lastVetoed = false;
@@ -111,6 +115,9 @@ private:
       m_snapshot.lastDirection = m_lastAggregated.direction;
       m_snapshot.lastConfidence = m_lastAggregated.normalizedScore;
       m_snapshot.lastRawScore = m_lastAggregated.rawScore;
+      SignalAggregatorSnapshot aggSnap = m_aggregator.GetSnapshot();
+      m_snapshot.lastConflictScore = aggSnap.conflictScore;
+      m_snapshot.lastDominanceGap = aggSnap.dominanceGap;
       m_snapshot.lastMultiplier = m_lastAggregated.multiplierFactor;
       m_snapshot.lastConfluence = m_lastAggregated.confluence;
       m_snapshot.lastVetoed = m_lastAggregated.vetoed;
