@@ -2,32 +2,11 @@
 //|                                       Core/Config/Types.mqh     |
 //|                                       Copyright 2026, Agsicentre|
 //|                                                                  |
-//|  PURPOSE: Canonical StrategyConfig + 5 domain sub-structs.      |
+//|  PURPOSE: Canonical StrategyConfig + domain sub-structs.         |
 //|    - Pure data: NO methods, NO includes, NO EventBus            |
 //|    - DO NOT add #include here — keep this a pure data header     |
 //|    - Consumed by: IManager, CConfigManager, CConfigValidator    |
 //|    - Sub-structs enforce SRP at the config data level            |
-//|                                                                  |
-//|  SUB-STRUCT MAP:                                                  |
-//|    StrategyConfig                                                |
-//|      .Risk     → RiskConfig    (lot, %, SL/TP mult, BE, trail,  |
-//|                                  recovery, partial, expiry)     |
-//|      .Market   → MarketConfig  (ATR/ADX, spread, session, news) |
-//|      .AI       → AIConfig      (enable, confidence, lr, replay) |
-//|      .Pattern  → PatternConfig (enable, score, lookback, ratios)|
-//|      .Display  → DisplayConfig (panel, arrows, alerts, colors)  |
-//|                                                                  |
-//|  CHANGE LOG:                                                     |
-//|  v2.15 (2026-05-26) — Risk safety fields added:                  |
-//|    + MaxDrawdownPct        — double, equity peak drawdown limit  |
-//|    + MaxConsecLoss         — int, consecutive loss breaker       |
-//|  v2.14 (2026-05-21) — Phase 6 fields added to RiskConfig:       |
-//|    + RecoveryEnabled        — bool, master switch for recovery   |
-//|    + MaxRecoveryAttempts    — int,  max retries before abandon   |
-//|    + RecoveryCooldownBars   — int,  bars to wait between retries |
-//|    + PartialClosePct        — double, fraction to partial close  |
-//|    + MaxTradeDurationDays   — int, force-close after N days (0=off)|
-//|  All new fields have safe production defaults.                   |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CORE_CONFIG_TYPES_MQH__
@@ -38,52 +17,23 @@
 //+------------------------------------------------------------------+
 struct RiskConfig
   {
-   //--- Lot sizing (mutually exclusive: use one, set other to 0)
-   double LotSize;              // fixed lot size (0 = use RiskPercent)
-   double RiskPercent;          // % of equity per trade (0 = use LotSize)
-
-   //--- SL / TP
-   double SLMultiplier;         // StopLoss  = ATR * SLMultiplier
-   double TPMultiplier;         // TakeProfit = ATR * TPMultiplier
-
-   //--- Session & drawdown limits
-   double MaxDailyLossPct;      // EA halts if daily realised loss exceeds this %
-   double MaxDrawdownPct;       // EA halts if equity drawdown from peak exceeds this %
-   int    MaxOpenPositions;     // max concurrent open positions
-   int    MaxConsecLoss;        // consecutive losing closes before circuit breaker (0=off)
-
-   //--- Break-even
-   bool   UseBreakEven;         // move SL to break-even when in profit
-   double BreakEvenATRMult;     // BE trigger: price moved ATR * this mult
-
-   //--- Trailing stop
-   bool   UseTrailingStop;      // enable ATR-based trailing stop
-   double TrailATRMult;         // trail distance = ATR * this mult
-
-   //--- [Phase 6] Recovery system
-   // RecoveryEnabled: master switch. When false, RecoveryManager skips
-   //   all SL-hit handling and lets MT5 close the position normally.
-   bool   RecoveryEnabled;      // default: true
-
-   // MaxRecoveryAttempts: after this many attempts the engine gives up
-   //   and marks the position as DONE. Prevents infinite retry loops.
-   int    MaxRecoveryAttempts;  // default: 3   (range: 1..10)
-
-   // RecoveryCooldownBars: minimum bars to wait between recovery attempts.
-   //   Prevents rapid-fire SL adjustments on choppy bars.
-   int    RecoveryCooldownBars; // default: 5   (range: 1..50)
-
-   //--- [Phase 6] Partial close
-   // PartialClosePct: fraction of lot to close when price reaches
-   //   TPMultiplier * 0.5 ATR profit. 0 = disabled.
-   // Example: 0.5 = close 50% of position at half-TP.
-   double PartialClosePct;      // default: 0.5 (range: 0.1..0.9; 0 = off)
-
-   //--- [Phase 6] Trade expiry
-   // MaxTradeDurationDays: force-close any position older than N days.
-   //   Useful for preventing stale recovery positions from sitting open
-   //   over weekends. 0 = disabled.
-   int    MaxTradeDurationDays; // default: 0   (range: 0..30; 0 = off)
+   double LotSize;
+   double RiskPercent;
+   double SLMultiplier;
+   double TPMultiplier;
+   double MaxDailyLossPct;
+   double MaxDrawdownPct;
+   int    MaxOpenPositions;
+   int    MaxConsecLoss;
+   bool   UseBreakEven;
+   double BreakEvenATRMult;
+   bool   UseTrailingStop;
+   double TrailATRMult;
+   bool   RecoveryEnabled;
+   int    MaxRecoveryAttempts;
+   int    RecoveryCooldownBars;
+   double PartialClosePct;
+   int    MaxTradeDurationDays;
 
    RiskConfig()
       : LotSize(0.01),          RiskPercent(1.0),
@@ -92,10 +42,9 @@ struct RiskConfig
         MaxOpenPositions(3),    MaxConsecLoss(5),
         UseBreakEven(true),     BreakEvenATRMult(1.0),
         UseTrailingStop(false), TrailATRMult(1.0),
-        //--- Phase 6 defaults
-        RecoveryEnabled(true),        MaxRecoveryAttempts(3),
+        RecoveryEnabled(true),  MaxRecoveryAttempts(3),
         RecoveryCooldownBars(5),
-        PartialClosePct(0.5),         MaxTradeDurationDays(0) {}
+        PartialClosePct(0.5),   MaxTradeDurationDays(0) {}
   };
 
 //+------------------------------------------------------------------+
@@ -103,14 +52,14 @@ struct RiskConfig
 //+------------------------------------------------------------------+
 struct MarketConfig
   {
-   int    ATRPeriod;            // iATR period (bars)
-   int    ADXPeriod;            // iADX period (bars)
-   double ADXTrendThreshold;    // ADX > this value = trending market
-   double SpreadFilterPips;     // skip entry if current spread > this (pips)
-   int    SessionStartHour;     // trading session start hour (broker time)
-   int    SessionEndHour;       // trading session end hour (broker time)
-   bool   FilterNewsTime;       // pause trading around news events
-   int    NewsBufferMinutes;    // minutes before+after news to skip
+   int    ATRPeriod;
+   int    ADXPeriod;
+   double ADXTrendThreshold;
+   double SpreadFilterPips;
+   int    SessionStartHour;
+   int    SessionEndHour;
+   bool   FilterNewsTime;
+   int    NewsBufferMinutes;
 
    MarketConfig()
       : ATRPeriod(14), ADXPeriod(14), ADXTrendThreshold(25.0),
@@ -120,27 +69,108 @@ struct MarketConfig
   };
 
 //+------------------------------------------------------------------+
-//| AIConfig — AI/ML subsystem parameters                            |
+//| AIConfig — AI/ML subsystem and risk-decision parameters          |
 //+------------------------------------------------------------------+
 struct AIConfig
   {
-   bool   EnableAI;             // master switch: enable AI signal filter
-   double MinConfidence;        // min softmax score required to emit signal
-   double LearningRate;         // backpropagation learning rate
-   int    TrainIntervalBars;    // minimum bars between training cycles
-   int    ReplayBufferSize;     // experience replay buffer capacity
-   int    MinibatchSize;        // samples per backpropagation step
-   bool   PersistWeights;       // save/load trained weights to/from file
-   string ModelFileName;        // MLP weight file name (relative to MQL5/Files)
-   string OnnxModelFileName;    // ONNX sequence model (empty = ONNX disabled)
-   bool   EnableOnnx;           // attempt ONNX sequence inference when model file set
+   bool   EnableAI;
+   double MinConfidence;
+   double LearningRate;
+   int    TrainIntervalBars;
+   int    ReplayBufferSize;
+   int    MinibatchSize;
+   bool   PersistWeights;
+   string ModelFileName;
+   string OnnxModelFileName;
+   bool   EnableOnnx;
+
+   //--- Regime strategy thresholds / risk multipliers
+   double TrendEntryThreshold;
+   double TrendRiskMultiplier;
+   double TrendStrategyConfidence;
+   double RangeEntryThreshold;
+   double RangeRiskMultiplier;
+   double RangeStrategyConfidence;
+   double VolatileEntryThreshold;
+   double VolatileRiskMultiplier;
+   double VolatileStrategyConfidence;
+   double ConservativeEntryThreshold;
+   double ConservativeRiskMultiplier;
+   double ConservativeStrategyConfidence;
+   double ScalpEntryThreshold;
+   double ScalpRiskMultiplier;
+   double ScalpStrategyConfidence;
+
+   //--- Regime detection normalization thresholds
+   double StrongTrendLevel;
+   double RangeTrendMax;
+   double RangeVolatilityMax;
+   double VolatileLevel;
+   double TrendLevel;
+   int    RegimeConfirmBars;
+   int    RegimeATRPeriod;
+   int    RegimeADXPeriod;
+
+   //--- Risk-aware AI decision coefficients
+   double DriftFailureWeight;
+   double RegimeFailureWeight;
+   double ConfidenceRewardWeight;
+   double EdgeRewardWeight;
+   double RegimeRewardWeight;
+   double FailurePenaltyWeight;
+   double NoTradeDriftWeight;
+   double ConservativeNoTradePenalty;
+   double MinExpectedR;
+   double MaxFailureProbability;
+   double StrongConfidenceBuffer;
+   double StrongConfidenceMin;
+   double StrongExpectedR;
+   double StrongMaxFailureProbability;
+   double VolatileSLBoost;
+   double RangeSLTighten;
+   double MinSL_ATR;
+   double MaxSL_ATR;
+   double MinTP_ATR;
+   double MaxTP_ATR;
+   double MinTPExpectedR;
+   double RiskFailureWeight;
+   double MinRiskMultiplier;
+   double MaxRiskMultiplier;
+   double ConservativeSignalThreshold;
+   double LowStrategyConfidence;
+   int    LowStrategySignalThreshold;
+   int    RangeSignalThreshold;
+   int    MeanRevertSignalThreshold;
+
+   //--- Advanced internal model blending
+   double LSTMBlendWeight;
+   double EnsembleBlendWeight;
 
    AIConfig()
       : EnableAI(false),        MinConfidence(0.60),
         LearningRate(0.001),    TrainIntervalBars(5),
         ReplayBufferSize(512),  MinibatchSize(32),
-        PersistWeights(true),   ModelFileName("PASR_weights.bin"),
-        OnnxModelFileName("PASR_transformer.onnx"), EnableOnnx(false) {}
+        PersistWeights(true),   ModelFileName("PASR_mlp_m0.bin"),
+        OnnxModelFileName("PASR_sequence.onnx"), EnableOnnx(false),
+        TrendEntryThreshold(0.60), TrendRiskMultiplier(1.20), TrendStrategyConfidence(0.85),
+        RangeEntryThreshold(0.65), RangeRiskMultiplier(1.30), RangeStrategyConfidence(0.85),
+        VolatileEntryThreshold(0.85), VolatileRiskMultiplier(0.90), VolatileStrategyConfidence(0.70),
+        ConservativeEntryThreshold(0.95), ConservativeRiskMultiplier(0.10), ConservativeStrategyConfidence(0.00),
+        ScalpEntryThreshold(0.70), ScalpRiskMultiplier(1.00), ScalpStrategyConfidence(0.75),
+        StrongTrendLevel(0.80), RangeTrendMax(0.30), RangeVolatilityMax(0.30),
+        VolatileLevel(0.80), TrendLevel(0.50), RegimeConfirmBars(3),
+        RegimeATRPeriod(20), RegimeADXPeriod(50),
+        DriftFailureWeight(0.35), RegimeFailureWeight(0.15),
+        ConfidenceRewardWeight(2.00), EdgeRewardWeight(1.25), RegimeRewardWeight(0.75), FailurePenaltyWeight(1.40),
+        NoTradeDriftWeight(0.50), ConservativeNoTradePenalty(0.25),
+        MinExpectedR(0.35), MaxFailureProbability(0.72),
+        StrongConfidenceBuffer(0.10), StrongConfidenceMin(0.75), StrongExpectedR(1.20), StrongMaxFailureProbability(0.45),
+        VolatileSLBoost(1.25), RangeSLTighten(0.90),
+        MinSL_ATR(0.60), MaxSL_ATR(3.00), MinTP_ATR(1.00), MaxTP_ATR(5.00), MinTPExpectedR(1.15),
+        RiskFailureWeight(0.45), MinRiskMultiplier(0.05), MaxRiskMultiplier(1.50),
+        ConservativeSignalThreshold(90.0), LowStrategyConfidence(0.40),
+        LowStrategySignalThreshold(70), RangeSignalThreshold(60), MeanRevertSignalThreshold(50),
+        LSTMBlendWeight(0.60), EnsembleBlendWeight(0.40) {}
   };
 
 //+------------------------------------------------------------------+
@@ -148,17 +178,55 @@ struct AIConfig
 //+------------------------------------------------------------------+
 struct PatternConfig
   {
-   bool   EnablePatterns;       // master switch: enable pattern filter
-   double MinPatternScore;      // minimum composite score [0-100]
-   int    LookbackBars;         // bars to look back when scanning patterns
-   double PinBarRatio;          // min wick:body ratio to qualify as pin bar
-   double EngulfMultiplier;     // engulf: current body must be >= prev * this
-   bool   RequireConfirmation;  // wait for bar close before acting on signal
+   bool   EnablePatterns;
+   double MinPatternScore;
+   double MinDominanceGap;
+   int    LookbackBars;
+   double PinBarRatio;
+   double EngulfMultiplier;
+   bool   RequireConfirmation;
 
    PatternConfig()
-      : EnablePatterns(true), MinPatternScore(60.0),
+      : EnablePatterns(true), MinPatternScore(60.0), MinDominanceGap(0.05),
         LookbackBars(50),     PinBarRatio(2.0),
         EngulfMultiplier(1.1), RequireConfirmation(true) {}
+  };
+
+//+------------------------------------------------------------------+
+//| SignalTuningConfig — signal/MTF constants exposed for testing    |
+//+------------------------------------------------------------------+
+struct SignalTuningConfig
+  {
+   bool   UseMTF;
+   int    SignalLookback;
+   int    MinConfluence;
+   double MinScore;
+   double MinDominanceGap;
+   int    MaxSourceAgeSeconds;
+   int    SignalCooldownBars;
+   bool   ExitOnOpposite;
+   double ZoneReuseATR;
+   int    PatternFailureCooldownBars;
+   int    EntryMode;
+   double MaxSignalATR;
+   double AntiBreakoutPct;
+   double MomentumThresholdATR;
+   double MinTPDistanceATR;
+   double MinRRRatio;
+   double ATRBufferMult;
+   double MaxSpreadPoints;
+   double MinATRPoints;
+   bool   UseSessionFilter;
+   double UrgencyHighThreshold;
+   double UrgencyMediumThreshold;
+
+   SignalTuningConfig()
+      : UseMTF(true), SignalLookback(20), MinConfluence(1), MinScore(0.40), MinDominanceGap(0.05),
+        MaxSourceAgeSeconds(120), SignalCooldownBars(3), ExitOnOpposite(false),
+        ZoneReuseATR(0.5), PatternFailureCooldownBars(5), EntryMode(0), MaxSignalATR(2.0),
+        AntiBreakoutPct(0.85), MomentumThresholdATR(0.3), MinTPDistanceATR(1.5), MinRRRatio(1.5),
+        ATRBufferMult(1.0), MaxSpreadPoints(30), MinATRPoints(0.0), UseSessionFilter(false),
+        UrgencyHighThreshold(0.75), UrgencyMediumThreshold(0.55) {}
   };
 
 //+------------------------------------------------------------------+
@@ -166,13 +234,13 @@ struct PatternConfig
 //+------------------------------------------------------------------+
 struct DisplayConfig
   {
-   bool   ShowDashboard;        // render on-chart info panel
-   bool   ShowSignalArrows;     // draw buy/sell arrows on chart
-   bool   EnableAlerts;         // send MT5 native alert popup
-   bool   EnablePushNotify;     // send push notification to mobile
-   color  BullColor;            // buy signal arrow / label color
-   color  BearColor;            // sell signal arrow / label color
-   int    FontSize;             // dashboard text font size (points)
+   bool   ShowDashboard;
+   bool   ShowSignalArrows;
+   bool   EnableAlerts;
+   bool   EnablePushNotify;
+   color  BullColor;
+   color  BearColor;
+   int    FontSize;
 
    DisplayConfig()
       : ShowDashboard(true),  ShowSignalArrows(true),
@@ -183,32 +251,24 @@ struct DisplayConfig
 
 //+------------------------------------------------------------------+
 //| StrategyConfig — root configuration object                       |
-//|                                                                  |
-//| OWNERSHIP: Created once by CConfigManager in EA OnInit().        |
-//| DISTRIBUTION: Sent to all managers via EventBus ConfigReloadEvent|
-//|   Each manager caches it as m_cfg — NOT per-function copies.     |
-//| VALIDATION: Always validated by CConfigValidator before dispatch. |
-//| DEFAULTS: All sub-struct constructors provide production-safe     |
-//|   defaults; never a zero-initialised struct in production.        |
 //+------------------------------------------------------------------+
 struct StrategyConfig
   {
-   //--- Identity
-   long   MagicNumber;   // unique EA instance identifier (> 0)
-   string EAName;        // human-readable name for logs and chart objects
-   string Version;       // semantic version string e.g. "2.14.0"
+   long   MagicNumber;
+   string EAName;
+   string Version;
 
-   //--- Domain sub-structs (each has safe constructor defaults)
-   RiskConfig     Risk;
-   MarketConfig   Market;
-   AIConfig       AI;
-   PatternConfig  Pattern;
-   DisplayConfig  Display;
+   RiskConfig         Risk;
+   MarketConfig       Market;
+   AIConfig           AI;
+   PatternConfig      Pattern;
+   SignalTuningConfig Signal;
+   DisplayConfig      Display;
 
    StrategyConfig()
       : MagicNumber(123456),
         EAName("PASR"),
-        Version("2.15.0") {}
+        Version("2.16.0") {}
   };
 
 #endif // __CORE_CONFIG_TYPES_MQH__
