@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
-//| Analysis/Pattern/PatternManager.mqh — v3.12                      |
-//| Probabilistic regression-style pattern score for AI context       |
-//| Uses fixed ring buffer history to avoid heap churn in runtime.   |
+//| Analysis/Pattern/PatternManager.mqh — v3.30                      |
+//| Trainable probabilistic pattern scoring for PASR                  |
+//| Loads PASR_pattern_weights.bin, falls back to safe defaults       |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PATTERN_MANAGER_MQH__
@@ -13,6 +13,17 @@
 #include "PatternTypes.mqh"
 
 #define PATTERN_HISTORY_CAPACITY 200
+#define PATTERN_TRAINABLE_COUNT 5
+#define PATTERN_FEATURE_COUNT 5
+#define PATTERN_WEIGHT_FILE "PASR_pattern_weights.bin"
+#define PATTERN_WEIGHT_MAGIC 20260608.0
+#define PATTERN_WEIGHT_VERSION 1.0
+
+#define PATTERN_IDX_PINBAR   0
+#define PATTERN_IDX_ENGULF   1
+#define PATTERN_IDX_TWEEZER  2
+#define PATTERN_IDX_FAKEY    3
+#define PATTERN_IDX_INSIDE   4
 
 struct SPatternFeatureSnapshot
   {
@@ -116,9 +127,90 @@ private:
    double         m_pinBarRatio;
    double         m_engulfMultiplier;
    bool           m_requireConfirmation;
+   bool           m_externalWeightsLoaded;
+   string         m_weightsFile;
+
+   double         m_bias[PATTERN_TRAINABLE_COUNT];
+   double         m_w[PATTERN_TRAINABLE_COUNT][PATTERN_FEATURE_COUNT];
 
    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
    double SafeDiv(double a, double b) const { return (MathAbs(b) <= DBL_EPSILON) ? 0.0 : a / b; }
+   double Sigmoid(double x) const { return 1.0 / (1.0 + MathExp(-x)); }
+
+   void SetPatternWeights(int idx, double bias, double w0, double w1, double w2, double w3, double w4)
+     {
+      if(idx < 0 || idx >= PATTERN_TRAINABLE_COUNT) return;
+      m_bias[idx] = bias;
+      m_w[idx][0] = w0;
+      m_w[idx][1] = w1;
+      m_w[idx][2] = w2;
+      m_w[idx][3] = w3;
+      m_w[idx][4] = w4;
+     }
+
+   void InitDefaultWeights()
+     {
+      // These defaults reproduce the previous manual regression-style scores.
+      SetPatternWeights(PATTERN_IDX_PINBAR,  -2.20, 2.80, 1.30, 1.00, 0.70, 0.00); // wick, smallBody, atr, follow
+      SetPatternWeights(PATTERN_IDX_ENGULF,  -2.05, 2.20, 1.25, 1.25, 0.80, 0.00); // bodyRatio, closePower, atr, follow
+      SetPatternWeights(PATTERN_IDX_TWEEZER, -2.10, 2.60, 1.40, 1.00, 0.65, 0.00); // equality, body, atr, follow
+      SetPatternWeights(PATTERN_IDX_FAKEY,   -2.00, 2.00, 1.65, 1.15, 0.90, 0.00); // trap, reclaim, body, atr
+      SetPatternWeights(PATTERN_IDX_INSIDE,  -2.15, 2.40, 1.55, 1.20, 0.55, 0.00); // compression, closeBias, motherATR, follow
+      m_externalWeightsLoaded = false;
+      m_weightsFile = "";
+     }
+
+   double ScorePattern(const int idx, const double f0, const double f1, const double f2, const double f3, const double f4 = 0.0) const
+     {
+      if(idx < 0 || idx >= PATTERN_TRAINABLE_COUNT) return 0.0;
+      double z = m_bias[idx] + m_w[idx][0] * f0 + m_w[idx][1] * f1 + m_w[idx][2] * f2 + m_w[idx][3] * f3 + m_w[idx][4] * f4;
+      return Clamp01(Sigmoid(z));
+     }
+
+   bool ReadFloatChecked(const int handle, double &outValue)
+     {
+      if(FileIsEnding(handle)) return false;
+      outValue = (double)FileReadFloat(handle);
+      return true;
+     }
+
+   bool LoadPatternWeights(const string filename)
+     {
+      int handle = FileOpen(filename, FILE_READ | FILE_BIN);
+      if(handle == INVALID_HANDLE)
+         return false;
+
+      double magic = 0.0, version = 0.0, nPatterns = 0.0, nFeatures = 0.0;
+      bool ok = ReadFloatChecked(handle, magic) && ReadFloatChecked(handle, version) &&
+                ReadFloatChecked(handle, nPatterns) && ReadFloatChecked(handle, nFeatures);
+      if(!ok || MathRound(magic) != (int)PATTERN_WEIGHT_MAGIC ||
+         (int)MathRound(nPatterns) != PATTERN_TRAINABLE_COUNT ||
+         (int)MathRound(nFeatures) != PATTERN_FEATURE_COUNT)
+        {
+         FileClose(handle);
+         PrintFormat("[PatternManager] invalid pattern weight header in '%s'", filename);
+         return false;
+        }
+
+      double bias = 0.0, w0 = 0.0, w1 = 0.0, w2 = 0.0, w3 = 0.0, w4 = 0.0;
+      for(int p = 0; p < PATTERN_TRAINABLE_COUNT && ok; p++)
+        {
+         ok = ReadFloatChecked(handle, bias) && ReadFloatChecked(handle, w0) && ReadFloatChecked(handle, w1) &&
+              ReadFloatChecked(handle, w2) && ReadFloatChecked(handle, w3) && ReadFloatChecked(handle, w4);
+         if(ok) SetPatternWeights(p, bias, w0, w1, w2, w3, w4);
+        }
+      FileClose(handle);
+      if(!ok)
+        {
+         PrintFormat("[PatternManager] truncated pattern weights in '%s'; keeping defaults", filename);
+         InitDefaultWeights();
+         return false;
+        }
+      m_externalWeightsLoaded = true;
+      m_weightsFile = filename;
+      PrintFormat("[PatternManager] loaded trainable pattern weights from '%s'", filename);
+      return true;
+     }
 
    void ApplyConfig()
      {
@@ -131,11 +223,12 @@ private:
          return;
         }
       m_minConfluenceScore = Clamp01(m_cfg.Pattern.MinPatternScore / 100.0);
+      m_minDominanceGap = Clamp01(m_cfg.Pattern.MinDominanceGap);
      }
 
    void ClearHistory()
      {
-      for(int i=0; i<PATTERN_HISTORY_CAPACITY; i++)
+      for(int i = 0; i < PATTERN_HISTORY_CAPACITY; i++)
          m_history[i].Clear();
       m_historyHead = 0;
       m_historyCount = 0;
@@ -262,28 +355,23 @@ private:
       double bodyMid = (CandleOpen(r, s) + CandleClose(r, s)) / 2.0;
       double upper = UpperWick(r, s);
       double lower = LowerWick(r, s);
-      double requiredRatio = MathMax(1.0, m_pinBarRatio);
       int dir = 0;
       double extreme = 0.0;
-      if(CandleClose(r, s) > bodyMid && lower > (upper > 0.0 ? upper * requiredRatio : _Point * requiredRatio)) { dir = 1; extreme = CandleLow(r, s); }
-      else if(CandleClose(r, s) < bodyMid && upper > (lower > 0.0 ? lower * requiredRatio : _Point * requiredRatio)) { dir = -1; extreme = CandleHigh(r, s); }
+      if(CandleClose(r, s) > bodyMid && lower > (upper > 0.0 ? upper * m_pinBarRatio : _Point * m_pinBarRatio)) { dir = 1; extreme = CandleLow(r, s); }
+      else if(CandleClose(r, s) < bodyMid && upper > (lower > 0.0 ? lower * m_pinBarRatio : _Point * m_pinBarRatio)) { dir = -1; extreme = CandleHigh(r, s); }
       else return;
 
-      double wick = (dir == 1) ? lower : upper;
-      double wickPct = Clamp01(wick / range);
-      double bodyPct = Clamp01(CandleBody(r, s) / range);
+      double wickPct = Clamp01(((dir == 1) ? lower : upper) / range);
+      double smallBody = Clamp01(1.0 - CandleBody(r, s) / range);
       double atrQuality = NormalizeATRFactor(range, atr);
       double follow = FollowThroughScore(r, s, dir);
-      double score = Clamp01(0.10 + 0.45 * wickPct + 0.20 * (1.0 - bodyPct) + 0.15 * atrQuality + 0.10 * follow);
+      double score = ScorePattern(PATTERN_IDX_PINBAR, wickPct, smallBody, atrQuality, follow);
 
       vote.valid = true; vote.type = PATTERN_PINBAR; vote.dir = dir; vote.extreme = extreme;
-      vote.score = score;
-      vote.rejectionQuality = wickPct;
-      vote.trapQuality = 0.0;
+      vote.score = score; vote.rejectionQuality = wickPct; vote.trapQuality = 0.0;
       vote.reclaimQuality = Clamp01((dir == 1) ? SafeDiv(CandleClose(r,s) - bodyMid, MathMax(range * 0.5, _Point))
                                                : SafeDiv(bodyMid - CandleClose(r,s), MathMax(range * 0.5, _Point)));
-      vote.followThrough = follow;
-      vote.label = (dir == 1) ? "Pinbar Bull" : "Pinbar Bear";
+      vote.followThrough = follow; vote.label = (dir == 1) ? "Pinbar Bull" : "Pinbar Bear";
      }
 
    void EvaluateEngulfing(const MqlRates &r[], int s, double atr, SPatternVote &vote)
@@ -303,14 +391,11 @@ private:
       double closePower = (dir == 1) ? SafeDiv(c1 - CandleLow(r, s), MathMax(CandleRange(r, s), _Point))
                                      : SafeDiv(CandleHigh(r, s) - c1, MathMax(CandleRange(r, s), _Point));
       double follow = FollowThroughScore(r, s, dir);
-      double score = Clamp01(0.12 + 0.35 * bodyRatio + 0.20 * Clamp01(closePower) + 0.20 * atrQuality + 0.13 * follow);
+      double score = ScorePattern(PATTERN_IDX_ENGULF, bodyRatio, Clamp01(closePower), atrQuality, follow);
 
       vote.valid = true; vote.type = PATTERN_ENGULFING; vote.dir = dir; vote.extreme = extreme;
-      vote.score = score;
-      vote.rejectionQuality = bodyRatio;
-      vote.trapQuality = 0.0;
-      vote.reclaimQuality = Clamp01(closePower);
-      vote.followThrough = follow;
+      vote.score = score; vote.rejectionQuality = bodyRatio; vote.trapQuality = 0.0;
+      vote.reclaimQuality = Clamp01(closePower); vote.followThrough = follow;
       vote.label = (dir == 1) ? "Engulf Bull" : "Engulf Bear";
      }
 
@@ -320,8 +405,7 @@ private:
       double h2 = CandleHigh(r, s + 1), l2 = CandleLow(r, s + 1);
       double tol = MathMax(atr * 0.10 * _Point, 3.0 * _Point);
       int dir = 0;
-      double extreme = 0.0;
-      double distance = 0.0;
+      double extreme = 0.0, distance = 0.0;
       if(MathAbs(l1 - l2) <= tol && IsBullish(r, s)) { dir = 1; extreme = MathMin(l1, l2); distance = MathAbs(l1 - l2); }
       else if(MathAbs(h1 - h2) <= tol && IsBearish(r, s)) { dir = -1; extreme = MathMax(h1, h2); distance = MathAbs(h1 - h2); }
       else return;
@@ -330,14 +414,11 @@ private:
       double bodyPct = Clamp01(CandleBody(r, s) / MathMax(CandleRange(r, s), _Point));
       double atrQuality = NormalizeATRFactor(CandleRange(r, s), atr);
       double follow = FollowThroughScore(r, s, dir);
-      double score = Clamp01(0.10 + 0.40 * equality + 0.25 * bodyPct + 0.15 * atrQuality + 0.10 * follow);
+      double score = ScorePattern(PATTERN_IDX_TWEEZER, equality, bodyPct, atrQuality, follow);
 
       vote.valid = true; vote.type = PATTERN_BOTTOM; vote.dir = dir; vote.extreme = extreme;
-      vote.score = score;
-      vote.rejectionQuality = equality;
-      vote.trapQuality = 0.0;
-      vote.reclaimQuality = bodyPct;
-      vote.followThrough = follow;
+      vote.score = score; vote.rejectionQuality = equality; vote.trapQuality = 0.0;
+      vote.reclaimQuality = bodyPct; vote.followThrough = follow;
       vote.label = (dir == 1) ? "Tweezer Bottom" : "Tweezer Top";
      }
 
@@ -357,15 +438,11 @@ private:
       double reclaimQuality = (dir == 1) ? Clamp01((c0 - l1) / insideRange) : Clamp01((h1 - c0) / insideRange);
       double atrQuality = NormalizeATRFactor(CandleRange(r, s), atr);
       double bodyPct = Clamp01(CandleBody(r, s) / MathMax(CandleRange(r, s), _Point));
-      double follow = FollowThroughScore(r, s, dir);
-      double score = Clamp01(0.12 + 0.30 * trapQuality + 0.25 * reclaimQuality + 0.18 * bodyPct + 0.15 * atrQuality);
+      double score = ScorePattern(PATTERN_IDX_FAKEY, trapQuality, reclaimQuality, bodyPct, atrQuality);
 
       vote.valid = true; vote.type = PATTERN_FAKEY; vote.dir = dir; vote.extreme = extreme;
-      vote.score = score;
-      vote.rejectionQuality = bodyPct;
-      vote.trapQuality = trapQuality;
-      vote.reclaimQuality = reclaimQuality;
-      vote.followThrough = follow;
+      vote.score = score; vote.rejectionQuality = bodyPct; vote.trapQuality = trapQuality;
+      vote.reclaimQuality = reclaimQuality; vote.followThrough = FollowThroughScore(r, s, dir);
       vote.label = (dir == 1) ? "Fakey Bull" : "Fakey Bear";
      }
 
@@ -387,37 +464,36 @@ private:
       double closeBias = (dir == 1) ? Clamp01((close - mid) / (motherRange * 0.5)) : Clamp01((mid - close) / (motherRange * 0.5));
       double motherATR = NormalizeATRFactor(motherRange, atr);
       double follow = FollowThroughScore(r, s, dir);
-      double score = Clamp01(0.08 + 0.40 * compression + 0.25 * closeBias + 0.20 * motherATR + 0.07 * follow);
+      double score = ScorePattern(PATTERN_IDX_INSIDE, compression, closeBias, motherATR, follow);
 
       vote.valid = true; vote.type = PATTERN_INSIDE_BAR_BREAKOUT; vote.dir = dir; vote.extreme = extreme;
-      vote.score = score;
-      vote.rejectionQuality = compression;
-      vote.trapQuality = 0.0;
-      vote.reclaimQuality = closeBias;
-      vote.followThrough = follow;
+      vote.score = score; vote.rejectionQuality = compression; vote.trapQuality = 0.0;
+      vote.reclaimQuality = closeBias; vote.followThrough = follow;
       vote.label = (dir == 1) ? "Inside Bull" : "Inside Bear";
      }
 
 public:
    CPatternManager()
       : IManager(), m_historyHead(0), m_historyCount(0),
-        m_lastScanBarTime(0), m_totalPatternsDetected(0),
-        m_totalValidSignals(0), m_minConfluenceScore(0.40),
-        m_minDominanceGap(0.05), m_regimeBoostFactor(0.20),
-        m_pinBarRatio(2.0), m_engulfMultiplier(1.1), m_requireConfirmation(true)
+        m_lastScanBarTime(0), m_totalPatternsDetected(0), m_totalValidSignals(0),
+        m_minConfluenceScore(0.40), m_minDominanceGap(0.05), m_regimeBoostFactor(0.20),
+        m_pinBarRatio(2.0), m_engulfMultiplier(1.1), m_requireConfirmation(true),
+        m_externalWeightsLoaded(false), m_weightsFile("")
      {
+      InitDefaultWeights();
       ClearHistory();
       m_lastResult.Clear();
       m_lastFeatures.Clear();
      }
 
    ~CPatternManager() {}
-
    virtual string HandlerName() const override { return "PatternManager"; }
 
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
+      InitDefaultWeights();
+      LoadPatternWeights(PATTERN_WEIGHT_FILE);
       ApplyConfig();
       ClearHistory();
       m_lastResult.Clear();
@@ -425,7 +501,7 @@ public:
       m_lastScanBarTime = 0;
       m_totalPatternsDetected = 0;
       m_totalValidSignals = 0;
-      Print("[PatternManager] v3.12 Init OK");
+      PrintFormat("[PatternManager] v3.30 Init OK trainable_weights=%s", m_externalWeightsLoaded ? "true" : "false");
       return true;
      }
 
@@ -467,8 +543,7 @@ public:
       outResult.Clear();
       m_lastFeatures.Clear();
       int scanShift = shift;
-      if(m_requireConfirmation && scanShift < 1)
-         scanShift = 1;
+      if(m_requireConfirmation && scanShift < 1) scanShift = 1;
       if(scanShift < 0 || atrPoints <= 0.0) { outResult.reason = "Invalid shift/ATR"; return false; }
       if(scanShift + 2 >= ArraySize(rates)) { outResult.reason = "Insufficient bars"; return false; }
 
@@ -491,8 +566,7 @@ public:
          if(votes[i].valid) votes[i].regimeWeight = CalculateRegimeWeight(currentRegime, votes[i].type, votes[i].dir);
 
       int validVotes = 0;
-      for(int i = 0; i < 5; i++)
-         if(votes[i].valid) validVotes++;
+      for(int i = 0; i < 5; i++) if(votes[i].valid) validVotes++;
 
       double buyScore = AggregateProbability(votes, 1);
       double sellScore = AggregateProbability(votes, -1);
@@ -511,8 +585,7 @@ public:
       m_lastFeatures.reclaimQuality = AggregateFeature(votes, featureDir, 2);
       m_lastFeatures.followThrough = AggregateFeature(votes, featureDir, 3);
 
-      if(validVotes > 0)
-         m_totalPatternsDetected++;
+      if(validVotes > 0) m_totalPatternsDetected++;
       m_lastScanBarTime = curTime;
 
       if(finalScore < m_minConfluenceScore)
@@ -545,11 +618,12 @@ public:
       outResult.conflictScore = conflictScore;
       outResult.dominanceGap = dominanceGap;
       outResult.barTime = curTime;
-      outResult.reason = votes[bestIdx].label + StringFormat(" | PatternScore %.2f gap %.2f conflict %.2f | rej %.2f trap %.2f reclaim %.2f ft %.2f | %s",
+      outResult.reason = votes[bestIdx].label + StringFormat(" | PatternScore %.2f gap %.2f conflict %.2f | rej %.2f trap %.2f reclaim %.2f ft %.2f | %s%s",
                          finalScore, dominanceGap, conflictScore,
                          m_lastFeatures.rejectionQuality, m_lastFeatures.trapQuality,
                          m_lastFeatures.reclaimQuality, m_lastFeatures.followThrough,
-                         BuildConfluenceLabel(votes, direction));
+                         BuildConfluenceLabel(votes, direction),
+                         m_externalWeightsLoaded ? " | trainable" : " | fallback");
 
       m_lastResult = outResult;
       m_totalValidSignals++;
@@ -577,6 +651,8 @@ public:
       return (double)m_totalValidSignals / (double)m_totalPatternsDetected * 100.0;
      }
 
+   bool HasExternalWeights() const { return m_externalWeightsLoaded; }
+   string GetWeightsFile() const { return m_weightsFile; }
    SPatternResult GetLastResult() const { return m_lastResult; }
    SPatternFeatureSnapshot GetLastFeatureSnapshot() const { return m_lastFeatures; }
    void GetLastResult(SPatternResult &out) const { out = m_lastResult; }
