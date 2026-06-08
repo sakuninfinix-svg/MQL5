@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Signal/SignalConfig.mqh — v1.02                                  |
+//| Signal/SignalConfig.mqh — v1.03                                  |
 //| Centralized configuration cache for Signal module                |
 //+------------------------------------------------------------------+
 #property strict
@@ -100,6 +100,13 @@ private:
       return MathMax(0.0, pips) * factor;
      }
 
+   ENUM_ENTRY_MODE ClampEntryMode(const int mode) const
+     {
+      if(mode <= (int)MODE_SAFE) return MODE_SAFE;
+      if(mode >= (int)MODE_AGGRESSIVE) return MODE_AGGRESSIVE;
+      return MODE_BALANCED;
+     }
+
 public:
    CSignalConfig() : m_initialized(false)
      { m_config.Init(); }
@@ -115,12 +122,28 @@ public:
      {
       m_config.Init();
 
-      m_config.SignalLookback = MathMax(5, cfg.Pattern.LookbackBars);
-      m_config.MinScore = Clamp01(cfg.Pattern.MinPatternScore / 100.0);
-      m_config.SignalCooldownBars = MathMax(1, cfg.Risk.RecoveryCooldownBars);
-      m_config.PatternFailureCooldownBars = MathMax(1, cfg.Risk.RecoveryCooldownBars);
-      m_config.MaxSpreadPoints = PipToPoints(cfg.Market.SpreadFilterPips);
-      m_config.UseSessionFilter = !(cfg.Market.SessionStartHour == 0 && cfg.Market.SessionEndHour == 23);
+      m_config.SignalLookback = MathMax(5, cfg.Signal.SignalLookback);
+      m_config.MinConfluence = MathMax(1, cfg.Signal.MinConfluence);
+      m_config.MinScore = Clamp01(cfg.Signal.MinScore);
+      m_config.MinDominanceGap = Clamp01(cfg.Signal.MinDominanceGap);
+      m_config.MaxSourceAgeSeconds = MathMax(1, cfg.Signal.MaxSourceAgeSeconds);
+      m_config.SignalCooldownBars = MathMax(1, cfg.Signal.SignalCooldownBars);
+      m_config.ExitOnOpposite = cfg.Signal.ExitOnOpposite;
+      m_config.UseMTF = cfg.Signal.UseMTF;
+      m_config.ZoneReuseATR = MathMax(0.0, cfg.Signal.ZoneReuseATR);
+      m_config.PatternFailureCooldownBars = MathMax(1, cfg.Signal.PatternFailureCooldownBars);
+      m_config.EntryMode = ClampEntryMode(cfg.Signal.EntryMode);
+      m_config.MaxSignalATR = MathMax(0.0, cfg.Signal.MaxSignalATR);
+      m_config.AntiBreakoutPct = Clamp01(cfg.Signal.AntiBreakoutPct);
+      m_config.MomentumThresholdATR = MathMax(0.0, cfg.Signal.MomentumThresholdATR);
+      m_config.MinTPDistanceATR = MathMax(0.0, cfg.Signal.MinTPDistanceATR);
+      m_config.MinRRRatio = MathMax(0.0, cfg.Signal.MinRRRatio);
+      m_config.ATRBufferMult = MathMax(0.0, cfg.Signal.ATRBufferMult);
+      m_config.MaxSpreadPoints = (cfg.Signal.MaxSpreadPoints > 0.0) ? cfg.Signal.MaxSpreadPoints : PipToPoints(cfg.Market.SpreadFilterPips);
+      m_config.MinATRPoints = MathMax(0.0, cfg.Signal.MinATRPoints);
+      m_config.UseSessionFilter = cfg.Signal.UseSessionFilter || !(cfg.Market.SessionStartHour == 0 && cfg.Market.SessionEndHour == 23);
+      m_config.UrgencyHighThreshold = Clamp01(cfg.Signal.UrgencyHighThreshold);
+      m_config.UrgencyMediumThreshold = Clamp01(cfg.Signal.UrgencyMediumThreshold);
       m_config.DebugMode = debugMode;
       m_config.LastUpdate = TimeCurrent();
       m_initialized = true;
