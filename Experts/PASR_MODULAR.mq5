@@ -54,11 +54,11 @@ input string InpAIModelFileName = "PASR_weights.bin";
 
 input group "Pattern"
 input bool   InpEnablePatterns = true;
-input double InpMinPatternScore = 60.0;
+input double InpMinPatternScore = 45.0;
 input int    InpPatternLookbackBars = 50;
 input double InpPinBarRatio = 2.0;
 input double InpEngulfMultiplier = 1.1;
-input bool   InpRequireConfirmation = true;
+input bool   InpRequireConfirmation = false;
 
 input group "Display"
 input bool   InpShowDashboard = true;

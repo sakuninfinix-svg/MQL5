@@ -6,6 +6,8 @@
 #ifndef __SIGNAL_CONFIG_MQH__
 #define __SIGNAL_CONFIG_MQH__
 
+#include "../Core/Config/Types.mqh"
+
 enum ENUM_ENTRY_MODE
   {
    MODE_SAFE       = 0,
@@ -46,9 +48,9 @@ struct SignalConfigData
    void Init()
      {
       SignalLookback                 = 20;
-      MinConfluence                  = 2;
-      MinScore                       = 0.55;
-      MinDominanceGap                = 0.12;
+      MinConfluence                  = 1;
+      MinScore                       = 0.45;
+      MinDominanceGap                = 0.08;
       MaxSourceAgeSeconds            = 120;
       SignalCooldownBars             = 3;
       ExitOnOpposite                 = false;
@@ -86,6 +88,18 @@ private:
    SignalConfigData m_config;
    bool             m_initialized;
 
+   double Clamp01(const double value) const
+     {
+      return MathMax(0.0, MathMin(1.0, value));
+     }
+
+   double PipToPoints(const double pips) const
+     {
+      int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+      double factor = (digits == 3 || digits == 5) ? 10.0 : 1.0;
+      return MathMax(0.0, pips) * factor;
+     }
+
 public:
    CSignalConfig() : m_initialized(false)
      { m_config.Init(); }
@@ -93,6 +107,21 @@ public:
    void Init()
      {
       m_config.Init();
+      m_config.LastUpdate = TimeCurrent();
+      m_initialized = true;
+     }
+
+   void ApplyStrategyConfig(const StrategyConfig &cfg, const bool debugMode = false)
+     {
+      m_config.Init();
+
+      m_config.SignalLookback = MathMax(5, cfg.Pattern.LookbackBars);
+      m_config.SignalCooldownBars = MathMax(1, cfg.Risk.RecoveryCooldownBars);
+      m_config.PatternFailureCooldownBars = MathMax(1, cfg.Risk.RecoveryCooldownBars);
+      m_config.MaxSpreadPoints = PipToPoints(cfg.Market.SpreadFilterPips);
+      m_config.UseSessionFilter = !(cfg.Market.SessionStartHour == 0 && cfg.Market.SessionEndHour == 23);
+      m_config.DebugMode = debugMode;
+      m_config.LastUpdate = TimeCurrent();
       m_initialized = true;
      }
 

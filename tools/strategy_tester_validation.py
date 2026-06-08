@@ -92,11 +92,21 @@ def run_terminal(terminal: Path, config: Path, out_dir: Path, timeout: int) -> t
 
     log_path = out_dir / "terminal_cli.log"
     cmd = [str(terminal), f"/config:{str(config)}", f"/log:{str(log_path)}"]
+    command_text = " ".join(cmd)
     try:
-        completed = subprocess.run(cmd, timeout=timeout, check=False)
-        return completed.returncode, " ".join(cmd)
+        proc = subprocess.Popen(cmd)
+        return proc.wait(timeout=timeout), command_text
     except subprocess.TimeoutExpired:
-        return 124, f"timeout after {timeout}s: {' '.join(cmd)}"
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        for image in ("terminal64.exe", "metatester64.exe"):
+            subprocess.run(["taskkill", "/F", "/IM", image, "/T"],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL,
+                           check=False)
+        return 124, f"timeout after {timeout}s: {command_text}"
     except Exception as exc:
         return 1, f"terminal run failed: {exc}"
 
@@ -143,6 +153,20 @@ def read_maybe(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="ignore").replace("\x00", "")
     except Exception:
         return path.read_text(errors="ignore").replace("\x00", "")
+
+
+def read_tail_maybe(path: Path, max_bytes: int = 256_000) -> str:
+    if not path.exists():
+        return ""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            if size > max_bytes:
+                handle.seek(-max_bytes, os.SEEK_END)
+            data = handle.read()
+        return data.decode("utf-8", errors="ignore").replace("\x00", "")
+    except Exception:
+        return read_maybe(path)[-max_bytes:]
 
 
 def parse_report_text(text: str) -> dict[str, str]:
@@ -204,7 +228,7 @@ def analyze(mql5_root: Path, out_dir: Path) -> tuple[list[ValidationResult], dic
     logs = find_files(out_dir, ["*.log", "*.txt"])
     if not logs:
         logs = find_terminal_logs(mql5_root, out_dir)
-    log_text = "\n".join(read_maybe(p) for p in logs)
+    log_text = "\n".join(read_tail_maybe(p) for p in logs)
     details["log_files"] = [str(p) for p in logs]
     error_patterns = [
         r"\berror\b",

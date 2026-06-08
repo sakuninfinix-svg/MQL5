@@ -113,12 +113,18 @@ private:
    double         m_minConfluenceScore;
    double         m_minDominanceGap;
    double         m_regimeBoostFactor;
+   double         m_pinBarRatio;
+   double         m_engulfMultiplier;
+   bool           m_requireConfirmation;
 
    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
    double SafeDiv(double a, double b) const { return (MathAbs(b) <= DBL_EPSILON) ? 0.0 : a / b; }
 
    void ApplyConfig()
      {
+      m_pinBarRatio = MathMax(1.0, m_cfg.Pattern.PinBarRatio);
+      m_engulfMultiplier = MathMax(0.1, m_cfg.Pattern.EngulfMultiplier);
+      m_requireConfirmation = m_cfg.Pattern.RequireConfirmation;
       if(!m_cfg.Pattern.EnablePatterns)
         {
          m_minConfluenceScore = 2.0;
@@ -256,10 +262,11 @@ private:
       double bodyMid = (CandleOpen(r, s) + CandleClose(r, s)) / 2.0;
       double upper = UpperWick(r, s);
       double lower = LowerWick(r, s);
+      double requiredRatio = MathMax(1.0, m_pinBarRatio);
       int dir = 0;
       double extreme = 0.0;
-      if(CandleClose(r, s) > bodyMid && lower > (upper > 0.0 ? upper * 2.0 : _Point)) { dir = 1; extreme = CandleLow(r, s); }
-      else if(CandleClose(r, s) < bodyMid && upper > (lower > 0.0 ? lower * 2.0 : _Point)) { dir = -1; extreme = CandleHigh(r, s); }
+      if(CandleClose(r, s) > bodyMid && lower > (upper > 0.0 ? upper * requiredRatio : _Point * requiredRatio)) { dir = 1; extreme = CandleLow(r, s); }
+      else if(CandleClose(r, s) < bodyMid && upper > (lower > 0.0 ? lower * requiredRatio : _Point * requiredRatio)) { dir = -1; extreme = CandleHigh(r, s); }
       else return;
 
       double wick = (dir == 1) ? lower : upper;
@@ -291,7 +298,7 @@ private:
       else return;
 
       double b1 = CandleBody(r, s), b2 = CandleBody(r, s + 1);
-      double bodyRatio = Clamp01(b2 > 0.0 ? b1 / (b2 * 1.50) : 0.0);
+      double bodyRatio = Clamp01(b2 > 0.0 ? b1 / (b2 * MathMax(0.1, m_engulfMultiplier)) : 0.0);
       double atrQuality = NormalizeATRFactor(CandleRange(r, s), atr);
       double closePower = (dir == 1) ? SafeDiv(c1 - CandleLow(r, s), MathMax(CandleRange(r, s), _Point))
                                      : SafeDiv(CandleHigh(r, s) - c1, MathMax(CandleRange(r, s), _Point));
@@ -395,8 +402,9 @@ public:
    CPatternManager()
       : IManager(), m_historyHead(0), m_historyCount(0),
         m_lastScanBarTime(0), m_totalPatternsDetected(0),
-        m_totalValidSignals(0), m_minConfluenceScore(0.55),
-        m_minDominanceGap(0.15), m_regimeBoostFactor(0.20)
+        m_totalValidSignals(0), m_minConfluenceScore(0.45),
+        m_minDominanceGap(0.08), m_regimeBoostFactor(0.20),
+        m_pinBarRatio(2.0), m_engulfMultiplier(1.1), m_requireConfirmation(true)
      {
       ClearHistory();
       m_lastResult.Clear();
@@ -458,10 +466,13 @@ public:
      {
       outResult.Clear();
       m_lastFeatures.Clear();
-      if(shift < 1 || atrPoints <= 0.0) { outResult.reason = "Invalid shift/ATR"; return false; }
-      if(shift + 2 >= ArraySize(rates)) { outResult.reason = "Insufficient bars"; return false; }
+      int scanShift = shift;
+      if(m_requireConfirmation && scanShift < 1)
+         scanShift = 1;
+      if(scanShift < 0 || atrPoints <= 0.0) { outResult.reason = "Invalid shift/ATR"; return false; }
+      if(scanShift + 2 >= ArraySize(rates)) { outResult.reason = "Insufficient bars"; return false; }
 
-      datetime curTime = rates[shift].time;
+      datetime curTime = rates[scanShift].time;
       if(curTime == m_lastScanBarTime)
         {
          outResult = m_lastResult;
@@ -470,11 +481,11 @@ public:
 
       SPatternVote votes[5];
       for(int i = 0; i < 5; i++) votes[i].Reset();
-      EvaluatePinbar(rates, shift, atrPoints, votes[0]);
-      EvaluateEngulfing(rates, shift, atrPoints, votes[1]);
-      EvaluateTweezer(rates, shift, atrPoints, votes[2]);
-      EvaluateFakey(rates, shift, atrPoints, votes[3]);
-      EvaluateInsideBar(rates, shift, atrPoints, votes[4]);
+      EvaluatePinbar(rates, scanShift, atrPoints, votes[0]);
+      EvaluateEngulfing(rates, scanShift, atrPoints, votes[1]);
+      EvaluateTweezer(rates, scanShift, atrPoints, votes[2]);
+      EvaluateFakey(rates, scanShift, atrPoints, votes[3]);
+      EvaluateInsideBar(rates, scanShift, atrPoints, votes[4]);
 
       for(int i = 0; i < 5; i++)
          if(votes[i].valid) votes[i].regimeWeight = CalculateRegimeWeight(currentRegime, votes[i].type, votes[i].dir);

@@ -429,7 +429,7 @@ private:
       signal.SetPatternManager(pattern);
       signal.SetSRManager(sr);
       if(regime != NULL)
-         signal.SetRegimeManager(NULL);
+         signal.SetRegimeManager(regime);
 
       m_src_pattern = CModuleFactory::CreatePatternSignalSource(pattern);
       if(m_src_pattern != NULL)

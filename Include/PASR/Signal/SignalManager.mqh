@@ -110,6 +110,18 @@ private:
    SignalDecisionResult    m_lastDecisionResult;
    SignalLayerSnapshot     m_snapshot;
 
+   void ReloadRuntimeConfig()
+     {
+      if(m_data != NULL)
+         m_data.GetConfigCache(m_cfg);
+      m_config.ApplyStrategyConfig(m_cfg, m_debugMode);
+      m_aggregator.Init(m_config);
+      m_filterPipeline.Init(m_config);
+      m_cooldownMgr.Init(m_config);
+      m_scorer.Init(m_config);
+      m_configReady = true;
+     }
+
    void RefreshSnapshot(const string reason = "")
      {
       m_snapshot.ready = m_configReady;
@@ -135,12 +147,7 @@ private:
    void EnsureConfigReady()
      {
       if(m_configReady) return;
-      m_config.Init();
-      m_aggregator.Init(m_config);
-      m_filterPipeline.Init(m_config);
-      m_cooldownMgr.Init(m_config);
-      m_scorer.Init(m_config);
-      m_configReady = true;
+      ReloadRuntimeConfig();
       RefreshSnapshot("ConfigReady");
      }
 
@@ -240,12 +247,7 @@ public:
    virtual void OnConfigReload() override
      {
       IManager::OnConfigReload();
-      m_config.Init();
-      m_aggregator.Init(m_config);
-      m_filterPipeline.Init(m_config);
-      m_cooldownMgr.Init(m_config);
-      m_scorer.Init(m_config);
-      m_configReady = true;
+      ReloadRuntimeConfig();
       RefreshSnapshot("ConfigReload");
      }
 

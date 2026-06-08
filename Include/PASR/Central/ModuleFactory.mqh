@@ -37,7 +37,7 @@ public:
      { return new CSignalManager(); }
 
    static PatternSignalSource* CreatePatternSignalSource(CPatternManager *pattern)
-     { return new PatternSignalSource(pattern); }
+      { return new PatternSignalSource(pattern, 0.45); }
 
    static SRSignalSource* CreateSRSignalSource(CAnalysisSRManager *sr, IDataManager *data, const double proximityATR = 0.5)
      { return new SRSignalSource(sr, data, proximityATR); }

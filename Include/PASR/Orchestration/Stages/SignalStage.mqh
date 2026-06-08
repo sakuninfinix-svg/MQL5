@@ -73,8 +73,16 @@ private:
         }
       ctx.signal = m_signal.AggregateSignals();
       ctx.signal_strength = ctx.signal.confidence;
+      SignalLayerSnapshot snap = m_signal.GetSnapshot();
+      if(ctx.signal.direction == SIGNAL_NONE)
+         ctx.exit_message = "Signal: " + snap.lastReason;
       if(m_debug)
-         PrintFormat("[Pipeline] RULE_FALLBACK Signal: dir=%d conf=%.3f src=%s", (int)ctx.signal.direction, ctx.signal.confidence, ctx.signal.primarySource);
+        {
+         if(ctx.signal.direction == SIGNAL_NONE)
+            PrintFormat("[Pipeline] RULE_FALLBACK no trade: %s", snap.lastReason);
+         else
+            PrintFormat("[Pipeline] RULE_FALLBACK Signal: dir=%d conf=%.3f src=%s", (int)ctx.signal.direction, ctx.signal.confidence, ctx.signal.primarySource);
+        }
       if(m_profiling) m_timer.Log("Stage6_RuleFallbackSignal");
       return STAGE_OK;
      }

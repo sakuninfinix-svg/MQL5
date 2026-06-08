@@ -231,42 +231,6 @@ private:
       m_assert.EndSection();
      }
 
-   void TestSignalConfigBridge()
-     {
-      m_assert.BeginSection("SignalConfigBridge");
-
-      StrategyConfig cfg;
-      cfg.Pattern.MinPatternScore = 73.0;
-      cfg.Pattern.LookbackBars = 64;
-      cfg.Risk.RecoveryCooldownBars = 7;
-      cfg.Market.SpreadFilterPips = 2.5;
-      cfg.Market.SessionStartHour = 2;
-      cfg.Market.SessionEndHour = 18;
-
-      CSignalConfig config;
-      config.ApplyStrategyConfig(cfg, true);
-
-      int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-      double pipFactor = (digits == 3 || digits == 5) ? 10.0 : 1.0;
-      double expectedSpreadPoints = 2.5 * pipFactor;
-
-      m_assert.AreEqual("lookback follows pattern config", 64, config.GetSignalLookback());
-      m_assert.IsNear("aggregator min score keeps signal baseline", 0.45, config.GetMinScore(), 0.000001);
-      m_assert.AreEqual("signal cooldown follows recovery cooldown", 7, config.GetSignalCooldownBars());
-      m_assert.AreEqual("pattern failure cooldown follows recovery cooldown", 7, config.GetPatternFailureCooldownBars());
-      m_assert.IsNear("spread filter converted to points", expectedSpreadPoints, config.GetMaxSpreadPoints(), 0.000001);
-      m_assert.IsTrue("session filter enabled for restricted window", config.GetUseSessionFilter());
-      m_assert.IsTrue("debug mode forwarded", config.GetDebugMode());
-
-      cfg.Market.SessionStartHour = 0;
-      cfg.Market.SessionEndHour = 23;
-      config.ApplyStrategyConfig(cfg, false);
-      m_assert.IsFalse("session filter disabled for full-day session", config.GetUseSessionFilter());
-      m_assert.IsFalse("debug mode can be disabled", config.GetDebugMode());
-
-      m_assert.EndSection();
-     }
-
    void TestAIFeatureValidator()
      {
       m_assert.BeginSection("AIFeatureValidator");
@@ -334,7 +298,6 @@ public:
       TestExecutionLedger();
       TestExitConfirmationQueue();
       TestSignalDecisionEngine();
-      TestSignalConfigBridge();
       TestAIFeatureValidator();
       m_assert.PrintReport();
       if(QA::FailCount() == 0)
