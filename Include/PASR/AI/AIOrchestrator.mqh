@@ -1,6 +1,7 @@
 ﻿//+------------------------------------------------------------------+
-//| AI/AIOrchestrator.mqh — v3.10                                    |
+//| AI/AIOrchestrator.mqh — v3.30                                    |
 //| AI-first, risk-aware strategy brain for PASR                      |
+//| Business constants are sourced from StrategyConfig.AI             |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ORCHESTRATOR_MQH__
@@ -26,43 +27,42 @@ private:
    CSequenceFeatureBuilder  *m_seq_feat;
    SAISequenceTensor         m_last_sequence;
    bool                      m_last_sequence_valid;
-   CAIEnsemble           *m_ensemble;
-   CAITrainer            *m_trainer;
-   CConfidenceCalibrator *m_calib;
-   COnlineLearningGuard  *m_guard;
-   CAIFeatureValidator    m_validator;
+   CAIEnsemble              *m_ensemble;
+   CAITrainer               *m_trainer;
+   CConfidenceCalibrator    *m_calib;
+   COnlineLearningGuard     *m_guard;
+   CAIFeatureValidator       m_validator;
    AIFeatureValidationResult m_last_validation;
 
-   // New advanced AI components
-   CLSTMInference         *m_lstm;
-   CAttentionFusion       *m_attention;
-   bool                   m_use_lstm;
-   bool                   m_use_attention;
+   CLSTMInference           *m_lstm;
+   CAttentionFusion         *m_attention;
+   bool                      m_use_lstm;
+   bool                      m_use_attention;
 
-   SAIInferenceResult     m_last_result;
-   SAIRiskDecision        m_last_decision;
-   SAITradeLabel          m_last_label;
-   SAIModelPerf           m_perf;
-   bool                   m_ready;
-   int                    m_min_bars_required;
-   SAIFeatureVector       m_open_features;
-   bool                   m_open_features_valid;
+   SAIInferenceResult        m_last_result;
+   SAIRiskDecision           m_last_decision;
+   SAITradeLabel             m_last_label;
+   SAIModelPerf              m_perf;
+   bool                      m_ready;
+   int                       m_min_bars_required;
+   SAIFeatureVector          m_open_features;
+   bool                      m_open_features_valid;
 
-   EActiveStrategy        m_currentStrategy;
-   EMarketRegime          m_detectedRegime;
-   double                 m_strategyConfidence;
-   datetime               m_lastStrategyChange;
-   int                    m_regimeStreak;
-   double                 m_entryThreshold;
-   double                 m_riskMultiplier;
+   EActiveStrategy           m_currentStrategy;
+   EMarketRegime             m_detectedRegime;
+   double                    m_strategyConfidence;
+   datetime                  m_lastStrategyChange;
+   int                       m_regimeStreak;
+   double                    m_entryThreshold;
+   double                    m_riskMultiplier;
 
-   bool                   m_useAI;
-   double                 m_vetoThreshold;
-   double                 m_driftVetoThreshold;
-   double                 m_highConfidenceThreshold;
+   bool                      m_useAI;
+   double                    m_vetoThreshold;
+   double                    m_driftVetoThreshold;
+   double                    m_highConfidenceThreshold;
 
-   int                    m_hATRRegime;
-   int                    m_hADXRegime;
+   int                       m_hATRRegime;
+   int                       m_hADXRegime;
 
    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
    double Clamp(double v, double lo, double hi) const { return MathMax(lo, MathMin(hi, v)); }
@@ -105,10 +105,12 @@ private:
 
    bool EnsureRegimeIndicators()
      {
+      int atrPeriod = MathMax(1, m_cfg.AI.RegimeATRPeriod);
+      int adxPeriod = MathMax(1, m_cfg.AI.RegimeADXPeriod);
       if(m_hATRRegime == INVALID_HANDLE)
-         m_hATRRegime = iATR(_Symbol, _Period, 20);
+         m_hATRRegime = iATR(_Symbol, _Period, atrPeriod);
       if(m_hADXRegime == INVALID_HANDLE)
-         m_hADXRegime = iADX(_Symbol, _Period, 50);
+         m_hADXRegime = iADX(_Symbol, _Period, adxPeriod);
       return (m_hATRRegime != INVALID_HANDLE && m_hADXRegime != INVALID_HANDLE);
      }
 
@@ -133,17 +135,17 @@ private:
 
    void DetectRegime()
      {
-      double trendStr = CalculateTrendStrength(50);
-      double vol      = CalculateVolatility(20);
+      double trendStr = CalculateTrendStrength(m_cfg.AI.RegimeADXPeriod);
+      double vol      = CalculateVolatility(m_cfg.AI.RegimeATRPeriod);
 
       EMarketRegime newRegime = REGIME_UNKNOWN;
-      if(trendStr > 0.8 && vol > 0.4)
+      if(trendStr > m_cfg.AI.StrongTrendLevel && vol > m_cfg.AI.RangeVolatilityMax)
          newRegime = REGIME_TREND_UP;
-      else if(trendStr < 0.3 && vol < 0.3)
+      else if(trendStr < m_cfg.AI.RangeTrendMax && vol < m_cfg.AI.RangeVolatilityMax)
          newRegime = REGIME_RANGE;
-      else if(vol > 0.8)
+      else if(vol > m_cfg.AI.VolatileLevel)
          newRegime = REGIME_VOLATILE;
-      else if(trendStr > 0.5)
+      else if(trendStr > m_cfg.AI.TrendLevel)
          newRegime = REGIME_TREND_UP;
       else
          newRegime = REGIME_TRANSITION;
@@ -152,7 +154,7 @@ private:
          m_regimeStreak++;
       else
         {
-         if(m_regimeStreak >= 3)
+         if(m_regimeStreak >= MathMax(1, m_cfg.AI.RegimeConfirmBars))
            {
             m_detectedRegime = newRegime;
             m_regimeStreak = 1;
@@ -169,36 +171,38 @@ private:
          case REGIME_TREND_UP:
          case REGIME_TREND_DOWN:
             m_currentStrategy = STRAT_TREND_FOLLOW;
-            m_entryThreshold = 0.60;
-            m_riskMultiplier = 1.20;
-            m_strategyConfidence = 0.85;
+            m_entryThreshold = m_cfg.AI.TrendEntryThreshold;
+            m_riskMultiplier = m_cfg.AI.TrendRiskMultiplier;
+            m_strategyConfidence = m_cfg.AI.TrendStrategyConfidence;
             break;
          case REGIME_RANGE:
             m_currentStrategy = STRAT_RANGE_TRADING;
-            m_entryThreshold = 0.65;
-            m_riskMultiplier = 1.30;
-            m_strategyConfidence = 0.85;
+            m_entryThreshold = m_cfg.AI.RangeEntryThreshold;
+            m_riskMultiplier = m_cfg.AI.RangeRiskMultiplier;
+            m_strategyConfidence = m_cfg.AI.RangeStrategyConfidence;
             break;
          case REGIME_VOLATILE:
             m_currentStrategy = STRAT_BREAKOUT;
-            m_entryThreshold = 0.85;
-            m_riskMultiplier = 0.90;
-            m_strategyConfidence = 0.70;
+            m_entryThreshold = m_cfg.AI.VolatileEntryThreshold;
+            m_riskMultiplier = m_cfg.AI.VolatileRiskMultiplier;
+            m_strategyConfidence = m_cfg.AI.VolatileStrategyConfidence;
             break;
          case REGIME_CRASH:
          case REGIME_UNKNOWN:
             m_currentStrategy = STRAT_CONSERVATIVE;
-            m_entryThreshold = 0.95;
-            m_riskMultiplier = 0.10;
-            m_strategyConfidence = 0.0;
+            m_entryThreshold = m_cfg.AI.ConservativeEntryThreshold;
+            m_riskMultiplier = m_cfg.AI.ConservativeRiskMultiplier;
+            m_strategyConfidence = m_cfg.AI.ConservativeStrategyConfidence;
             break;
          default:
             m_currentStrategy = STRAT_SCALP_AI;
-            m_entryThreshold = 0.70;
-            m_riskMultiplier = 1.00;
-            m_strategyConfidence = 0.75;
+            m_entryThreshold = m_cfg.AI.ScalpEntryThreshold;
+            m_riskMultiplier = m_cfg.AI.ScalpRiskMultiplier;
+            m_strategyConfidence = m_cfg.AI.ScalpStrategyConfidence;
             break;
         }
+      m_entryThreshold = Clamp(m_entryThreshold, AI_MIN_CONF_THRESHOLD, AI_MAX_CONF_THRESHOLD);
+      m_strategyConfidence = Clamp01(m_strategyConfidence);
       m_lastStrategyChange = TimeCurrent();
      }
 
@@ -227,7 +231,7 @@ private:
      {
       double th = MathMax(m_vetoThreshold, m_entryThreshold);
       if(m_currentStrategy == STRAT_CONSERVATIVE)
-         th = MathMax(th, 0.90);
+         th = MathMax(th, m_cfg.AI.ConservativeEntryThreshold);
       if(m_highConfidenceThreshold > 0.0)
          th = MathMin(th, m_highConfidenceThreshold);
       return MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, th));
@@ -250,11 +254,18 @@ private:
 
       decision.direction = res.direction;
       decision.confidence = res.confidence;
-      decision.failureProbability = Clamp01(1.0 - res.confidence + driftPenalty * 0.35 + (1.0 - regimeQuality) * 0.15);
-      decision.expectedR = (res.confidence * 2.0 + edge * 1.25 + regimeQuality * 0.75) - (decision.failureProbability * 1.4);
-      decision.noTradePenalty = Clamp01((threshold - res.confidence) + driftPenalty * 0.50 + (m_currentStrategy == STRAT_CONSERVATIVE ? 0.25 : 0.0));
+      decision.failureProbability = Clamp01(1.0 - res.confidence +
+                                            driftPenalty * m_cfg.AI.DriftFailureWeight +
+                                            (1.0 - regimeQuality) * m_cfg.AI.RegimeFailureWeight);
+      decision.expectedR = (res.confidence * m_cfg.AI.ConfidenceRewardWeight +
+                            edge * m_cfg.AI.EdgeRewardWeight +
+                            regimeQuality * m_cfg.AI.RegimeRewardWeight) -
+                           (decision.failureProbability * m_cfg.AI.FailurePenaltyWeight);
+      decision.noTradePenalty = Clamp01((threshold - res.confidence) +
+                                        driftPenalty * m_cfg.AI.NoTradeDriftWeight +
+                                        (m_currentStrategy == STRAT_CONSERVATIVE ? m_cfg.AI.ConservativeNoTradePenalty : 0.0));
 
-      if(margin < 0.0 || decision.expectedR < 0.35 || decision.failureProbability > 0.72)
+      if(margin < 0.0 || decision.expectedR < m_cfg.AI.MinExpectedR || decision.failureProbability > m_cfg.AI.MaxFailureProbability)
         {
          decision.decisionClass = AI_DECISION_NO_TRADE;
          decision.riskMultiplier = 0.0;
@@ -263,17 +274,22 @@ private:
          return false;
         }
 
-      bool strong = (res.confidence >= MathMax(threshold + 0.10, 0.75) && decision.expectedR >= 1.20 && decision.failureProbability <= 0.45);
+      bool strong = (res.confidence >= MathMax(threshold + m_cfg.AI.StrongConfidenceBuffer, m_cfg.AI.StrongConfidenceMin) &&
+                     decision.expectedR >= m_cfg.AI.StrongExpectedR &&
+                     decision.failureProbability <= m_cfg.AI.StrongMaxFailureProbability);
       if(res.direction > 0)
          decision.decisionClass = strong ? AI_DECISION_STRONG_BUY : AI_DECISION_WEAK_BUY;
       else
          decision.decisionClass = strong ? AI_DECISION_STRONG_SELL : AI_DECISION_WEAK_SELL;
 
-      double volBoost = (m_detectedRegime == REGIME_VOLATILE) ? 1.25 : 1.0;
-      double rangeTighten = (m_detectedRegime == REGIME_RANGE) ? 0.90 : 1.0;
-      decision.recommendedSL_ATR = Clamp(1.0 * volBoost * rangeTighten / MathMax(0.7, m_riskMultiplier), 0.60, 3.00);
-      decision.recommendedTP_ATR = Clamp(decision.recommendedSL_ATR * MathMax(1.15, decision.expectedR), 1.00, 5.00);
-      decision.riskMultiplier = Clamp(m_riskMultiplier * res.confidence * (1.0 - decision.failureProbability * 0.45), 0.05, 1.50);
+      double volBoost = (m_detectedRegime == REGIME_VOLATILE) ? m_cfg.AI.VolatileSLBoost : 1.0;
+      double rangeTighten = (m_detectedRegime == REGIME_RANGE) ? m_cfg.AI.RangeSLTighten : 1.0;
+      decision.recommendedSL_ATR = Clamp(1.0 * volBoost * rangeTighten / MathMax(0.7, m_riskMultiplier),
+                                         m_cfg.AI.MinSL_ATR, m_cfg.AI.MaxSL_ATR);
+      decision.recommendedTP_ATR = Clamp(decision.recommendedSL_ATR * MathMax(m_cfg.AI.MinTPExpectedR, decision.expectedR),
+                                         m_cfg.AI.MinTP_ATR, m_cfg.AI.MaxTP_ATR);
+      decision.riskMultiplier = Clamp(m_riskMultiplier * res.confidence * (1.0 - decision.failureProbability * m_cfg.AI.RiskFailureWeight),
+                                      m_cfg.AI.MinRiskMultiplier, m_cfg.AI.MaxRiskMultiplier);
       decision.reason = StringFormat("AI_RISK_AWARE %s conf=%.2f expR=%.2f fail=%.2f SL=%.2fATR TP=%.2fATR risk=%.2f",
                                      GetStrategyDescription(), decision.confidence, decision.expectedR,
                                      decision.failureProbability, decision.recommendedSL_ATR,
@@ -310,6 +326,7 @@ public:
    CAIOrchestrator()
       : IManager(), m_feat(NULL), m_seq_feat(NULL), m_ensemble(NULL),
         m_trainer(NULL), m_calib(NULL), m_guard(NULL),
+        m_lstm(NULL), m_attention(NULL), m_use_lstm(true), m_use_attention(true),
         m_ready(false), m_min_bars_required(50),
         m_open_features_valid(false), m_last_sequence_valid(false),
         m_currentStrategy(STRAT_NONE), m_detectedRegime(REGIME_UNKNOWN),
@@ -317,8 +334,7 @@ public:
         m_entryThreshold(0.70), m_riskMultiplier(1.0),
         m_useAI(true), m_vetoThreshold(AI_DEFAULT_CONF_THRESHOLD),
         m_driftVetoThreshold(0.75), m_highConfidenceThreshold(0.80),
-        m_hATRRegime(INVALID_HANDLE), m_hADXRegime(INVALID_HANDLE),
-        m_lstm(NULL), m_attention(NULL), m_use_lstm(true), m_use_attention(true)
+        m_hATRRegime(INVALID_HANDLE), m_hADXRegime(INVALID_HANDLE)
      {
       m_last_result.Reset();
       m_last_decision.Reset();
@@ -358,6 +374,7 @@ public:
      {
       if(!IManager::Init(data, bus)) return false;
       ReleaseComponents();
+      RefreshConfig();
 
       m_feat     = new CAIFeatureBuilder();
       m_seq_feat = new CSequenceFeatureBuilder();
@@ -381,7 +398,6 @@ public:
       if(!m_calib.Init(data, bus))    { Print("AI: Calibrator init failed");     ReleaseComponents(); return false; }
       if(!m_guard.Init(data, bus))    { Print("AI: Guard init failed");          ReleaseComponents(); return false; }
 
-      // Initialize new advanced AI components
       if(m_use_lstm)
         {
          m_lstm = new CLSTMInference(42);
@@ -391,10 +407,7 @@ public:
             if(m_lstm != NULL) { delete m_lstm; m_lstm = NULL; }
             m_use_lstm = false;
            }
-         else
-           {
-            Print("AI: LSTM inference engine initialized successfully");
-           }
+         else Print("AI: LSTM inference engine initialized successfully");
         }
 
       if(m_use_attention)
@@ -406,25 +419,18 @@ public:
             if(m_attention != NULL) { delete m_attention; m_attention = NULL; }
             m_use_attention = false;
            }
-         else
-           {
-            Print("AI: Attention fusion initialized successfully");
-           }
+         else Print("AI: Attention fusion initialized successfully");
         }
 
-      m_calib.SetThreshold(m_vetoThreshold);
-      m_guard.SetVetoThreshold(m_driftVetoThreshold);
+      ConfigureParameters(m_cfg.AI.EnableAI, m_cfg.AI.MinConfidence, m_driftVetoThreshold,
+                          MathMax(m_cfg.AI.MinConfidence, m_cfg.AI.StrongConfidenceMin));
       m_trainer.SetEnsemble(m_ensemble);
 
-      RefreshConfig();
-      ConfigureParameters(m_useAI, m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold);
-
       m_ready = true;
-
       DetectRegime();
       SelectStrategy();
 
-      Print("CAIOrchestrator v3.20: risk-aware AI strategy brain with LSTM and Attention initialized");
+      Print("CAIOrchestrator v3.30: unified risk-aware AI strategy brain initialized");
       Print("  Active Strategy: ", GetStrategyDescription());
       Print("  Current Regime: ", EnumToString(m_detectedRegime));
       Print("  LSTM Enabled: ", m_use_lstm ? "Yes" : "No");
@@ -504,12 +510,9 @@ public:
          return false;
         }
 
-      if(fv.timestamp <= 0)
-         fv.timestamp = TimeCurrent();
-      if(fv.symbol == "")
-         fv.symbol = _Symbol;
-      if(fv.timeframe == PERIOD_CURRENT)
-         fv.timeframe = _Period;
+      if(fv.timestamp <= 0) fv.timestamp = TimeCurrent();
+      if(fv.symbol == "") fv.symbol = _Symbol;
+      if(fv.timeframe == PERIOD_CURRENT) fv.timeframe = _Period;
 
       if(!m_validator.Validate(fv, m_ensemble, m_last_validation))
         {
@@ -540,7 +543,6 @@ public:
          return false;
         }
 
-      // Use LSTM if available and sequence is filled, otherwise fall back to ensemble
       double lstm_score = 0.0;
       bool lstm_used = false;
       if(m_use_lstm && m_lstm != NULL && m_lstm.IsSequenceFilled())
@@ -548,8 +550,7 @@ public:
          if(m_lstm.ForwardFV(fv, lstm_score))
            {
             lstm_used = true;
-            if(m_debugMode)
-               PrintFormat("[AIOrchestrator] LSTM prediction: %.4f", lstm_score);
+            if(m_debugMode) PrintFormat("[AIOrchestrator] LSTM prediction: %.4f", lstm_score);
            }
         }
 
@@ -562,13 +563,15 @@ public:
          return false;
         }
 
-      // Combine LSTM and ensemble scores if LSTM was used
       double final_score = vote.final_score;
       if(lstm_used)
         {
-         // Weighted combination: 60% LSTM, 40% ensemble
-         final_score = 0.6 * lstm_score + 0.4 * vote.final_score;
-         out_result.model_id = "lstm+ensemble_ensemble";
+         double lstmW = MathMax(0.0, m_cfg.AI.LSTMBlendWeight);
+         double ensW  = MathMax(0.0, m_cfg.AI.EnsembleBlendWeight);
+         double total = lstmW + ensW;
+         if(total <= 0.0) { lstmW = 0.6; ensW = 0.4; total = 1.0; }
+         final_score = (lstmW * lstm_score + ensW * vote.final_score) / total;
+         out_result.model_id = "lstm+ensemble";
         }
       else
         {
@@ -708,8 +711,10 @@ public:
    virtual void OnConfigReload() override
      {
       IManager::OnConfigReload();
-      // Propagate internal parameter changes from m_cfg if necessary
-      ConfigureParameters(m_useAI, m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold);
+      ConfigureParameters(m_cfg.AI.EnableAI, m_cfg.AI.MinConfidence, m_driftVetoThreshold,
+                          MathMax(m_cfg.AI.MinConfidence, m_cfg.AI.StrongConfidenceMin));
+      DetectRegime();
+      SelectStrategy();
      }
   };
 
@@ -730,12 +735,12 @@ string CAIOrchestrator::GetStrategyDescription() const
 bool CAIOrchestrator::ShouldAllowTrade(int signalStrength)
   {
    if(m_currentStrategy == STRAT_CONSERVATIVE)
-      return (signalStrength > 90);
-   if(m_strategyConfidence < 0.4 && signalStrength < 70)
+      return (signalStrength > (int)m_cfg.AI.ConservativeSignalThreshold);
+   if(m_strategyConfidence < m_cfg.AI.LowStrategyConfidence && signalStrength < m_cfg.AI.LowStrategySignalThreshold)
       return false;
    if(m_currentStrategy == STRAT_RANGE_TRADING)
-      return (signalStrength >= 60);
-   if(m_currentStrategy == STRAT_MEAN_REVERT && signalStrength < 50)
+      return (signalStrength >= m_cfg.AI.RangeSignalThreshold);
+   if(m_currentStrategy == STRAT_MEAN_REVERT && signalStrength < m_cfg.AI.MeanRevertSignalThreshold)
       return false;
    double normalizedSignal = signalStrength / 100.0;
    return (normalizedSignal >= m_entryThreshold);
@@ -745,7 +750,7 @@ void CAIOrchestrator::AdjustRiskParameters(double &riskPercent, double &maxDrawd
   {
    if(m_currentStrategy == STRAT_CONSERVATIVE)
      {
-      riskPercent *= 0.1;
+      riskPercent *= MathMax(0.0, m_cfg.AI.ConservativeRiskMultiplier);
       maxDrawdown *= 0.5;
      }
    else
