@@ -1,6 +1,6 @@
 ﻿//+------------------------------------------------------------------+
-//| AI/AIEnsemble.mqh — v1.10                                        |
-//| MLP ensemble with optional ONNX sequence model fallback           |
+//| AI/AIEnsemble.mqh — v1.11                                        |
+//| MLP ensemble with optional external weights and ONNX fallback     |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ENSEMBLE_MQH__
@@ -12,6 +12,8 @@
 
 #define AI_ENSEMBLE_MAX_MODELS 4
 #define AI_ENSEMBLE_ONNX_WEIGHT 1.5
+#define AI_ENSEMBLE_MLP_WEIGHT_PREFIX "PASR_mlp_m"
+#define AI_ENSEMBLE_MLP_WEIGHT_SUFFIX ".bin"
 
 class CAIEnsemble : public IManager
   {
@@ -43,6 +45,22 @@ private:
       if(StringFind(path, "../") == 0) return false;
       if(StringFind(path, "..\\") == 0) return false;
       return true;
+     }
+
+   string DefaultMlpWeightsFile(const int model_idx) const
+     {
+      return StringFormat("%s%d%s", AI_ENSEMBLE_MLP_WEIGHT_PREFIX, model_idx, AI_ENSEMBLE_MLP_WEIGHT_SUFFIX);
+     }
+
+   void TryLoadMlpWeights()
+     {
+      for(int i = 0; i < m_n_models; i++)
+        {
+         if(m_models[i] == NULL) continue;
+         string file_name = DefaultMlpWeightsFile(i);
+         if(!m_models[i].LoadWeights(file_name))
+            PrintFormat("CAIEnsemble: no external MLP weights loaded for model %d (%s); using initialized weights", i, file_name);
+        }
      }
 
    double ComputeAgreement(double &scores[])
@@ -157,6 +175,7 @@ public:
          m_n_models++;
         }
 
+      TryLoadMlpWeights();
       NormalizeWeights();
       TryLoadOnnxModel();
       m_ready = true;
@@ -255,6 +274,12 @@ public:
      {
       if(idx < 0 || idx >= m_n_models) return NULL;
       return m_models[idx];
+     }
+
+   bool LoadModelWeights(int model_idx, const string filename)
+     {
+      if(model_idx < 0 || model_idx >= m_n_models || m_models[model_idx] == NULL) return false;
+      return m_models[model_idx].LoadWeights(filename);
      }
 
    void NormalizeWeights()
