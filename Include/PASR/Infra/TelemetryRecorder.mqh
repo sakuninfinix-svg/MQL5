@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
-//| Infra/TelemetryRecorder.mqh — v2.22                              |
-//| Telemetry metrics recorder + observability helpers               |
+//| Infra/TelemetryRecorder.mqh — v3.00 Optimized                    |
+//| High-performance telemetry with auto-optimization mode detection |
+//| Saves disk space during strategy optimization runs               |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __INFRA_TELEMETRY_RECORDER_MQH__
@@ -12,11 +13,18 @@
 #include "../Core/Globals.mqh"
 #include "../Observability/ObservabilityTypes.mqh"
 
-#define PASR_TELEMETRY_MAX_BUFFER 100
+// Optimized buffer sizes
+#define PASR_TELEMETRY_MAX_BUFFER       500     // Increased for better batching
+#define PASR_TELEMETRY_OPT_BUFFER       50      // Reduced buffer for optimization mode
+#define PASR_TELEMETRY_FLUSH_INTERVAL   10      // Seconds between automatic flushes
+#define PASR_TELEMETRY_MIN_FLUSH_INT    2       // Minimum flush interval in optimization
+#define PASR_TELEMETRY_FILE_MAX_SIZE    5242880 // 5MB max file size before rotation
+#define PASR_TELEMETRY_RETENTION_DAYS   7       // Keep logs for 7 days
+#define PASR_TELEMETRY_SAMPLE_RATE      10      // Sample rate in optimization (1 of N)
 
 struct STelemetryMetric
   {
-   datetime timestamp;
+   ulong    timestamp_ms;     // Milliseconds for higher precision
    string   metric_name;
    double   value;
    string   unit;
@@ -25,7 +33,7 @@ struct STelemetryMetric
 
    void Clear()
      {
-      timestamp = 0;
+      timestamp_ms = 0;
       metric_name = "";
       value = 0.0;
       unit = "";
@@ -45,6 +53,8 @@ struct TelemetrySnapshot
    double avgLatency;
    double maxSlippage;
    string currentFile;
+   bool   isOptimizationMode;
+   int    sampleRate;
 
    void Clear()
      {
@@ -57,6 +67,8 @@ struct TelemetrySnapshot
       avgLatency = 0.0;
       maxSlippage = 0.0;
       currentFile = "";
+      isOptimizationMode = false;
+      sampleRate = 1;
      }
   };
 
@@ -69,23 +81,39 @@ private:
    bool              m_is_open;
    datetime          m_last_flush;
    int               m_records_pending;
-   STelemetryMetric  m_buffer[PASR_TELEMETRY_MAX_BUFFER];
+   STelemetryMetric  m_buffer[];
    int               m_buffer_count;
+   int               m_buffer_max;
    ulong             m_total_records;
    ulong             m_pipeline_ticks;
    ulong             m_execution_lags;
    double            m_avg_latency;
    double            m_max_slippage;
    string            m_last_observability;
+   bool              m_optimization_mode;
+   int               m_sample_counter;
+   int               m_sample_rate;
+   datetime          m_last_rotation;
+   long              m_current_file_size;
+   
+   // Statistics for optimization reporting
+   ulong             m_sampled_records;
+   ulong             m_skipped_records;
 
 public:
    CTelemetryRecorder()
       : IManager(), m_base_path(""), m_current_file(""), m_file_handle(INVALID_HANDLE),
         m_is_open(false), m_last_flush(0), m_records_pending(0),
-        m_buffer_count(0), m_total_records(0), m_pipeline_ticks(0),
+        m_buffer_count(0), m_buffer_max(PASR_TELEMETRY_MAX_BUFFER),
+        m_total_records(0), m_pipeline_ticks(0),
         m_execution_lags(0), m_avg_latency(0.0), m_max_slippage(0.0),
-        m_last_observability("")
-     {}
+        m_last_observability(""), m_optimization_mode(false),
+        m_sample_counter(0), m_sample_rate(1), m_last_rotation(0),
+        m_current_file_size(0), m_sampled_records(0), m_skipped_records(0)
+     {
+      ArrayResize(m_buffer, m_buffer_max);
+      ArrayInitialize(m_buffer);
+     }
 
    ~CTelemetryRecorder()
      { Deinit(); }
@@ -102,10 +130,24 @@ public:
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
+      
+      // Detect optimization mode automatically
+      m_optimization_mode = MQLInfoInteger(MQL_OPTIMIZATION);
+      
+      if(m_optimization_mode)
+        {
+         m_buffer_max = PASR_TELEMETRY_OPT_BUFFER;
+         ArrayResize(m_buffer, m_buffer_max);
+         m_sample_rate = PASR_TELEMETRY_SAMPLE_RATE;
+         PASRLogInfo("Telemetry", "Optimization mode detected - sampling 1/" + IntegerToString(m_sample_rate));
+        }
+      
       m_base_path = "PASR\\Telemetry\\";
       OpenNewFile();
       WriteHeader();
-      PASRLogInfo("Telemetry", "v2.22 Initialized — recording to: " + m_base_path);
+      
+      string mode = m_optimization_mode ? "OPTIMIZATION" : "NORMAL";
+      PASRLogInfo("Telemetry", "v3.00 Initialized [" + mode + "] - recording to: " + m_base_path);
       return true;
      }
 
@@ -114,11 +156,23 @@ public:
       if(!m_initialized) return;
       Flush();
       CloseFile();
-      PASRLogInfo("Telemetry", "Shutdown. Total records: " + IntegerToString((long)m_total_records));
+      
+      string summary = StringFormat("Shutdown. Total=%I64u Sampled=%I64u Skipped=%I64u",
+                                    m_total_records, m_sampled_records, m_skipped_records);
+      if(m_optimization_mode)
+         summary += " [Optimization Mode]";
+      
+      PASRLogInfo("Telemetry", summary);
       IManager::Deinit();
      }
 
    void Shutdown() { Deinit(); }
+   
+   // Query optimization mode
+   bool IsOptimizationMode() const { return m_optimization_mode; }
+   int GetSampleRate() const { return m_sample_rate; }
+   ulong GetSampledRecords() const { return m_sampled_records; }
+   ulong GetSkippedRecords() const { return m_skipped_records; }
 
    virtual void OnEvent(const PASREvent &event) override
      {
@@ -134,19 +188,35 @@ public:
    void RecordMetric(const string name, double value,
                      const string unit, ulong stage_id=0, const string symbol="")
      {
-      if(m_buffer_count >= PASR_TELEMETRY_MAX_BUFFER) Flush();
-      if(m_buffer_count < 0 || m_buffer_count >= PASR_TELEMETRY_MAX_BUFFER) return;
+      // In optimization mode, apply sampling to reduce disk I/O
+      if(m_optimization_mode)
+        {
+         m_sample_counter++;
+         if(m_sample_counter % m_sample_rate != 0)
+           {
+            m_skipped_records++;
+            m_total_records++;
+            return; // Skip this record
+           }
+         m_sampled_records++;
+        }
+      
+      if(m_buffer_count >= m_buffer_max) Flush();
+      if(m_buffer_count < 0 || m_buffer_count >= m_buffer_max) return;
 
-      m_buffer[m_buffer_count].timestamp   = TimeCurrent();
-      m_buffer[m_buffer_count].metric_name = name;
-      m_buffer[m_buffer_count].value       = value;
-      m_buffer[m_buffer_count].unit        = unit;
-      m_buffer[m_buffer_count].stage_id    = stage_id;
-      m_buffer[m_buffer_count].symbol      = (symbol == "") ? _Symbol : symbol;
+      m_buffer[m_buffer_count].timestamp_ms = TimeCurrent() * 1000 + TimeMillisecond();
+      m_buffer[m_buffer_count].metric_name  = name;
+      m_buffer[m_buffer_count].value        = value;
+      m_buffer[m_buffer_count].unit         = unit;
+      m_buffer[m_buffer_count].stage_id     = stage_id;
+      m_buffer[m_buffer_count].symbol       = (symbol == "") ? _Symbol : symbol;
       m_buffer_count++;
       m_records_pending++;
       m_total_records++;
-      if(TimeCurrent() - m_last_flush > 5) Flush();
+      
+      // Adaptive flush interval based on mode
+      int flush_interval = m_optimization_mode ? PASR_TELEMETRY_MIN_FLUSH_INT : PASR_TELEMETRY_FLUSH_INTERVAL;
+      if(TimeCurrent() - m_last_flush > flush_interval) Flush();
      }
 
    void RecordObservabilityMetric(const string name, double value, const string unit=PASR_UNIT_VALUE)
@@ -182,16 +252,22 @@ public:
       s.avgLatency = m_avg_latency;
       s.maxSlippage = m_max_slippage;
       s.currentFile = m_current_file;
+      s.isOptimizationMode = m_optimization_mode;
+      s.sampleRate = m_sample_rate;
       return s;
      }
 
    void PrintDiagnostics() const
      {
-      PrintFormat("[TelemetryDiag] open=%s buffer=%d pending=%d total=%I64u ticks=%I64u exec=%I64u avgLat=%.2f maxSlip=%.2f file=%s obs=%s",
+      string mode = m_optimization_mode ? "OPT" : "NRM";
+      PrintFormat("[TelemetryDiag] mode=%s open=%s buffer=%d pending=%d total=%I64u sampled=%I64u skipped=%I64u ticks=%I64u exec=%I64u avgLat=%.2f maxSlip=%.2f file=%s obs=%s",
+                  mode,
                   m_is_open ? "true" : "false",
                   m_buffer_count,
                   m_records_pending,
                   m_total_records,
+                  m_sampled_records,
+                  m_skipped_records,
                   m_pipeline_ticks,
                   m_execution_lags,
                   m_avg_latency,
@@ -216,8 +292,11 @@ private:
      {
       CloseFile();
       MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
-      m_current_file = StringFormat("%stelemetry_%04d%02d%02d_%d.csv",
-                                    m_base_path, dt.year, dt.mon, dt.day,
+      
+      // Different filename pattern for optimization mode
+      string mode_prefix = m_optimization_mode ? "opt_" : "";
+      m_current_file = StringFormat("%s%s telemetry_%04d%02d%02d_%d.csv",
+                                    m_base_path, mode_prefix, dt.year, dt.mon, dt.day,
                                     (int)TimeCurrent());
       m_file_handle = FileOpen(m_current_file, FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON);
       if(m_file_handle == INVALID_HANDLE)
@@ -225,7 +304,11 @@ private:
          PASRLogError("Telemetry", "Cannot open file: " + m_current_file + " err=" + IntegerToString(GetLastError()));
          m_is_open = false;
         }
-      else m_is_open = true;
+      else 
+        {
+         m_is_open = true;
+         m_current_file_size = 0;
+        }
      }
 
    void CloseFile()
@@ -242,18 +325,59 @@ private:
      {
       if(!m_is_open) return;
       FileWrite(m_file_handle, "Timestamp", "MetricName", "Value", "Unit", "StageID", "Symbol");
+      m_current_file_size += 50; // Approximate header size
      }
 
    void WriteRecord(const STelemetryMetric &metric)
      {
       if(!m_is_open) return;
-      FileWrite(m_file_handle,
-                TimeToString(metric.timestamp, TIME_DATE|TIME_SECONDS),
+      
+      string line = StringFormat("%s,%s,%.6f,%s,%I64u,%s",
+                TimeToString((datetime)(metric.timestamp_ms / 1000), TIME_DATE|TIME_SECONDS),
                 metric.metric_name,
-                DoubleToString(metric.value, 6),
+                metric.value,
                 metric.unit,
-                IntegerToString((long)metric.stage_id),
+                metric.stage_id,
                 metric.symbol);
+      
+      FileWriteString(m_file_handle, line + "\r\n");
+      m_current_file_size += StringLen(line) + 2;
+      
+      // Check for rotation after each write in normal mode
+      if(!m_optimization_mode && m_current_file_size > PASR_TELEMETRY_FILE_MAX_SIZE)
+         RotateFile();
+     }
+   
+   void RotateFile()
+     {
+      if(!m_is_open) return;
+      
+      FileClose(m_file_handle);
+      
+      // Archive current file with timestamp
+      MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
+      string archive_name = StringReplace(m_current_file, ".csv", 
+                                          StringFormat("_arch_%02d%02d.csv", dt.hour, dt.min));
+      FileMove(m_current_file, 0, archive_name, 0, FILE_COMMON);
+      
+      // Open new file
+      m_current_file = StringFormat("%s telemetry_%04d%02d%02d_%d_rot.csv",
+                                    m_base_path, dt.year, dt.mon, dt.day,
+                                    (int)TimeCurrent());
+      m_file_handle = FileOpen(m_current_file, FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON);
+      if(m_file_handle != INVALID_HANDLE)
+        {
+         WriteHeader();
+         m_current_file_size = 0;
+         m_last_rotation = TimeCurrent();
+         PASRLogInfo("Telemetry", "File rotated due to size limit");
+        }
+      else
+        {
+         // Reopen original file if rotation fails
+         m_file_handle = FileOpen(m_current_file, FILE_WRITE|FILE_CSV|FILE_ANSI|FILE_COMMON);
+         m_is_open = (m_file_handle != INVALID_HANDLE);
+        }
      }
 
    void RecordPipelineLatency(const PASREvent &event)
