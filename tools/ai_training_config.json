@@ -1,0 +1,221 @@
+{
+  "ai_training_config": {
+    "version": "1.0",
+    "description": "Configuration for PASR_MODULAR AI training system",
+    
+    "data_config": {
+      "input_file": "AI_Training_Data_Template.csv",
+      "output_file": "AI_Training_Data_Processed.csv",
+      "validation_file": "AI_Training_Data_Validation.json",
+      "feature_dim": 34,
+      "expected_columns": 44,
+      
+      "validation_rules": {
+        "feature_ranges": {
+          "min": 0.0,
+          "max": 1.0
+        },
+        "label_values": [-1.0, 0.0, 1.0],
+        "weight_range": [0.1, 2.0],
+        "min_samples": 500,
+        "balance_ratio": 0.4
+      }
+    },
+    
+    "training_config": {
+      "model_type": "ensemble",
+      "use_lstm": true,
+      "use_attention": true,
+      "use_onnx": false,
+      
+      "training_parameters": {
+        "learning_rate": 0.001,
+        "batch_size": 32,
+        "epochs": 100,
+        "validation_split": 0.2,
+        "early_stopping_patience": 10,
+        "min_improvement": 0.001
+      },
+      
+      "model_architecture": {
+        "ensemble_models": [
+          {
+            "type": "mlp",
+            "hidden_layers": [128, 64, 32],
+            "activation": "relu",
+            "dropout": 0.3
+          },
+          {
+            "type": "mlp",
+            "hidden_layers": [64, 32],
+            "activation": "tanh",
+            "dropout": 0.2
+          }
+        ],
+        
+        "lstm_config": {
+          "sequence_length": 64,
+          "hidden_size": 128,
+          "num_layers": 2,
+          "dropout": 0.3,
+          "bidirectional": true
+        },
+        
+        "attention_config": {
+          "feature_dim": 34,
+          "num_heads": 8,
+          "key_dim": 43,
+          "dropout": 0.2
+        }
+      },
+      
+      "loss_function": "mse",
+      "optimizer": "adam",
+      "metrics": ["accuracy", "precision", "recall", "f1"]
+    },
+    
+    "feature_config": {
+      "feature_names": [
+        "price_return_1",
+        "price_return_2", 
+        "price_return_3",
+        "price_return_5",
+        "atr_ratio_3",
+        "atr_ratio_5",
+        "atr_ratio_10",
+        "atr_ratio_20",
+        "rsi",
+        "macd_histogram",
+        "cci",
+        "stochastic",
+        "volume_ratio",
+        "obv_delta",
+        "volume_spike",
+        "mfi",
+        "sr_distance",
+        "zone_strength",
+        "pattern_score",
+        "regime_trend",
+        "regime_range",
+        "regime_volatile",
+        "time_hour",
+        "time_day",
+        "zscore_20",
+        "skewness_20",
+        "pattern_buy_prob",
+        "pattern_sell_prob",
+        "pattern_conflict",
+        "pattern_dominance_gap",
+        "pattern_rejection",
+        "pattern_trap",
+        "pattern_reclaim",
+        "pattern_follow"
+      ],
+      
+      "feature_importance": {
+        "high": [
+          "rsi",
+          "macd_histogram",
+          "sr_distance",
+          "pattern_score",
+          "regime_trend",
+          "atr_ratio_14"
+        ],
+        "medium": [
+          "price_return_1",
+          "price_return_3",
+          "volume_ratio",
+          "zone_strength",
+          "time_hour"
+        ],
+        "low": [
+          "price_return_5",
+          "atr_ratio_20",
+          "obv_delta",
+          "time_day"
+        ]
+      }
+    },
+    
+    "output_config": {
+      "model_save_path": "PASR_AI_Weights.bin",
+      "onnx_model_path": "PASR_AI_Model.onnx",
+      "training_log_path": "AI_Training_Log.txt",
+      "performance_report_path": "AI_Performance_Report.json"
+    },
+    
+    "online_learning_config": {
+      "enabled": true,
+      "buffer_size": 500,
+      "min_retrain_samples": 50,
+      "retrain_frequency": 100,
+      "learning_rate_decay": 0.995,
+      "max_samples": 10000
+    },
+    
+    "validation_config": {
+      "cross_validation_folds": 5,
+      "test_set_size": 0.2,
+      "stratified_split": true,
+      "random_seed": 42
+    },
+    
+    "performance_targets": {
+      "min_accuracy": 0.55,
+      "target_accuracy": 0.65,
+      "min_profit_factor": 1.2,
+      "target_profit_factor": 1.5,
+      "max_drawdown": 0.20,
+      "sharpe_ratio_target": 0.5
+    },
+    
+    "regime_specific_config": {
+      "trend_following": {
+        "entry_threshold": 0.60,
+        "risk_multiplier": 1.20,
+        "required_features": [
+          "regime_trend",
+          "rsi",
+          "atr_ratio_14"
+        ]
+      },
+      
+      "range_trading": {
+        "entry_threshold": 0.65,
+        "risk_multiplier": 1.30,
+        "required_features": [
+          "regime_range",
+          "sr_distance",
+          "zone_strength"
+        ]
+      },
+      
+      "breakout": {
+        "entry_threshold": 0.85,
+        "risk_multiplier": 0.90,
+        "required_features": [
+          "regime_volatile",
+          "volume_spike",
+          "atr_ratio_3"
+        ]
+      }
+    },
+    
+    "risk_management_config": {
+      "max_position_size": 0.1,
+      "max_daily_risk": 0.02,
+      "max_concurrent_trades": 3,
+      "min_confidence_threshold": 0.55,
+      "max_confidence_threshold": 0.90,
+      "drift_veto_threshold": 0.75
+    },
+    
+    "logging_config": {
+      "log_level": "INFO",
+      "log_predictions": true,
+      "log_features": false,
+      "log_training_progress": true,
+      "log_performance_metrics": true
+    }
+  }
+}
