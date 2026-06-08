@@ -43,6 +43,7 @@
 #include <PASR/Infra/PerformanceReport.mqh>
 #include <PASR/Infra/SanityManager.mqh>
 #include <PASR/Infra/StateManager.mqh>
+#include <PASR/Infra/AuditLogSystem.mqh>
 
 // SymbolScanner is a manager-like component, not a pure data type.
 // Include it after DataManager/IManager contracts are available.

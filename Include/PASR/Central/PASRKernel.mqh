@@ -42,6 +42,7 @@ private:
    bool                    m_new_bar_flag;
    ulong                   m_last_price_dispatch_ms;
    int                     m_price_dispatch_throttle_ms;
+   CAuditLogSystem        *m_audit_log;
 
    double ConfigDigest() const
      {
@@ -670,6 +671,17 @@ public:
       m_cfg = cfg;
       m_last_error = "";
 
+      // Initialize audit log system first for early logging
+      m_audit_log = new CAuditLogSystem();
+      if(m_audit_log != NULL)
+        {
+         if(!m_audit_log.Init(cfg))
+           {
+            delete m_audit_log;
+            m_audit_log = NULL;
+           }
+        }
+
       m_event_bus = CModuleFactory::CreateEventBus();
       if(m_event_bus == NULL)
         {
@@ -744,6 +756,15 @@ public:
          delete m_event_bus;
          m_event_bus = NULL;
         }
+      
+      // Shutdown audit log last to capture all shutdown events
+      if(m_audit_log != NULL)
+        {
+         m_audit_log.Shutdown();
+         delete m_audit_log;
+         m_audit_log = NULL;
+        }
+      
       m_ready = false;
       ResetRuntimeState();
       SetState(PASR_KERNEL_STOPPED);
