@@ -7,31 +7,78 @@
 #define __PASR_ORCHESTRATION_DATA_SYNC_STAGE_MQH__
 
 #include <PASR/Core/PipelineTypes.mqh>
-#include <PASR/Core/IManager.mqh>
-#include <PASR/Orchestration/Stages/PipelineStageBase.mqh>
+#include <PASR/Core/Globals.mqh>
+#include <PASR/Infra/DataManager.mqh>
+#include <PASR/Orchestration/PipelineStage.mqh>
 
 class CDataSyncStage : public CPipelineStageBase
   {
 private:
-   IManager *m_manager;
+   CDataManager *m_data;
+   bool          m_enabled;
+   bool          m_debug;
+   bool          m_profiling;
+   CPerfTimer    m_timer;
+
+   void FillPriceContext(PipelineContext &ctx)
+     {
+      MqlTick tick;
+      if(SymbolInfoTick(_Symbol, tick))
+        {
+         ctx.bid = tick.bid;
+         ctx.ask = tick.ask;
+        }
+      else
+        {
+         ctx.bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         ctx.ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+        }
+      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      ctx.spread_pts = (point > 0.0 && ctx.ask > ctx.bid) ? (ctx.ask - ctx.bid) / point : 0.0;
+      ctx.atr_points = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
+      ctx.atr = ctx.atr_points;
+      ctx.bar_time = iTime(_Symbol, _Period, 0);
+      ctx.market_open = (ctx.bid > 0.0 && ctx.ask > 0.0);
+      ctx.session = PASRDetectSession();
+      ctx.account.Capture();
+     }
 
 public:
-   CDataSyncStage() : CPipelineStageBase("DataSyncStage"), m_manager(NULL)
+   CDataSyncStage() : m_data(NULL), m_enabled(true), m_debug(false), m_profiling(true) {}
+
+   void Bind(CDataManager *data)
      {
-      m_enabled = false;
+      m_data = data;
      }
 
    void Bind(IManager *manager)
      {
-      m_manager = manager;
+     m_enabled = enabled;
+     }
+
+   void SetDebugMode(const bool enabled)
+     {
+      m_debug = enabled;
+     }
+
+   void EnableProfiling(const bool enabled)
+     {
+      m_profiling = enabled;
      }
 
    virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
      {
       if(!m_enabled)
          return STAGE_SKIP;
-      if(m_manager == NULL)
-         return Abort(ctx, "DataSyncStage manager not bound");
+      if(m_data == NULL)
+        {
+         if(m_debug) Print("[Pipeline] DataSync SKIP: manager is NULL");
+         return STAGE_SKIP;
+        }
+      m_timer.Start();
+      m_data.OnTick();
+      FillPriceContext(ctx);
+      if(m_profiling) m_timer.Log("Stage1_DataSync");
       return STAGE_OK;
      }
   };

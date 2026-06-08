@@ -33,6 +33,7 @@
 
 // Layer 2: Infra managers and data providers
 #include <PASR/Infra/AdaptiveConfig.mqh>
+#include <PASR/Infra/AccountSnapshot.mqh>
 #include <PASR/Infra/DataManager.mqh>
 #include <PASR/Infra/HealthMonitor.mqh>
 #include <PASR/Infra/SessionState.mqh>
@@ -49,9 +50,6 @@
 
 // Layer 3: Analysis base modules and helpers
 #include <PASR/Analysis/Pattern/PatternTypes.mqh>
-#include <PASR/Analysis/Pattern/CandleUtils.mqh>
-#include <PASR/Analysis/Pattern/FakeoutDetector.mqh>
-#include <PASR/Analysis/Pattern/ScoreEngine.mqh>
 #include <PASR/Analysis/Pattern/PatternManager.mqh>
 #include <PASR/Analysis/SRDetector.mqh>
 #include <PASR/Analysis/SRManager.mqh>
@@ -91,6 +89,7 @@
 #include <PASR/Signal/SignalManager.mqh>
 
 // Layer 7: Trade managers
+#include <PASR/Trade/PositionRegistry.mqh>
 #include <PASR/Trade/PositionManager.mqh>
 #include <PASR/Trade/ExitEngine.mqh>
 #include <PASR/Trade/RiskManager.mqh>
@@ -112,8 +111,19 @@
 #include <PASR/Orchestration/PipelineStage.mqh>
 #include <PASR/Orchestration/Stages/PipelineStageBase.mqh>
 #include <PASR/Orchestration/Stages/DataSyncStage.mqh>
+#include <PASR/Orchestration/Stages/AnalysisSRStage.mqh>
+#include <PASR/Orchestration/Stages/AnalysisZoneStage.mqh>
+#include <PASR/Orchestration/Stages/PatternStage.mqh>
+#include <PASR/Orchestration/Stages/RegimeStage.mqh>
 #include <PASR/Orchestration/Stages/SignalStage.mqh>
+#include <PASR/Orchestration/Stages/AIInferStage.mqh>
 #include <PASR/Orchestration/Stages/RiskStage.mqh>
+#include <PASR/Orchestration/Stages/AdaptiveParamsStage.mqh>
+#include <PASR/Orchestration/Stages/ExecutionStage.mqh>
+#include <PASR/Orchestration/Stages/PositionStage.mqh>
+#include <PASR/Orchestration/Stages/RecoveryStage.mqh>
+#include <PASR/Orchestration/Stages/DashboardStage.mqh>
+#include <PASR/Orchestration/Stages/JournalStage.mqh>
 #include <PASR/Orchestration/PipelineEngine.mqh>
 
 // PipelineTypes temporarily maps DetectSession -> PASRDetectSession so included
@@ -123,13 +133,12 @@
 #undef DetectSession
 #endif
 
-// Layer 10: Centralized Modular Pipeline facade and compatibility backend
+// Layer 10: Centralized Modular Pipeline facade
 #include <PASR/Central/ModuleNames.mqh>
 #include <PASR/Central/ModuleRegistry.mqh>
 #include <PASR/Central/ServiceLocator.mqh>
 #include <PASR/Central/LifecycleManager.mqh>
-#include <PASR/Central/BackendAdapter.mqh>
-#include <PASR/Central/BackendAdapterInit.mqh>
+#include <PASR/Central/ModuleFactory.mqh>
 #include <PASR/Central/PASRKernel.mqh>
 
 #endif // __CORE_PASR_MASTER_MQH__

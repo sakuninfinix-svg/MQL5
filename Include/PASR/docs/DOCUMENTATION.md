@@ -1,102 +1,62 @@
-# PASR Framework — Architecture & API Reference
+# 📘 PASR Technical Documentation Hub
 
-## Architecture Overview
+Selamat datang di pusat dokumentasi **Price Action Support Resistance (PASR) EA**. Dokumen ini dirancang sebagai panduan navigasi utama bagi pengembang untuk memahami, memelihara, dan mengembangkan sistem perdagangan berbasis **Centralized Modular Pipeline**.
 
-PASR menggunakan **7-layer architecture** dengan dependency flow satu arah (lower layers tidak boleh depend ke layer lebih tinggi):
+---
 
-```
-L0: Tools/Optimizations     ← macros, CStringPool (no MQL5 deps)
-L1: Core/Config/Types       ← plain structs only
-L2: Core/EventBus           ← Event, IEventHandler, EventBus
-L3: Core/Events             ← concrete event classes
-L4: Core/IManager           ← base interface: Init/Shutdown/OnNewBar
-L5: Globals                 ← GVKey(), helpers, CPerfTimer
-L6: Data/DataManager        ← indicator + symbol data cache
-L7: Core/Config/Manager     ← loads+validates StrategyConfig
-L8: Data/MarketRegime       ← trend/range/volatile regime
-L9: Analysis/ZoneManager    ← supply/demand zone detection (v2.01)
-L10: Data/MarketManager     ← spread, session, conditions
-L11: Data/SRManager         ← S/R level calculation
-L12: Analysis/PatternManager <- candlestick pattern recognition
-L13: Signal/SignalManager   ← entry/exit signal orchestration
-L14: AI/CAIOrchestrator     ← ML inference & regime enhancement (26-dim, v4.02)
-L15: Trade/ExecutionManager ← CTrade wrapper, SL/TP management
-L16: Trade/RecoveryManager  ← error recovery, GV state cleanup
-L17: UI/DashboardManager    ← chart overlay dashboard
-```
+## 🚀 Visi & Filosofi Sistem
+> **"Centralized Control, Decentralized Logic"**
+Sistem ini memisahkan mekanisme *orchestration* (urutan kerja) dari *domain logic* (strategi trading). Dengan menggunakan `CPASRKernel` sebagai jantung sistem, PASR menjamin stabilitas eksekusi tanpa mengorbankan fleksibilitas strategi.
 
-## Key Design Patterns
+---
 
-### Event-Driven Communication
+## 📂 Peta Dokumentasi (Navigation Map)
 
-Managers communicate exclusively through EventBus — never direct pointer calls:
+### 1. Fondasi & Arsitektur
+- [**ARCHITECTURE.md**](./ARCHITECTURE.md): Blueprint kernel, registry, lifecycle manager, dan 14-stage pipeline.
+- [**QUICKSTART.md**](./QUICKSTART.md): Panduan cepat integrasi `CPASRKernel` ke dalam file `.mq5` baru.
+- **CENTRALIZED_MODULAR_MIGRATION_PROJECT.md**: Rekaman sejarah transformasi dari sistem monolitik ke modular.
 
-```mql5
-// PUBLISH
-CSignalEvent event(SIGNAL_BUY, 1.0, close);
-m_bus.Publish(event);
+### 2. Logika Bisnis & Strategi
+- [**fundamental-business-logic-audit.md**](./fundamental-business-logic-audit.md): Analisis mendalam tentang risiko logika trading, konsistensi data, dan integritas sinyal.
+- [**Signal Decision Engine**: (In Progress) Dokumentasi mekanisme voting dan veto sinyal.
 
-// SUBSCRIBE
-m_bus.Subscribe(EVENT_SIGNAL, GetPointer(this));
+---
 
-// HANDLE
-void OnEvent(const CEvent *evt) override {
-    if (evt.GetId() == EVENT_SIGNAL) { ... }
-}
-```
+## 📈 Progress Pengembangan (Development Roadmap)
 
-### Config Caching Pattern
+### **Status Saat Ini: Fase Hardening & Integritas Data**
+Setelah sukses memigrasikan arsitektur ke model modular, fokus saat ini bergeser ke **Deterministic Trading Decisions**.
 
-Ambil config SATU kali per manager, bukan per-fungsi:
+#### ✅ Selesai (Milestones)
+- **Arsitektur Modular Centralized**: Kernel sepenuhnya mengontrol lifecycle dan dependency (v0.31).
+- **Position Authority (FBL-001)**: Implementasi `CPositionRegistry` sebagai sumber kebenaran tunggal posisi terbuka.
+- **Account Consistency (FBL-002)**: Penggunaan `SAccountSnapshot` yang menjamin kalkulasi risk tetap konsisten dalam satu siklus pipeline.
+- **AI Feature Guard**: Validasi input AI sebelum inferensi dilakukan untuk mencegah "garbage in, garbage out".
 
-```mql5
-class CMyManager : public IManager {
-private:
-    StrategyConfig m_cfg;           // cached config
-    bool           m_cfgDirty;
+#### 🛠️ Sedang Berjalan (Active Sprints)
+- **Execution & Exit Ledger (FBL-005)**: Memperkuat pelacakan status order dari request hingga konfirmasi broker (DEAL_ENTRY_IN/OUT).
+- **Signal Conflict Guard**: Pengembangan algoritma penengah (resolver) ketika sinyal AI dan Price Action tidak sejalan.
+- **AI Model Evolution**: Riset integrasi *Transformer-based Attention* untuk prediksi volatilitas intra-day.
 
-    void RefreshConfig() {
-        if (m_cfgDirty) {
-            m_data.GetConfigCache(m_cfg);
-            m_cfgDirty = false;
-        }
-    }
+#### 📋 Backlog (Future Work)
+- **Multi-Symbol Expansion**: Mengoptimalkan kernel untuk menangani pemindaian multi-instrumen secara simultan.
+- **Adaptive Parameter Governance**: Digitalisasi parameter trading agar validasi range terjadi secara otomatis saat inisialisasi.
 
-public:
-    void OnEvent(const CEvent *evt) override {
-        if (evt.GetId() == EVENT_CONFIG_RELOAD)
-            m_cfgDirty = true;      // lazy reload
-    }
-};
-```
+---
 
-### Account-Safe GlobalVariables
+## 🛠️ Standar Pengembangan
+Setiap perubahan pada kode harus melewati gerbang verifikasi berikut:
+1. **Compile Guard**: Harus lolos `0 errors, 0 warnings` pada `PASR_MODULAR.mq5`.
+2. **Smoke Test**: Menjalankan `PASR_Smoke.mq5` untuk memverifikasi fungsionalitas dasar kernel.
+3. **Business Logic Harness**: Memastikan perubahan tidak merusak integritas data posisi dan account.
 
-SELALU gunakan GVKey() atau helper dari Globals.mqh:
+---
 
-```mql5
-// BERBAHAYA — collision antara live/demo:
-GlobalVariableSet("TRADE_STATE", 1.0);
+## 💡 Catatan Penting untuk Developer
+- **Entry Point**: Selalu gunakan `#include <PASR/Core/PASR.mqh>`. Jangan meng-include manager secara individual di file EA utama.
+- **OnTick Policy**: Pertahankan `OnTick()` tetap ringan. Pekerjaan berat (Analisis, AI, Risk) wajib berada di dalam `OnTimer()` melalui pipeline stages.
+- **Stabilitas**: PASR saat ini berada dalam tahap *Research-Grade*. Selalu lakukan pengujian di akun demo/tester sebelum mempertimbangkan implementasi live.
 
-// AMAN — auto prefix account_symbol_magic:
-GVSet("TRADE_STATE", 1.0);
-```
-
-## Performance Budget
-
-| Handler | Budget | Strategy |
-|---------|--------|----------|
-| OnTick() | <100µs | Early return, no allocs |
-| OnNewBar() | <2ms | Deferred heavy compute |
-| EventBus dispatch | <50µs | Array-based queue |
-| Dashboard render | 1 Hz max | Throttle with GetMicrosecondCount() |
-
-## Critical Known Issues (to fix)
-
-1. **RecoveryManager::ClearEngineGVs()** — `cfg` tidak di-declare di scope. Fix:
-   ```mql5
-   StrategyConfig cfg;
-   m_data.GetConfigCache(cfg);
-   ```
-2. **CAIOrchestrator training** — deferred ke EventBus queue (tidak blocking tick thread).
-3. **DashboardManager** — tambah throttle 1Hz sebelum rebuild string.
+---
+*Terakhir Diperbarui: 2026-06-05 | Tim Arsitektur PASR*

@@ -14,9 +14,9 @@ README ini berfungsi sebagai dokumentasi arsitektur, peta folder, panduan build,
 
 ## Architecture Overview
 
-PASR sekarang bergerak menuju **Centralized Modular Pipeline Architecture**.
+PASR sekarang memakai **Centralized Modular Pipeline Architecture**.
 
-Entry point EA memakai `CPASRKernel` sebagai pusat lifecycle, service facade, dan owner pipeline. Untuk fase kompatibilitas, `CPASRKernel` masih memakai `CBackendAdapter` sebagai backend manager/event adapter, tetapi timer pipeline dijalankan oleh kernel-owned `CPipelineEngine`.
+Entry point EA memakai `CPASRKernel` sebagai pusat lifecycle, service facade, owner manager registry, runtime event loop, dan owner pipeline. Compatibility runtime lama sudah dihapus dari canonical tree.
 
 ```text
 Experts/PASR_MODULAR.mq5
@@ -24,8 +24,6 @@ Experts/PASR_MODULAR.mq5
 CPASRKernel
         ↓
 CModuleRegistry + CServiceLocator + CLifecycleManager
-        ↓
-CBackendAdapter compatibility backend
         ↓
 CPipelineEngine::ExecutePipeline(PipelineContext)
         ↓
@@ -45,7 +43,7 @@ CPipelineEngine::ExecutePipeline(PipelineContext)
 14 Journal
 ```
 
-`CBackendAdapter` pada diagram di atas adalah compatibility backend untuk bootstrap/tick/trade events. Pipeline object, timer execution, dan lifetime manager berbasis `IManager` sudah dimiliki `CPASRKernel`. `COrchestrator` masih tersedia sebagai wrapper kompatibilitas untuk include lama.
+Pipeline object, timer execution, runtime tick/trade routing, dan lifetime manager berbasis `IManager` sudah dimiliki `CPASRKernel`. `Core/PASR.mqh` tidak lagi menyertakan surface compatibility runtime lama.
 
 Runtime event flow tetap:
 
@@ -62,7 +60,7 @@ OnDeinit()           -> g_kernel.OnDeinit()
 
 ```text
 Include/PASR/
-├── Core/           Core primitives, EventBus, IManager, legacy backend adapters
+├── Core/           Core primitives, EventBus, IManager, master include, utilities
 ├── Central/        Kernel facade, module registry, service locator, lifecycle manager
 ├── Orchestration/  Pipeline/stage interfaces and future split-stage implementation
 ├── Analysis/       SR, Zone, Regime, AdaptiveParameter, Pattern modules
@@ -101,9 +99,10 @@ Remaining `PERF_METRICS` cleanup is tracked in Issue #181.
 |------|--------|-------|
 | Fase 1 | Done | Add `Central/`, `CPASRKernel`, `CModuleRegistry`, `CServiceLocator`, `CLifecycleManager` |
 | Fase 2 | Done | `Experts/PASR_MODULAR.mq5` now uses `CPASRKernel g_kernel` |
-| Fase 3 | In progress | Extract allocation/lifecycle/dependency ownership from `Central/BackendAdapter*.mqh` |
-| Fase 4 | In progress | Add `Orchestration/` and `IPipelineStage` target interface |
-| Fase 5 | Pending | Move `CPipelineEngine` implementation out of `Core/` after compile stability |
+| Fase 3 | Done | Allocation/lifecycle/dependency ownership moved into `CPASRKernel` |
+| Fase 4 | Done | Runtime event loop and dependency injection owned by kernel/service locator |
+| Fase 5 | Done | Move `CPipelineEngine` implementation to `Orchestration/`; keep `Core/PipelineEngine.mqh` as wrapper |
+| Fase 6 | Done | Split all primary runtime stages into `Orchestration/Stages/*Stage.mqh` delegates |
 
 ---
 
@@ -127,9 +126,9 @@ S21-010 adalah dokumentasi issue yang diselesaikan oleh migrasi ini: README tida
 
 1. Compile-test `Experts/PASR_MODULAR.mq5` after `CPASRKernel` adoption.
 2. Fix any include/type errors introduced by `Central/` and `Orchestration/` headers.
-3. Move remaining allocation/bootstrap code from `Central/BackendAdapterInit.mqh` into Central-owned services.
-4. Extract lifecycle init/deinit ordering into `CLifecycleManager`.
-5. Move `CPipelineEngine` implementation to `Orchestration/` only after compile stability.
+3. Keep `Core/PASR.mqh` as the canonical include without legacy runtime adapters.
+4. Keep lifecycle init/deinit ordering centralized through `CPASRKernel` + `CLifecycleManager`.
+5. Keep migration docs consistent with the canonical kernel path.
 6. Decompose `Analysis/SRManager.mqh` and audit `Analysis/Pattern` after core compile is stable.
 
 ---
@@ -180,14 +179,12 @@ void OnDeinit(const int reason)
 | File | Version | Status |
 |------|---------|--------|
 | `Core/PASR.mqh` | central include order | Active |
-| `Central/PASRKernel.mqh` | v0.12 | Compatibility facade |
+| `Central/PASRKernel.mqh` | v0.31 | Central runtime, manager bootstrap, and pipeline owner |
 | `Central/ModuleRegistry.mqh` | v0.10 | Active |
 | `Central/ServiceLocator.mqh` | v0.11 | Active |
 | `Central/LifecycleManager.mqh` | v0.10 | Skeleton |
 | `Central/ModuleNames.mqh` | v0.10 | Active |
 | `Orchestration/PipelineStage.mqh` | v0.10 | Skeleton |
-| `Central/BackendAdapter.mqh` | v3.11 | Compatibility backend |
-| `Core/Orchestrator.mqh` | v3.11 | Compatibility wrapper |
 | `Orchestration/PipelineEngine.mqh` | v2.20 | Canonical pipeline engine |
 | `Core/PipelineEngine.mqh` | v2.20 | Compatibility wrapper |
 | `Signal/SignalManager.mqh` | v4.02 | Stable |

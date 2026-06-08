@@ -25,6 +25,7 @@ private:
    void StoreLast(SignalResult &out, const string reason, double zonePrice = 0.0, double zoneStrength = 0.0)
      {
       m_lastEvaluated = TimeCurrent();
+      out.evaluatedAt = m_lastEvaluated;
       m_lastDirection = out.direction;
       m_lastConfidence = out.confidence;
       m_lastReason = reason;

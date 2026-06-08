@@ -51,9 +51,12 @@ struct SignalAggregatorSnapshot
    int     voterCount;
    int     multiplierCount;
    int     vetoCount;
+   int     staleSourceCount;
    double  totalVoterWeight;
    double  bullScore;
    double  bearScore;
+   double  conflictScore;
+   double  dominanceGap;
    double  multiplierFactor;
    int     bullConfluence;
    int     bearConfluence;
@@ -71,9 +74,12 @@ struct SignalAggregatorSnapshot
       voterCount = 0;
       multiplierCount = 0;
       vetoCount = 0;
+      staleSourceCount = 0;
       totalVoterWeight = 0.0;
       bullScore = 0.0;
       bearScore = 0.0;
+      conflictScore = 0.0;
+      dominanceGap = 0.0;
       multiplierFactor = 1.0;
       bullConfluence = 0;
       bearConfluence = 0;
@@ -155,6 +161,7 @@ private:
    bool    m_vetoSell;
    string  m_vetoReason;
    string  m_lastDecisionReason;
+   int     m_staleSourceCount;
 
    void ResetState()
      {
@@ -171,6 +178,7 @@ private:
       m_vetoSell         = false;
       m_vetoReason       = "";
       m_lastDecisionReason = "";
+      m_staleSourceCount = 0;
      }
 
    void RefreshSnapshot()
@@ -185,8 +193,11 @@ private:
          else if(t == SOURCE_TYPE_VETO) m_snapshot.vetoCount++;
         }
       m_snapshot.totalVoterWeight = m_totalVoterWeight;
+      m_snapshot.staleSourceCount = m_staleSourceCount;
       m_snapshot.bullScore = m_bullScore;
       m_snapshot.bearScore = m_bearScore;
+      m_snapshot.conflictScore = MathMin(m_bullScore, m_bearScore);
+      m_snapshot.dominanceGap = MathAbs(m_bullScore - m_bearScore);
       m_snapshot.multiplierFactor = m_multiplierFactor;
       m_snapshot.bullConfluence = m_bullConfluence;
       m_snapshot.bearConfluence = m_bearConfluence;
@@ -197,6 +208,26 @@ private:
       m_snapshot.bullSources = m_bullSources;
       m_snapshot.bearSources = m_bearSources;
       m_snapshot.lastDecisionReason = m_lastDecisionReason;
+     }
+
+   bool IsFresh(SignalResult &result, const string sourceName)
+     {
+      if(result.evaluatedAt == 0)
+        {
+         result.evaluatedAt = TimeCurrent();
+         return true;
+        }
+      int maxAge = (m_config != NULL) ? m_config.GetMaxSourceAgeSeconds() : 120;
+      if(maxAge <= 0) return true;
+      int age = (int)(TimeCurrent() - result.evaluatedAt);
+      if(age <= maxAge) return true;
+      m_staleSourceCount++;
+      if(m_lastDecisionReason == "")
+         m_lastDecisionReason = StringFormat("Stale signal source ignored: %s age=%d max=%d",
+                                             sourceName, age, maxAge);
+      if(m_config != NULL && m_config.GetDebugMode())
+         PrintFormat("[SignalAgg] STALE %s: age=%d max=%d", sourceName, age, maxAge);
+      return false;
      }
 
    bool ProcessVetoSource(int idx, SignalResult &result)
@@ -326,6 +357,7 @@ public:
          if(src == NULL) continue;
          SignalResult result; result.Clear();
          if(!src.Evaluate(result)) continue;
+         if(!IsFresh(result, src.Name())) continue;
          if(!ProcessVetoSource(i, result))
            {
             agg.vetoed = true;
@@ -341,6 +373,7 @@ public:
          if(src == NULL) continue;
          SignalResult result; result.Clear();
          if(!src.Evaluate(result)) continue;
+         if(!IsFresh(result, src.Name())) continue;
          ProcessMultiplierSource(i, result);
         }
 
@@ -351,6 +384,7 @@ public:
          if(src == NULL) continue;
          SignalResult result; result.Clear();
          if(!src.Evaluate(result)) continue;
+         if(!IsFresh(result, src.Name())) continue;
          ProcessVoterSource(i, result);
         }
 
@@ -365,8 +399,22 @@ public:
       double normBear = (m_bearScore / m_totalVoterWeight) * m_multiplierFactor;
       int    minConfluence = (m_config != NULL) ? m_config.GetMinConfluence() : 2;
       double minScore      = (m_config != NULL) ? m_config.GetMinScore()      : 0.45;
+      double minGap        = (m_config != NULL) ? m_config.GetMinDominanceGap() : 0.12;
+      double conflictScore = MathMin(normBull, normBear);
+      double dominanceGap  = MathAbs(normBull - normBear);
 
-      if(normBull > normBear && m_bullConfluence >= minConfluence && normBull >= minScore)
+      bool bullQualified = (m_bullConfluence >= minConfluence && normBull >= minScore);
+      bool bearQualified = (m_bearConfluence >= minConfluence && normBear >= minScore);
+
+      if(bullQualified && bearQualified && dominanceGap < minGap)
+        {
+         m_lastDecisionReason = StringFormat("Conflict no-trade bull=%.3f bear=%.3f gap=%.3f minGap=%.3f",
+                                             normBull, normBear, dominanceGap, minGap);
+         RefreshSnapshot();
+         return agg;
+        }
+
+      if(normBull > normBear && bullQualified)
         {
          agg.direction           = SIGNAL_BUY;
          agg.rawScore            = m_bullScore;
@@ -377,7 +425,7 @@ public:
          agg.urgency             = m_scorer.GetUrgencyLevel(normBull);
          m_lastDecisionReason    = "BUY accepted";
         }
-      else if(normBear > normBull && m_bearConfluence >= minConfluence && normBear >= minScore)
+      else if(normBear > normBull && bearQualified)
         {
          agg.direction           = SIGNAL_SELL;
          agg.rawScore            = m_bearScore;
@@ -390,8 +438,9 @@ public:
         }
       else
         {
-         m_lastDecisionReason = StringFormat("No consensus bull=%.3f/%d bear=%.3f/%d minScore=%.3f minConf=%d",
-                                             normBull, m_bullConfluence, normBear, m_bearConfluence, minScore, minConfluence);
+         m_lastDecisionReason = StringFormat("No consensus bull=%.3f/%d bear=%.3f/%d conflict=%.3f gap=%.3f minScore=%.3f minConf=%d",
+                                             normBull, m_bullConfluence, normBear, m_bearConfluence,
+                                             conflictScore, dominanceGap, minScore, minConfluence);
         }
 
       ApplyContraVeto(agg);

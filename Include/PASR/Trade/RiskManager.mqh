@@ -87,6 +87,8 @@ private:
    int     m_maxOpenTrades;
    int     m_maxConsecLoss;
    double  m_maxSpreadPts;
+   int     m_sessionStartHour;
+   int     m_sessionEndHour;
    double  m_minLot;
    double  m_maxLot;
    double  m_lotStep;
@@ -96,11 +98,35 @@ private:
    double  m_peakEquity;
    datetime m_lastResetDay;
    bool    m_circuitBroken;
+   SAccountSnapshot m_cycleAccount;
+   bool    m_hasCycleAccount;
+   double  m_cycleFloatingPnL;
+   bool    m_hasCyclePositions;
    RiskPnLRecord m_accountedPnL[];
 
-   double AccountBalance()    const { return ::AccountInfoDouble(ACCOUNT_BALANCE);     }
-   double AccountEquity()     const { return ::AccountInfoDouble(ACCOUNT_EQUITY);      }
-   double AccountFreeMargin() const { return ::AccountInfoDouble(ACCOUNT_MARGIN_FREE); }
+   double AccountBalance() const
+     {
+      if(m_hasCycleAccount && m_cycleAccount.valid) return m_cycleAccount.balance;
+      SAccountSnapshot account;
+      account.Capture();
+      return account.valid ? account.balance : 0.0;
+     }
+
+   double AccountEquity() const
+     {
+      if(m_hasCycleAccount && m_cycleAccount.valid) return m_cycleAccount.equity;
+      SAccountSnapshot account;
+      account.Capture(m_peakEquity);
+      return account.valid ? account.equity : 0.0;
+     }
+
+   double AccountFreeMargin() const
+     {
+      if(m_hasCycleAccount && m_cycleAccount.valid) return m_cycleAccount.free_margin;
+      SAccountSnapshot account;
+      account.Capture();
+      return account.valid ? account.free_margin : 0.0;
+     }
    datetime ServerDateMidnight() const { return StringToTime(TimeToString(TimeCurrent(), TIME_DATE)); }
 
    double DailyLossPercent(double dailyPnl) const
@@ -108,6 +134,21 @@ private:
       double bal = AccountBalance();
       if(bal <= 0.0) return 0.0;
       return MathMax(0.0, -dailyPnl / bal * 100.0);
+     }
+
+   double FloatingPnL() const
+     {
+      if(m_hasCyclePositions)
+         return m_cycleFloatingPnL;
+
+      CPositionRegistry positions;
+      positions.Scan(_Symbol, (long)m_cfg.MagicNumber);
+      return positions.FloatingPnL();
+     }
+
+   double DailyPnlIncludingFloating() const
+     {
+      return m_dailyLoss + FloatingPnL();
      }
 
    bool IsMaxDDActive() const
@@ -190,6 +231,25 @@ private:
       return spread <= m_maxSpreadPts;
      }
 
+   double PipToPoints(const double pips) const
+     {
+      int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+      double factor = (digits == 3 || digits == 5) ? 10.0 : 1.0;
+      return MathMax(0.0, pips) * factor;
+     }
+
+   bool SessionOK() const
+     {
+      int start = MathMax(0, MathMin(23, m_sessionStartHour));
+      int end = MathMax(0, MathMin(23, m_sessionEndHour));
+      MqlDateTime dt;
+      TimeToStruct(TimeCurrent(), dt);
+      if(start == end) return true;
+      if(start < end)
+         return (dt.hour >= start && dt.hour <= end);
+      return (dt.hour >= start || dt.hour <= end);
+     }
+
    void CheckDailyLossBreaker(double projectedDailyPnl)
      {
       if(m_dailyLossPct <= 0.0) return;
@@ -212,7 +272,9 @@ private:
       if(m_maxDDPct <= 0.0) m_maxDDPct = m_dailyLossPct * 2.0;
       m_maxOpenTrades = cfg.Risk.MaxOpenPositions;
       m_maxConsecLoss = cfg.Risk.MaxConsecLoss;
-      m_maxSpreadPts  = cfg.Market.SpreadFilterPips * 10.0;
+      m_maxSpreadPts  = PipToPoints(cfg.Market.SpreadFilterPips);
+      m_sessionStartHour = cfg.Market.SessionStartHour;
+      m_sessionEndHour = cfg.Market.SessionEndHour;
       return true;
      }
 
@@ -237,10 +299,15 @@ public:
    CRiskManager() : IManager(),
       m_riskPct(1.0), m_maxDDPct(10.0), m_dailyLossPct(3.0),
       m_maxOpenTrades(3), m_maxConsecLoss(5), m_maxSpreadPts(30),
+      m_sessionStartHour(0), m_sessionEndHour(23),
       m_minLot(0.01), m_maxLot(10.0), m_lotStep(0.01),
       m_openTrades(0), m_consecLoss(0), m_dailyLoss(0),
-      m_peakEquity(0), m_lastResetDay(0), m_circuitBroken(false)
-     { ArrayResize(m_accountedPnL, 0); }
+      m_peakEquity(0), m_lastResetDay(0), m_circuitBroken(false),
+      m_hasCycleAccount(false), m_cycleFloatingPnL(0.0), m_hasCyclePositions(false)
+     {
+      m_cycleAccount.Clear();
+      ArrayResize(m_accountedPnL, 0);
+     }
 
    virtual void DeclareEvents() override
      {
@@ -297,13 +364,15 @@ public:
       if(m_circuitBroken) { r.reason = "CircuitBroken"; return r; }
       if(m_openTrades >= m_maxOpenTrades)
         { r.reason = StringFormat("MaxTrades(%d/%d)", m_openTrades, m_maxOpenTrades); return r; }
-      double lossPct = DailyLossPercent(m_dailyLoss);
+      double lossPct = DailyLossPercent(DailyPnlIncludingFloating());
       if(m_dailyLossPct > 0.0 && lossPct >= m_dailyLossPct)
         { r.reason = StringFormat("DailyLoss(%.1f%%>=%.1f%%)", lossPct, m_dailyLossPct); return r; }
       if(IsMaxDDActive())
         { r.reason = StringFormat("MaxDD(%.1f%%>=%.1f%%)", GetDrawdownPct(), m_maxDDPct); return r; }
       if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
         { r.reason = StringFormat("ConsecLoss(%d>=%d)", m_consecLoss, m_maxConsecLoss); return r; }
+      if(!SessionOK())
+        { r.reason = StringFormat("SessionClosed(%02d-%02d)", m_sessionStartHour, m_sessionEndHour); return r; }
       if(!SpreadOK())
         {
          double sp = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point;
@@ -345,7 +414,7 @@ public:
       double slPoints = signal.slPoints;
       if(slPoints <= 0.0)
         {
-         double atrPts = (m_data != NULL) ? m_data.GetATRPoints() / point : 0.0;
+         double atrPts = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
          if(atrPts <= 0.0) atrPts = 100.0;
          slPoints = atrPts * m_cfg.Risk.SLMultiplier;
         }
@@ -387,18 +456,45 @@ public:
 
    void SyncOpenTradesFromBroker()
      {
-      int cnt = 0;
-      for(int i = PositionsTotal() - 1; i >= 0; i--)
-        {
-         ulong ticket = PositionGetTicket(i);
-         if(ticket == 0) continue;
-         if(!PositionSelectByTicket(ticket)) continue;
-         if(PositionGetString(POSITION_SYMBOL) == _Symbol) cnt++;
-        }
-      m_openTrades = cnt;
+      CPositionRegistry positions;
+      positions.Scan(_Symbol, (long)m_cfg.MagicNumber);
+      m_openTrades = positions.Count();
+     }
+
+   void SyncOpenTradesFromSnapshot(const int openTrades)
+     {
+      if(openTrades >= 0)
+         m_openTrades = openTrades;
+     }
+
+   void SetCycleSnapshot(const SAccountSnapshot &account, const int openTrades)
+     {
+      m_cycleAccount = account;
+      m_hasCycleAccount = account.valid;
+      m_hasCyclePositions = false;
+      m_cycleFloatingPnL = 0.0;
+      SyncOpenTradesFromSnapshot(openTrades);
+      if(m_hasCycleAccount && m_cycleAccount.equity > m_peakEquity)
+         m_peakEquity = m_cycleAccount.equity;
+     }
+
+   void SetCycleContext(const SAccountSnapshot &account, const CPositionRegistry &positions)
+     {
+      SetCycleSnapshot(account, positions.Count());
+      m_cycleFloatingPnL = positions.FloatingPnL();
+      m_hasCyclePositions = (positions.CapturedAt() > 0);
+     }
+
+   void ClearCycleSnapshot()
+     {
+      m_hasCycleAccount = false;
+      m_hasCyclePositions = false;
+      m_cycleFloatingPnL = 0.0;
+      m_cycleAccount.Clear();
      }
 
    bool IsTradingAllowed() const { return !m_circuitBroken; }
+   long MagicNumber() const { return (long)m_cfg.MagicNumber; }
    int  GetOpenTrades() const { return m_openTrades; }
    double GetDrawdownPct() const
      {
@@ -410,14 +506,14 @@ public:
      {
       RiskSnapshot s;
       s.Clear();
-      s.tradingAllowed = IsTradingAllowed();
+      s.tradingAllowed = (IsTradingAllowed() && !IsMaxDDActive());
       s.circuitBroken = m_circuitBroken;
       s.openTrades = m_openTrades;
       s.maxOpenTrades = m_maxOpenTrades;
       s.consecLoss = m_consecLoss;
       s.maxConsecLoss = m_maxConsecLoss;
       s.dailyPnl = m_dailyLoss;
-      s.dailyLossPctUsed = DailyLossPercent(m_dailyLoss);
+      s.dailyLossPctUsed = DailyLossPercent(DailyPnlIncludingFloating());
       s.dailyLossPctLimit = m_dailyLossPct;
       s.drawdownPct = GetDrawdownPct();
       s.maxDrawdownPct = m_maxDDPct;

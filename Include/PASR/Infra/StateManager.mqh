@@ -6,6 +6,8 @@
 #ifndef __INFRA_STATE_MANAGER_MQH__
 #define __INFRA_STATE_MANAGER_MQH__
 
+#include "AccountSnapshot.mqh"
+
 #define STATE_FILE_VERSION  0x0200
 
 struct PASRState
@@ -72,7 +74,9 @@ private:
 
    void ResetDefaults()
      {
-      double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+      SAccountSnapshot account;
+      account.Capture();
+      double bal = account.valid ? account.balance : 0.0;
       m_state.version = STATE_FILE_VERSION;
       m_state.crc = 0;
       m_state.equityPeak = (bal > 0) ? bal : 10000.0;
@@ -204,7 +208,9 @@ public:
       datetime lastDate = m_state.lastTradeDate;
       if(today > lastDate)
         {
-         double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+         SAccountSnapshot account;
+         account.Capture();
+         double bal = account.valid ? account.balance : m_state.dailyStartBalance;
          if(m_state.tradesToday > 0)
             PrintFormat("[State] Daily reset: trades=%d -> 0", m_state.tradesToday);
          m_state.dailyStartBalance = bal;

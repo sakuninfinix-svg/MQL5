@@ -2,7 +2,7 @@
 
 Central layer adalah pusat kontrol untuk migrasi **Centralized Modular Pipeline Architecture**.
 
-Tujuan folder ini bukan memindahkan semua logic trading ke satu tempat, tetapi memisahkan tanggung jawab pusat dari backend lama. Compatibility backend sekarang berada di `Central/BackendAdapter.mqh`; wrapper lama di `Core/Orchestrator*.mqh` hanya dipertahankan untuk include lama.
+Tujuan folder ini bukan memindahkan semua logic trading ke satu tempat, tetapi memisahkan tanggung jawab pusat dari runtime lama sampai runtime canonical sepenuhnya dimiliki `CPASRKernel`. Compatibility runtime lama sudah dihapus lewat breaking cleanup.
 
 ## Prinsip
 
@@ -65,17 +65,17 @@ Data → Analysis → Signal → AI → Risk → Execution → Journal
 - Tambahkan `CModuleRegistry` untuk daftar module.
 - Tambahkan `CServiceLocator` untuk lookup manager.
 - Tambahkan `CLifecycleManager` untuk init/deinit seragam.
-- `Core/PASR.mqh` sudah menyertakan layer `Central/` setelah backend legacy.
+- `Core/PASR.mqh` sudah menyertakan layer `Central/` sebagai canonical runtime facade.
 
-### Fase 2 — Adapter ke orchestrator lama ✅
+### Fase 2 — Kernel entrypoint ✅
 
-- `CPASRKernel` menjalankan `CBackendAdapter` compatibility backend dari `Central/BackendAdapter.mqh`.
+- `CPASRKernel` menjadi entrypoint runtime dari EA utama.
 - `Experts/PASR_MODULAR.mq5` sudah memakai `CPASRKernel g_kernel` sebagai entry point.
-- Runtime behavior masih didelegasikan ke orchestrator lama agar migrasi tetap aman.
+- Runtime tick/event loop, trade transaction routing, dan pipeline timer sudah berjalan di kernel.
 
 ### Fase 3 — Extract responsibilities ⏳
 
-Pindahkan bertahap dari backend adapter:
+Pindahkan bertahap dari runtime lama:
 
 - allocation factory → `CModuleFactory` ✅,
 - module registry ownership → `CModuleRegistry`,
@@ -101,15 +101,14 @@ Signal
 Trade
 Central
 Orchestration
-Compatibility adapters
 ```
 
 ## Status
 
-Fase 1 dan Fase 2 sudah selesai secara struktural. Sistem sekarang memakai `CPASRKernel` sebagai facade pusat, dan allocation module utama/opsional sudah lewat `CModuleFactory`.
+Fase 1 sampai Fase 6 sudah selesai secara struktural. Sistem sekarang memakai `CPASRKernel` sebagai facade pusat, dan allocation module utama/opsional sudah lewat `CModuleFactory`.
 
-`CBackendAdapter` masih menjadi compatibility backend untuk manager allocation/bootstrap, tick processing, dan trade-transaction handling. Init manager utama sudah melewati `CLifecycleManager`, manager berbasis `IManager` sekarang owned oleh `CPASRKernel` registry, dan `CPASRKernel` sudah memiliki/menjalankan `CPipelineEngine`.
+`CPASRKernel` sekarang memiliki bootstrap manager, lifecycle init/deinit, registry ownership, runtime tick/event loop, pipeline context preparation, execution retry drain, trade-transaction routing, dan `CPipelineEngine`. `AdaptiveParameterManager` juga sudah diaktifkan dari kernel karena bergantung pada kernel-owned `MarketRegimeDetector`.
 
-Langkah berikutnya adalah memindahkan allocation/bootstrap code dan non-`IManager` runtime services dari backend adapter ke Central supaya backend bisa mengecil menjadi event adapter murni atau dihapus.
+Breaking cleanup sudah menghapus compatibility surface runtime lama. Caller lama harus migrasi ke `CPASRKernel`.
 
 Current ownership/dependency status is tracked in `Central/DEPENDENCIES.md`.

@@ -10,6 +10,20 @@
 #include <PASR/Core/Config/Types.mqh>
 #include <PASR/Core/Globals.mqh>
 #include <PASR/Orchestration/PipelineStageRegistry.mqh>
+#include <PASR/Orchestration/Stages/DataSyncStage.mqh>
+#include <PASR/Orchestration/Stages/AnalysisSRStage.mqh>
+#include <PASR/Orchestration/Stages/AnalysisZoneStage.mqh>
+#include <PASR/Orchestration/Stages/PatternStage.mqh>
+#include <PASR/Orchestration/Stages/RegimeStage.mqh>
+#include <PASR/Orchestration/Stages/SignalStage.mqh>
+#include <PASR/Orchestration/Stages/AIInferStage.mqh>
+#include <PASR/Orchestration/Stages/RiskStage.mqh>
+#include <PASR/Orchestration/Stages/AdaptiveParamsStage.mqh>
+#include <PASR/Orchestration/Stages/ExecutionStage.mqh>
+#include <PASR/Orchestration/Stages/PositionStage.mqh>
+#include <PASR/Orchestration/Stages/RecoveryStage.mqh>
+#include <PASR/Orchestration/Stages/DashboardStage.mqh>
+#include <PASR/Orchestration/Stages/JournalStage.mqh>
 #include <PASR/Analysis/SRZoneStore.mqh>
 #include <PASR/Analysis/SRManager.mqh>
 #include <PASR/Analysis/ZoneManager.mqh>
@@ -49,12 +63,56 @@
   class CTelemetryRecorder;
   class CAdaptiveParameterManager;
   class CMarketRegimeDetector;
-  class CLatencyOptimizer;
-  class CAsyncOrderManager;
-  class CHealthMonitor;
-  class CSnapshotManager;
   class CTrade;
 #endif
+
+struct SPipelineDependencies
+  {
+   CDataManager              *data;
+   CAnalysisSRManager        *sr;
+   CAnalysisZoneManager      *zone;
+   CPatternManager           *pattern;
+   CSignalManager            *signal;
+   CAIOrchestrator           *ai_orch;
+   CRegimeFilter             *regime;
+   CRiskManager              *risk;
+   CExecutionManager         *exec;
+   CExitEngine               *exit_engine;
+   CRecoveryManager          *recovery;
+   CDashboardManager         *dash;
+   CJournalManager           *journal;
+   CEventBus                 *bus;
+   CSanityManager            *sanity;
+   CTelemetryRecorder        *telemetry;
+   CAdaptiveParameterManager *adaptive;
+   CMarketRegimeDetector     *regime_det;
+   SPipelineDependencies()
+     {
+      Clear();
+     }
+
+   void Clear()
+     {
+      data = NULL;
+      sr = NULL;
+      zone = NULL;
+      pattern = NULL;
+      signal = NULL;
+      ai_orch = NULL;
+      regime = NULL;
+      risk = NULL;
+      exec = NULL;
+      exit_engine = NULL;
+      recovery = NULL;
+      dash = NULL;
+      journal = NULL;
+      bus = NULL;
+      sanity = NULL;
+      telemetry = NULL;
+      adaptive = NULL;
+      regime_det = NULL;
+     }
+  };
 
 class CPipelineEngine
   {
@@ -70,6 +128,7 @@ private:
    CExecutionManager         *m_exec;
    CExitEngine               *m_exit;
    CRecoveryManager          *m_recovery;
+   CPositionManager          *m_position_manager;
    CDashboardManager         *m_dash;
    CJournalManager           *m_journal;
    CEventBus                 *m_bus;
@@ -77,15 +136,24 @@ private:
    CTelemetryRecorder        *m_telemetry;
    CAdaptiveParameterManager *m_adaptive;
    CMarketRegimeDetector     *m_regime_det;
-   CLatencyOptimizer         *m_optimizer;
-   CAsyncOrderManager        *m_async_orders;
-   CHealthMonitor            *m_health;
-   CSnapshotManager          *m_snapshot;
-
    bool   m_debug_mode;
    bool   m_profiling_enabled;
    CPerfTimer m_stage_timer;
    CPipelineStageRegistry m_stage_registry;
+   CDataSyncStage m_data_stage;
+   CAnalysisSRStage m_analysis_sr_stage;
+   CAnalysisZoneStage m_analysis_zone_stage;
+   CPatternStage  m_pattern_stage;
+   CRegimeStage   m_regime_stage;
+   CSignalStage   m_signal_stage;
+   CAIInferStage   m_ai_infer_stage;
+   CRiskStage     m_risk_stage;
+   CAdaptiveParamsStage m_adaptive_stage;
+   CExecutionStage m_execution_stage;
+   CPositionStage  m_position_stage;
+   CRecoveryStage m_recovery_stage;
+   CDashboardStage m_dashboard_stage;
+   CJournalStage   m_journal_stage;
    string m_last_observability;
    ulong  m_observability_ticks;
 
@@ -106,65 +174,6 @@ private:
       return STAGE_OK;
      }
 
-   void FillPriceContext(PipelineContext &ctx)
-     {
-      MqlTick tick;
-      if(SymbolInfoTick(_Symbol, tick))
-        {
-         ctx.bid = tick.bid;
-         ctx.ask = tick.ask;
-        }
-      else
-        {
-         ctx.bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         ctx.ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-        }
-      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      ctx.spread_pts = (point > 0.0 && ctx.ask > ctx.bid) ? (ctx.ask - ctx.bid) / point : 0.0;
-      ctx.atr_points = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
-      ctx.atr = ctx.atr_points;
-      ctx.bar_time = iTime(_Symbol, _Period, 0);
-      ctx.market_open = (ctx.bid > 0.0 && ctx.ask > 0.0);
-      ctx.session = DetectSession();
-     }
-
-   void InjectAIContext(PipelineContext &ctx)
-     {
-      if(m_ai_orch == NULL) return;
-      double srDist = 0.5;
-      double zoneStrength = 0.5;
-      double patternScore = 0.5;
-
-      if(m_sr != NULL && ctx.bid > 0.0)
-        {
-         SRZoneExtended z;
-         if(m_sr.IsNearValidZone(ctx.bid, 0.5, z))
-           {
-            double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-            double atrPrice = (ctx.atr_points > 0.0) ? ctx.atr_points : 0.0;
-            double dist = MathAbs(ctx.bid - z.price);
-            srDist = (atrPrice > 0.0) ? MathMax(0.0, MathMin(1.0, 1.0 - dist / MathMax(atrPrice, point))) : 0.5;
-            zoneStrength = MathMax(0.0, MathMin(1.0, z.strength / 100.0));
-           }
-        }
-
-      if(m_pattern != NULL)
-        {
-         SPatternResult pr = m_pattern.GetLastResult();
-         if(pr.found)
-            patternScore = MathMax(0.0, MathMin(1.0, pr.confluenceScore));
-
-         SPatternFeatureSnapshot pf = m_pattern.GetLastFeatureSnapshot();
-         CAIFeatureBuilder *fb = m_ai_orch.GetFeatureBuilder();
-         if(fb != NULL)
-            fb.InjectPatternFeatures(pf.buyProb, pf.sellProb, pf.conflict, pf.dominanceGap,
-                                     pf.rejectionQuality, pf.trapQuality, pf.reclaimQuality,
-                                     pf.followThrough);
-        }
-
-      m_ai_orch.InjectContext(srDist, zoneStrength, patternScore, ctx.regime);
-     }
-
    string BuildObservabilityText(PipelineContext &ctx, ENUM_STAGE_RESULT result)
      {
       int sourceCount = 0;
@@ -183,7 +192,7 @@ private:
         }
 
       string riskStatus = "NA";
-      int openTrades = PositionsTotal();
+      int openTrades = ctx.positions.Count();
       double dd = 0.0;
       if(m_risk != NULL)
         {
@@ -220,7 +229,11 @@ private:
          recoveryActive = rec.active;
         }
 
-      return StringFormat("res=%d sig=%s %.2f src=%d ready=%s cd=%d fz=%d risk=%s dd=%.2f open=%d exec=%d ret=%d tk=%I64u exit=%d/%I64u rec=%s %s",
+      string aiReason = ctx.ai_result.validation_reason;
+      if(StringLen(aiReason) > 48)
+         aiReason = StringSubstr(aiReason, 0, 48);
+
+      return StringFormat("res=%d sig=%s %.2f src=%d ready=%s cd=%d fz=%d ai=%s val=%s drift=%.3f risk=%s dd=%.2f open=%d exec=%d ret=%d tk=%I64u exit=%d/%I64u rec=%s %s %s",
                           (int)result,
                           SignalDirText(ctx.signal.direction),
                           ctx.signal.confidence,
@@ -228,6 +241,9 @@ private:
                           signalReady ? "Y" : "N",
                           cooldowns,
                           failedZones,
+                          ctx.ai_result.model_healthy ? "Y" : "N",
+                          ctx.ai_result.validation_valid ? "Y" : "N",
+                          ctx.ai_result.drift_index,
                           riskStatus,
                           dd,
                           openTrades,
@@ -237,6 +253,7 @@ private:
                           exitReason,
                           exitTotal,
                           recoveryActive ? "Y" : "N",
+                          aiReason,
                           signalReason);
      }
 
@@ -253,6 +270,11 @@ private:
          m_telemetry.RecordObservabilityText(m_last_observability);
          m_telemetry.RecordObservabilityMetric("SignalConfidence", ctx.signal.confidence, "normalized");
          m_telemetry.RecordObservabilityMetric("AIScore", ctx.ai_score, "score");
+         m_telemetry.RecordObservabilityMetric("AIDrift", ctx.ai_result.drift_index, "index");
+         m_telemetry.RecordObservabilityMetric("AIValidationValid", ctx.ai_result.validation_valid ? 1.0 : 0.0, "bool");
+         m_telemetry.RecordObservabilityMetric("AIModelHealthy", ctx.ai_result.model_healthy ? 1.0 : 0.0, "bool");
+         if(ctx.ai_result.invalid_feature_index >= 0)
+            m_telemetry.RecordObservabilityMetric("AIInvalidFeatureIndex", (double)ctx.ai_result.invalid_feature_index, "index");
          m_telemetry.RecordObservabilityMetric("SpreadPts", ctx.spread_pts, "points");
          m_telemetry.RecordObservabilityMetric("Result", (double)result, "enum");
         }
@@ -263,300 +285,74 @@ private:
 
    ENUM_STAGE_RESULT Stage_DataSync(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_data, "DataSync") == STAGE_SKIP) return STAGE_SKIP;
-      m_stage_timer.Start();
-      m_data.OnTick();
-      FillPriceContext(ctx);
-      if(m_profiling_enabled) m_stage_timer.Log("Stage1_DataSync");
-      return STAGE_OK;
+      return m_data_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_AnalysisSR(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_sr, "AnalysisSR") == STAGE_SKIP) return STAGE_SKIP;
-      if(!ctx.new_bar) return STAGE_SKIP;
-      m_stage_timer.Start();
-      PASREvent ev;
-      ev.id = EVENT_ID_NEW_BAR;
-      ev.priority = 10;
-      if(m_bus != NULL) m_bus.DispatchImmediate(ev);
-      if(m_profiling_enabled) m_stage_timer.Log("Stage2_AnalysisSR");
-      return STAGE_OK;
+      return m_analysis_sr_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_AnalysisZone(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_zone, "AnalysisZone") == STAGE_SKIP) return STAGE_SKIP;
-      m_stage_timer.Start();
-      m_zone.OnPriceUpdate();
-      if(ctx.new_bar) m_zone.OnNewBar();
-      if(m_profiling_enabled) m_stage_timer.Log("Stage3_AnalysisZone");
-      return STAGE_OK;
+      return m_analysis_zone_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_PatternRec(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_pattern, "PatternRec") == STAGE_SKIP) return STAGE_SKIP;
-      if(!ctx.new_bar) return STAGE_SKIP;
-      m_stage_timer.Start();
-      if(m_profiling_enabled) m_stage_timer.Log("Stage4_PatternRec");
-      return STAGE_OK;
+      return m_pattern_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_RegimeDet(PipelineContext &ctx)
      {
-      if(m_regime != NULL)
-        {
-         m_stage_timer.Start();
-         if(ctx.new_bar) m_regime.OnNewBar();
-         ctx.regime = m_regime.GetRegime();
-         ctx.regime_confidence = m_regime.IsReady() ? 1.0 : 0.0;
-         if(m_profiling_enabled) m_stage_timer.Log("Stage5_RegimeDet");
-         return STAGE_OK;
-        }
-      if(SkipIfNull(m_regime_det, "RegimeDet") == STAGE_SKIP) return STAGE_SKIP;
-      m_stage_timer.Start();
-      ctx.regime = m_regime_det.GetCurrentRegime();
-      SDynamicParams params = m_regime_det.GetParams();
-      ctx.regime_confidence = MathMin(1.0, MathMax(0.0, params.trend_strength / 100.0));
-      if(m_profiling_enabled) m_stage_timer.Log("Stage5_RegimeDet");
-      return STAGE_OK;
-     }
-
-   ENUM_STAGE_RESULT Stage_RuleFallbackSignal(PipelineContext &ctx)
-     {
-      if(SkipIfNull(m_signal, "RuleFallbackSignal") == STAGE_SKIP)
-        {
-         if(m_profiling_enabled) m_stage_timer.Log("Stage6_SignalGen");
-         return STAGE_SKIP;
-        }
-      ctx.signal = m_signal.AggregateSignals();
-      ctx.signal_strength = ctx.signal.confidence;
-      if(m_debug_mode)
-         PrintFormat("[Pipeline] RULE_FALLBACK Signal: dir=%d conf=%.3f src=%s", (int)ctx.signal.direction, ctx.signal.confidence, ctx.signal.primarySource);
-      if(m_profiling_enabled) m_stage_timer.Log("Stage6_RuleFallbackSignal");
-      return STAGE_OK;
+      return m_regime_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_SignalGen(PipelineContext &ctx)
      {
-      m_stage_timer.Start();
-      ctx.signal.Clear();
-      InjectAIContext(ctx);
-
-      bool aiAvailable = (m_ai_orch != NULL && m_ai_orch.IsReady() && m_ai_orch.IsHealthy());
-      if(!aiAvailable)
-        {
-         ctx.ai_result.model_healthy = false;
-         ctx.exit_message = "AI unavailable; using rule fallback";
-         return Stage_RuleFallbackSignal(ctx);
-        }
-
-      if(m_ai_orch.PredictSignal(ctx.signal))
-        {
-         SAIInferenceResult ai = m_ai_orch.GetLastResult();
-         ctx.ai_score = (float)ai.score;
-         ctx.ai_veto = ai.vetoed;
-         ctx.drift_score = (float)ai.drift_score;
-         ctx.ai_result.score = ctx.ai_score;
-         ctx.ai_result.drift_index = ctx.drift_score;
-         ctx.ai_result.model_healthy = true;
-         ctx.signal_strength = ctx.signal.confidence;
-         if(m_debug_mode)
-            PrintFormat("[Pipeline] AI_PRIMARY Signal: dir=%d conf=%.3f src=%s", (int)ctx.signal.direction, ctx.signal.confidence, ctx.signal.primarySource);
-         if(m_profiling_enabled) m_stage_timer.Log("Stage6_AIPrimarySignal");
-         return STAGE_OK;
-        }
-
-      SAIInferenceResult last = m_ai_orch.GetLastResult();
-      ctx.ai_score = (float)last.score;
-      ctx.ai_veto = last.vetoed;
-      ctx.drift_score = (float)last.drift_score;
-      ctx.ai_result.score = ctx.ai_score;
-      ctx.ai_result.drift_index = ctx.drift_score;
-      ctx.ai_result.model_healthy = true;
-      ctx.exit_message = last.vetoed ? last.veto_reason : "AI primary chose no trade";
-      if(m_debug_mode)
-         PrintFormat("[Pipeline] AI_PRIMARY no trade: %s", ctx.exit_message);
-      if(m_profiling_enabled) m_stage_timer.Log("Stage6_AIPrimarySignal");
-      return STAGE_OK;
+      return m_signal_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_AIInfer(PipelineContext &ctx)
      {
-      if(m_ai_orch == NULL) return STAGE_SKIP;
-      ctx.ai_result.model_healthy = m_ai_orch.IsHealthy();
-      return STAGE_OK;
+      return m_ai_infer_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_RiskCheck(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_risk, "RiskCheck") == STAGE_SKIP) return STAGE_SKIP;
-      if(ctx.signal.direction == SIGNAL_NONE) return STAGE_SKIP;
-      m_stage_timer.Start();
-      ctx.risk_result = m_risk.CheckRisk(ctx.signal);
-      if(!ctx.risk_result.allowed)
-        {
-         if(m_debug_mode) PrintFormat("[Pipeline] RiskCheck REJECTED: %s", ctx.risk_result.reason);
-         ctx.exit_message = "RiskCheck: " + ctx.risk_result.reason;
-         if(m_profiling_enabled) m_stage_timer.Log("Stage8_RiskCheck");
-         return STAGE_SKIP;
-        }
-      ctx.trading_allowed = true;
-      if(m_profiling_enabled) m_stage_timer.Log("Stage8_RiskCheck");
-      return STAGE_OK;
+      return m_risk_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_AdaptiveParams(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_adaptive, "AdaptiveParams") == STAGE_SKIP) return STAGE_SKIP;
-      if(!ctx.new_bar)
-        {
-         ctx.plan.valid = false;
-         return STAGE_SKIP;
-        }
-      m_stage_timer.Start();
-      m_adaptive.OnNewBar();
-      if(m_profiling_enabled) m_stage_timer.Log("Stage9_AdaptiveParams");
-      return STAGE_OK;
+      return m_adaptive_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_Execution(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_exec, "Execution") == STAGE_SKIP) return STAGE_SKIP;
-      if(ctx.signal.direction == SIGNAL_NONE) return STAGE_SKIP;
-      if(!ctx.risk_result.allowed) return STAGE_SKIP;
-      m_stage_timer.Start();
-
-      TradePlan plan;
-      plan.Clear();
-      plan.direction = ctx.signal.direction;
-      plan.entryPrice = ctx.risk_result.entryPrice;
-      plan.sl = ctx.risk_result.stopLoss;
-      plan.tp = ctx.risk_result.takeProfit;
-      plan.lot = ctx.risk_result.lotSize;
-      plan.slPoints = ctx.signal.slPoints;
-      plan.comment = StringFormat("PASR|AI_PRIMARY|%.0f", ctx.signal.confidence * 100.0);
-      plan.valid = (plan.direction != SIGNAL_NONE && plan.lot > 0 && plan.sl > 0 && plan.tp > 0);
-
-      ctx.plan.direction = plan.direction;
-      ctx.plan.entryPrice = plan.entryPrice;
-      ctx.plan.sl = plan.sl;
-      ctx.plan.tp = plan.tp;
-      ctx.plan.slPoints = plan.slPoints;
-      ctx.plan.tpPoints = ctx.signal.tpPoints;
-      ctx.plan.lot = plan.lot;
-      ctx.plan.valid = plan.valid;
-
-      if(!plan.valid)
-        {
-         ctx.exit_message = "Execution skipped: invalid trade plan";
-         if(m_profiling_enabled) m_stage_timer.Log("Stage10_Execution");
-         return STAGE_SKIP;
-        }
-
-      ctx.exec_result = m_exec.Execute(plan);
-
-      if(ctx.exec_result.status == EXEC_FAIL)
-        {
-         if(m_debug_mode) PrintFormat("[Pipeline] Execution FAILED: %s", ctx.exec_result.comment);
-         ctx.exit_reason = STAGE_ABORT;
-         ctx.exit_message = "Execution error: " + ctx.exec_result.comment;
-         if(m_profiling_enabled) m_stage_timer.Log("Stage10_Execution");
-         return STAGE_ABORT;
-        }
-
-      if(ctx.exec_result.status == EXEC_OK && m_recovery != NULL)
-        {
-         int dir = (plan.direction == SIGNAL_BUY) ? 1 : -1;
-         m_recovery.OnTradeOpen(ctx.exec_result.ticket, dir, plan.entryPrice);
-        }
-
-      if(m_debug_mode)
-         PrintFormat("[Pipeline] Execution status=%d ticket=%I64u price=%.5f lot=%.2f", (int)ctx.exec_result.status, ctx.exec_result.ticket, plan.entryPrice, plan.lot);
-      if(m_profiling_enabled) m_stage_timer.Log("Stage10_Execution");
-      return STAGE_OK;
+      return m_execution_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_PosMgmt(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_exit, "PosMgmt") == STAGE_SKIP) return STAGE_SKIP;
-      m_stage_timer.Start();
-
-      CTrade trade;
-      StrategyConfig cfg;
-      if(m_data != NULL)
-         m_data.GetConfigCache(cfg);
-      else
-         cfg.MagicNumber = 0;
-      long cfgMagic = cfg.MagicNumber;
-      if(cfgMagic > 0) trade.SetExpertMagicNumber(cfgMagic);
-
-      for(int i = PositionsTotal() - 1; i >= 0; i--)
-        {
-         ulong ticket = PositionGetTicket(i);
-         if(ticket == 0) continue;
-         if(!PositionSelectByTicket(ticket)) continue;
-
-         long magic = PositionGetInteger(POSITION_MAGIC);
-         if(cfgMagic > 0 && magic != cfgMagic) continue;
-
-         string sym = PositionGetString(POSITION_SYMBOL);
-         ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-         ENUM_ORDER_TYPE orderType = (posType == POSITION_TYPE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-         double entryPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-         datetime entryTime = (datetime)PositionGetInteger(POSITION_TIME);
-         double curPrice = (orderType == ORDER_TYPE_BUY)
-                           ? SymbolInfoDouble(sym, SYMBOL_BID)
-                           : SymbolInfoDouble(sym, SYMBOL_ASK);
-
-         ExitSignal sig = m_exit.CheckExit(sym, orderType, entryPrice, curPrice, entryTime);
-         if(sig.reason == EXIT_NONE) continue;
-
-         bool closed = trade.PositionClose(ticket);
-         if(m_debug_mode)
-            PrintFormat("[PosMgmt] Exit %I64u reason=%d closed=%s desc=%s",
-                        ticket, (int)sig.reason, closed ? "true" : "false", sig.description);
-        }
-
-      if(m_profiling_enabled) m_stage_timer.Log("Stage11_PosMgmt");
-      return STAGE_OK;
+      return m_position_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_Recovery(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_recovery, "Recovery") == STAGE_SKIP) return STAGE_SKIP;
-      m_stage_timer.Start();
-      m_recovery.OnPriceUpdate();
-      if(ctx.new_bar) m_recovery.OnNewBar();
-      if(m_profiling_enabled) m_stage_timer.Log("Stage12_Recovery");
-      return STAGE_OK;
+      return m_recovery_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_Dashboard(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_dash, "Dashboard") == STAGE_SKIP) return STAGE_SKIP;
-      m_stage_timer.Start();
-      m_dash.SetPipelineSignal(ctx.signal);
-      m_dash.SetAIScore(ctx.ai_score);
-      m_dash.SetRegime(ctx.regime);
-      m_dash.SetSessionDD(ctx.session_dd);
-      m_dash.SetObservabilityText(m_last_observability);
-      m_dash.OnTimer();
-      if(m_profiling_enabled) m_stage_timer.Log("Stage13_Dashboard");
-      return STAGE_OK;
+      m_dashboard_stage.SetObservabilityText(m_last_observability);
+      return m_dashboard_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT Stage_Journal(PipelineContext &ctx)
      {
-      if(SkipIfNull(m_journal, "Journal") == STAGE_SKIP) return STAGE_SKIP;
-      if(!ctx.new_bar) return STAGE_SKIP;
-      m_stage_timer.Start();
-      m_journal.LogEntry(ctx);
-      if(m_debug_mode && m_last_observability != "")
-         Print("[JournalObs] ", m_last_observability);
-      if(m_profiling_enabled) m_stage_timer.Log("Stage14_Journal");
-      return STAGE_OK;
+      m_journal_stage.SetObservabilityText(m_last_observability);
+      return m_journal_stage.Execute(ctx);
      }
 
    ENUM_STAGE_RESULT ExecuteStageById(const ENUM_PIPELINE_STAGE_ID id, PipelineContext &ctx)
@@ -610,9 +406,8 @@ public:
    CPipelineEngine()
       : m_data(NULL), m_sr(NULL), m_zone(NULL), m_pattern(NULL), m_signal(NULL),
         m_ai_orch(NULL), m_regime(NULL), m_risk(NULL), m_exec(NULL), m_exit(NULL),
-        m_recovery(NULL), m_dash(NULL), m_journal(NULL), m_bus(NULL),
+        m_recovery(NULL), m_position_manager(NULL), m_dash(NULL), m_journal(NULL), m_bus(NULL),
         m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL), m_regime_det(NULL),
-        m_optimizer(NULL), m_async_orders(NULL), m_health(NULL), m_snapshot(NULL),
         m_debug_mode(false), m_profiling_enabled(true), m_last_observability(""),
         m_observability_ticks(0)
      {
@@ -623,26 +418,61 @@ public:
      {
       m_debug_mode = on;
       m_stage_registry.SetDebugMode(on);
+      m_data_stage.SetDebugMode(on);
+      m_analysis_sr_stage.SetDebugMode(on);
+      m_analysis_zone_stage.SetDebugMode(on);
+      m_pattern_stage.SetDebugMode(on);
+      m_regime_stage.SetDebugMode(on);
+      m_signal_stage.SetDebugMode(on);
+      m_risk_stage.SetDebugMode(on);
+      m_adaptive_stage.SetDebugMode(on);
+      m_execution_stage.SetDebugMode(on);
+      m_position_stage.SetDebugMode(on);
+      m_recovery_stage.SetDebugMode(on);
+      m_dashboard_stage.SetDebugMode(on);
+      m_journal_stage.SetDebugMode(on);
      }
 
-   void EnableProfiling(bool on) { m_profiling_enabled = on; }
-
-   void InjectManagers(CDataManager *data, CAnalysisSRManager *sr, CAnalysisZoneManager *zone,
-      CPatternManager *pattern, CSignalManager *signal, CAIOrchestrator *ai_orch,
-      CRegimeFilter *regime, CRiskManager *risk, CExecutionManager *exec,
-      CRecoveryManager *recovery, CDashboardManager *dash, CJournalManager *journal,
-      CEventBus *bus, CSanityManager *sanity, CTelemetryRecorder *telemetry,
-      CAdaptiveParameterManager *adaptive, CMarketRegimeDetector *regime_det,
-      CLatencyOptimizer *optimizer=NULL, CAsyncOrderManager *async_orders=NULL,
-      CHealthMonitor *health=NULL, CSnapshotManager *snapshot=NULL,
-      CExitEngine *exit_engine=NULL)
+   void EnableProfiling(bool on)
      {
-      m_data=data; m_sr=sr; m_zone=zone; m_pattern=pattern; m_signal=signal;
-      m_ai_orch=ai_orch; m_regime=regime; m_risk=risk; m_exec=exec;
-      m_exit=exit_engine; m_recovery=recovery; m_dash=dash; m_journal=journal; m_bus=bus;
-      m_sanity=sanity; m_telemetry=telemetry; m_adaptive=adaptive;
-      m_regime_det=regime_det; m_optimizer=optimizer; m_async_orders=async_orders;
-      m_health=health; m_snapshot=snapshot;
+      m_profiling_enabled = on;
+      m_data_stage.EnableProfiling(on);
+      m_analysis_sr_stage.EnableProfiling(on);
+      m_analysis_zone_stage.EnableProfiling(on);
+      m_pattern_stage.EnableProfiling(on);
+      m_regime_stage.EnableProfiling(on);
+      m_signal_stage.EnableProfiling(on);
+      m_risk_stage.EnableProfiling(on);
+      m_adaptive_stage.EnableProfiling(on);
+      m_execution_stage.EnableProfiling(on);
+      m_position_stage.EnableProfiling(on);
+      m_recovery_stage.EnableProfiling(on);
+      m_dashboard_stage.EnableProfiling(on);
+      m_journal_stage.EnableProfiling(on);
+     }
+
+   void InjectDependencies(const SPipelineDependencies &deps)
+     {
+      m_data=deps.data; m_sr=deps.sr; m_zone=deps.zone; m_pattern=deps.pattern; m_signal=deps.signal;
+      m_ai_orch=deps.ai_orch; m_regime=deps.regime; m_risk=deps.risk; m_exec=deps.exec;
+      m_exit=deps.exit_engine; m_recovery=deps.recovery; m_dash=deps.dash; m_journal=deps.journal; m_bus=deps.bus;
+      m_sanity=deps.sanity; m_telemetry=deps.telemetry; m_adaptive=deps.adaptive;
+      m_regime_det=deps.regime_det;
+      m_position_manager = NULL;
+      m_data_stage.Bind(m_data);
+      m_analysis_sr_stage.Bind(m_sr, m_bus);
+      m_analysis_zone_stage.Bind(m_zone);
+      m_pattern_stage.Bind(m_pattern);
+      m_regime_stage.Bind(m_regime, m_regime_det);
+      m_signal_stage.Bind(m_signal, m_ai_orch, m_sr, m_pattern);
+      m_ai_infer_stage.Bind(m_ai_orch);
+      m_risk_stage.Bind(m_risk);
+      m_adaptive_stage.Bind(m_adaptive);
+      m_execution_stage.Bind(m_exec, m_recovery);
+      m_position_stage.Bind(m_exit, m_data, m_position_manager);
+      m_recovery_stage.Bind(m_recovery);
+      m_dashboard_stage.Bind(m_dash);
+      m_journal_stage.Bind(m_journal);
       if(m_stage_registry.Count() == 0)
          m_stage_registry.RegisterDefaultStages();
      }
@@ -660,6 +490,48 @@ public:
    string StageNameAt(int index) const
      {
       return m_stage_registry.NameAt(index);
+     }
+
+   int GetStageCount() const
+     {
+      return StageCount();
+     }
+
+   string GetStageName(int index) const
+     {
+      return StageNameAt(index);
+     }
+
+   bool InitializeWithMocks(CEventBus *bus, CDataManager *data)
+     {
+      if(bus == NULL || data == NULL)
+         return false;
+
+      SPipelineDependencies deps;
+      deps.data = data;
+      deps.bus = bus;
+      InjectDependencies(deps);
+      return true;
+     }
+
+   ENUM_STAGE_RESULT RunStage(int index, PipelineContext &ctx)
+     {
+      if(m_stage_registry.Count() == 0)
+         m_stage_registry.RegisterDefaultStages();
+
+      ENUM_PIPELINE_STAGE_ID id = m_stage_registry.IdAt(index);
+      if(id == PIPE_STAGE_NONE)
+         return STAGE_SKIP;
+
+      if(!m_stage_registry.IsEnabled(id))
+        {
+         m_stage_registry.Record(id, STAGE_SKIP);
+         return STAGE_SKIP;
+        }
+
+      ENUM_STAGE_RESULT result = ExecuteStageById(id, ctx);
+      m_stage_registry.Record(id, result);
+      return result;
      }
 
    string LastObservabilityText() const

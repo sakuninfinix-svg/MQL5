@@ -7,7 +7,7 @@
 #define DATA_SYMBOL_SCANNER_MQH
 
 #include "../Core/IManager.mqh"
-#include "../Infra/Optimizations/TickCache.mqh"
+#include "../Infra/TickCache.mqh"
 
 //+------------------------------------------------------------------+
 //| Symbol info structure                                            |

@@ -7,6 +7,8 @@
 
 #include "../Core/IManager.mqh"
 #include "../Core/Globals.mqh"
+#include "../Infra/AccountSnapshot.mqh"
+#include "../Trade/PositionRegistry.mqh"
 
 #define PASR_DATA_SCAVENGE_INTERVAL_SEC    300
 #define PASR_DATA_DASHBOARD_THROTTLE_SEC   1
@@ -26,34 +28,35 @@ private:
    datetime  m_lastDashboardUpdate;
 
    int       m_atrHandle;
+   int       m_atrPeriod;
    datetime  m_lastATRUpdate;
    datetime  m_lastTickEventTime;
    int       m_tickEventCount;
 
    string    m_todayStr;
+   SAccountSnapshot m_account;
+   CPositionRegistry m_positions;
 
    double FloatingPnL() const
      {
-      double floating = 0.0;
-      int total = PositionsTotal();
-      for(int i = total - 1; i >= 0; i--)
-        {
-         ulong ticket = PositionGetTicket(i);
-         if(ticket == 0) continue;
-         if(!PositionSelectByTicket(ticket)) continue;
-         floating += PositionGetDouble(POSITION_PROFIT);
-        }
-      return floating;
+      return m_positions.FloatingPnL();
+     }
+
+   void RefreshAccountState()
+     {
+      double peak = (m_account.valid && m_account.equity > 0.0) ? MathMax(m_account.equity, m_startBalance) : m_startBalance;
+      m_account.Capture(peak);
+      m_positions.Scan("", 0);
      }
 
 public:
    CDataManager()
      : IManager(),
        m_atrPoints(0.0), m_dailyProfit(0.0),
-       m_startBalance(AccountInfoDouble(ACCOUNT_BALANCE)),
+       m_startBalance(0.0),
        m_consecutiveLosses(0),
        m_lastScavengeTime(0), m_lastDashboardUpdate(0),
-       m_atrHandle(INVALID_HANDLE), m_lastATRUpdate(0),
+       m_atrHandle(INVALID_HANDLE), m_atrPeriod(14), m_lastATRUpdate(0),
        m_lastTickEventTime(0), m_tickEventCount(0),
        m_todayStr("")
      {}
@@ -67,10 +70,13 @@ public:
       if(!IManager::Init(GetPointer(this), bus)) return false;
       m_cfg = m_config;
       m_cfgDirty = false;
-      m_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+      RefreshAccountState();
+      m_startBalance = m_account.valid ? m_account.balance : 0.0;
       m_todayStr = TimeToString(TimeCurrent(), TIME_DATE);
       RefreshDailyProfit();
+      m_atrPeriod = MathMax(1, m_config.Market.ATRPeriod);
       InitializeATRHandle();
+      UpdateATRCache();
       return true;
      }
 
@@ -95,7 +101,8 @@ public:
       string barDate = TimeToString(bar.time, TIME_DATE);
       if(barDate != m_todayStr)
         {
-         m_startBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+         RefreshAccountState();
+         m_startBalance = m_account.valid ? m_account.balance : m_startBalance;
          m_dailyProfit  = 0.0;
          m_todayStr     = barDate;
          if(m_debugMode)
@@ -118,6 +125,14 @@ public:
       m_config = cfg;
       m_cfg    = cfg;
       m_cfgDirty = false;
+      int newPeriod = MathMax(1, cfg.Market.ATRPeriod);
+      if(newPeriod != m_atrPeriod)
+        {
+         m_atrPeriod = newPeriod;
+         ReleaseATRHandle();
+         InitializeATRHandle();
+         UpdateATRCache();
+        }
      }
 
    double GetATRPoints() const         { return m_atrPoints;         }
@@ -130,7 +145,9 @@ public:
 
    void RefreshDailyProfit()
      {
-      m_dailyProfit = (AccountInfoDouble(ACCOUNT_BALANCE) - m_startBalance) + FloatingPnL();
+      RefreshAccountState();
+      double balance = m_account.valid ? m_account.balance : m_startBalance;
+      m_dailyProfit = (balance - m_startBalance) + FloatingPnL();
      }
 
    bool ShouldUpdateDashboard()
@@ -143,7 +160,8 @@ public:
 
    void ScavengeOldGVs()
      {
-      string prefix = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_PASR_";
+      RefreshAccountState();
+      string prefix = IntegerToString((int)m_account.login) + "_PASR_";
       int count = GlobalVariablesTotal();
       for(int i = count-1; i >= 0; i--)
         {
@@ -158,7 +176,7 @@ public:
    void InitializeATRHandle()
      {
       if(m_atrHandle != INVALID_HANDLE) return;
-      m_atrHandle = iATR(_Symbol, _Period, 14);
+      m_atrHandle = iATR(_Symbol, _Period, MathMax(1, m_atrPeriod));
       if(m_atrHandle == INVALID_HANDLE)
          PASRLogWarn("DataManager", "Failed to create ATR handle");
       else
@@ -176,7 +194,10 @@ public:
       if(m_atrHandle == INVALID_HANDLE) return;
       double buf[1];
       if(CopyBuffer(m_atrHandle, 0, 0, 1, buf) > 0 && buf[0] > 0)
-         m_atrPoints = buf[0];
+        {
+         double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+         m_atrPoints = (point > 0.0) ? buf[0] / point : 0.0;
+        }
      }
   };
 

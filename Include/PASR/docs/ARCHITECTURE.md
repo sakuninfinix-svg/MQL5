@@ -1,151 +1,161 @@
-# PASR Framework — Architecture Reference
+# PASR Architecture
 
-> **Version**: 3.0 (Layered Architecture)
-> **Date**: 2026-05-20
-> **Author**: Agsicentre
+PASR is an MQL5 Expert Advisor framework built around a centralized runtime kernel and a modular trading pipeline.
+
+Current canonical entrypoint:
+
+```mql5
+#include <PASR/Core/PASR.mqh>
+
+CPASRKernel kernel;
+```
+
+`CPASRKernel` owns lifecycle, service lookup, manager registry, runtime event flow, trade transaction routing, and pipeline execution. Legacy runtime compatibility adapters have been removed; new callers must use the kernel directly.
+
+## 0. Visual System Overview
+```mermaid
+graph TD
+    EA[Experts/PASR_MODULAR.mq5] -->|Events| K[CPASRKernel]
+    K -->|1. Init| LM[CLifecycleManager]
+    K -->|2. Runtime| PE[CPipelineEngine]
+
+    subgraph "Central Layer"
+        LM -->|Register| MR[CModuleRegistry]
+        SL[CServiceLocator] -.->|Lookup| MR
+    end
+
+    subgraph "Orchestration Layer"
+        PE -->|Execute| S[14 Stages]
+        S -->|Context| PC[PipelineContext]
+    end
+```
+
+## 1. Structural Hierarchy
+
+Arsitektur PASR dibagi menjadi tiga zona utama yang saling terisolasi namun terintegrasi:
+
+### A. Central Layer (The Brain)
+- **`CPASRKernel`**: Facade utama. Mengelola event loop dan delegasi ke sub-sistem.
+- **`CModuleRegistry`**: Pemilik (owner) instance objek. Bertanggung jawab atas alokasi dan dealokasi memori untuk semua manager berbasis `IManager`.
+- **`CServiceLocator`**: Mekanisme Dependency Injection. Menyediakan akses tipe-aman (type-safe) antar manager tanpa membuat ketergantungan sirkular (circular dependency).
+- **`CLifecycleManager`**: Mengelola urutan inisialisasi kritis dan memastikan *shutdown* dilakukan secara terbalik (LIFO) untuk integritas data.
+
+### B. Orchestration Layer (The Workflow)
+- **`CPipelineEngine`**: Mesin penggerak yang menjalankan 14 stage secara berurutan.
+- **`PipelineContext`**: Objek state yang dibawa melintasi stage. Menyimpan snapshot akun, registry posisi, dan hasil sementara (signal, risk).
+- **`SPipelineDependencies`**: Kontrak eksplisit yang mendefinisikan manager apa saja yang boleh diakses oleh Pipeline.
+
+### C. Domain Layer (The Intelligence)
+- **Data & Infra**: Menyediakan data pasar deterministik via `CDataManager` dan `SAccountSnapshot`.
+- **Analysis**: Deteksi struktur pasar (SR, Zone, Pattern).
+- **Signal & AI**: Pengambilan keputusan melalui voting sinyal dan veto AI.
+- **Trade**: Eksekusi melalui `CExecutionManager` dan verifikasi posisi via `CPositionRegistry`.
 
 ---
 
-## Overview
+## 2. Event & Runtime Flow
 
-PASR (Price Action Support/Resistance) is an MQL5 Expert Advisor framework built on a strict 7-layer clean architecture. Each layer has a clear responsibility boundary and may only depend on layers below it.
+### Siklus Hidup Event
+1. **`OnTick()`**: Hanya melakukan update harga ringan dan mendeteksi pergantian bar. Mengirim event `EVENT_PRICE_UPDATE` ke EventBus.
+2. **`OnTimer()`**: Menjalankan siklus Pipeline. Di sinilah logika berat (AI, Analisis) diproses secara sinkron namun terisolasi dari *tick* utama.
+3. **`OnTradeTransaction()`**: Digunakan untuk sinkronisasi state instan antara broker dan kernel (misal: verifikasi *deal-in* untuk memulai logika recovery).
 
----
-
-## Layer Map
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  LAYER 0 — ENTRY POINT                                  │
-│  PASR.mqh (master include)  │  Globals.mqh              │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 1 — CORE / FOUNDATION                            │
-│  Core/IManager.mqh          │  Core/EventBus.mqh        │
-│  Core/Events.mqh            │  Core/Config/Types.mqh    │
-│                             │  Core/Config/Manager.mqh  │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 2 — INFRASTRUCTURE                               │
-│  Infra/DataManager.mqh      │  Infra/MarketManager.mqh  │
-│  Infra/ZoneManager.mqh                                  │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 3 — ANALYSIS                                     │
-│  Analysis/SRManager.mqh     │  Analysis/MarketRegime.mqh│
-│  Analysis/Pattern/PatternManager.mqh  (+ Evaluators,   │
-│                              ScoreEngine)               │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 4 — SIGNAL / INTELLIGENCE                        │
-│  Signal/SignalManager.mqh   │  Signal/AI/AIOrchestrator │
-│  Signal/AI/AIInference.mqh  │  Signal/AI/AITrainer.mqh  │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 5 — TRADE / EXECUTION                            │
-│  Trade/ExecutionManager.mqh │  Trade/RecoveryManager.mqh│
-├─────────────────────────────────────────────────────────┤
-│  LAYER 6 — UI / PRESENTATION (read-only)                │
-│  UI/DashboardManager.mqh                                │
-├─────────────────────────────────────────────────────────┤
-│  LAYER 7 — QA / DEVTOOLS (never in production)          │
-│  QA/Audit.mqh  │  QA/Test.mqh  │  QA/Optimizations.mqh │
-└─────────────────────────────────────────────────────────┘
-```
+### Mekanisme Pipeline (14 Stages)
+| Urutan | Stage | Fungsi Kritis |
+|---|---|---|
+| 01 | **DataSync** | Mengunci `SAccountSnapshot` dan `CPositionRegistry` sebagai *Single Source of Truth* untuk sisa siklus. |
+| 02-04 | **Analysis** | Update SR, Zone, dan Pattern berdasarkan bar terbaru. |
+| 05 | **RegimeDetect** | Menentukan filter agresivitas trading berdasarkan volatilitas/sesi. |
+| 06-07 | **Signal & AI** | Menghasilkan sinyal dan melakukan validasi fitur AI (*Feature Guard*). |
+| 08 | **RiskCheck** | Validasi drawdown, margin, dan korelasi posisi. |
+| 09 | **AdaptiveParams** | Penyesuaian SL/TP secara dinamis sebelum eksekusi. |
+| 10 | **Execution** | Mengirim permintaan ke broker dan mencatatnya di `CExecutionLedger`. |
+| 11-12 | **Management** | Trailing SL, Breakeven, dan logika Recovery untuk posisi terbuka. |
+| 13-14 | **Observability** | Update Dashboard UI dan Telemetri. |
 
 ---
 
-## Dependency Rules (Enforcement)
+## 3. Trading Integrity (Deterministic Logic)
 
-| Layer | MAY include | MUST NOT include |
-|-------|-------------|------------------|
-| Core | Core/ only | anything else |
-| Infra | Core/ | Analysis+, Signal+, Trade+, UI |
-| Analysis | Core/, Infra/ | Signal+, Trade+, UI |
-| Signal | Core/, Infra/, Analysis/ | Trade+, UI |
-| Trade | Core/, Infra/ | Signal/, UI |
-| UI | Core/, Infra/ (read) | Trade/, Signal/ (direct include) |
-| QA | ALL | (never included by prod) |
+Salah satu keunggulan arsitektur ini adalah penggunaan **Registry** dan **Snapshot**:
+- **`CPositionRegistry`**: Menggantikan pembacaan `PositionsTotal()` yang acak. Semua stage membaca dari registry yang sama dalam satu tick.
+- **`SAccountSnapshot`**: Memastikan kalkulasi lot dan risk tidak berubah di tengah jalan jika ekuitas akun berfluktuasi selama pemrosesan.
 
 ---
 
-## Migration Progress
+## 4. Include Layers
 
-Old numbered files at root (`0.EventBus.mqh` → `12.MarketRegime.mqh`) remain
-during transition. Each is migrated to its new layer path, tested, then
-the old file becomes a 1-line shim:
+| Layer | Deskripsi |
+|---|---|
+| **0-1** | Dasar: Konfigurasi, Tipe Data, EventBus, Global Primitives. |
+| **2-4** | Infrastruktur & Analisis: Data Manager, SR Manager, Pattern Recognition. |
+| **5-7** | Strategi & Trading: AI Ensemble, Signal Aggregator, Risk & Execution. |
+| **8-10** | Orchestration & Central: Pipeline Engine, Service Locator, Kernel Facade. |
 
-```cpp
-// DEPRECATED — use Core/EventBus.mqh
-#include "Core/EventBus.mqh"
+| Layer | Scope |
+| --- | --- |
+| 0 | Config and core primitives |
+| 0b | Cross-layer data-only types |
+| 1 | Core utilities |
+| 2 | Infra managers and data providers |
+| 3 | Analysis modules |
+| 4 | Trade primitive types |
+| 5 | AI modules |
+| 6 | Signal modules |
+| 7 | Trade managers |
+| 8 | UI and QA helpers |
+| 9 | Orchestration interfaces, stages, and pipeline engine |
+| 10 | Central kernel, registry, service locator, lifecycle, factory |
+
+## Pipeline Stages
+
+`CPipelineEngine` is canonical in `Include/PASR/Orchestration/PipelineEngine.mqh`.
+
+Runtime stage delegates live in `Include/PASR/Orchestration/Stages/`:
+
+```text
+01 DataSync
+02 AnalysisSR
+03 AnalysisZone
+04 PatternRec
+05 RegimeDetect
+06 SignalGen
+07 AIInference
+08 RiskCheck
+09 AdaptiveParams
+10 Execution
+11 PositionMgmt
+12 Recovery
+13 Dashboard
+14 Journal
 ```
 
-### Status Table
+Pipeline dependencies cross the orchestration boundary through `SPipelineDependencies`. Runtime context values such as health/session metrics are prepared by the kernel before execution.
 
-| Old File | New Path | Status |
-|----------|----------|--------|
-| IManager.mqh | Core/IManager.mqh | ⏳ Pending |
-| 0.EventBus.mqh | Core/EventBus.mqh | ⏳ Pending |
-| 1.Events.mqh | Core/Events.mqh | ⏳ Pending |
-| 2.Config.Types.mqh | Core/Config/Types.mqh | ⏳ Pending |
-| 2.Config.Manager.mqh | Core/Config/Manager.mqh | ⏳ Pending |
-| 3.MarketManager.mqh | Infra/MarketManager.mqh | ⏳ Pending |
-| 3.ZoneManager.mqh | Infra/ZoneManager.mqh | ⏳ Pending |
-| 10.DataManager.mqh | Infra/DataManager.mqh | ⏳ Pending |
-| 4.SRManager.mqh | Analysis/SRManager.mqh | ⏳ Pending |
-| 12.MarketRegime.mqh | Analysis/MarketRegime.mqh | ⏳ Pending |
-| 9.PatternManager.mqh | Analysis/Pattern/ | ✅ Done |
-| 5.SignalManager.mqh | Signal/SignalManager.mqh | ⏳ Pending |
-| 7.CAIOrchestrator.mqh | Signal/AI/ (14 files, 26-dim) | ✅ Done v4.02 |
-| 6.ExecutionManager.mqh | Trade/ExecutionManager.mqh | ⏳ Pending |
-| 8.RecoveryManager.mqh | Trade/RecoveryManager.mqh | ⏳ Pending |
-| 11.DashboardManager.mqh | UI/DashboardManager.mqh | ✅ Done |
-| PASR.Audit.mqh | QA/Audit.mqh | ⏳ Pending |
-| PASR.Test.mqh | QA/Test.mqh | ⏳ Pending |
-| PASR.Optimizations.mqh | QA/Optimizations.mqh | ⏳ Pending |
+## Ownership Rules
 
----
+- `CPASRKernel` owns non-`IManager` runtime services such as `EventBus`, fallback market regime detector, signal sources, and the pipeline engine.
+- `CModuleRegistry` owns registered `IManager` instances when they are successfully initialized with `owned=true`.
+- `CLifecycleManager` controls init/deinit order and reverse shutdown.
+- `CServiceLocator` is the typed lookup boundary for managers used by the kernel and pipeline.
+- Domain logic stays in domain folders: `Analysis/`, `Signal/`, `AI/`, `Trade/`, `Infra/`, `Data/`, `UI/`, and `QA/`.
 
-## Key Design Decisions
+## Dependency Policy
 
-### 1. Config Injection (not pull)
-DataManager does NOT include ConfigManager. Config is injected:
-```cpp
-dataManager.InitConfigCache(cfg); // called by EA OnInit
+- Do not reintroduce legacy runtime adapters.
+- Do not make domain modules pull dependencies through ad hoc globals.
+- Prefer registry/service-locator lookup in central runtime code.
+- Keep `OnTick()` light; expensive work belongs in timer/new-bar pipeline stages.
+- Keep trading formulas and AI/risk behavior separate from architecture cleanup unless the change explicitly targets business logic.
+
+## Verification Gates
+
+After changing architecture or include ownership, compile:
+
+```text
+Experts/PASR_MODULAR.mq5
+Scripts/PASR_Smoke.mq5
+Scripts/PASR_PipelineHarness_Smoke.mq5
 ```
 
-### 2. GlobalVariable Key Safety
-All GV keys prefixed with account login:
-```cpp
-string key = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
-           + "_PASR_" + symbol + "_" + (string)magic;
-```
-
-### 3. AI Thread Safety
-AIInference runs on tick thread (O(layers), zero alloc).
-AITrainer runs on deferred NewBar event only.
-Backpropagation never blocks OnTick().
-
-### 4. Dashboard Throttle
-Dashboard renders at maximum 1 Hz:
-```cpp
-if(GetMicrosecondCount() - m_lastRenderUs < 1000000UL) return;
-```
-
----
-
-## Event Flow
-
-```
-OnTick()
-  └─► EventBus.Dispatch(PriceUpdateEvent)
-        ├─► DataManager.OnPriceUpdate()   [cache check only]
-        ├─► MarketRegime.OnPriceUpdate()  [regime read only]
-        ├─► SignalManager.OnPriceUpdate() [AI inference only]
-        └─► DashboardManager.OnPriceUpdate() [throttled 1Hz]
-
-OnNewBar()
-  └─► EventBus.Dispatch(NewBarEvent)
-        ├─► DataManager.OnNewBar()        [update indicators]
-        ├─► SRManager.OnNewBar()          [recalc S/R levels]
-        ├─► PatternManager.OnNewBar()     [scan patterns]
-        ├─► MarketRegime.OnNewBar()       [full regime update]
-        ├─► SignalManager.OnNewBar()      [generate signal]
-        ├─► AITrainer.OnNewBar()          [deferred backprop]
-        └─► ExecutionManager.OnNewBar()   [trail/BE/partial]
-```
+The expected migration baseline is `0 errors, 0 warnings` for all three.

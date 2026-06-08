@@ -100,4 +100,58 @@ namespace QA
 #define ASSERT_FAIL(msg) \
    QA::_Record(false, "Fail: " msg, __FILE__, __LINE__)
 
+class CAssertions
+  {
+private:
+   string m_section;
+
+public:
+   void BeginSection(const string name)
+     {
+      m_section = name;
+      Print("[QA] BEGIN ", name);
+     }
+
+   void EndSection()
+     {
+      if(m_section != "")
+         Print("[QA] END ", m_section);
+      m_section = "";
+     }
+
+   void AreEqual(const string name, const int expected, const int actual)
+     {
+      QA::_Record(expected == actual, name, __FILE__, __LINE__,
+                  StringFormat("expected=%d actual=%d", expected, actual));
+     }
+
+   void IsTrue(const string name, const bool value)
+     {
+      QA::_Record(value, name, __FILE__, __LINE__);
+     }
+
+   void IsFalse(const string name, const bool value)
+     {
+      QA::_Record(!value, name, __FILE__, __LINE__);
+     }
+
+   void IsNotNull(const string name, const void *ptr)
+     {
+      QA::_Record(ptr != NULL, name, __FILE__, __LINE__);
+     }
+
+   void IsNear(const string name, const double expected, const double actual, const double epsilon)
+     {
+      double delta = MathAbs(expected - actual);
+      QA::_Record(delta <= epsilon, name, __FILE__, __LINE__,
+                  StringFormat("expected=%.8f actual=%.8f delta=%.8f eps=%.8f",
+                               expected, actual, delta, epsilon));
+     }
+
+   void PrintReport()
+     {
+      PrintFormat("[QA] Assertions pass=%d fail=%d", QA::PassCount(), QA::FailCount());
+     }
+  };
+
 #endif // __QA_ASSERTIONS_MQH__

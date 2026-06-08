@@ -11,6 +11,7 @@
 #include "ISignalSource.mqh"
 #include "SignalConfig.mqh"
 #include "SignalAggregator.mqh"
+#include "SignalDecisionEngine.mqh"
 #include "SignalFilterPipeline.mqh"
 #include "SignalCooldownManager.mqh"
 #include "SignalScorer.mqh"
@@ -50,9 +51,12 @@ struct SignalLayerSnapshot
    int             sourceCount;
    int             cooldownCount;
    int             failedZoneCount;
+   int             staleSourceCount;
    ENUM_SIGNAL_DIR lastDirection;
    double          lastConfidence;
    double          lastRawScore;
+   double          lastConflictScore;
+   double          lastDominanceGap;
    double          lastMultiplier;
    int             lastConfluence;
    bool            lastVetoed;
@@ -67,9 +71,12 @@ struct SignalLayerSnapshot
       sourceCount = 0;
       cooldownCount = 0;
       failedZoneCount = 0;
+      staleSourceCount = 0;
       lastDirection = SIGNAL_NONE;
       lastConfidence = 0.0;
       lastRawScore = 0.0;
+      lastConflictScore = 0.0;
+      lastDominanceGap = 0.0;
       lastMultiplier = 1.0;
       lastConfluence = 0;
       lastVetoed = false;
@@ -85,6 +92,7 @@ class CSignalManager : public IManager
   {
 private:
    CSignalAggregator       m_aggregator;
+   CSignalDecisionEngine   m_decisionEngine;
    CSignalFilterPipeline   m_filterPipeline;
    CSignalCooldownManager  m_cooldownMgr;
    CSignalScorer           m_scorer;
@@ -99,6 +107,7 @@ private:
    datetime                m_lastProcessedBar;
    bool                    m_configReady;
    AggregatedSignal        m_lastAggregated;
+   SignalDecisionResult    m_lastDecisionResult;
    SignalLayerSnapshot     m_snapshot;
 
    void RefreshSnapshot(const string reason = "")
@@ -109,14 +118,18 @@ private:
       m_snapshot.cooldownCount = m_cooldownMgr.GetActiveCooldownCount();
       m_snapshot.failedZoneCount = m_cooldownMgr.GetActiveFailedZoneCount();
       m_snapshot.lastDirection = m_lastAggregated.direction;
-      m_snapshot.lastConfidence = m_lastAggregated.normalizedScore;
+      m_snapshot.lastConfidence = m_lastDecisionResult.confidence;
       m_snapshot.lastRawScore = m_lastAggregated.rawScore;
+      SignalAggregatorSnapshot aggSnap = m_aggregator.GetSnapshot();
+      m_snapshot.staleSourceCount = aggSnap.staleSourceCount;
+      m_snapshot.lastConflictScore = aggSnap.conflictScore;
+      m_snapshot.lastDominanceGap = aggSnap.dominanceGap;
       m_snapshot.lastMultiplier = m_lastAggregated.multiplierFactor;
       m_snapshot.lastConfluence = m_lastAggregated.confluence;
-      m_snapshot.lastVetoed = m_lastAggregated.vetoed;
-      m_snapshot.lastSources = m_lastAggregated.contributingSources;
-      m_snapshot.lastVetoReason = m_aggregator.GetVetoReason();
-      m_snapshot.lastReason = reason;
+      m_snapshot.lastVetoed = m_lastDecisionResult.vetoed;
+      m_snapshot.lastSources = m_lastDecisionResult.primarySource;
+      m_snapshot.lastVetoReason = m_lastDecisionResult.vetoReason;
+      m_snapshot.lastReason = (reason != "") ? reason : m_lastDecisionResult.reason;
      }
 
    void EnsureConfigReady()
@@ -137,6 +150,7 @@ public:
         m_signalPending(false), m_lastProcessedBar(0), m_configReady(false)
      {
       m_lastAggregated.Clear();
+      m_lastDecisionResult.Clear();
       m_snapshot.Clear();
      }
 
@@ -155,6 +169,7 @@ public:
       m_signalPending = false;
       m_cooldownMgr.Clear();
       m_lastAggregated.Clear();
+      m_lastDecisionResult.Clear();
       m_snapshot.Clear();
       IManager::Deinit();
      }
@@ -179,17 +194,18 @@ public:
       SSignal out;
       out.Clear();
 
-      m_lastAggregated = m_aggregator.Aggregate();
-      if(m_lastAggregated.vetoed || m_lastAggregated.direction == SIGNAL_NONE)
+      m_lastDecisionResult = m_decisionEngine.Decide(m_aggregator);
+      m_lastAggregated = m_decisionEngine.GetLastAggregated();
+      if(!m_lastDecisionResult.tradeAllowed)
         {
-         RefreshSnapshot(m_lastAggregated.vetoed ? "Vetoed" : "NoSignal");
+         RefreshSnapshot(m_lastDecisionResult.reason);
          return out;
         }
 
-      out.direction     = m_lastAggregated.direction;
-      out.confidence    = m_lastAggregated.normalizedScore;
-      out.primarySource = m_lastAggregated.contributingSources;
-      out.entryPrice    = (m_lastAggregated.direction == SIGNAL_BUY)
+      out.direction     = m_lastDecisionResult.direction;
+      out.confidence    = m_lastDecisionResult.confidence;
+      out.primarySource = m_lastDecisionResult.primarySource;
+      out.entryPrice    = (m_lastDecisionResult.direction == SIGNAL_BUY)
                           ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
                           : SymbolInfoDouble(_Symbol, SYMBOL_BID);
       out.slPoints      = 0.0;
@@ -243,6 +259,7 @@ public:
          case EVENT_ID_EMERGENCY_STOP:
             m_signalPending = false;
             m_lastAggregated.Clear();
+            m_lastDecisionResult.Clear();
             RefreshSnapshot("EmergencyStop");
             if(m_config.GetDebugMode()) Log("Emergency Stop: Clearing pending signals.");
             break;
@@ -275,6 +292,7 @@ public:
 
    const CSignalConfig GetConfig() const { return m_config; }
    AggregatedSignal GetLastAggregated() const { return m_lastAggregated; }
+   SignalDecisionResult GetLastDecision() const { return m_lastDecisionResult; }
    SignalLayerSnapshot GetSnapshot() const { return m_snapshot; }
    string GetLastVetoReason() const { return m_aggregator.GetVetoReason(); }
 

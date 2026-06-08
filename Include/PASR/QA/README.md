@@ -2,13 +2,13 @@
 //| PASR LAYER 7 — QA / DEVTOOLS                                    |
 //|                                                                  |
 //| PURPOSE:                                                         |
-//|   Development-only tools: unit testing, audit logging,         |
-//|   performance profiling. NEVER included in production builds.  |
+//|   Development-only tools: unit testing, mocks, harnesses, and   |
+//|   diagnostics. Keep production runtime out of this folder.      |
 //|                                                                  |
 //| CONTENTS:                                                        |
-//|   Audit.mqh         — Runtime audit log (from Infra/Optimizations)  |
-//|   Test.mqh          — Unit test runner (from QA/Test.mqh)    |
-//|   Optimizations.mqh — Optimization helpers (Infra/Optimizations) |
+//|   Audit.mqh         — Runtime audit helper                    |
+//|   SmokeTest.mqh     — Smoke test helpers                      |
+//|   PipelineHarness.mqh — Pipeline harness and mocks             |
 //|                                                                  |
 //| DEPENDENCY RULES:                                               |
 //|   ✅ MAY include   : any layer (QA needs full system access)    |
@@ -25,10 +25,5 @@
 //|   entire file compiles to zero bytes.                           |
 //+------------------------------------------------------------------+
 //
-// Migration status:
-//   [✓] Audit.mqh         — completed
-//   [✓] Test.mqh          — completed
-//   [✓] Optimizations.mqh — completed (moved to Infra/Optimizations/)
-//   [✓] BatchProcessor.mqh — completed (moved to Infra/Optimizations/)
-//   [✓] MemoryPool.mqh    — completed (moved to Infra/Optimizations/)
-//   [✓] Branchless.mqh    — completed (moved to Infra/Optimizations/)
+// Active QA files should be compile-gated with PASR_QA_BUILD unless a
+// script explicitly includes them for a test harness.

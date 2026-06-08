@@ -12,13 +12,45 @@ public:
    virtual string Name() const = 0;
    virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) = 0;
 
-   // Phase 5 compatibility hooks. Default implementations keep existing
-   // stage contracts source-compatible while allowing extracted stages to
-   // receive runtime toggles from CPipelineEngine later.
-   virtual bool IsEnabled() const { return true; }
-   virtual void SetEnabled(const bool enabled) {}
-   virtual void SetDebugMode(const bool enabled) {}
-   virtual void SetProfilingEnabled(const bool enabled) {}
+   virtual bool IsEnabled() const
+     {
+      return true;
+     }
+
+   virtual void SetEnabled(const bool enabled)
+     {
+      // Optional for concrete stages that expose runtime toggles.
+     }
+
+   virtual void SetDebugMode(const bool enabled)
+     {
+      // Optional for concrete stages that emit diagnostics.
+     }
+
+   virtual void EnableProfiling(const bool enabled)
+     {
+      // Optional for concrete stages that measure elapsed time.
+     }
+
+   virtual bool IsReady() const
+     {
+      return true;
+     }
+
+   virtual string LastError() const
+     {
+      return "";
+     }
+
+   virtual ulong LastElapsedUs() const
+     {
+      return 0;
+     }
+
+   virtual void Reset()
+     {
+      // Optional for stages that keep transient state.
+     }
   };
 
 #endif // __PASR_ORCHESTRATION_PIPELINE_STAGE_MQH__

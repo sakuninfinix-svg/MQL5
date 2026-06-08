@@ -1,37 +1,74 @@
 //+------------------------------------------------------------------+
-//| Orchestration/Stages/RiskStage.mqh - v0.20                       |
-//| Compatibility adapter scaffold for future split pipeline stages   |
+//| Orchestration/Stages/RiskStage.mqh - v0.20                      |
+//| Runtime RiskCheck pipeline stage                                 |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_ORCHESTRATION_RISK_STAGE_MQH__
 #define __PASR_ORCHESTRATION_RISK_STAGE_MQH__
 
 #include <PASR/Core/PipelineTypes.mqh>
-#include <PASR/Core/IManager.mqh>
-#include <PASR/Orchestration/Stages/PipelineStageBase.mqh>
+#include <PASR/Core/Globals.mqh>
+#include <PASR/Trade/RiskManager.mqh>
+#include <PASR/Orchestration/PipelineStage.mqh>
 
 class CRiskStage : public CPipelineStageBase
   {
 private:
-   IManager *m_manager;
+   CRiskManager *m_risk;
+   bool          m_enabled;
+   bool          m_debug;
+   bool          m_profiling;
+   CPerfTimer    m_timer;
 
 public:
-   CRiskStage() : CPipelineStageBase("RiskStage"), m_manager(NULL)
+   CRiskStage() : m_risk(NULL), m_enabled(true), m_debug(false), m_profiling(true) {}
+
+   void Bind(CRiskManager *risk)
      {
-      m_enabled = false;
+      m_risk = risk;
      }
 
    void Bind(IManager *manager)
      {
-      m_manager = manager;
+     m_enabled = enabled;
+     }
+
+   void SetDebugMode(const bool enabled)
+     {
+      m_debug = enabled;
+     }
+
+   void EnableProfiling(const bool enabled)
+     {
+      m_profiling = enabled;
      }
 
    virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
      {
       if(!m_enabled)
          return STAGE_SKIP;
-      if(m_manager == NULL)
-         return Abort(ctx, "RiskStage manager not bound");
+      if(m_risk == NULL)
+        {
+         if(m_debug) Print("[Pipeline] RiskCheck SKIP: manager is NULL");
+         return STAGE_SKIP;
+        }
+      if(ctx.signal.direction == SIGNAL_NONE) return STAGE_SKIP;
+      m_timer.Start();
+      if(ctx.positions.CapturedAt() == 0)
+         ctx.positions.Scan(_Symbol, m_risk.MagicNumber());
+      if(!ctx.account.valid)
+         ctx.account.Capture();
+      m_risk.SetCycleContext(ctx.account, ctx.positions);
+      ctx.risk_result = m_risk.CheckRisk(ctx.signal);
+      if(!ctx.risk_result.allowed)
+        {
+         if(m_debug) PrintFormat("[Pipeline] RiskCheck REJECTED: %s", ctx.risk_result.reason);
+         ctx.exit_message = "RiskCheck: " + ctx.risk_result.reason;
+         if(m_profiling) m_timer.Log("Stage8_RiskCheck");
+         return STAGE_SKIP;
+        }
+      ctx.trading_allowed = true;
+      if(m_profiling) m_timer.Log("Stage8_RiskCheck");
       return STAGE_OK;
      }
   };

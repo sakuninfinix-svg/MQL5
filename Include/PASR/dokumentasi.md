@@ -21,13 +21,15 @@ Bug aktif tidak lagi dikelola sebagai tabel panjang di README. Bug aktif harus h
 
 ## 2. Ringkasan Arsitektur
 
-PASR memakai arsitektur Pipeline Orchestration.
+PASR sedang dimigrasikan ke **Centralized Modular Pipeline Architecture**.
+Kontrol lifecycle, registry, dependency, dan pipeline ownership berada di `Central/`,
+sedangkan logic trading tetap berada di module domain.
 
 Prinsip utamanya:
 
 1. `OnTick()` harus ringan.
 2. Logic berat dijalankan dari `OnTimer()`.
-3. Semua module utama dikoordinasi oleh `COrchestrator`.
+3. Semua module utama diakses melalui `CPASRKernel`; compatibility runtime lama sudah dihapus.
 4. Komunikasi antar module memakai `CEventBus`.
 5. State harus dimiliki manager yang tepat, bukan tersebar di EA entry point.
 6. `Experts/PASR_MODULAR.mq5` hanya menjadi wrapper lifecycle EA.
@@ -97,7 +99,6 @@ OnTradeTransaction()
 Include/PASR/
 ├── Core/
 │   ├── PASR.mqh
-│   ├── Orchestrator.mqh
 │   ├── PipelineEngine.mqh
 │   ├── PipelineTypes.mqh
 │   ├── Events.mqh
@@ -192,7 +193,7 @@ Masalah:
 
 Dampak:
 
-`Experts/PASR_MODULAR.mq5` memakai master include tersebut, lalu mendeklarasikan `COrchestrator`. Jika master include kosong/placeholder, class dan dependency utama tidak terdefinisi.
+`Experts/PASR_MODULAR.mq5` memakai master include tersebut. Pada arsitektur saat ini EA mendeklarasikan `CPASRKernel`; jika master include kosong/placeholder, class dan dependency utama tidak terdefinisi.
 
 Arahan fix:
 
@@ -329,7 +330,7 @@ Folder pending:
 - `Data/` — 4 files (DataManager.mqh, RegimeTypes.mqh, SRStruct.mqh, SymbolScanner.mqh)
 - `QA/` — 14 files (stress test, assertions, mocks, harnesses)
 - `UI/` — 2 files (DashboardManager.mqh, README.md)
-- `Tools/` — 8 files (Audit.mqh, TickCache.mqh, utilities)
+- `Infra/TickCache.mqh` — tick duplicate filter used by `Data/SymbolScanner.mqh`
 
 Audit hasil:
 
@@ -351,10 +352,9 @@ Audit hasil:
 - ✅ Include guards proper
 - ✅ Dependency pada `JournalManager`, `AITypes`, `TradePlan`
 
-**Tools/**
-- ✅ `Audit.mqh` — automated code quality audit
-- ✅ `TickCache.mqh` — O(1) tick deduplication
-- ✅ Utility files (BatchProcessor, Branchless, MemoryPool, Optimizations)
+**Infra utility cleanup**
+- `TickCache.mqh` dipertahankan sebagai dependency aktif `SymbolScanner`.
+- Utility optimasi lama yang tidak terhubung ke runtime dihapus.
 
 Kesimpulan:
 - Semua folder telah diaudit.
@@ -384,7 +384,7 @@ Kesimpulan:
 | S2 | Architecture integrity | BUG-001–006, BUG-009–011 |
 | S7 | HealthMonitor rewrite | BUG-H1..H6 resolved |
 | S8 | Runtime state ownership | SessionState wiring, Events.mqh |
-| S9 | Orchestrator residuals + Analysis cleanup | O1, O4, O7, O8, X1–X7 |
+| S9 | Runtime residuals + Analysis cleanup | O1, O4, O7, O8, X1-X7 |
 | S11 | PipelineEngine + Orchestrator hardening | N01, N03, N04, N06, N07, BUG-S10-001–004 |
 | S12 | Trade subfolder audit | TR-001–005 |
 | S13 | CorrelationManager migration | TR-006 |
@@ -417,7 +417,7 @@ Kesimpulan:
 | TR-001..006 | CRITICAL | `Trade/*.mqh` | ExitEngine, PositionManager, RiskManager, ExecutionManager, RecoveryManager, CorrelationManager | S12–13 |
 | BUG-H1..H6 | CRITICAL | `Infra/HealthMonitor.mqh` | EventBus pointer type, SendEvent to Push, PASR_MemoryUsage, flags | S7 |
 | BUG-001..012 | CRITICAL | `Core/*.mqh` | Monolith cleanup, pipeline wiring, compile fixes | S1–2 |
-| O1,O4,O7,O8 | CRITICAL | `Core/Orchestrator.mqh` | ENUM_PIPELINE_STAGE, SessionState wiring, BarChanged race, JournalManager | S9 |
+| O1,O4,O7,O8 | CRITICAL | Legacy runtime wrappers | ENUM_PIPELINE_STAGE, SessionState wiring, BarChanged race, JournalManager | S9 |
 | X1–X7 | CRITICAL | `Core/PASR_Executor.mqh` | Deleted monolith zombie executor | S9 |
 | S8-001,S8-005 | CRITICAL | `Core/Events.mqh` | Missing event IDs | S8 |
 | N01,N03,N04,N06,N07 | CRITICAL | `Core/*.mqh` | PipelineEngine and Orchestrator hardening | S11 |
@@ -430,11 +430,11 @@ Kesimpulan:
 ```cpp
 #include <PASR/Core/PASR.mqh>
 
-COrchestrator orch;
+CPASRKernel kernel;
 
 int OnInit()
   {
-   if(orch.Init(cfg) != INIT_SUCCEEDED)
+   if(kernel.Init(cfg) != INIT_SUCCEEDED)
       return INIT_FAILED;
    EventSetTimer(1);
    return INIT_SUCCEEDED;
@@ -442,24 +442,24 @@ int OnInit()
 
 void OnTick()
   {
-   orch.OnTick();
+   kernel.OnTick();
   }
 
 void OnTimer()
   {
-   orch.OnTimer();
+   kernel.OnTimer();
   }
 
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
   {
-   orch.OnTradeTransaction(trans, request, result);
+   kernel.OnTradeTransaction(trans, request, result);
   }
 
 void OnDeinit(const int reason)
   {
-   orch.OnDeinit(reason);
+   kernel.OnDeinit(reason);
   }
 ```
 

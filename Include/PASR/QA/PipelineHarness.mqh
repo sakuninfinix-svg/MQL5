@@ -33,7 +33,7 @@
 #include "MockDataManager.mqh"
 #include "AssertHelpers.mqh"
 #include "../Core/PipelineTypes.mqh"
-#include "../Core/PipelineEngine.mqh"
+#include "../Orchestration/PipelineEngine.mqh"
 
 #define HARNESS_MAX_STAGES   16
 #define HARNESS_MAX_CYCLES  512
@@ -82,15 +82,15 @@ private:
    void RecordStageResult(int stage_idx, ENUM_STAGE_RESULT res, ulong us)
      {
       if(stage_idx < 0 || stage_idx >= HARNESS_MAX_STAGES) return;
-      SStageStats &s = m_stage_stats[stage_idx];
-      s.total_us += us;
-      if(us > s.max_us) s.max_us = us;
+      m_stage_stats[stage_idx].total_us += us;
+      if(us > m_stage_stats[stage_idx].max_us)
+         m_stage_stats[stage_idx].max_us = us;
       switch(res)
         {
-         case STAGE_OK:      s.pass_count++;    break;
-         case STAGE_SKIP:    s.skip_count++;    break;
-         case STAGE_FAIL:    s.fail_count++;    break;
-         case STAGE_TIMEOUT: s.timeout_count++; m_result.total_timeouts++; break;
+         case STAGE_OK:      m_stage_stats[stage_idx].pass_count++;    break;
+         case STAGE_SKIP:    m_stage_stats[stage_idx].skip_count++;    break;
+         case STAGE_FAIL:    m_stage_stats[stage_idx].fail_count++;    break;
+         case STAGE_TIMEOUT: m_stage_stats[stage_idx].timeout_count++; m_result.total_timeouts++; break;
         }
      }
 
@@ -148,7 +148,9 @@ public:
          MqlRates bar = CMockDataManager::BuildBar(
                           o, c + 0.00005, o - 0.00003, c,
                           (datetime)(1700000000 + i * 3600));
-         m_data.InjectBars(bar, 1);
+         MqlRates bars[1];
+         bars[0] = bar;
+         m_data.InjectBars(bars, 1);
          // Corresponding tick for each bar
          MqlTick t = CMockDataManager::BuildTick(
                        c - _Point, c + _Point,
@@ -171,7 +173,9 @@ public:
          MqlRates bar = CMockDataManager::BuildBar(
                           o, o + 0.00020, c - 0.00020, c,
                           (datetime)(1700000000 + i * 3600));
-         m_data.InjectBars(bar, 1);
+         MqlRates bars[1];
+         bars[0] = bar;
+         m_data.InjectBars(bars, 1);
          MqlTick t = CMockDataManager::BuildTick(
                        c - _Point, c + _Point,
                        (datetime)(1700000000 + i * 3600 + 3500));
@@ -192,12 +196,13 @@ public:
          if(!m_data.PlayNextBar()) break;
 
          PipelineContext ctx;
-         ZeroMemory(ctx);
+         ctx.Reset();
          ctx.new_bar   = true;
          ctx.bar_time  = m_data.m_current_bar.time;
          ctx.bid       = m_data.m_current_bar.close - _Point;
          ctx.ask       = m_data.m_current_bar.close + _Point;
          ctx.atr       = 0.00080; // synthetic ATR
+         ctx.atr_points = 80.0;
 
          ulong t_start = GetMicrosecondCount();
          bool all_ok   = true;
@@ -250,12 +255,11 @@ public:
       Print("--- Stage Breakdown ---");
       for(int i = 0; i < m_stage_count && i < HARNESS_MAX_STAGES; i++)
         {
-         SStageStats &s = m_stage_stats[i];
-         ulong avg_us = s.pass_count + s.skip_count > 0
-                        ? s.total_us / (s.pass_count + s.skip_count) : 0;
+         ulong avg_us = m_stage_stats[i].pass_count + m_stage_stats[i].skip_count > 0
+                        ? m_stage_stats[i].total_us / (m_stage_stats[i].pass_count + m_stage_stats[i].skip_count) : 0;
          PrintFormat("  [%02d] %-24s  OK:%d  SKIP:%d  FAIL:%d  TIMEOUT:%d  avg:%I64uus",
-                     i, s.name, s.pass_count, s.skip_count,
-                     s.fail_count, s.timeout_count, avg_us);
+                     i, m_stage_stats[i].name, m_stage_stats[i].pass_count, m_stage_stats[i].skip_count,
+                     m_stage_stats[i].fail_count, m_stage_stats[i].timeout_count, avg_us);
         }
       Print("=================================");
      }

@@ -6,6 +6,7 @@
 #define PASR_CORRELATION_MANAGER_MQH
 
 #include "../Core/IManager.mqh"
+#include "PositionRegistry.mqh"
 
 #define CORR_WINDOW_SIZE      20
 #define CORR_HIGH_THRESHOLD   0.80
@@ -40,6 +41,7 @@ private:
    double         m_returns2[CORR_WINDOW_SIZE];
    ulong          m_calc_count;
    ulong          m_block_count;
+   CPositionRegistry m_positions;
 
 public:
    CCorrelationManager()
@@ -131,12 +133,12 @@ public:
      {
       if(!IsInitialized()) return true;
       double check_threshold = (threshold > 0.0) ? threshold : CORR_HIGH_THRESHOLD;
-      int total = PositionsTotal();
-      for(int i = total - 1; i >= 0; i--)
+      m_positions.Scan("", 0);
+      SPositionSnapshot pos;
+      for(int i = 0; i < m_positions.Count(); i++)
         {
-         ulong ticket = PositionGetTicket(i);
-         if(ticket <= 0 || !PositionSelectByTicket(ticket)) continue;
-         string pos_sym = PositionGetString(POSITION_SYMBOL);
+         if(!m_positions.GetAt(i, pos)) continue;
+         string pos_sym = pos.symbol;
          if(pos_sym == symbol) continue;
          double corr = GetCorrelation(symbol, pos_sym);
          if(MathAbs(corr) >= check_threshold)
@@ -227,12 +229,12 @@ private:
      {
       ArrayResize(m_tracked_symbols, 0);
       m_tracked_count = 0;
-      int total = PositionsTotal();
-      for(int i = total - 1; i >= 0; i--)
+      m_positions.Scan("", 0);
+      SPositionSnapshot pos;
+      for(int i = 0; i < m_positions.Count(); i++)
         {
-         ulong ticket = PositionGetTicket(i);
-         if(ticket <= 0 || !PositionSelectByTicket(ticket)) continue;
-         string sym = PositionGetString(POSITION_SYMBOL);
+         if(!m_positions.GetAt(i, pos)) continue;
+         string sym = pos.symbol;
          bool found = false;
          for(int k = 0; k < m_tracked_count; k++)
             if(m_tracked_symbols[k] == sym) { found = true; break; }

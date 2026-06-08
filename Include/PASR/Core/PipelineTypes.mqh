@@ -9,6 +9,8 @@
 #include "Events.mqh"
 #include "../Data/RegimeTypes.mqh"
 #include "../Signal/ISignalSource.mqh"
+#include "../Infra/AccountSnapshot.mqh"
+#include "../Trade/PositionRegistry.mqh"
 
 #define STAGE_TIMEOUT_US   50000
 #define STAGE_COUNT        15
@@ -134,7 +136,21 @@ struct SAIResult
    double            drift_index;
    bool              model_healthy;
    string            model_name;
-   SAIResult() : score(0), drift_index(0), model_healthy(true), model_name("") {}
+   bool              validation_valid;
+   string            validation_reason;
+   int               invalid_feature_index;
+   SAIResult() : score(0), drift_index(0), model_healthy(true), model_name(""),
+                 validation_valid(false), validation_reason(""), invalid_feature_index(-1) {}
+   void Clear()
+     {
+      score = 0.0;
+      drift_index = 0.0;
+      model_healthy = true;
+      model_name = "";
+      validation_valid = false;
+      validation_reason = "";
+      invalid_feature_index = -1;
+     }
   };
 
 struct StageMetrics
@@ -209,6 +225,8 @@ struct PipelineContext
    datetime          bar_time;
    bool              new_bar;
    bool              market_open;
+   SAccountSnapshot  account;
+   CPositionRegistry positions;
 
    EMarketRegime          regime;
    double                 regime_confidence;
@@ -268,12 +286,14 @@ struct PipelineContext
       bar_time = 0;
       new_bar = false;
       market_open = false;
+      account.Clear();
+      positions.Clear();
       regime = REGIME_UNKNOWN;
       regime_confidence = 0;
       session = SESSION_UNKNOWN;
       signal.Clear();
       signal_strength = 0;
-      ZeroMemory(ai_result);
+      ai_result.Clear();
       ai_score = 0;
       drift_score = 0;
       ai_veto = false;

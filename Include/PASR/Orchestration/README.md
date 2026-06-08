@@ -57,15 +57,27 @@ Include/PASR/Core/PipelineEngine.mqh
 
 Migrasi dilakukan bertahap agar compile lama tetap aman.
 
-Adapter stage awal sudah tersedia dan di-include oleh master include sebagai compile guard:
+Semua runtime stage utama sudah tersedia dan di-include oleh master include:
 
 ```text
 Include/PASR/Orchestration/Stages/DataSyncStage.mqh
+Include/PASR/Orchestration/Stages/AnalysisSRStage.mqh
+Include/PASR/Orchestration/Stages/AnalysisZoneStage.mqh
+Include/PASR/Orchestration/Stages/PatternStage.mqh
+Include/PASR/Orchestration/Stages/RegimeStage.mqh
 Include/PASR/Orchestration/Stages/SignalStage.mqh
+Include/PASR/Orchestration/Stages/AIInferStage.mqh
 Include/PASR/Orchestration/Stages/RiskStage.mqh
+Include/PASR/Orchestration/Stages/AdaptiveParamsStage.mqh
+Include/PASR/Orchestration/Stages/ExecutionStage.mqh
+Include/PASR/Orchestration/Stages/PositionStage.mqh
+Include/PASR/Orchestration/Stages/RecoveryStage.mqh
+Include/PASR/Orchestration/Stages/DashboardStage.mqh
+Include/PASR/Orchestration/Stages/JournalStage.mqh
 ```
 
-Adapter tersebut default disabled dan belum dipakai oleh runtime lama.
+`DataSyncStage`, `AnalysisSRStage`, `AnalysisZoneStage`, `PatternStage`, `RegimeStage`, `SignalStage`, `AIInferStage`, `RiskStage`, `AdaptiveParamsStage`, `ExecutionStage`, `PositionStage`, `RecoveryStage`, `DashboardStage`, dan `JournalStage` sudah dipakai runtime melalui `CPipelineEngine` delegation.
+`CPipelineEngine` sekarang berperan sebagai dispatcher, registry runner, health/session gate, dan publisher observability; logic per-stage berada di file stage masing-masing.
 
 ## Target akhir
 
@@ -82,7 +94,9 @@ Include/PASR/Orchestration/
     ├── PatternStage.mqh
     ├── RegimeStage.mqh
     ├── SignalStage.mqh
+    ├── AIInferStage.mqh
     ├── RiskStage.mqh
+    ├── AdaptiveParamsStage.mqh
     ├── ExecutionStage.mqh
     ├── PositionStage.mqh
     ├── RecoveryStage.mqh
@@ -92,4 +106,5 @@ Include/PASR/Orchestration/
 
 ## Migration rule
 
-Sampai semua stage dipisah, file lama di `Core/` tetap menjadi sumber implementasi runtime. File di `Orchestration/` boleh berupa adapter/wrapper dulu.
+`CPipelineEngine` tetap menjaga urutan pipeline, fallback behavior, abort policy, stage registry, dan observability.
+Perubahan behavior domain harus dilakukan di module domain atau file stage terkait, bukan dengan mengembalikan logic besar ke engine.
