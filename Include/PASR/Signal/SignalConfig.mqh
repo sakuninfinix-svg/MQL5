@@ -6,7 +6,7 @@
 #ifndef __SIGNAL_CONFIG_MQH__
 #define __SIGNAL_CONFIG_MQH__
 
-#include "../Core/Config/Types.mqh"
+#include <PASR/Core/Config/Types.mqh>
 
 enum ENUM_ENTRY_MODE
   {
@@ -49,8 +49,8 @@ struct SignalConfigData
      {
       SignalLookback                 = 20;
       MinConfluence                  = 1;
-      MinScore                       = 0.45;
-      MinDominanceGap                = 0.08;
+      MinScore                       = 0.40;
+      MinDominanceGap                = 0.05;
       MaxSourceAgeSeconds            = 120;
       SignalCooldownBars             = 3;
       ExitOnOpposite                 = false;
@@ -116,6 +116,7 @@ public:
       m_config.Init();
 
       m_config.SignalLookback = MathMax(5, cfg.Pattern.LookbackBars);
+      m_config.MinScore = Clamp01(cfg.Pattern.MinPatternScore / 100.0);
       m_config.SignalCooldownBars = MathMax(1, cfg.Risk.RecoveryCooldownBars);
       m_config.PatternFailureCooldownBars = MathMax(1, cfg.Risk.RecoveryCooldownBars);
       m_config.MaxSpreadPoints = PipToPoints(cfg.Market.SpreadFilterPips);

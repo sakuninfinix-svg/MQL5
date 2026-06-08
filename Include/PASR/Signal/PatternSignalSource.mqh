@@ -29,7 +29,7 @@ private:
      }
 
 public:
-   PatternSignalSource(CPatternManager *p, double minConfidence = 0.55)
+   PatternSignalSource(CPatternManager *p, double minConfidence = 0.40)
       : m_pattern(p), m_minConfidence(MathMax(0.0, MathMin(1.0, minConfidence))),
         m_lastEvaluated(0), m_lastDirection(SIGNAL_NONE), m_lastConfidence(0.0), m_lastReason("") {}
 

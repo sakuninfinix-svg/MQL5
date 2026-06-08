@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                                      AITypes.mqh |
 //|                        Shared structs & enums for AI subsystem   |
 //+------------------------------------------------------------------+
@@ -10,6 +10,16 @@
 
 #ifndef AI_FEATURE_DIM
 #define AI_FEATURE_DIM 34
+#endif
+
+#ifndef AI_SEQ_LEN
+#define AI_SEQ_LEN 64
+#endif
+#ifndef AI_SEQ_FEATURE_DIM
+#define AI_SEQ_FEATURE_DIM 12
+#endif
+#ifndef AI_SEQ_TENSOR_SIZE
+#define AI_SEQ_TENSOR_SIZE (AI_SEQ_LEN * AI_SEQ_FEATURE_DIM)
 #endif
 
 #ifndef AI_DEFAULT_CONF_THRESHOLD
@@ -24,11 +34,12 @@
 
 enum ENUM_AI_MODEL_TYPE
   {
-   AI_MODEL_NONE       = 0,
-   AI_MODEL_MLP        = 1,
-   AI_MODEL_ONNX       = 2,
-   AI_MODEL_ENSEMBLE   = 3,
-   AI_MODEL_ONLINE     = 4
+   AI_MODEL_NONE         = 0,
+   AI_MODEL_MLP          = 1,
+   AI_MODEL_ONNX         = 2,
+   AI_MODEL_ENSEMBLE     = 3,
+   AI_MODEL_ONLINE       = 4,
+   AI_MODEL_TRANSFORMER  = 5
   };
 
 enum ENUM_AI_DECISION_CLASS
@@ -106,6 +117,53 @@ struct SAIFeatureVector
       ArrayInitialize(features, 0.0);
       timestamp = 0;
       bar_time = 0;
+      symbol = "";
+      timeframe = PERIOD_CURRENT;
+      regime = REGIME_UNKNOWN;
+      valid = false;
+     }
+
+   void Reset() { Clear(); }
+  };
+
+struct SAISequenceTensor
+  {
+   double           data[AI_SEQ_TENSOR_SIZE];
+   int              seq_len;
+   int              feat_dim;
+   datetime         timestamp;
+   datetime         newest_bar_time;
+   string           symbol;
+   ENUM_TIMEFRAMES  timeframe;
+   EMarketRegime    regime;
+   bool             valid;
+
+   int FlatIndex(const int bar, const int feat) const
+     {
+      return bar * feat_dim + feat;
+     }
+
+   double At(const int bar, const int feat) const
+     {
+      int idx = FlatIndex(bar, feat);
+      if(idx < 0 || idx >= AI_SEQ_TENSOR_SIZE) return 0.0;
+      return data[idx];
+     }
+
+   void Set(const int bar, const int feat, const double value)
+     {
+      int idx = FlatIndex(bar, feat);
+      if(idx < 0 || idx >= AI_SEQ_TENSOR_SIZE) return;
+      data[idx] = value;
+     }
+
+   void Clear()
+     {
+      ArrayInitialize(data, 0.0);
+      seq_len = AI_SEQ_LEN;
+      feat_dim = AI_SEQ_FEATURE_DIM;
+      timestamp = 0;
+      newest_bar_time = 0;
       symbol = "";
       timeframe = PERIOD_CURRENT;
       regime = REGIME_UNKNOWN;

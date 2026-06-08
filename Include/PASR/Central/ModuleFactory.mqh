@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| Central/ModuleFactory.mqh - v1.00                                |
 //| Central allocation factory for PASR runtime modules               |
 //+------------------------------------------------------------------+
@@ -47,6 +47,9 @@ public:
 
    static CAIOrchestrator* CreateAIOrchestrator()
      { return new CAIOrchestrator(); }
+
+   static CAISignalSource* CreateAISignalSource(CAIOrchestrator *ai)
+     { return new CAISignalSource(ai); }
 
    static CRiskManager* CreateRiskManager()
      { return new CRiskManager(); }

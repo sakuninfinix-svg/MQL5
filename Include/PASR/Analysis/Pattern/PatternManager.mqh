@@ -402,8 +402,8 @@ public:
    CPatternManager()
       : IManager(), m_historyHead(0), m_historyCount(0),
         m_lastScanBarTime(0), m_totalPatternsDetected(0),
-        m_totalValidSignals(0), m_minConfluenceScore(0.45),
-        m_minDominanceGap(0.08), m_regimeBoostFactor(0.20),
+        m_totalValidSignals(0), m_minConfluenceScore(0.40),
+        m_minDominanceGap(0.05), m_regimeBoostFactor(0.20),
         m_pinBarRatio(2.0), m_engulfMultiplier(1.1), m_requireConfirmation(true)
      {
       ClearHistory();

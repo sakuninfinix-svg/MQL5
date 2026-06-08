@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                   Core/Config/Validator.mqh     |
 //|                                   Copyright 2026, Agsicentre    |
 //|                                                                  |
@@ -177,6 +177,16 @@ public:
             StringFind(cfg.AI.ModelFileName, "../") == 0)
             AddError(errors, "[Config.AI] ModelFileName must not start with '../' "
                      "(path traversal not allowed): " + cfg.AI.ModelFileName);
+
+         if(cfg.AI.EnableOnnx && StringLen(cfg.AI.OnnxModelFileName) == 0)
+            AddError(errors, "[Config.AI] OnnxModelFileName must not be empty when EnableOnnx=true");
+
+         if(StringLen(cfg.AI.OnnxModelFileName) > 0 &&
+            StringFind(cfg.AI.OnnxModelFileName, "..\\") == 0)
+            AddError(errors, "[Config.AI] OnnxModelFileName path traversal not allowed: " + cfg.AI.OnnxModelFileName);
+         if(StringLen(cfg.AI.OnnxModelFileName) > 0 &&
+            StringFind(cfg.AI.OnnxModelFileName, "../") == 0)
+            AddError(errors, "[Config.AI] OnnxModelFileName path traversal not allowed: " + cfg.AI.OnnxModelFileName);
         }
 
       //=== SECTION 5: Pattern ==========================================

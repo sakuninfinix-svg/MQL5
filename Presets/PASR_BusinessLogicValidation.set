@@ -1,5 +1,5 @@
 ; PASR_MODULAR - Business Logic Validation Preset
-; Matches current Experts/PASR_MODULAR.mq5 inputs.
+; Conservative preset for logic validation and tester tuning.
 
 InpDebugMode=true
 InpEnableProfiling=true
@@ -45,11 +45,11 @@ InpAIPersistWeights=false
 InpAIModelFileName=PASR_weights.bin
 
 InpEnablePatterns=true
-InpMinPatternScore=45.0
-InpPatternLookbackBars=50
+InpMinPatternScore=40.0
+InpPatternLookbackBars=64
 InpPinBarRatio=2.0
 InpEngulfMultiplier=1.1
-InpRequireConfirmation=false
+InpRequireConfirmation=true
 
 InpShowDashboard=false
 InpShowSignalArrows=false

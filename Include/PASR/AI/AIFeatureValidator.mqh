@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| AI/AIFeatureValidator.mqh - inference input safety gate          |
 //+------------------------------------------------------------------+
 #property strict
@@ -6,6 +6,7 @@
 #define __PASR_AI_FEATURE_VALIDATOR_MQH__
 
 #include "AITypes.mqh"
+#include "SequenceFeatureBuilder.mqh"
 #include "AIEnsemble.mqh"
 
 #define PASR_AI_FEATURE_MAX_ABS        10.0
@@ -57,6 +58,32 @@ private:
       if(value != value) return false;
       if(MathAbs(value) > DBL_MAX / 4.0) return false;
       return true;
+     }
+
+   string SequenceFeatureGroup(const int feat) const
+     {
+      switch(feat)
+        {
+         case SEQ_FEAT_NORM_RETURN:  return "seq_return";
+         case SEQ_FEAT_HL_ATR_RATIO: return "seq_hl_atr";
+         case SEQ_FEAT_VOL_RATIO:    return "seq_volume";
+         case SEQ_FEAT_BODY_RATIO:
+         case SEQ_FEAT_UPPER_WICK:
+         case SEQ_FEAT_LOWER_WICK:
+         case SEQ_FEAT_CLOSE_POS:    return "seq_candle";
+         case SEQ_FEAT_SR_DIST:
+         case SEQ_FEAT_ZONE_STR:
+         case SEQ_FEAT_PATTERN:      return "seq_structure";
+         case SEQ_FEAT_REGIME_TREND: return "seq_regime";
+         case SEQ_FEAT_BAR_AGE:      return "seq_time";
+         default:                    return "seq_unknown";
+        }
+     }
+
+   void SequenceFeatureBounds(const int feat, double &lo, double &hi) const
+     {
+      lo = 0.0;
+      hi = 1.0;
      }
 
    string FeatureGroup(const int index) const
@@ -187,6 +214,71 @@ public:
       out.valid = (featureOk && modelOk);
       if(out.valid) out.reason = "OK";
       return out.valid;
+     }
+
+   bool ValidateSequence(const SAISequenceTensor &tensor, AIFeatureValidationResult &out) const
+     {
+      out.Clear();
+      out.featureDim = AI_SEQ_FEATURE_DIM;
+      out.featureCount = AI_SEQ_TENSOR_SIZE;
+      out.featureTime = tensor.timestamp;
+      out.barTime = tensor.newest_bar_time;
+
+      if(!tensor.valid)
+        {
+         out.reason = "Sequence tensor invalid flag";
+         return false;
+        }
+
+      if(tensor.seq_len != AI_SEQ_LEN || tensor.feat_dim != AI_SEQ_FEATURE_DIM)
+        {
+         out.reason = StringFormat("Sequence shape mismatch len=%d feat=%d",
+                                   tensor.seq_len, tensor.feat_dim);
+         return false;
+        }
+
+      if(tensor.newest_bar_time <= 0)
+        {
+         out.reason = "Sequence newest bar time missing";
+         return false;
+        }
+
+      datetime now = TimeCurrent();
+      datetime featureTime = (tensor.timestamp > 0) ? tensor.timestamp : now;
+      if(m_maxStaleSec > 0 && now - featureTime > m_maxStaleSec)
+        {
+         out.reason = StringFormat("Sequence tensor stale age=%d sec", (int)(now - featureTime));
+         return false;
+        }
+
+      for(int b = 0; b < AI_SEQ_LEN; b++)
+        {
+         for(int f = 0; f < AI_SEQ_FEATURE_DIM; f++)
+           {
+            double value = tensor.At(b, f);
+            double lo = 0.0;
+            double hi = 0.0;
+            SequenceFeatureBounds(f, lo, hi);
+            if(!IsFinite(value) || MathAbs(value) > PASR_AI_FEATURE_MAX_ABS ||
+               value < lo - 0.000001 || value > hi + 0.000001)
+              {
+               out.invalidIndex = tensor.FlatIndex(b, f);
+               out.invalidValue = value;
+               out.featureGroup = SequenceFeatureGroup(f);
+               out.expectedMin = lo;
+               out.expectedMax = hi;
+               out.reason = StringFormat("Invalid %s tensor[%d,%d]=%.8f expected[%.2f..%.2f]",
+                                         out.featureGroup, b, f, value, lo, hi);
+               return false;
+              }
+           }
+        }
+
+      out.valid = true;
+      out.modelHealthy = true;
+      out.modelId = StringFormat("sequence:%dx%d", AI_SEQ_LEN, AI_SEQ_FEATURE_DIM);
+      out.reason = "OK";
+      return true;
      }
   };
 

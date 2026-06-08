@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| QA/BusinessLogicHarness.mqh - deterministic lifecycle checks     |
 //+------------------------------------------------------------------+
 #property strict
@@ -11,6 +11,7 @@
 #include "../Trade/PositionRegistry.mqh"
 #include "../Infra/AccountSnapshot.mqh"
 #include "../AI/AIFeatureValidator.mqh"
+#include "../AI/ONNXBridge.mqh"
 #include "../Signal/SignalDecisionEngine.mqh"
 
 class CMockSignalSource : public ISignalSource
@@ -251,7 +252,7 @@ private:
       double expectedSpreadPoints = 2.5 * pipFactor;
 
       m_assert.AreEqual("lookback follows pattern config", 64, config.GetSignalLookback());
-      m_assert.IsNear("aggregator min score keeps signal baseline", 0.45, config.GetMinScore(), 0.000001);
+      m_assert.IsNear("aggregator min score follows pattern config", 0.73, config.GetMinScore(), 0.000001);
       m_assert.AreEqual("signal cooldown follows recovery cooldown", 7, config.GetSignalCooldownBars());
       m_assert.AreEqual("pattern failure cooldown follows recovery cooldown", 7, config.GetPatternFailureCooldownBars());
       m_assert.IsNear("spread filter converted to points", expectedSpreadPoints, config.GetMaxSpreadPoints(), 0.000001);
@@ -325,6 +326,81 @@ private:
       m_assert.EndSection();
      }
 
+   void FillValidSequenceTensor(SAISequenceTensor &tensor)
+     {
+      tensor.Reset();
+      tensor.valid = true;
+      tensor.seq_len = AI_SEQ_LEN;
+      tensor.feat_dim = AI_SEQ_FEATURE_DIM;
+      tensor.timestamp = TimeCurrent();
+      tensor.newest_bar_time = TimeCurrent() - PeriodSeconds(PERIOD_CURRENT);
+      tensor.symbol = _Symbol;
+      tensor.timeframe = _Period;
+      for(int b = 0; b < AI_SEQ_LEN; b++)
+        {
+         for(int f = 0; f < AI_SEQ_FEATURE_DIM; f++)
+            tensor.Set(b, f, 0.5);
+         tensor.Set(b, SEQ_FEAT_BAR_AGE, (double)b / (double)MathMax(1, AI_SEQ_LEN - 1));
+        }
+     }
+
+   void TestSequenceTensorValidator()
+     {
+      m_assert.BeginSection("SequenceTensorValidator");
+
+      CAIFeatureValidator validator;
+      SAISequenceTensor tensor;
+      FillValidSequenceTensor(tensor);
+
+      AIFeatureValidationResult result;
+      bool ok = validator.ValidateSequence(tensor, result);
+      m_assert.IsTrue("valid sequence tensor accepted", ok);
+      m_assert.AreEqual("sequence feature dim", AI_SEQ_FEATURE_DIM, result.featureDim);
+      m_assert.AreEqual("sequence flat size", AI_SEQ_TENSOR_SIZE, result.featureCount);
+
+      tensor.Set(10, SEQ_FEAT_BODY_RATIO, 1.5);
+      ok = validator.ValidateSequence(tensor, result);
+      m_assert.IsFalse("out-of-range sequence value rejected", ok);
+      m_assert.AreEqual("sequence candle group captured", 0, StringCompare(result.featureGroup, "seq_candle"));
+
+      FillValidSequenceTensor(tensor);
+      tensor.newest_bar_time = 0;
+      ok = validator.ValidateSequence(tensor, result);
+      m_assert.IsFalse("missing newest bar time rejected", ok);
+
+      FillValidSequenceTensor(tensor);
+      tensor.seq_len = AI_SEQ_LEN - 1;
+      ok = validator.ValidateSequence(tensor, result);
+      m_assert.IsFalse("shape mismatch rejected", ok);
+
+      m_assert.EndSection();
+     }
+
+   void TestONNXBridgeStub()
+     {
+      m_assert.BeginSection("ONNXBridgeStub");
+
+      CONNXBridge bridge;
+      m_assert.IsFalse("sequence load disabled without compile flag",
+                       bridge.LoadSequence("PASR_transformer.onnx", AI_SEQ_LEN, AI_SEQ_FEATURE_DIM, 2));
+      m_assert.IsFalse("bridge not loaded by default", bridge.IsLoaded());
+
+      double outputs[];
+      int out_count = 0;
+      float input[];
+      ArrayResize(input, AI_SEQ_TENSOR_SIZE);
+      ArrayInitialize(input, 0.5f);
+      m_assert.IsFalse("sequence run fails when not loaded",
+                       bridge.RunSequence(input, AI_SEQ_LEN, AI_SEQ_FEATURE_DIM, outputs, out_count));
+
+      SAISequenceTensor tensor;
+      FillValidSequenceTensor(tensor);
+      m_assert.IsFalse("tensor run fails when bridge not loaded",
+                       bridge.RunSequenceTensor(tensor, outputs, out_count));
+
+      m_assert.EndSection();
+     }
+
 public:
    void RunAll()
      {
@@ -336,6 +412,8 @@ public:
       TestSignalDecisionEngine();
       TestSignalConfigBridge();
       TestAIFeatureValidator();
+      TestSequenceTensorValidator();
+      TestONNXBridgeStub();
       m_assert.PrintReport();
       if(QA::FailCount() == 0)
          Print("[BusinessLogicHarness] PASS");

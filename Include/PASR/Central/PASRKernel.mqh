@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| Central/PASRKernel.mqh - v0.30                                   |
 //| Central facade and pipeline owner for modular migration            |
 //+------------------------------------------------------------------+
@@ -26,6 +26,7 @@ private:
    PatternSignalSource    *m_src_pattern;
    SRSignalSource         *m_src_sr;
    CRegimeSignalSource    *m_src_regime;
+   CAISignalSource        *m_src_ai;
    CModuleRegistry         m_registry;
    CServiceLocator         m_services;
    CLifecycleManager       m_lifecycle;
@@ -168,6 +169,7 @@ private:
 
    void ReleaseSignalSources()
      {
+      if(m_src_ai != NULL) { delete m_src_ai; m_src_ai = NULL; }
       if(m_src_regime != NULL) { delete m_src_regime; m_src_regime = NULL; }
       if(m_src_sr != NULL) { delete m_src_sr; m_src_sr = NULL; }
       if(m_src_pattern != NULL) { delete m_src_pattern; m_src_pattern = NULL; }
@@ -469,6 +471,14 @@ private:
       if(!RegisterOwnedManager(PASR_MOD_AI_ORCHESTRATOR, ai))
          return false;
 
+      CSignalManager *signal = m_services.Signal();
+      if(signal != NULL)
+        {
+         m_src_ai = CModuleFactory::CreateAISignalSource(ai);
+         if(m_src_ai != NULL)
+            signal.RegisterSource(m_src_ai, 1.2);
+        }
+
       double vetoThreshold = m_cfg.AI.MinConfidence;
       double driftVetoThreshold = 0.60;
       double highConfidenceThreshold = MathMax(0.75, m_cfg.AI.MinConfidence + 0.15);
@@ -610,7 +620,7 @@ private:
 public:
    CPASRKernel()
       : m_event_bus(NULL), m_regime_detector(NULL), m_adaptive_manager(NULL),
-        m_src_pattern(NULL), m_src_sr(NULL), m_src_regime(NULL),
+        m_src_pattern(NULL), m_src_sr(NULL), m_src_regime(NULL), m_src_ai(NULL),
         m_pipeline(NULL), m_state(PASR_KERNEL_STOPPED), m_ready(false),
         m_debug(false), m_profiling_enabled(true), m_last_error(""),
         m_last_bar_time(0), m_new_bar_flag(false), m_last_price_dispatch_ms(0),

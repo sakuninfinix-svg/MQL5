@@ -21,15 +21,31 @@ private:
    StrategyConfig  m_cfg;
    IDataManager   *m_data;
 
+   double PipToPoints(const double pips) const
+     {
+      int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+      double factor = (digits == 3 || digits == 5) ? 10.0 : 1.0;
+      return MathMax(0.0, pips) * factor;
+     }
+
    bool CheckSpread(LegacyFilterResult &r) const
      {
-      double spreadPts = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-      double maxSpreadPts = m_cfg.Market.SpreadFilterPips * 10.0;
-      if(maxSpreadPts > 0.0 && spreadPts > maxSpreadPts)
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      if(ask <= 0.0 || bid <= 0.0)
         {
          r.passed = false;
-         r.reason = "Spread:" + DoubleToString(spreadPts, 1);
+         r.reason = "Spread:invalid";
          return false;
+        }
+
+      double spreadPts = (ask - bid) / _Point;
+      double maxSpreadPts = PipToPoints(m_cfg.Market.SpreadFilterPips);
+      if(maxSpreadPts > 0.0 && spreadPts > maxSpreadPts)
+        {
+          r.passed = false;
+          r.reason = "Spread:" + DoubleToString(spreadPts, 1);
+          return false;
         }
       return true;
      }
@@ -50,8 +66,10 @@ private:
      {
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
-      int startHour = m_cfg.Market.SessionStartHour;
-      int endHour = m_cfg.Market.SessionEndHour;
+      int startHour = MathMax(0, MathMin(23, m_cfg.Market.SessionStartHour));
+      int endHour = MathMax(0, MathMin(23, m_cfg.Market.SessionEndHour));
+      if(startHour == endHour)
+         return true;
       if(startHour <= endHour)
         {
          if(dt.hour < startHour || dt.hour > endHour)
@@ -63,7 +81,7 @@ private:
         }
       else
         {
-         if(dt.hour < startHour && dt.hour > endHour)
+         if(dt.hour > endHour && dt.hour < startHour)
            {
             r.passed = false;
             r.reason = "OutOfSession";

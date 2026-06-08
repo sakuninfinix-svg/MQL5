@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                       Core/Config/Types.mqh     |
 //|                                       Copyright 2026, Agsicentre|
 //|                                                                  |
@@ -131,13 +131,16 @@ struct AIConfig
    int    ReplayBufferSize;     // experience replay buffer capacity
    int    MinibatchSize;        // samples per backpropagation step
    bool   PersistWeights;       // save/load trained weights to/from file
-   string ModelFileName;        // weight file name (relative to MQL5/Common)
+   string ModelFileName;        // MLP weight file name (relative to MQL5/Files)
+   string OnnxModelFileName;    // ONNX sequence model (empty = ONNX disabled)
+   bool   EnableOnnx;           // attempt ONNX sequence inference when model file set
 
    AIConfig()
       : EnableAI(false),        MinConfidence(0.60),
         LearningRate(0.001),    TrainIntervalBars(5),
         ReplayBufferSize(512),  MinibatchSize(32),
-        PersistWeights(true),   ModelFileName("PASR_weights.bin") {}
+        PersistWeights(true),   ModelFileName("PASR_weights.bin"),
+        OnnxModelFileName("PASR_transformer.onnx"), EnableOnnx(false) {}
   };
 
 //+------------------------------------------------------------------+

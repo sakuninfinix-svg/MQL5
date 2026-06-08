@@ -86,7 +86,7 @@ struct SignalLayerSnapshot
      }
   };
 
-class CMarketRegime;
+class CRegimeFilter;
 
 class CSignalManager : public IManager
   {
@@ -100,7 +100,7 @@ private:
 
    CPatternManager        *m_pattern;
    CAnalysisSRManager     *m_sr;
-   CMarketRegime          *m_regime;
+   CRegimeFilter          *m_regime;
 
    SignalDecision          m_pendingSignal;
    bool                    m_signalPending;
@@ -183,7 +183,7 @@ public:
 
    void SetPatternManager(CPatternManager *p) { m_pattern = p; RefreshSnapshot("PatternManagerBound"); }
    void SetSRManager(CAnalysisSRManager *sr)  { m_sr      = sr; RefreshSnapshot("SRManagerBound"); }
-   void SetRegimeManager(CMarketRegime *r)    { m_regime  = r; RefreshSnapshot("RegimeManagerBound"); }
+   void SetRegimeManager(CRegimeFilter *r)    { m_regime  = r; RefreshSnapshot("RegimeManagerBound"); }
 
    bool RegisterSource(ISignalSource *src, double weight = 1.0)
      {

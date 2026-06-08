@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //|                                       Core/PASR.mqh              |
 //|                          Copyright 2026, Agsicentre              |
 //|                                                                  |
@@ -63,6 +63,7 @@
 // Layer 5: AI managers and AI signal source
 #include <PASR/AI/AITypes.mqh>
 #include <PASR/AI/AIFeatureBuilder.mqh>
+#include <PASR/AI/SequenceFeatureBuilder.mqh>
 #include <PASR/AI/AIInference.mqh>
 #include <PASR/AI/AIEnsemble.mqh>
 #include <PASR/AI/AITrainer.mqh>

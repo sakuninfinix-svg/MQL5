@@ -1,4 +1,4 @@
-# Fundamental Business Logic Upgrade Project
+﻿# Fundamental Business Logic Upgrade Project
 
 Dokumen ini adalah project kerja untuk menaikkan PASR dari compile-clean architecture menjadi EA yang business logic-nya lebih kuat, terukur, dan layak divalidasi secara kuantitatif.
 
@@ -89,6 +89,7 @@ Versi terbaik PASR harus punya karakter berikut:
 | FBL-005 | Execution and Exit Confirmation | Entry/exit request dilacak sampai fill/reject/timeout. |
 | FBL-006 | Config and Parameter Governance | Parameter trading punya owner, range, validation, dan default yang jelas. |
 | FBL-007 | Observability and QA Gates | Semua keputusan penting bisa diuji dan direkonstruksi. |
+| FBL-008 | Hierarchical Confluence Stack | AI sebagai voter dalam aggregator, bukan otoritas tunggal bypass risk. |
 
 ---
 
@@ -284,6 +285,7 @@ Current status:
 
 - Done: `SignalConfigData.MinDominanceGap`, aggregator conflict/dominance snapshot fields, conflict no-trade reason, formal `CSignalDecisionEngine`, explicit source age validation via `SignalResult.evaluatedAt`, stale source diagnostics, and SignalManager telemetry fields.
 - Done: deterministic business logic harness covers accepted aligned sources, opposed evidence no-trade, and stale-source no-trade.
+- Done (2026-06-06): `SignalStage` dimigrasikan dari mode `AI_PRIMARY` ke **Hierarchical Confluence** — semua sinyal (SR, Pattern, Regime, AI) selalu melewati `CSignalAggregator` + `CSignalDecisionEngine`; `CAISignalSource` diregistrasi di `CPASRKernel::InitAIStack()` dengan bobot voter `1.2`.
 - Operational validation gate: richer veto taxonomy dapat diperluas setelah data live diagnostic terkumpul.
 
 ---
@@ -485,6 +487,79 @@ Current status:
 
 ---
 
+## Phase 8 - Hierarchical Confluence Stack (AI + Rules)
+
+Problem:
+
+`SignalStage` sebelumnya memakai mode `AI_PRIMARY`: saat AI sehat, sinyal langsung dari `AIOrchestrator::PredictSignal()` tanpa melewati `CSignalAggregator` dan `CSignalDecisionEngine`. Ini melanggar North Star (#2, #3) dan membuat AI menjadi otoritas tunggal yang tidak diaudit oleh confluence/conflict guard.
+
+Target design:
+
+```text
+Analysis (SR, Zone, Pattern, Regime)
+        |
+        v
+InjectAIContext -> AIFeatureBuilder
+        |
+        v
+CSignalAggregator
+  +-- PatternSignalSource  (voter w=1.0)
+  +-- SRSignalSource       (voter w=0.8)
+  +-- RegimeSignalSource   (voter/veto w=0.6)
+  +-- CAISignalSource      (voter w=1.2, saat AI enabled)
+        |
+        v
+CSignalDecisionEngine (confluence, conflict, veto, reason code)
+        |
+        v
+PipelineContext.signal -> RiskCheck -> Execution
+```
+
+Decision policy (canonical):
+
+| Condition | Action | Reason code |
+| --- | --- | --- |
+| `no_trade_prob > 0.65` (Transformer, planned) | `NO_TRADE` | `AI_VETO_HIGH_UNCERTAINTY` |
+| Feature/sequence invalid atau drift tinggi | `NO_TRADE` | `AI_VALIDATION_FAIL` / `AI_DRIFT_VETO` |
+| SR + Pattern align, AI neutral | `ALLOW` (lot × 0.7) | `RULE_STRONG_AI_NEUTRAL` |
+| SR align, Pattern lemah, AI quality rendah | `NO_TRADE` | `INSUFFICIENT_QUALITY` |
+| AI strong, SR/Pattern conflict | `NO_TRADE` | `AI_RULE_CONFLICT` |
+| Dominance gap BUY/SELL terlalu kecil | `NO_TRADE` | `SIGNAL_DECISION_CONFLICT` |
+| Minimal 2 sumber setuju arah + quality cukup | `ALLOW` | `SIGNAL_DECISION_ACCEPTED` |
+
+Regime presets:
+
+| Regime | Min confluence | Min trade_quality | AI bobot |
+| --- | --- | --- | --- |
+| `TREND_UP/DOWN` | 2 | 0.55 | 1.5× (planned) |
+| `RANGE` | 3 | 0.65 | 1.0× |
+| `VOLATILE` | 3 | 0.70 | 0.8× + lot −20% |
+| `CRASH/UNKNOWN` | — | — | veto total |
+
+Proposed / updated files:
+
+- `Include/PASR/Orchestration/Stages/SignalStage.mqh` — **updated** (confluence mode v0.30)
+- `Include/PASR/Central/PASRKernel.mqh` — **updated** (`CAISignalSource` registration)
+- `Include/PASR/Central/ModuleFactory.mqh` — **updated** (`CreateAISignalSource`)
+- `Include/PASR/docs/Artificial_Inteligent_Development.md` — §5 business logic detail
+
+Acceptance criteria:
+
+- Tidak ada jalur produksi yang mem-bypass `AggregateSignals()` + `Decide()`.
+- `InpEnableAI=false` menghasilkan keputusan rules-only tanpa error.
+- Setiap trade/no-trade punya `reasonCode` dari `CSignalDecisionEngine`.
+- Compile gate hijau.
+
+Current status:
+
+- Done: `SignalStage` selalu memanggil `ResolveConfluenceSignal()`; `AI_PRIMARY` path dihapus.
+- Done: `CAISignalSource` diregistrasi saat `StrategyConfig.AI.EnableAI=true` dan orchestrator init sukses.
+- Done (2026-06-06): Fase 1 Transformer data layer — `SAISequenceTensor`, `CSequenceFeatureBuilder`, `ValidateSequence()`; sequence dibangun di `AIOrchestrator::Predict()` setelah validasi flat feature.
+- Done (2026-06-06): Fase 2 ONNX runtime — `ONNXBridge` v2, `AIEnsemble` ONNX voter opsional (`InpAIEnableOnnx`), fallback MLP jika model tidak load.
+- Planned: multi-head Transformer (`trade_quality`, `volatility_forecast`, `no_trade_prob`) dan regime-specific thresholds di `SignalConfig`.
+
+---
+
 ## Implementation Order
 
 Recommended order:
@@ -497,12 +572,14 @@ Recommended order:
 6. Phase 5 - Execution and Exit Confirmation
 7. Phase 6 - Config and Parameter Governance
 8. Phase 7 - Observability and QA
+9. Phase 8 - Hierarchical Confluence Stack
 
 Reasoning:
 
 - Position and account state must be stable before risk/execution decisions are trusted.
 - Signal resolution must exist before AI/rule fallback can be safely blended.
 - Execution confirmation must come after state ownership so it has a reliable ledger to update.
+- Confluence stack (Phase 8) requires Phase 3 (decision engine) and Phase 4 (AI validation) to be in place first.
 
 ---
 
@@ -513,6 +590,7 @@ PASR business logic upgrade is done when:
 - `CPositionRegistry` or equivalent is the single source of position state.
 - `SAccountSnapshot` is used for all risk-sensitive decisions in a pipeline cycle.
 - `CSignalDecisionEngine` produces final trade/no-trade decisions with reason codes.
+- `SignalStage` uses hierarchical confluence mode; AI never bypasses the signal resolver.
 - AI inference is guarded by feature/model validation.
 - Execution and exit requests are reconciled with trade transactions.
 - Config validation blocks unsafe parameter sets at init.

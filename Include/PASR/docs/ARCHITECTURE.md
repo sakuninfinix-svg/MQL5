@@ -159,3 +159,138 @@ Scripts/PASR_PipelineHarness_Smoke.mq5
 ```
 
 The expected migration baseline is `0 errors, 0 warnings` for all three.
+
+PASR Expert Advisor configuration system traces the flow from user inputs through validation to runtime enforcement across all subsystem managers. Key locations include the input parameter definitions [1a], configuration builder function [1b], validation rules [2b], risk enforcement checks [3b], and event-driven distribution [4a].
+
+1. EA input to configuration object
+Motivation
+The PASR Expert Advisor needs a robust configuration system to handle dozens of trading parameters safely. Without proper validation and organization, users could accidentally set dangerous risk parameters like 100% daily loss limits or invalid lot sizes, potentially blowing up their trading accounts. The system must transform simple user inputs into a structured, validated configuration that all trading components can reliably use.
+
+Details
+Input Collection
+The EA exposes user inputs through organized parameter groups [1a]. Risk parameters like InpLotSize, InpRiskPercent, and InpSLMultiplier control position sizing and stop-loss behavior. Market parameters define technical indicator settings and trading sessions, while AI and Pattern parameters enable optional intelligent features.
+
+Configuration Building
+The BuildConfigFromInputs() function [1b] transforms these flat inputs into a hierarchical StrategyConfig structure. This creates a clean separation between user-facing parameters and internal data structures, making the system more maintainable.
+
+Type Safety
+The configuration uses strongly-typed sub-structures like RiskConfig [1c] that group related parameters. This prevents parameter mix-ups and provides compile-time safety. Each sub-structure has sensible defaults, so the EA can run even with minimal user configuration.
+
+Initialization Flow
+During OnInit() [1d], the EA builds the configuration, validates it, and passes it to the central kernel. The kernel then distributes the validated configuration to all subsystem managers, ensuring every component works with consistent, safe parameters.
+
+Safety First
+All risk parameters are validated before use, preventing dangerous combinations like negative lot sizes or excessive daily loss limits. This validation happens early in initialization, so the EA fails fast if configuration is invalid rather than behaving unpredictably during trading.
+
+EA Initialization Flow
+User Input Parameters
+1a. Risk Input Parameters
+PASR_MODULAR.mq5.bak-20260605:16
+input group "Risk" input double InpLotSize = 0.01; input double InpRiskPercent = 1.0; input double InpSLMultiplier = 1.5;
+Market group inputs
+AI group inputs
+Pattern group inputs
+BuildConfigFromInputs() function
+Create StrategyConfig struct
+1b. Configuration Builder
+PASR_MODULAR.mq5.bak-20260605:90
+StrategyConfig BuildConfigFromInputs() { StrategyConfig cfg; cfg.Risk.LotSize = InpLotSize; cfg.Risk.RiskPercent = InpRiskPercent;
+Return populated config
+1c. Risk Configuration Structure
+Types.mqh:39
+struct RiskConfig
+RiskConfig sub-struct
+MarketConfig sub-struct
+AIConfig sub-struct
+PatternConfig sub-struct
+EA OnInit() lifecycle
+Build config from inputs
+1d. EA Initialization
+PASR_MODULAR.mq5.bak-20260605:150
+int OnInit() { StrategyConfig cfg = BuildConfigFromInputs(); int init = g_kernel.Init(cfg);
+Start timer and return success
+
+Configuration Validation Pipeline
+2a. Config Manager Init
+Manager.mqh:207
+int Init(StrategyConfig &inputCfg)
+BuildConfigFromInputs() creates cfg
+StrategyConfig with all parameters
+ApplyDefaults() fills missing values
+2a. Config Manager Init
+Scan all 35 business rules
+MagicNumber validation
+Risk parameter ranges
+2c. Risk Parameter Validation
+Validator.mqh:90
+if(cfg.Risk.MaxDailyLossPct <= 0.0 || cfg.Risk.MaxDailyLossPct > 50.0)
+Cross-field consistency
+Return validation result
+Validation Failure Path
+2d
+Validation Failure
+Manager.mqh:214
+CConfigValidator::PrintErrors(errors);
+Set m_cfgValid = false
+Return INIT_PARAMETERS_INCORRECT
+Validation Success Path
+Set m_cfgValid = true
+UpdateSnapshot() with status
+Broadcast ConfigReload event
+
+Risk Manager Runtime Enforcement
+3a
+Risk Manager Initialization
+RiskManager.mqh:321
+virtual bool Init(IDataManager *data, CEventBus *bus) override
+ReadConfig() loads parameters
+m_riskPct = cfg.Risk.RiskPercent
+m_dailyLossPct = cfg.Risk.MaxDailyLossPct
+m_maxOpenTrades = cfg.Risk.MaxOpenPositions
+Account & symbol setup
+3b
+Real-time Risk Check
+RiskManager.mqh:361
+RiskCheckResult Check(double slPoints = 0, ENUM_ORDER_TYPE orderType = ORDER_TYPE_BUY) const
+Circuit breaker check
+Position limit check
+3c
+Daily Loss Enforcement
+RiskManager.mqh:367
+double lossPct = DailyLossPercent(DailyPnlIncludingFloating());
+DailyLossPercent() calculation
+Compare vs m_dailyLossPct limit
+Margin & spread validation
+3d
+Position Sizing Calculation
+RiskManager.mqh:437
+double CalcLot(double slPoints) const
+riskMoney = AccountBalance * riskPct%
+valuePerPoint from symbol info
+NormaliseLot() to broker steps
+
+Configuration Distribution System
+Config Manager Reload()
+Validate new configuration
+4d
+Configuration Snapshot
+Manager.mqh:142
+void UpdateSnapshot(const string validationStatus)
+4a
+Config Reload Event
+Manager.mqh:246
+PASREvent ev;
+Event Bus Dispatch
+Send to all subscribers
+Manager Event Handlers
+4b
+Manager Event Handling
+RiskManager.mqh:344
+virtual void OnEvent(const PASREvent &ev) override
+ReadConfig() call
+4c
+Local Config Update
+RiskManager.mqh:263
+bool ReadConfig()
+Other managers (Signal, Trade, etc.)
+Similar ReadConfig() pattern

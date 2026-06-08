@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| PASR_MODULAR.mq5                                                 |
 //| Centralized Modular PASR Expert Advisor                          |
 //+------------------------------------------------------------------+
@@ -51,6 +51,8 @@ input int    InpAIReplayBufferSize = 512;
 input int    InpAIMinibatchSize = 32;
 input bool   InpAIPersistWeights = true;
 input string InpAIModelFileName = "PASR_weights.bin";
+input bool   InpAIEnableOnnx = false;
+input string InpAIModelOnnxFileName = "PASR_transformer.onnx";
 
 input group "Pattern"
 input bool   InpEnablePatterns = true;
@@ -130,6 +132,8 @@ StrategyConfig BuildConfigFromInputs()
    cfg.AI.MinibatchSize = InpAIMinibatchSize;
    cfg.AI.PersistWeights = InpAIPersistWeights;
    cfg.AI.ModelFileName = InpAIModelFileName;
+   cfg.AI.EnableOnnx = InpAIEnableOnnx;
+   cfg.AI.OnnxModelFileName = InpAIModelOnnxFileName;
 
    cfg.Pattern.EnablePatterns = InpEnablePatterns;
    cfg.Pattern.MinPatternScore = InpMinPatternScore;
@@ -147,10 +151,60 @@ StrategyConfig BuildConfigFromInputs()
    return cfg;
   }
 
+bool ValidateConfig(const StrategyConfig &cfg)
+  {
+   string errors[];
+   if(!CConfigValidator::Validate(cfg, errors))
+     {
+      Print("[PASR_MODULAR] Strategy config invalid:");
+      CConfigValidator::PrintErrors(errors);
+      return false;
+     }
+   return true;
+  }
+
+double BuildTesterFitness()
+  {
+   const int minTrades = 20;
+   int trades = (int)TesterStatistics(STAT_TRADES);
+   double profit = TesterStatistics(STAT_PROFIT);
+   double profitFactor = TesterStatistics(STAT_PROFIT_FACTOR);
+   double recoveryFactor = TesterStatistics(STAT_RECOVERY_FACTOR);
+   double expectedPayoff = TesterStatistics(STAT_EXPECTED_PAYOFF);
+   double equityDrawdownPct = TesterStatistics(STAT_EQUITY_DDREL_PERCENT);
+   double sharpeRatio = TesterStatistics(STAT_SHARPE_RATIO);
+
+   if(trades < minTrades)
+      return -1000.0 + (double)trades;
+
+   if(profit <= 0.0)
+      return -1000.0 - MathAbs(profit) - equityDrawdownPct;
+
+   profit = MathMin(1000000.0, profit);
+   profitFactor = MathMin(100.0, MathMax(0.0, profitFactor));
+   recoveryFactor = MathMin(100.0, MathMax(0.0, recoveryFactor));
+   expectedPayoff = MathMin(1000.0, MathMax(0.0, expectedPayoff));
+   equityDrawdownPct = MathMin(100.0, MathMax(0.0, equityDrawdownPct));
+   sharpeRatio = MathMax(-5.0, MathMin(5.0, sharpeRatio));
+
+   double score = 0.0;
+   score += MathLog(1.0 + profit);
+   score += 2.0 * MathLog(1.0 + profitFactor);
+   score += 1.5 * MathLog(1.0 + recoveryFactor);
+   score += MathLog(1.0 + expectedPayoff);
+   score += 0.25 * sharpeRatio;
+   score += MathMin(2.0, (double)trades / 50.0);
+   score -= 0.15 * equityDrawdownPct;
+   return score;
+  }
+
 int OnInit()
   {
    g_state.Reset();
    StrategyConfig cfg = BuildConfigFromInputs();
+   if(!ValidateConfig(cfg))
+      return INIT_PARAMETERS_INCORRECT;
+
    g_kernel.SetDebugMode(InpDebugMode);
    g_kernel.SetProfilingEnabled(InpEnableProfiling);
    int init = g_kernel.Init(cfg);
@@ -161,6 +215,11 @@ int OnInit()
 #endif
    g_state.initialized = true;
    return INIT_SUCCEEDED;
+  }
+
+double OnTester()
+  {
+   return BuildTesterFitness();
   }
 
 void OnDeinit(const int reason)

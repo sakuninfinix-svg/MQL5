@@ -1,6 +1,6 @@
-//+------------------------------------------------------------------+
-//| Orchestration/Stages/SignalStage.mqh - v0.20                    |
-//| Runtime SignalGen pipeline stage                                 |
+﻿//+------------------------------------------------------------------+
+//| Orchestration/Stages/SignalStage.mqh - v0.30                    |
+//| Runtime SignalGen pipeline stage — hierarchical confluence mode  |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_ORCHESTRATION_SIGNAL_STAGE_MQH__
@@ -63,27 +63,61 @@ private:
       m_ai_orch.InjectContext(srDist, zoneStrength, patternScore, ctx.regime);
      }
 
-   ENUM_STAGE_RESULT RuleFallbackSignal(PipelineContext &ctx)
+   void PublishAiResult(PipelineContext &ctx)
+     {
+      if(m_ai_orch == NULL)
+        {
+         ctx.ai_result.model_healthy = false;
+         ctx.ai_result.validation_valid = false;
+         if(ctx.ai_result.validation_reason == "")
+            ctx.ai_result.validation_reason = "AI orchestrator unavailable";
+         return;
+        }
+
+      SAIInferenceResult ai = m_ai_orch.GetLastResult();
+      AIFeatureValidationResult validation = m_ai_orch.GetLastValidation();
+      ctx.ai_score = (float)ai.score;
+      ctx.ai_veto = ai.vetoed;
+      ctx.drift_score = (float)ai.drift_score;
+      ctx.ai_result.score = ctx.ai_score;
+      ctx.ai_result.drift_index = ctx.drift_score;
+      ctx.ai_result.model_healthy = (m_ai_orch.IsHealthy() && validation.modelHealthy);
+      ctx.ai_result.model_name = (ai.model_id != "") ? ai.model_id : validation.modelId;
+      ctx.ai_result.validation_valid = validation.valid;
+      ctx.ai_result.validation_reason = validation.reason;
+      ctx.ai_result.invalid_feature_index = validation.invalidIndex;
+     }
+
+   ENUM_STAGE_RESULT ResolveConfluenceSignal(PipelineContext &ctx)
      {
       if(m_signal == NULL)
         {
-         if(m_debug) Print("[Pipeline] RuleFallbackSignal SKIP: manager is NULL");
+         if(m_debug) Print("[Pipeline] ConfluenceSignal SKIP: manager is NULL");
          if(m_profiling) m_timer.Log("Stage6_SignalGen");
          return STAGE_SKIP;
         }
+
       ctx.signal = m_signal.AggregateSignals();
       ctx.signal_strength = ctx.signal.confidence;
+      PublishAiResult(ctx);
+
       SignalLayerSnapshot snap = m_signal.GetSnapshot();
       if(ctx.signal.direction == SIGNAL_NONE)
          ctx.exit_message = "Signal: " + snap.lastReason;
+
       if(m_debug)
         {
          if(ctx.signal.direction == SIGNAL_NONE)
-            PrintFormat("[Pipeline] RULE_FALLBACK no trade: %s", snap.lastReason);
+            PrintFormat("[Pipeline] CONFLUENCE no trade: %s (src=%d conf=%d veto=%s)",
+                        snap.lastReason, snap.sourceCount, snap.lastConfluence,
+                        snap.lastVetoed ? "true" : "false");
          else
-            PrintFormat("[Pipeline] RULE_FALLBACK Signal: dir=%d conf=%.3f src=%s", (int)ctx.signal.direction, ctx.signal.confidence, ctx.signal.primarySource);
+            PrintFormat("[Pipeline] CONFLUENCE Signal: dir=%d conf=%.3f src=%s confluence=%d",
+                        (int)ctx.signal.direction, ctx.signal.confidence,
+                        ctx.signal.primarySource, snap.lastConfluence);
         }
-      if(m_profiling) m_timer.Log("Stage6_RuleFallbackSignal");
+
+      if(m_profiling) m_timer.Log("Stage6_ConfluenceSignal");
       return STAGE_OK;
      }
 
@@ -130,55 +164,7 @@ public:
       m_timer.Start();
       ctx.signal.Clear();
       InjectAIContext(ctx);
-
-      bool aiAvailable = (m_ai_orch != NULL && m_ai_orch.IsReady() && m_ai_orch.IsHealthy());
-      if(!aiAvailable)
-        {
-         ctx.ai_result.model_healthy = false;
-         ctx.ai_result.validation_valid = false;
-         ctx.ai_result.validation_reason = "AI unavailable";
-         ctx.exit_message = "AI unavailable; using rule fallback";
-         return RuleFallbackSignal(ctx);
-        }
-
-      if(m_ai_orch.PredictSignal(ctx.signal))
-        {
-         SAIInferenceResult ai = m_ai_orch.GetLastResult();
-         AIFeatureValidationResult validation = m_ai_orch.GetLastValidation();
-         ctx.ai_score = (float)ai.score;
-         ctx.ai_veto = ai.vetoed;
-         ctx.drift_score = (float)ai.drift_score;
-         ctx.ai_result.score = ctx.ai_score;
-         ctx.ai_result.drift_index = ctx.drift_score;
-         ctx.ai_result.model_healthy = validation.modelHealthy;
-         ctx.ai_result.model_name = (ai.model_id != "") ? ai.model_id : validation.modelId;
-         ctx.ai_result.validation_valid = validation.valid;
-         ctx.ai_result.validation_reason = validation.reason;
-         ctx.ai_result.invalid_feature_index = validation.invalidIndex;
-         ctx.signal_strength = ctx.signal.confidence;
-         if(m_debug)
-            PrintFormat("[Pipeline] AI_PRIMARY Signal: dir=%d conf=%.3f src=%s", (int)ctx.signal.direction, ctx.signal.confidence, ctx.signal.primarySource);
-         if(m_profiling) m_timer.Log("Stage6_AIPrimarySignal");
-         return STAGE_OK;
-        }
-
-      SAIInferenceResult last = m_ai_orch.GetLastResult();
-      AIFeatureValidationResult validation = m_ai_orch.GetLastValidation();
-      ctx.ai_score = (float)last.score;
-      ctx.ai_veto = last.vetoed;
-      ctx.drift_score = (float)last.drift_score;
-      ctx.ai_result.score = ctx.ai_score;
-      ctx.ai_result.drift_index = ctx.drift_score;
-      ctx.ai_result.model_healthy = validation.modelHealthy;
-      ctx.ai_result.model_name = (last.model_id != "") ? last.model_id : validation.modelId;
-      ctx.ai_result.validation_valid = validation.valid;
-      ctx.ai_result.validation_reason = validation.reason;
-      ctx.ai_result.invalid_feature_index = validation.invalidIndex;
-      ctx.exit_message = last.vetoed ? last.veto_reason : "AI primary chose no trade";
-      if(m_debug)
-         PrintFormat("[Pipeline] AI_PRIMARY no trade: %s", ctx.exit_message);
-      if(m_profiling) m_timer.Log("Stage6_AIPrimarySignal");
-      return STAGE_OK;
+      return ResolveConfluenceSignal(ctx);
      }
   };
 

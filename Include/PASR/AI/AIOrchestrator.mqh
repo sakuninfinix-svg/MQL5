@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| AI/AIOrchestrator.mqh — v3.10                                    |
 //| AI-first, risk-aware strategy brain for PASR                      |
 //+------------------------------------------------------------------+
@@ -8,24 +8,36 @@
 
 #include "AITypes.mqh"
 #include "AIFeatureBuilder.mqh"
+#include "SequenceFeatureBuilder.mqh"
 #include "AIEnsemble.mqh"
 #include "AITrainer.mqh"
 #include "ConfidenceCalibrator.mqh"
 #include "OnlineLearningGuard.mqh"
 #include "AIFeatureValidator.mqh"
+#include "LSTMInference.mqh"
+#include "AttentionFusion.mqh"
 #include "../Core/IManager.mqh"
 #include "../Core/PipelineTypes.mqh"
 
 class CAIOrchestrator : public IManager
   {
 private:
-   CAIFeatureBuilder     *m_feat;
+   CAIFeatureBuilder        *m_feat;
+   CSequenceFeatureBuilder  *m_seq_feat;
+   SAISequenceTensor         m_last_sequence;
+   bool                      m_last_sequence_valid;
    CAIEnsemble           *m_ensemble;
    CAITrainer            *m_trainer;
    CConfidenceCalibrator *m_calib;
    COnlineLearningGuard  *m_guard;
    CAIFeatureValidator    m_validator;
    AIFeatureValidationResult m_last_validation;
+
+   // New advanced AI components
+   CLSTMInference         *m_lstm;
+   CAttentionFusion       *m_attention;
+   bool                   m_use_lstm;
+   bool                   m_use_attention;
 
    SAIInferenceResult     m_last_result;
    SAIRiskDecision        m_last_decision;
@@ -54,6 +66,11 @@ private:
 
    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
    double Clamp(double v, double lo, double hi) const { return MathMax(lo, MathMin(hi, v)); }
+
+   const SAISequenceTensor *GetSequencePtr() const
+     {
+      return m_last_sequence_valid ? &m_last_sequence : NULL;
+     }
 
    void SetUnavailable(SAIInferenceResult &out_result, string reason)
      {
@@ -103,10 +120,15 @@ private:
       if(m_trainer  != NULL) { m_trainer.Deinit();  delete m_trainer;  m_trainer  = NULL; }
       if(m_ensemble != NULL) { m_ensemble.Deinit(); delete m_ensemble; m_ensemble = NULL; }
       if(m_feat     != NULL) { m_feat.Deinit();     delete m_feat;     m_feat     = NULL; }
+      if(m_seq_feat != NULL) { m_seq_feat.Deinit(); delete m_seq_feat; m_seq_feat = NULL; }
+      if(m_lstm     != NULL) { delete m_lstm;        m_lstm     = NULL; }
+      if(m_attention!= NULL) { delete m_attention;   m_attention= NULL; }
       ReleaseIndicator(m_hATRRegime);
       ReleaseIndicator(m_hADXRegime);
       m_open_features_valid = false;
       m_open_features.Reset();
+      m_last_sequence_valid = false;
+      m_last_sequence.Reset();
      }
 
    void DetectRegime()
@@ -286,16 +308,17 @@ private:
 
 public:
    CAIOrchestrator()
-      : IManager(), m_feat(NULL), m_ensemble(NULL),
+      : IManager(), m_feat(NULL), m_seq_feat(NULL), m_ensemble(NULL),
         m_trainer(NULL), m_calib(NULL), m_guard(NULL),
         m_ready(false), m_min_bars_required(50),
-        m_open_features_valid(false),
+        m_open_features_valid(false), m_last_sequence_valid(false),
         m_currentStrategy(STRAT_NONE), m_detectedRegime(REGIME_UNKNOWN),
         m_strategyConfidence(0.0), m_lastStrategyChange(0), m_regimeStreak(0),
         m_entryThreshold(0.70), m_riskMultiplier(1.0),
         m_useAI(true), m_vetoThreshold(AI_DEFAULT_CONF_THRESHOLD),
         m_driftVetoThreshold(0.75), m_highConfidenceThreshold(0.80),
-        m_hATRRegime(INVALID_HANDLE), m_hADXRegime(INVALID_HANDLE)
+        m_hATRRegime(INVALID_HANDLE), m_hADXRegime(INVALID_HANDLE),
+        m_lstm(NULL), m_attention(NULL), m_use_lstm(true), m_use_attention(true)
      {
       m_last_result.Reset();
       m_last_decision.Reset();
@@ -337,12 +360,13 @@ public:
       ReleaseComponents();
 
       m_feat     = new CAIFeatureBuilder();
+      m_seq_feat = new CSequenceFeatureBuilder();
       m_ensemble = new CAIEnsemble();
       m_trainer  = new CAITrainer();
       m_calib    = new CConfidenceCalibrator();
       m_guard    = new COnlineLearningGuard();
 
-      if(m_feat == NULL || m_ensemble == NULL || m_trainer == NULL ||
+      if(m_feat == NULL || m_seq_feat == NULL || m_ensemble == NULL || m_trainer == NULL ||
          m_calib == NULL || m_guard == NULL)
         {
          Print("AI: allocation failed");
@@ -351,15 +375,47 @@ public:
         }
 
       if(!m_feat.Init(data, bus))     { Print("AI: FeatureBuilder init failed"); ReleaseComponents(); return false; }
+      if(!m_seq_feat.Init(data, bus)) { Print("AI: SequenceFeatureBuilder init failed"); ReleaseComponents(); return false; }
       if(!m_ensemble.Init(data, bus)) { Print("AI: Ensemble init failed");       ReleaseComponents(); return false; }
       if(!m_trainer.Init(data, bus))  { Print("AI: Trainer init failed");        ReleaseComponents(); return false; }
       if(!m_calib.Init(data, bus))    { Print("AI: Calibrator init failed");     ReleaseComponents(); return false; }
       if(!m_guard.Init(data, bus))    { Print("AI: Guard init failed");          ReleaseComponents(); return false; }
 
+      // Initialize new advanced AI components
+      if(m_use_lstm)
+        {
+         m_lstm = new CLSTMInference(42);
+         if(m_lstm == NULL || !m_lstm.Init(data, bus))
+           {
+            Print("AI: LSTM init failed, falling back to ensemble");
+            if(m_lstm != NULL) { delete m_lstm; m_lstm = NULL; }
+            m_use_lstm = false;
+           }
+         else
+           {
+            Print("AI: LSTM inference engine initialized successfully");
+           }
+        }
+
+      if(m_use_attention)
+        {
+         m_attention = new CAttentionFusion(AI_FEATURE_DIM, 43);
+         if(m_attention == NULL || !m_attention.Init(data, bus))
+           {
+            Print("AI: Attention fusion init failed, falling back to standard fusion");
+            if(m_attention != NULL) { delete m_attention; m_attention = NULL; }
+            m_use_attention = false;
+           }
+         else
+           {
+            Print("AI: Attention fusion initialized successfully");
+           }
+        }
+
       m_calib.SetThreshold(m_vetoThreshold);
       m_guard.SetVetoThreshold(m_driftVetoThreshold);
       m_trainer.SetEnsemble(m_ensemble);
-      
+
       RefreshConfig();
       ConfigureParameters(m_useAI, m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold);
 
@@ -368,9 +424,11 @@ public:
       DetectRegime();
       SelectStrategy();
 
-      Print("CAIOrchestrator v3.10: risk-aware AI strategy brain initialized");
+      Print("CAIOrchestrator v3.20: risk-aware AI strategy brain with LSTM and Attention initialized");
       Print("  Active Strategy: ", GetStrategyDescription());
       Print("  Current Regime: ", EnumToString(m_detectedRegime));
+      Print("  LSTM Enabled: ", m_use_lstm ? "Yes" : "No");
+      Print("  Attention Enabled: ", m_use_attention ? "Yes" : "No");
       return true;
      }
 
@@ -445,6 +503,7 @@ public:
          SetUnavailable(out_result, "Feature build failed");
          return false;
         }
+
       if(fv.timestamp <= 0)
          fv.timestamp = TimeCurrent();
       if(fv.symbol == "")
@@ -458,6 +517,20 @@ public:
          return false;
         }
 
+      m_last_sequence_valid = false;
+      m_last_sequence.Reset();
+      if(m_seq_feat != NULL)
+        {
+         SAISequenceTensor seq;
+         AIFeatureValidationResult seqValidation;
+         seq.Reset();
+         if(m_seq_feat.Build(seq) && m_validator.ValidateSequence(seq, seqValidation))
+           {
+            m_last_sequence = seq;
+            m_last_sequence_valid = true;
+           }
+        }
+
       double drift = m_guard.ComputeDrift(fv);
       if(m_guard.ShouldVeto(drift))
         {
@@ -467,22 +540,51 @@ public:
          return false;
         }
 
+      // Use LSTM if available and sequence is filled, otherwise fall back to ensemble
+      double lstm_score = 0.0;
+      bool lstm_used = false;
+      if(m_use_lstm && m_lstm != NULL && m_lstm.IsSequenceFilled())
+        {
+         if(m_lstm.ForwardFV(fv, lstm_score))
+           {
+            lstm_used = true;
+            if(m_debugMode)
+               PrintFormat("[AIOrchestrator] LSTM prediction: %.4f", lstm_score);
+           }
+        }
+
       SAIEnsembleVote vote;
       vote.Reset();
-      if(!m_ensemble.Vote(fv, vote) || vote.n_models <= 0)
+      const SAISequenceTensor *seq_ptr = m_last_sequence_valid ? GetSequencePtr() : NULL;
+      if(!m_ensemble.Vote(fv, seq_ptr, vote) || vote.n_models <= 0)
         {
          SetUnavailable(out_result, "Ensemble vote failed");
          return false;
         }
 
-      double raw_conf = MathAbs(vote.final_score);
+      // Combine LSTM and ensemble scores if LSTM was used
+      double final_score = vote.final_score;
+      if(lstm_used)
+        {
+         // Weighted combination: 60% LSTM, 40% ensemble
+         final_score = 0.6 * lstm_score + 0.4 * vote.final_score;
+         out_result.model_id = "lstm+ensemble_ensemble";
+        }
+      else
+        {
+         if(m_ensemble.IsOnnxLoaded() && m_last_sequence_valid)
+            out_result.model_id = "ensemble_mlp+onnx_seq";
+         else
+            out_result.model_id = "ensemble_mlp";
+        }
+
+      double raw_conf = MathAbs(final_score);
       double cal_conf = m_calib.Calibrate(raw_conf, vote.agreement);
 
-      out_result.score = vote.final_score;
+      out_result.score = final_score;
       out_result.confidence = cal_conf;
-      out_result.direction = (vote.final_score > 0.0) ? 1 : ((vote.final_score < 0.0) ? -1 : 0);
+      out_result.direction = (final_score > 0.0) ? 1 : ((final_score < 0.0) ? -1 : 0);
       out_result.valid = (cal_conf >= DynamicThreshold() && out_result.direction != 0);
-      out_result.model_id = "ensemble_v3_ai_primary";
       out_result.timestamp = TimeCurrent();
       out_result.drift_score = drift;
       out_result.vetoed = false;
@@ -573,9 +675,16 @@ public:
 
    void InjectContext(double sr_dist, double zone_str, double pattern_score, EMarketRegime regime)
      {
-      if(m_feat == NULL) return;
-      m_feat.InjectStructure(sr_dist, zone_str, pattern_score);
-      m_feat.InjectRegime(regime);
+      if(m_feat != NULL)
+        {
+         m_feat.InjectStructure(sr_dist, zone_str, pattern_score);
+         m_feat.InjectRegime(regime);
+        }
+      if(m_seq_feat != NULL)
+        {
+         m_seq_feat.InjectStructure(sr_dist, zone_str, pattern_score);
+         m_seq_feat.InjectRegime(regime);
+        }
      }
 
    bool IsReady() const { return m_ready; }
@@ -586,6 +695,14 @@ public:
    SAITradeLabel GetLastLabel() const { return m_last_label; }
    SAIModelPerf GetPerf() const { return m_perf; }
    CAIFeatureBuilder *GetFeatureBuilder() { return m_feat; }
+   CSequenceFeatureBuilder *GetSequenceFeatureBuilder() { return m_seq_feat; }
+   bool GetLastSequence(SAISequenceTensor &dest) const
+     {
+      if(!m_last_sequence_valid) return false;
+      dest = m_last_sequence;
+      return true;
+     }
+   bool HasValidSequence() const { return m_last_sequence_valid; }
    CAIEnsemble *GetEnsemble() { return m_ensemble; }
 
    virtual void OnConfigReload() override
