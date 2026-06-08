@@ -11,7 +11,7 @@
 #include <PASR/Trade/RiskManager.mqh>
 #include <PASR/Orchestration/PipelineStage.mqh>
 
-class CRiskStage : public IPipelineStage
+class CRiskStage : public CPipelineStageBase
   {
 private:
    CRiskManager *m_risk;
@@ -28,7 +28,7 @@ public:
       m_risk = risk;
      }
 
-   void SetEnabled(const bool enabled)
+   void Bind(IManager *manager)
      {
      m_enabled = enabled;
      }
@@ -42,9 +42,6 @@ public:
      {
       m_profiling = enabled;
      }
-
-   virtual string Name() const override { return "RiskStage"; }
-   virtual bool IsEnabled() const override { return m_enabled; }
 
    virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
      {

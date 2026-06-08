@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Central/PASRKernel.mqh - v0.30                                   |
-//| Central facade and pipeline owner for modular migration            |
+//| Central/PASRKernel.mqh — v0.23                                   |
+//| Compatibility facade for Centralized Modular Pipeline migration    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_CENTRAL_KERNEL_MQH__

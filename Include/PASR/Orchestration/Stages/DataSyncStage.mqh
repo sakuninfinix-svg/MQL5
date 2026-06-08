@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Orchestration/Stages/DataSyncStage.mqh - v0.20                  |
-//| Runtime DataSync pipeline stage                                  |
+//| Orchestration/Stages/DataSyncStage.mqh - v0.20                   |
+//| Compatibility adapter scaffold for future split pipeline stages   |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_ORCHESTRATION_DATA_SYNC_STAGE_MQH__
@@ -11,7 +11,7 @@
 #include <PASR/Infra/DataManager.mqh>
 #include <PASR/Orchestration/PipelineStage.mqh>
 
-class CDataSyncStage : public IPipelineStage
+class CDataSyncStage : public CPipelineStageBase
   {
 private:
    CDataManager *m_data;
@@ -51,7 +51,7 @@ public:
       m_data = data;
      }
 
-   void SetEnabled(const bool enabled)
+   void Bind(IManager *manager)
      {
      m_enabled = enabled;
      }
@@ -65,9 +65,6 @@ public:
      {
       m_profiling = enabled;
      }
-
-   virtual string Name() const override { return "DataSyncStage"; }
-   virtual bool IsEnabled() const override { return m_enabled; }
 
    virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
      {

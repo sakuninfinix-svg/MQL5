@@ -14,7 +14,7 @@
 #include <PASR/Signal/SignalManager.mqh>
 #include <PASR/Orchestration/PipelineStage.mqh>
 
-class CSignalStage : public IPipelineStage
+class CSignalStage : public CPipelineStageBase
   {
 private:
    CSignalManager     *m_signal;
@@ -96,9 +96,9 @@ public:
       m_pattern = pattern;
      }
 
-   void SetEnabled(const bool enabled)
+   void Bind(IManager *manager)
      {
-      m_enabled = enabled;
+      m_manager = manager;
      }
 
    void SetDebugMode(const bool enabled)

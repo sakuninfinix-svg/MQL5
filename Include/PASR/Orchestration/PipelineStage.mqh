@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Orchestration/PipelineStage.mqh - v1.00                           |
-//| Base interface for split pipeline stages with common diagnostics. |
+//| Orchestration/PipelineStage.mqh — v0.20                           |
+//| Base interface for split pipeline stages                           |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_ORCHESTRATION_PIPELINE_STAGE_MQH__
