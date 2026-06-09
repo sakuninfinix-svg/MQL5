@@ -1,7 +1,6 @@
 # Logs and temp files
 *.log
 *.tmp
-*.swp
 
 # Environment
 .env
@@ -11,6 +10,9 @@
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
+*.tmp
 
 # Dependencies
 node_modules/
@@ -19,6 +21,36 @@ venv/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
+Include/PASR/_cache_/
+Include/PASR/*_cache/
+.continue/
+Files/
+Images/
+Indicators/
+Profiles/
+Scripts/
+Experts/Advisors/
+Experts/Examples/
+Experts/Free Robots/
+Include/Arrays/
+Include/Canvas/
+Include/ChartObjects/
+Include/Charts/
+Include/Controls/
+Include/Expert/
+Include/Generic/
+Include/Math/
+Include/Graphics/
+Include/OpenCL/
+Include/Strings/
+Include/Trade/
+Include/Tools/
+Include/WinAPI
+Include/MovingAverages.mqh
+Include/VirtualKeys.mqh
+Include/StdLibErr.mqh
+Include/Object.mqh
+
 
 # Build artifacts
 dist/
@@ -42,6 +74,12 @@ Thumbs.db
 *.a
 *.obj
 *.out
+*.ex4
+*.ex5
+*.fxt
+*.gsc
+*.gse
+*.gsp
 
 # Compressed files
 *.zip
