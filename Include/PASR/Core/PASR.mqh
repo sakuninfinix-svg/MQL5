@@ -54,8 +54,10 @@
 #include <PASR/Analysis/Pattern/PatternManager.mqh>
 #include <PASR/Analysis/SRDetector.mqh>
 #include <PASR/Analysis/SRManager.mqh>
+#include <PASR/Analysis/SRZoneScorer.mqh>
 #include <PASR/Analysis/ZoneManager.mqh>
 #include <PASR/Analysis/MarketRegimeDetector.mqh>
+#include <PASR/Analysis/MarketRegimeScorer.mqh>
 #include <PASR/Analysis/AdaptiveParameterManager.mqh>
 
 // Layer 4: Trade primitive types required by Signal scoring/aggregation
@@ -88,14 +90,18 @@
 #include <PASR/Signal/RegimeSignalSource.mqh>
 #include <PASR/Signal/PatternSignalSource.mqh>
 #include <PASR/Signal/SRSignalSource.mqh>
+#include <PASR/Signal/EntryQualityScorer.mqh>
+#include <PASR/Signal/SessionQualityScorer.mqh>
 #include <PASR/Signal/SignalManager.mqh>
 
 // Layer 7: Trade managers
 #include <PASR/Trade/PositionRegistry.mqh>
 #include <PASR/Trade/PositionManager.mqh>
+#include <PASR/Trade/ExitPressureScorer.mqh>
 #include <PASR/Trade/ExitEngine.mqh>
 #include <PASR/Trade/RiskManager.mqh>
 #include <PASR/Trade/ExecutionManager.mqh>
+#include <PASR/Trade/RecoveryScorer.mqh>
 #include <PASR/Trade/RecoveryEngine.mqh>
 #include <PASR/Trade/RecoveryManager.mqh>
 #include <PASR/Trade/CorrelationManager.mqh>
@@ -141,6 +147,5 @@
 #include <PASR/Central/ServiceLocator.mqh>
 #include <PASR/Central/LifecycleManager.mqh>
 #include <PASR/Central/ModuleFactory.mqh>
-#include <PASR/Central/PASRKernel.mqh>
 
 #endif // __CORE_PASR_MASTER_MQH__
