@@ -13,6 +13,9 @@
 #include "MLPModel.mqh"
 #include "ONNXBridge.mqh"
 
+class IDataManager;
+class CEventBus;
+
 struct SAIEnsembleConfig
   {
    int    n_models;
@@ -167,50 +170,6 @@ public:
 
    out.agreement = (score_idx > 0) ? (double)agree / score_idx : 0.0;
    return true;
-   int total_voters = m_n_models + (use_onnx ? 1 : 0);
-   ArrayResize(out.scores,  total_voters);
-   ArrayResize(out.weights, total_voters);
-   out.n_models = total_voters;
-
-   for(int i = 0; i < m_n_models; i++)
-        {
-         if(CheckPointer(m_models[i]) == POINTER_INVALID) continue;
-
-         double score = 0.5;
-         // FIX v1.03: Forward now requires explicit feat_dim
-         m_models[i].Forward(fv.features, AI_FEATURE_DIM, score);
-         score = score * 2.0 - 1.0;
-
-         out.scores[score_idx]  = score;
-         out.weights[score_idx] = m_weights[i];
-         weighted_sum += score * m_weights[i];
-         weight_total += m_weights[i];
-         score_idx++;
-        }
-
-      if(use_onnx)
-        {
-         out.scores[score_idx]  = m_last_onnx_score * 2.0 - 1.0;
-         out.weights[score_idx] = m_onnx_weight;
-         weighted_sum += out.scores[score_idx] * m_onnx_weight;
-         weight_total += m_onnx_weight;
-         score_idx++;
-        }
-
-      if(weight_total <= 0.0) return false;
-
-      out.final_score = weighted_sum / weight_total;
-      out.confidence  = MathAbs(out.final_score);
-
-      int agree = 0;
-      for(int i = 0; i < score_idx; i++)
-         if((out.final_score >= 0.0 && out.scores[i] >= 0.0) ||
-            (out.final_score <  0.0 && out.scores[i] <  0.0))
-            agree++;
-      out.agreement = (score_idx > 0) ? (double)agree / score_idx : 0.0;
-
-      return true;
-     }
-  };
-
+  }
+};
 #endif // __PASR_AI_ENSEMBLE_MQH__
