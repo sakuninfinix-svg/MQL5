@@ -1,76 +1,56 @@
 //+------------------------------------------------------------------+
-//| Orchestration/Stages/RiskStage.mqh - v0.20                      |
-//| Runtime RiskCheck pipeline stage                                 |
+//| Orchestration/Stages/RiskStage.mqh                               |
+//| Pipeline stage: risk filter and position sizing                  |
 //+------------------------------------------------------------------+
 #property strict
-#ifndef __PASR_ORCHESTRATION_RISK_STAGE_MQH__
-#define __PASR_ORCHESTRATION_RISK_STAGE_MQH__
+#ifndef __ORCHESTRATION_RISK_STAGE_MQH__
+#define __ORCHESTRATION_RISK_STAGE_MQH__
 
-#include <PASR/Core/PipelineTypes.mqh>
-#include <PASR/Core/Globals.mqh>
-#include <PASR/Trade/RiskManager.mqh>
-#include <PASR/Orchestration/PipelineStage.mqh>
+#include "PipelineStageBase.mqh"
+#include "../../Risk/RiskManager.mqh"
 
 class CRiskStage : public CPipelineStageBase
-  {
+{
 private:
-   CRiskManager *m_risk;
-   bool          m_enabled;
-   bool          m_debug;
-   bool          m_profiling;
-   CPerfTimer    m_timer;
+   // REMOVED: bool m_enabled — inherited from CPipelineStageBase
+   // REMOVED: bool m_debug   — inherited from CPipelineStageBase
+   CRiskManager *m_risk_mgr;
 
 public:
-   CRiskStage() : m_risk(NULL), m_enabled(true), m_debug(false), m_profiling(true) {}
+   CRiskStage() : CPipelineStageBase("Risk"), m_risk_mgr(NULL) {}
 
-   void Bind(CRiskManager *risk)
-     {
-      m_risk = risk;
-     }
+   virtual bool Init(IDataManager *data, CEventBus *bus) override
+   {
+      if(!CPipelineStageBase::Init(data, bus)) return false;
+      return true;
+   }
 
-   void Bind(IManager *manager)
-     {
-     m_enabled = enabled;
-     }
+   void SetRiskManager(CRiskManager *mgr) { m_risk_mgr = mgr; }
 
-   void SetDebugMode(const bool enabled)
-     {
-      m_debug = enabled;
-     }
+   virtual bool Execute(SPipelineContext &ctx) override
+   {
+      if(!m_enabled) return true;
+      if(!ctx.signal_ready) return true;
 
-   void EnableProfiling(const bool enabled)
-     {
-      m_profiling = enabled;
-     }
+      if(m_risk_mgr == NULL)
+      {
+         if(m_debug) Print("[RiskStage] RiskManager is NULL");
+         return false;
+      }
 
-   virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
-     {
-      if(!m_enabled)
-         return STAGE_SKIP;
-      if(m_risk == NULL)
-        {
-         if(m_debug) Print("[Pipeline] RiskCheck SKIP: manager is NULL");
-         return STAGE_SKIP;
-        }
-      if(ctx.signal.direction == SIGNAL_NONE) return STAGE_SKIP;
-      m_timer.Start();
-      if(ctx.positions.CapturedAt() == 0)
-         ctx.positions.Scan(_Symbol, m_risk.MagicNumber());
-      if(!ctx.account.valid)
-         ctx.account.Capture();
-      m_risk.SetCycleContext(ctx.account, ctx.positions);
-      ctx.risk_result = m_risk.CheckRisk(ctx.signal);
-      if(!ctx.risk_result.allowed)
-        {
-         if(m_debug) PrintFormat("[Pipeline] RiskCheck REJECTED: %s", ctx.risk_result.reason);
-         ctx.exit_message = "RiskCheck: " + ctx.risk_result.reason;
-         if(m_profiling) m_timer.Log("Stage8_RiskCheck");
-         return STAGE_SKIP;
-        }
-      ctx.trading_allowed = true;
-      if(m_profiling) m_timer.Log("Stage8_RiskCheck");
-      return STAGE_OK;
-     }
-  };
+      ctx.risk_approved = m_risk_mgr->EvaluateSignal(ctx.signal_out, ctx.risk_out);
 
-#endif // __PASR_ORCHESTRATION_RISK_STAGE_MQH__
+      if(m_debug)
+         PrintFormat("[RiskStage] Risk %s — lot=%.2f sl=%.5f tp=%.5f",
+                     ctx.risk_approved ? "APPROVED" : "REJECTED",
+                     ctx.risk_out.lot_size,
+                     ctx.risk_out.sl_price,
+                     ctx.risk_out.tp_price);
+
+      return true;
+   }
+
+   virtual string StageName() const override { return "Risk"; }
+};
+
+#endif // __ORCHESTRATION_RISK_STAGE_MQH__

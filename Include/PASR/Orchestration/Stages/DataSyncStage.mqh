@@ -1,86 +1,51 @@
 //+------------------------------------------------------------------+
-//| Orchestration/Stages/DataSyncStage.mqh - v0.20                   |
-//| Compatibility adapter scaffold for future split pipeline stages   |
+//| Orchestration/Stages/DataSyncStage.mqh                          |
+//| Pipeline stage: synchronize market data                          |
 //+------------------------------------------------------------------+
 #property strict
-#ifndef __PASR_ORCHESTRATION_DATA_SYNC_STAGE_MQH__
-#define __PASR_ORCHESTRATION_DATA_SYNC_STAGE_MQH__
+#ifndef __ORCHESTRATION_DATA_SYNC_STAGE_MQH__
+#define __ORCHESTRATION_DATA_SYNC_STAGE_MQH__
 
-#include <PASR/Core/PipelineTypes.mqh>
-#include <PASR/Core/Globals.mqh>
-#include <PASR/Infra/DataManager.mqh>
-#include <PASR/Orchestration/PipelineStage.mqh>
+#include "PipelineStageBase.mqh"
 
 class CDataSyncStage : public CPipelineStageBase
-  {
+{
 private:
-   CDataManager *m_data;
-   bool          m_enabled;
-   bool          m_debug;
-   bool          m_profiling;
-   CPerfTimer    m_timer;
-
-   void FillPriceContext(PipelineContext &ctx)
-     {
-      MqlTick tick;
-      if(SymbolInfoTick(_Symbol, tick))
-        {
-         ctx.bid = tick.bid;
-         ctx.ask = tick.ask;
-        }
-      else
-        {
-         ctx.bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         ctx.ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-        }
-      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      ctx.spread_pts = (point > 0.0 && ctx.ask > ctx.bid) ? (ctx.ask - ctx.bid) / point : 0.0;
-      ctx.atr_points = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
-      ctx.atr = ctx.atr_points;
-      ctx.bar_time = iTime(_Symbol, _Period, 0);
-      ctx.market_open = (ctx.bid > 0.0 && ctx.ask > 0.0);
-      ctx.session = PASRDetectSession();
-      ctx.account.Capture();
-     }
+   // REMOVED: bool m_enabled — inherited from CPipelineStageBase
+   // REMOVED: bool m_debug   — inherited from CPipelineStageBase
+   IDataManager *m_data;
 
 public:
-   CDataSyncStage() : m_data(NULL), m_enabled(true), m_debug(false), m_profiling(true) {}
+   CDataSyncStage() : CPipelineStageBase("DataSync"), m_data(NULL) {}
 
-   void Bind(CDataManager *data)
-     {
+   virtual bool Init(IDataManager *data, CEventBus *bus) override
+   {
+      if(!CPipelineStageBase::Init(data, bus)) return false;
       m_data = data;
-     }
+      return true;
+   }
 
-   void Bind(IManager *manager)
-     {
-     m_enabled = enabled;
-     }
+   virtual bool Execute(SPipelineContext &ctx) override
+   {
+      if(!m_enabled) return true;
 
-   void SetDebugMode(const bool enabled)
-     {
-      m_debug = enabled;
-     }
-
-   void EnableProfiling(const bool enabled)
-     {
-      m_profiling = enabled;
-     }
-
-   virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
-     {
-      if(!m_enabled)
-         return STAGE_SKIP;
       if(m_data == NULL)
-        {
-         if(m_debug) Print("[Pipeline] DataSync SKIP: manager is NULL");
-         return STAGE_SKIP;
-        }
-      m_timer.Start();
-      m_data.OnTick();
-      FillPriceContext(ctx);
-      if(m_profiling) m_timer.Log("Stage1_DataSync");
-      return STAGE_OK;
-     }
-  };
+      {
+         if(m_debug) Print("[DataSyncStage] DataManager is NULL");
+         return false;
+      }
 
-#endif // __PASR_ORCHESTRATION_DATA_SYNC_STAGE_MQH__
+      if(!m_data->IsReady())
+      {
+         if(m_debug) Print("[DataSyncStage] DataManager not ready");
+         return false;
+      }
+
+      ctx.data_ready = true;
+      return true;
+   }
+
+   virtual string StageName() const override { return "DataSync"; }
+};
+
+#endif // __ORCHESTRATION_DATA_SYNC_STAGE_MQH__

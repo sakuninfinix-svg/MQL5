@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AttentionFusion.mqh — v1.0                                    |
+//| AI/AttentionFusion.mqh — v1.01                                   |
 //| Multi-head attention mechanism for feature fusion                |
 //| Enables adaptive weighting of different signal sources           |
 //+------------------------------------------------------------------+
@@ -64,7 +64,7 @@ private:
    double         m_layer_norm_beta;
    int            m_input_dim;
    int            m_output_dim;
-   bool           m_initialized;
+   // REMOVED: bool m_initialized; — inherited from IManager, redeclaration hides base member
    int            m_rand_seed;
    
    double Softmax(const double &scores[], int count, double &output[])
@@ -148,7 +148,7 @@ private:
 public:
    CAttentionFusion(int inputDim = AI_FEATURE_DIM, int seed = 42)
       : IManager(), m_input_dim(inputDim), m_output_dim(ATTENTION_HEADS * ATTENTION_DIM),
-        m_initialized(false), m_rand_seed(seed), m_layer_norm_gamma(1.0), m_layer_norm_beta(0.0)
+        m_rand_seed(seed), m_layer_norm_gamma(1.0), m_layer_norm_beta(0.0)
    {
       for(int h = 0; h < ATTENTION_HEADS; h++)
          m_heads[h].Reset();
@@ -184,7 +184,6 @@ public:
       outWeights.Reset();
       outWeights.count = featureCount;
       
-      // Compute attention scores using multi-head attention
       double totalScores[MAX_FEATURE_SOURCES];
       ArrayInitialize(totalScores, 0.0);
       
@@ -193,7 +192,6 @@ public:
          double headScores[MAX_FEATURE_SOURCES];
          ArrayInitialize(headScores, 0.0);
          
-         // Compute Q, K, V for each feature
          for(int f = 0; f < featureCount; f++)
          {
             double q[ATTENTION_DIM], k[ATTENTION_DIM], v[ATTENTION_DIM];
@@ -201,7 +199,6 @@ public:
             ArrayInitialize(k, 0.0);
             ArrayInitialize(v, 0.0);
             
-            // Matrix multiplication for Q, K, V
             for(int i = 0; i < m_input_dim; i++)
             {
                for(int j = 0; j < ATTENTION_DIM; j++)
@@ -212,21 +209,17 @@ public:
                }
             }
             
-            // Attention score = Q · K / sqrt(d_k)
             double score = DotProduct(q, k, ATTENTION_DIM) / MathSqrt((double)ATTENTION_DIM);
             headScores[f] = score;
          }
          
-         // Softmax for this head
          double softmaxScores[MAX_FEATURE_SOURCES];
          Softmax(headScores, featureCount, softmaxScores);
          
-         // Accumulate scores across heads
          for(int f = 0; f < featureCount; f++)
             totalScores[f] += softmaxScores[f];
       }
       
-      // Average across heads and apply softmax
       for(int f = 0; f < featureCount; f++)
          totalScores[f] /= ATTENTION_HEADS;
       
@@ -246,7 +239,6 @@ public:
       ArrayResize(fusedOutput, outputSize);
       ArrayInitialize(fusedOutput, 0.0);
       
-      // Apply attention weights and fuse features
       for(int h = 0; h < ATTENTION_HEADS; h++)
       {
          int offset = h * ATTENTION_DIM;
@@ -255,7 +247,6 @@ public:
          {
             double weight = weights.weights[f];
             
-            // Compute value projection
             double v[ATTENTION_DIM];
             ArrayInitialize(v, 0.0);
             
@@ -265,17 +256,14 @@ public:
                   v[j] += features[f][i] * m_heads[h].W_v[i][j];
             }
             
-            // Weighted sum
             for(int j = 0; j < ATTENTION_DIM; j++)
                fusedOutput[offset + j] += weight * v[j];
          }
          
-         // Apply output projection
          for(int j = 0; j < ATTENTION_DIM; j++)
             fusedOutput[offset + j] *= m_heads[h].W_o[j];
       }
       
-      // Apply layer normalization
       double normalized[];
       ArrayResize(normalized, outputSize);
       LayerNorm(fusedOutput, normalized, outputSize);
