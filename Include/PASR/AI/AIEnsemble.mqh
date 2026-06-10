@@ -117,17 +117,56 @@ public:
    // 2-arg overload — no sequence tensor
    bool Vote(SAIFeatureVector &fv, SAIEnsembleVote &out)
      {
-      const SAISequenceTensor &nullSeq = NULL;
-      return Vote(fv, nullSeq, out);
+   out.Reset();
+   if(!m_ready || m_n_models == 0)
+      return false;
+
+   ArrayResize(out.scores, m_n_models);
+   ArrayResize(out.weights, m_n_models);
+
+   double weighted_sum = 0.0;
+   double weight_total = 0.0;
+   int score_idx = 0;
+
+   for(int i = 0; i < m_n_models; i++)
+     {
+      if(CheckPointer(m_models[i]) == POINTER_INVALID || m_models[i] == NULL)
+         continue;
+
+      double score = 0.5;
+      if(!m_models[i].Forward(fv.features, AI_FEATURE_DIM, score))
+         continue;
+
+      score = score * 2.0 - 1.0;
+
+      out.scores[score_idx]  = score;
+      out.weights[score_idx] = m_weights[i];
+      weighted_sum += score * m_weights[i];
+      weight_total += m_weights[i];
+      score_idx++;
      }
 
-   // 3-arg overload — seq is a nullable pointer
-   bool Vote(SAIFeatureVector &fv, const SAISequenceTensor &seq, SAIEnsembleVote &out)
-     {
-      out.Reset();
-      if(!m_ready || m_n_models == 0) return false;
+   if(score_idx <= 0 || weight_total <= 0.0)
+      return false;
 
-      bool use_onnx = (m_onnx_loaded && seq != NULL && seq.valid);
+   ArrayResize(out.scores, score_idx);
+   ArrayResize(out.weights, score_idx);
+
+   out.n_models = score_idx;
+   out.final_score = weighted_sum / weight_total;
+   out.confidence = MathAbs(out.final_score);
+   out.valid = true;
+
+   int agree = 0;
+   for(int i = 0; i < score_idx; i++)
+     {
+      if((out.final_score >= 0.0 && out.scores[i] >= 0.0) ||
+         (out.final_score < 0.0 && out.scores[i] < 0.0))
+         agree++;
+     }
+
+   out.agreement = (score_idx > 0) ? (double)agree / score_idx : 0.0;
+   return true;
       int total_voters = m_n_models + (use_onnx ? 1 : 0);
       ArrayResize(out.scores,  total_voters);
       ArrayResize(out.weights, total_voters);
