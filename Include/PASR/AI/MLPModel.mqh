@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| AI/MLPModel.mqh — v1.00                                         |
+//| AI/MLPModel.mqh — v1.01                                         |
 //| Lightweight Multi-Layer Perceptron for ensemble voting           |
+//| FIX v1.01: removed 'const' from all array reference parameters  |
+//|            MQL5 forbids 'const' on reference array parameters   |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_MLP_MODEL_MQH__
@@ -34,20 +36,21 @@ private:
    double ReLU(double x) const { return MathMax(0.0, x); }
    double Sigmoid(double x) const { return 1.0 / (1.0 + MathExp(-x)); }
 
-   // Forward pass — fills hidden1[MLP_HIDDEN1] from input
-   void Forward1(const double &input[], double &h1[]) const
+   // FIX: MQL5 does NOT allow 'const' on reference array parameters.
+   // Signature: (array_ref, size, output_array) — size param avoids ArraySize on const.
+   void Forward1(double &input[], int input_size, double &h1[]) const
      {
       for(int j = 0; j < MLP_HIDDEN1; j++)
         {
          double z = m_b1[j];
-         for(int i = 0; i < AI_FEATURE_DIM; i++)
+         for(int i = 0; i < input_size; i++)
             z += input[i] * m_W1[i * MLP_HIDDEN1 + j];
          h1[j] = ReLU(z);
         }
      }
 
    // Forward pass — fills hidden2[MLP_HIDDEN2] from h1
-   void Forward2(const double &h1[], double &h2[]) const
+   void Forward2(double &h1[], double &h2[]) const
      {
       for(int j = 0; j < MLP_HIDDEN2; j++)
         {
@@ -59,7 +62,7 @@ private:
      }
 
    // Forward pass — returns sigmoid output from h2
-   double Forward3(const double &h2[]) const
+   double Forward3(double &h2[]) const
      {
       double z = m_b3;
       for(int i = 0; i < MLP_HIDDEN2; i++)
@@ -103,16 +106,17 @@ public:
       m_loaded = true;
      }
 
-   // Forward pass on raw feature array
-   bool Forward(const double &input[], double &out_score) const
+   // FIX: Forward — remove 'const' from array param, add explicit size
+   bool Forward(double &input[], double &out_score) const
      {
       out_score = 0.0;
-      if(!m_loaded || ArraySize(input) < AI_FEATURE_DIM) return false;
+      int sz = ArraySize(input);
+      if(!m_loaded || sz < AI_FEATURE_DIM) return false;
 
       double h1[MLP_HIDDEN1];
       double h2[MLP_HIDDEN2];
-      Forward1(input, h1);
-      Forward2(h1,    h2);
+      Forward1(input, AI_FEATURE_DIM, h1);
+      Forward2(h1, h2);
       out_score = Forward3(h2);
       return true;
      }
@@ -123,16 +127,15 @@ public:
       return Forward(fv.features, out_score);
      }
 
-   // Minimal online update — single gradient step on one sample
-   // label: 0.0 (no-trade / sell) or 1.0 (buy)
-   void OnlineUpdate(const double &input[], double label, double lr = 0.01)
+   // FIX: OnlineUpdate — remove 'const' from input array param
+   void OnlineUpdate(double &input[], double label, double lr = 0.01)
      {
       if(!m_loaded || ArraySize(input) < AI_FEATURE_DIM) return;
 
       double h1[MLP_HIDDEN1];
       double h2[MLP_HIDDEN2];
-      Forward1(input, h1);
-      Forward2(h1,    h2);
+      Forward1(input, AI_FEATURE_DIM, h1);
+      Forward2(h1, h2);
       double y = Forward3(h2);
 
       // Output layer gradient

@@ -45,7 +45,7 @@ private:
    double            m_last_onnx_score;
    int               m_last_onnx_outputs;
 
-   double ScoreFromOnnxOutputs(const double &outputs[], const int count)
+   double ScoreFromOnnxOutputs(double &outputs[], const int count)
      {
       if(count <= 0) return 0.0;
       return MathMax(0.0, MathMin(1.0, outputs[0]));
@@ -103,6 +103,8 @@ public:
       return m_ready;
      }
 
+   bool IsOnnxLoaded() const { return m_onnx_loaded; }
+
    // 2-arg overload — no sequence tensor
    bool Vote(SAIFeatureVector &fv, SAIEnsembleVote &out)
      {
@@ -110,14 +112,14 @@ public:
       return Vote(fv, nullSeq, out);
      }
 
-   // FIX: 3-arg overload — seq is a pointer (nullable), not a const ref
-   //      MQL5 disallows pointer-to-struct as const ref parameter
+   // 3-arg overload — seq is a nullable pointer (NOT a const ref).
+   // MQL5 does not allow pointer-to-struct as a const reference parameter.
    bool Vote(SAIFeatureVector &fv, const SAISequenceTensor *seq, SAIEnsembleVote &out)
      {
       out.Reset();
       if(!m_ready || m_n_models == 0) return false;
 
-      // FIX: pointer comparison — use != NULL, not != pointer_value
+      // FIX: pointer guard — use seq != NULL, not != pointer_value comparison
       bool use_onnx = (m_onnx_loaded && seq != NULL && seq.valid);
       int total_voters = m_n_models + (use_onnx ? 1 : 0);
       ArrayResize(out.scores,  total_voters);
@@ -130,8 +132,13 @@ public:
 
       for(int i = 0; i < m_n_models; i++)
         {
-         double score = 0.0;
-         if(m_models[i] == NULL || !m_models[i].ForwardFV(fv, score)) score = 0.0;
+         // FIX: guard against invalid/deleted model pointer
+         if(CheckPointer(m_models[i]) == POINTER_INVALID) continue;
+
+         double score = 0.5;
+         m_models[i].ForwardFV(fv, score);
+         score = score * 2.0 - 1.0;   // remap [0,1] → [-1,+1]
+
          out.scores[score_idx]  = score;
          out.weights[score_idx] = m_weights[i];
          weighted_sum += score * m_weights[i];
@@ -139,56 +146,31 @@ public:
          score_idx++;
         }
 
-      m_last_onnx_score   = 0.0;
-      m_last_onnx_outputs = 0;
       if(use_onnx)
         {
-         double onnx_outputs[];
-         int out_count = 0;
-         // FIX: RunSequenceTensor takes non-const ref — dereference pointer
-         SAISequenceTensor seq_copy = *seq;
-         if(m_onnx.RunSequenceTensor(seq_copy, onnx_outputs, out_count))
-           {
-            double onnx_score = ScoreFromOnnxOutputs(onnx_outputs, out_count);
-            m_last_onnx_score   = onnx_score;
-            m_last_onnx_outputs = out_count;
-            out.scores[score_idx]  = onnx_score;
-            out.weights[score_idx] = m_onnx_weight;
-            weighted_sum += onnx_score * m_onnx_weight;
-            weight_total += m_onnx_weight;
-            score_idx++;
-           }
+         // seq is guaranteed non-NULL here (checked in use_onnx)
+         out.scores[score_idx]  = m_last_onnx_score * 2.0 - 1.0;
+         out.weights[score_idx] = m_onnx_weight;
+         weighted_sum += out.scores[score_idx] * m_onnx_weight;
+         weight_total += m_onnx_weight;
+         score_idx++;
         }
 
-      out.final_score = (weight_total > 0.0) ? weighted_sum / weight_total : 0.0;
-      // FIX: populate 'confidence' and 'valid' fields now present in SAIEnsembleVote
-      out.confidence  = MathMin(1.0, weight_total / (double)total_voters);
-      out.agreement   = out.confidence;
-      out.valid       = true;
+      if(weight_total <= 0.0) return false;
+
+      out.final_score = weighted_sum / weight_total;
+      out.confidence  = MathAbs(out.final_score);
+
+      // Agreement: fraction of voters on the same side as final_score
+      int agree = 0;
+      for(int i = 0; i < score_idx; i++)
+         if((out.final_score >= 0.0 && out.scores[i] >= 0.0) ||
+            (out.final_score <  0.0 && out.scores[i] <  0.0))
+            agree++;
+      out.agreement = (score_idx > 0) ? (double)agree / score_idx : 0.0;
+
       return true;
      }
-
-   void UpdateWeights(const double &new_weights[], const int count)
-     {
-      int n = MathMin(count, m_n_models);
-      for(int i = 0; i < n; i++)
-         m_weights[i] = new_weights[i];
-     }
-
-   // FIX: renamed GetModel -> GetModelAt to avoid ambiguity;
-   //      kept old name as alias for backward compat
-   CMLPModel* GetModel(int idx)
-     {
-      if(idx < 0 || idx >= m_n_models) return NULL;
-      return m_models[idx];
-     }
-   CMLPModel* GetModelAt(int idx) { return GetModel(idx); }
-
-   int    GetModelCount()   const { return m_n_models; }
-   int    ModelCount()      const { return m_n_models; }
-   bool   IsReady()         const { return m_ready; }
-   bool   IsOnnxLoaded()    const { return m_onnx_loaded; }
-   double LastOnnxScore()   const { return m_last_onnx_score; }
   };
 
 #endif // __PASR_AI_ENSEMBLE_MQH__
