@@ -1,7 +1,7 @@
 # PASR Architecture & Change Log
 
-**Version:** 14.01-RANGE-TRADING-OPTIMIZED  
-**Last Updated:** 2026-01-XX  
+**Version:** 14.01-RANGE-TRADING-OPTIMIZED
+**Last Updated:** 2026-01-XX
 **Status:** ✅ Production Ready | AI Enhanced | Optimization Optimized
 
 PASR is an MQL5 Expert Advisor framework built around a centralized runtime kernel and a modular trading pipeline, featuring intelligent market regime detection, adaptive risk management, and optimized telemetry for strategy testing.
@@ -188,7 +188,7 @@ The expected migration baseline is `0 errors, 0 warnings` for all three.
 ## 📜 Architecture Change Log (v13.01 → v14.01)
 
 ### Version 14.01 - Range Trading Optimization
-**Date:** 2026-01-XX  
+**Date:** 2026-01-XX
 **Status:** ✅ Complete
 
 #### AI Enhancement: Dynamic Strategy Orchestrator
@@ -212,7 +212,7 @@ The expected migration baseline is `0 errors, 0 warnings` for all three.
 ---
 
 ### Version 14.00 - Post-Migration Cleanup
-**Date:** 2026-01-XX  
+**Date:** 2026-01-XX
 **Status:** ✅ Complete
 
 #### Summary
@@ -358,8 +358,3 @@ finalLot = NormaliseLot(lotSize)  // Broker lot steps
 For detailed usage, see `QUICKSTART.md` and `TELEMETRY_OPTIMIZATION_GUIDE.md`.
 
 ---
-
-**Architecture Status:** ✅ COMPLETE  
-**AI Enhancement:** ✅ COMPLETE  
-**Optimization Ready:** ✅ COMPLETE  
-**Version:** 14.01-RANGE-TRADING-OPTIMIZED
