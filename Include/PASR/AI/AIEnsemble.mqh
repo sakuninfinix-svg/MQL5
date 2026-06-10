@@ -115,8 +115,8 @@ public:
      }
 
    // 2-arg overload — no sequence tensor
-   bool Vote(SAIFeatureVector &fv, SAIEnsembleVote &out)
-     {
+  bool Vote(SAIFeatureVector &fv, SAIEnsembleVote &out)
+  {
    out.Reset();
    if(!m_ready || m_n_models == 0)
       return false;
@@ -167,16 +167,12 @@ public:
 
    out.agreement = (score_idx > 0) ? (double)agree / score_idx : 0.0;
    return true;
-      int total_voters = m_n_models + (use_onnx ? 1 : 0);
-      ArrayResize(out.scores,  total_voters);
-      ArrayResize(out.weights, total_voters);
-      out.n_models = total_voters;
+   int total_voters = m_n_models + (use_onnx ? 1 : 0);
+   ArrayResize(out.scores,  total_voters);
+   ArrayResize(out.weights, total_voters);
+   out.n_models = total_voters;
 
-      double weighted_sum = 0.0;
-      double weight_total = 0.0;
-      int score_idx = 0;
-
-      for(int i = 0; i < m_n_models; i++)
+   for(int i = 0; i < m_n_models; i++)
         {
          if(CheckPointer(m_models[i]) == POINTER_INVALID) continue;
 
