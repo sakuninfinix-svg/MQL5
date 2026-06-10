@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/LSTMInference.mqh — v1.0                                      |
+//| AI/LSTMInference.mqh — v1.01                                     |
 //| LSTM-based inference engine for time series prediction           |
 //| Replaces simple MLP with temporal modeling capability           |
 //+------------------------------------------------------------------+
@@ -107,10 +107,11 @@ private:
                m_layers[layer].W_hf[i][j] = ((double)MathRand() / 32767.0 - 0.5) * 2.0 * scale;
                m_layers[layer].W_ho[i][j] = ((double)MathRand() / 32767.0 - 0.5) * 2.0 * scale;
             }
-            m_layers[layer].b_i[j] = 0.0;
-            m_layers[layer].b_f[j] = 0.0;
-            m_layers[layer].b_o[j] = 0.0;
-            m_layers[layer].b_h[j] = 0.0;
+            // FIX: bias init must use loop variable 'i', not out-of-scope 'j'
+            m_layers[layer].b_i[i] = 0.0;
+            m_layers[layer].b_f[i] = 0.0;
+            m_layers[layer].b_o[i] = 0.0;
+            m_layers[layer].b_h[i] = 0.0;
          }
       }
       
@@ -121,7 +122,8 @@ private:
       m_output_bias = 0.0;
    }
    
-   void LSTMForwardStep(LSTMLayer &layer, const double &input[], double &output[])
+   // FIX: remove 'const' from array parameter — MQL5 does not support const ref array params
+   void LSTMForwardStep(LSTMLayer &layer, double &input[], double &output[])
    {
       double i_gate[LSTM_HIDDEN_SIZE];
       double f_gate[LSTM_HIDDEN_SIZE];

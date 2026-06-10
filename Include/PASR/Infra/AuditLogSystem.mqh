@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/AuditLogSystem.mqh — v1.00                                 |
+//| Infra/AuditLogSystem.mqh — v1.01                                 |
 //| High-performance, space-efficient audit logging system           |
 //| Optimized for strategy testing with minimal disk footprint       |
 //+------------------------------------------------------------------+
@@ -157,8 +157,7 @@ private:
    // Module name mapping
    string          m_module_names[];
    
-   // Initialization flag
-   bool            m_initialized;
+   // NOTE: m_initialized is inherited from IManager — do NOT redeclare here
 
 private:
    // Internal helpers
@@ -175,11 +174,13 @@ public:
                      CAuditLogSystem();
                     ~CAuditLogSystem();
    
-   // IManager interface
-   virtual bool      Init(const StrategyConfig &cfg) override;
-   virtual void      Shutdown() override;
-   virtual string    Name() const override { return "AuditLogSystem"; }
-   virtual bool      IsActive() const override { return m_initialized && m_enabled; }
+   // IManager interface — signatures must match IManager exactly
+   virtual bool      Init(IDataManager *data, CEventBus *bus) override;
+   virtual void      Deinit() override;
+   virtual string    HandlerName() const override { return "AuditLogSystem"; }
+   virtual bool      IsHealthy() const override { return m_initialized && m_enabled; }
+   virtual void      DeclareEvents() override {}
+   virtual void      OnEvent(const PASREvent &ev) override {}
    
    // Logging methods
    void              Log(ENUM_AUDIT_LEVEL level, ENUM_AUDIT_MODULE module, 
@@ -246,10 +247,12 @@ CAuditLogSystem::CAuditLogSystem()
    m_flushed_entries = 0;
    m_dropped_entries = 0;
    m_start_time = 0;
-   m_initialized = false;
+   // m_initialized is set by IManager base constructor
    
    ArrayResize(m_buffer, AUDIT_MAX_BUFFER_SIZE);
-   ArrayInitialize(m_buffer);
+   // struct array: clear each element individually (ArrayInitialize tidak support struct)
+   for(int i = 0; i < AUDIT_MAX_BUFFER_SIZE; i++)
+      m_buffer[i].Clear();
    InitModuleNames();
   }
 
@@ -258,7 +261,7 @@ CAuditLogSystem::CAuditLogSystem()
 //+------------------------------------------------------------------+
 CAuditLogSystem::~CAuditLogSystem()
   {
-   Shutdown();
+   Deinit();
   }
 
 //+------------------------------------------------------------------+
@@ -293,8 +296,9 @@ uchar CAuditLogSystem::GetModuleID(const string module_name)
 //+------------------------------------------------------------------+
 //| Initialize the audit log system                                  |
 //+------------------------------------------------------------------+
-bool CAuditLogSystem::Init(const StrategyConfig &cfg)
+bool CAuditLogSystem::Init(IDataManager *data, CEventBus *bus)
   {
+   if(!IManager::Init(data, bus)) return false;
    if(m_initialized) return true;
    
    m_start_time = TimeCurrent();
@@ -339,7 +343,7 @@ bool CAuditLogSystem::Init(const StrategyConfig &cfg)
       FileWriteString(m_file_handle, header);
      }
    
-   m_current_file_size = FileSize(m_file_handle);
+   m_current_file_size = (long)FileSize(m_file_handle);
    FileSeek(m_file_handle, 0, SEEK_END);
    
    m_initialized = true;
@@ -349,9 +353,9 @@ bool CAuditLogSystem::Init(const StrategyConfig &cfg)
   }
 
 //+------------------------------------------------------------------+
-//| Shutdown the audit log system                                    |
+//| Deinitialize the audit log system                                |
 //+------------------------------------------------------------------+
-void CAuditLogSystem::Shutdown()
+void CAuditLogSystem::Deinit()
   {
    if(!m_initialized) return;
    
@@ -359,8 +363,9 @@ void CAuditLogSystem::Shutdown()
    CleanupOldFiles();
    
    m_initialized = false;
-   PASRLogInfo("AuditLog", "Audit system shutdown - Total: " + IntegerToString(m_total_entries) + 
-               ", Flushed: " + IntegerToString(m_flushed_entries));
+   PASRLogInfo("AuditLog", "Audit system shutdown - Total: " + IntegerToString((long)m_total_entries) + 
+               ", Flushed: " + IntegerToString((long)m_flushed_entries));
+   IManager::Deinit();
   }
 
 //+------------------------------------------------------------------+
@@ -372,7 +377,9 @@ string CAuditLogSystem::GenerateFilename()
    MqlDateTime dt;
    TimeToStruct(now, dt);
    
-   string symbol_clean = StringReplace(_Symbol, "/", "_");
+   // StringReplace works in-place; do not use return value as string
+   string symbol_clean = _Symbol;
+   StringReplace(symbol_clean, "/", "_");
    return StringFormat("PASR_Audit_%s_%04d%02d%02d.csv", 
                        symbol_clean, dt.year, dt.mon, dt.day);
   }
@@ -389,9 +396,12 @@ void CAuditLogSystem::RotateFileIfNeeded()
    // Rename current file with timestamp
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
-   string archive_name = StringReplace(m_current_file, ".csv", 
-                                       StringFormat("_%02d%02d%02d.csv", dt.hour, dt.min, dt.sec));
-   FileMove(m_current_file, 0, archive_name, 0, FILE_COMMON);
+   // StringReplace works in-place
+   string archive_name = m_current_file;
+   StringReplace(archive_name, ".csv",
+                 StringFormat("_%02d%02d%02d.csv", dt.hour, dt.min, dt.sec));
+   // FileMove: 4 params (src, src_flags, dst, dst_flags)
+   FileMove(m_current_file, FILE_COMMON, archive_name, FILE_COMMON);
    
    // Create new file
    m_current_file = GenerateFilename();
@@ -401,7 +411,7 @@ void CAuditLogSystem::RotateFileIfNeeded()
      {
       string header = "Timestamp,SeqID,Level,Module,Event,ValueInt,ValueDouble,Ticket,Details\r\n";
       FileWriteString(m_file_handle, header);
-      m_current_file_size = FileSize(m_file_handle);
+      m_current_file_size = (long)FileSize(m_file_handle);
       FileSeek(m_file_handle, 0, SEEK_END);
      }
    
@@ -415,12 +425,9 @@ void CAuditLogSystem::CleanupOldFiles()
   {
    if(m_retention_days <= 0) return;
    
-   datetime cutoff = TimeCurrent() - (m_retention_days * 86400);
-   string search_pattern = "PASR_Audit_*.csv";
-   
    // Note: MQL5 doesn't have direct directory listing, so this is a placeholder
-   // In practice, you'd need to track created files or use external cleanup
-   PASRLogDebug("AuditLog", "Cleanup scheduled for files older than " + IntegerToString(m_retention_days) + " days");
+   PASRLogDebug("AuditLog", "Cleanup scheduled for files older than " +
+                IntegerToString(m_retention_days) + " days");
   }
 
 //+------------------------------------------------------------------+
@@ -436,7 +443,8 @@ void CAuditLogSystem::Log(ENUM_AUDIT_LEVEL level, ENUM_AUDIT_MODULE module,
    // Create entry
    AuditEntry entry;
    entry.Clear();
-   entry.timestamp_ms = TimeCurrent() * 1000 + TimeMillisecond();
+   // GetTickCount64() % 1000 gives sub-second ms component
+   entry.timestamp_ms = (ulong)TimeCurrent() * 1000ULL + (GetTickCount64() % 1000ULL);
    entry.sequence_id = m_sequence_counter++;
    entry.level = (uchar)level;
    entry.module_id = (uchar)module;
@@ -545,9 +553,10 @@ void CAuditLogSystem::Flush()
   {
    if(m_file_handle == INVALID_HANDLE) return;
    
+   int flushed = m_entries_since_flush;
    FileFlush(m_file_handle);
+   m_flushed_entries += flushed;
    m_entries_since_flush = 0;
-   m_flushed_entries += m_entries_since_flush;
   }
 
 //+------------------------------------------------------------------+
@@ -622,9 +631,9 @@ bool CAuditLogSystem::ExportSummary(const string filename)
    string summary = "=== PASR Audit Log Summary ===\r\n";
    summary += "Start Time: " + TimeToString(m_start_time) + "\r\n";
    summary += "End Time: " + TimeToString(TimeCurrent()) + "\r\n";
-   summary += "Total Entries: " + IntegerToString(m_total_entries) + "\r\n";
-   summary += "Flushed Entries: " + IntegerToString(m_flushed_entries) + "\r\n";
-   summary += "Dropped Entries: " + IntegerToString(m_dropped_entries) + "\r\n";
+   summary += "Total Entries: " + IntegerToString((long)m_total_entries) + "\r\n";
+   summary += "Flushed Entries: " + IntegerToString((long)m_flushed_entries) + "\r\n";
+   summary += "Dropped Entries: " + IntegerToString((long)m_dropped_entries) + "\r\n";
    summary += "Log Level: " + EnumToString(m_log_level) + "\r\n";
    summary += "Minimal Mode: " + (m_minimal_mode ? "Yes" : "No") + "\r\n";
    

@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Infra/TelemetryRecorder.mqh — v3.00 Optimized                    |
+//| Infra/TelemetryRecorder.mqh — v3.01 Optimized                    |
 //| High-performance telemetry with auto-optimization mode detection |
 //| Saves disk space during strategy optimization runs               |
 //+------------------------------------------------------------------+
@@ -112,7 +112,9 @@ public:
         m_current_file_size(0), m_sampled_records(0), m_skipped_records(0)
      {
       ArrayResize(m_buffer, m_buffer_max);
-      ArrayInitialize(m_buffer);
+      // struct array: clear each element individually
+      for(int i = 0; i < m_buffer_max; i++)
+         m_buffer[i].Clear();
      }
 
    ~CTelemetryRecorder()
@@ -147,7 +149,7 @@ public:
       WriteHeader();
       
       string mode = m_optimization_mode ? "OPTIMIZATION" : "NORMAL";
-      PASRLogInfo("Telemetry", "v3.00 Initialized [" + mode + "] - recording to: " + m_base_path);
+      PASRLogInfo("Telemetry", "v3.01 Initialized [" + mode + "] - recording to: " + m_base_path);
       return true;
      }
 
@@ -204,7 +206,8 @@ public:
       if(m_buffer_count >= m_buffer_max) Flush();
       if(m_buffer_count < 0 || m_buffer_count >= m_buffer_max) return;
 
-      m_buffer[m_buffer_count].timestamp_ms = TimeCurrent() * 1000 + TimeMillisecond();
+      // GetTickCount64() % 1000 provides sub-second ms component
+      m_buffer[m_buffer_count].timestamp_ms = (ulong)TimeCurrent() * 1000ULL + (GetTickCount64() % 1000ULL);
       m_buffer[m_buffer_count].metric_name  = name;
       m_buffer[m_buffer_count].value        = value;
       m_buffer[m_buffer_count].unit         = unit;
@@ -354,11 +357,13 @@ private:
       
       FileClose(m_file_handle);
       
-      // Archive current file with timestamp
+      // Archive current file with timestamp — StringReplace in-place
       MqlDateTime dt; TimeToStruct(TimeCurrent(), dt);
-      string archive_name = StringReplace(m_current_file, ".csv", 
-                                          StringFormat("_arch_%02d%02d.csv", dt.hour, dt.min));
-      FileMove(m_current_file, 0, archive_name, 0, FILE_COMMON);
+      string archive_name = m_current_file;
+      StringReplace(archive_name, ".csv",
+                    StringFormat("_arch_%02d%02d.csv", dt.hour, dt.min));
+      // FileMove: 4 params (src, src_flags, dst, dst_flags)
+      FileMove(m_current_file, FILE_COMMON, archive_name, FILE_COMMON);
       
       // Open new file
       m_current_file = StringFormat("%s telemetry_%04d%02d%02d_%d_rot.csv",
