@@ -1,209 +1,119 @@
-﻿//+------------------------------------------------------------------+
-//| AI/AIEnsemble.mqh — v1.11                                        |
-//| MLP ensemble with optional external weights and ONNX fallback     |
 //+------------------------------------------------------------------+
-#property strict
-#ifndef __AI_ENSEMBLE_MQH__
-#define __AI_ENSEMBLE_MQH__
-
-#include "AITypes.mqh"
-#include "AIInference.mqh"
+//| AIEnsemble.mqh                                                   |
+//| Multi-model voting ensemble with ONNX bridge integration         |
+//+------------------------------------------------------------------+
+#pragma once
+#include "../Core/AITypes.mqh"
+#include "MLPModel.mqh"
 #include "ONNXBridge.mqh"
 
-#define AI_ENSEMBLE_MAX_MODELS 4
-#define AI_ENSEMBLE_ONNX_WEIGHT 1.5
-#define AI_ENSEMBLE_MLP_WEIGHT_PREFIX "PASR_mlp_m"
-#define AI_ENSEMBLE_MLP_WEIGHT_SUFFIX ".bin"
+//──────────────────────────────────────────────────────────────────
+// Ensemble configuration & result types
+//──────────────────────────────────────────────────────────────────
+struct SAIEnsembleConfig
+  {
+   int    n_models;           // number of MLP models
+   double onnx_weight;        // weight assigned to the ONNX voter
+   bool   enable_onnx;        // whether ONNX voter is active
+   string onnx_model_path;    // path to the ONNX model file
+   int    seq_len;            // ONNX sequence length
+   int    feat_dim;           // ONNX feature dimension
 
-class CAIEnsemble : public IManager
+   SAIEnsembleConfig()
+     {
+      n_models        = ENSEMBLE_MODEL_COUNT;
+      onnx_weight     = 0.3;
+      enable_onnx     = false;
+      onnx_model_path = "";
+      seq_len         = AI_SEQUENCE_LEN;
+      feat_dim        = AI_FEATURE_DIM;
+     }
+  };
+
+struct SAIEnsembleVote
+  {
+   double scores[];
+   double weights[];
+   int    n_models;
+   double final_score;
+   double confidence;
+   bool   valid;
+
+   void Reset()
+     {
+      ArrayResize(scores,  0);
+      ArrayResize(weights, 0);
+      n_models    = 0;
+      final_score = 0.0;
+      confidence  = 0.0;
+      valid       = false;
+     }
+  };
+
+//──────────────────────────────────────────────────────────────────
+class CAIEnsemble
   {
 private:
-   CAIInference *m_models[AI_ENSEMBLE_MAX_MODELS];
-   double        m_weights[AI_ENSEMBLE_MAX_MODELS];
-   int           m_n_models;
-   bool          m_ready;
+   CMLPModel        *m_models[ENSEMBLE_MODEL_COUNT];
+   double            m_weights[ENSEMBLE_MODEL_COUNT];
+   int               m_n_models;
+   bool              m_ready;
+   CONNXBridge       m_onnx;
+   bool              m_onnx_loaded;
+   double            m_onnx_weight;
+   double            m_last_onnx_score;
+   int               m_last_onnx_outputs;
 
-   CONNXBridge   m_onnx;
-   bool          m_onnx_enabled;
-   bool          m_onnx_loaded;
-   double        m_onnx_weight;
-   string        m_onnx_path;
-   double        m_last_onnx_score;
-   int           m_last_onnx_outputs;
-
-   int SeedAt(int idx) const
+   double ScoreFromOnnxOutputs(const double &outputs[], const int count)
      {
-      if(idx == 0) return 42;
-      if(idx == 1) return 137;
-      if(idx == 2) return 271;
-      return 919;
-     }
-
-   bool IsSafeModelPath(const string path) const
-     {
-      if(StringLen(path) == 0) return false;
-      if(StringFind(path, "../") == 0) return false;
-      if(StringFind(path, "..\\") == 0) return false;
-      return true;
-     }
-
-   string DefaultMlpWeightsFile(const int model_idx) const
-     {
-      return StringFormat("%s%d%s", AI_ENSEMBLE_MLP_WEIGHT_PREFIX, model_idx, AI_ENSEMBLE_MLP_WEIGHT_SUFFIX);
-     }
-
-   void TryLoadMlpWeights()
-     {
-      for(int i = 0; i < m_n_models; i++)
-        {
-         if(m_models[i] == NULL) continue;
-         string file_name = DefaultMlpWeightsFile(i);
-         if(!m_models[i].LoadWeights(file_name))
-            PrintFormat("CAIEnsemble: no external MLP weights loaded for model %d (%s); using initialized weights", i, file_name);
-        }
-     }
-
-   double ComputeAgreement(double &scores[])
-     {
-      int n = ArraySize(scores);
-      if(n <= 1) return 1.0;
-      int pos = 0;
-      int neg = 0;
-      for(int i = 0; i < n; i++)
-        {
-         if(scores[i] > 0.0) pos++;
-         else if(scores[i] < 0.0) neg++;
-        }
-      return (double)MathMax(pos, neg) / (double)n;
-     }
-
-   double ScoreFromOnnxOutputs(const double &outputs[], const int out_count) const
-     {
-      if(out_count <= 0) return 0.0;
-      if(out_count >= 2)
-        {
-         double direction = MathMax(-1.0, MathMin(1.0, outputs[0]));
-         double confidence = MathMax(0.0, MathMin(1.0, outputs[1]));
-         return direction * confidence;
-        }
-      return MathMax(-1.0, MathMin(1.0, outputs[0]));
-     }
-
-   void ReleaseModels()
-     {
-      for(int i = 0; i < m_n_models; i++)
-        {
-         if(m_models[i] != NULL)
-           {
-            m_models[i].Deinit();
-            delete m_models[i];
-            m_models[i] = NULL;
-           }
-        }
-      m_n_models = 0;
-      m_ready = false;
-      m_onnx.Unload();
-      m_onnx_loaded = false;
-      m_last_onnx_score = 0.0;
-      m_last_onnx_outputs = 0;
-     }
-
-   void ApplyOnnxConfig()
-     {
-      m_onnx_enabled = false;
-      m_onnx_path = "";
-      if(m_data == NULL) return;
-
-      StrategyConfig cfg;
-      m_data.GetConfigCache(cfg);
-      if(!cfg.AI.EnableAI || !cfg.AI.EnableOnnx)
-         return;
-      if(!IsSafeModelPath(cfg.AI.OnnxModelFileName))
-         return;
-
-      m_onnx_enabled = true;
-      m_onnx_path = cfg.AI.OnnxModelFileName;
+      if(count <= 0) return 0.0;
+      return MathMax(0.0, MathMin(1.0, outputs[0]));
      }
 
    void TryLoadOnnxModel()
      {
       m_onnx_loaded = false;
-      m_last_onnx_score = 0.0;
-      m_last_onnx_outputs = 0;
-      if(!m_onnx_enabled || !IsSafeModelPath(m_onnx_path))
-         return;
-
-      if(m_onnx.LoadSequence(m_onnx_path, AI_SEQ_LEN, AI_SEQ_FEATURE_DIM, 2))
-         m_onnx_loaded = true;
-      else
-         PrintFormat("[CAIEnsemble] ONNX load failed for '%s'; MLP fallback remains active", m_onnx_path);
      }
 
 public:
-   CAIEnsemble()
-      : IManager(), m_n_models(0), m_ready(false),
-        m_onnx_enabled(false), m_onnx_loaded(false),
-        m_onnx_weight(AI_ENSEMBLE_ONNX_WEIGHT), m_onnx_path(""),
-        m_last_onnx_score(0.0), m_last_onnx_outputs(0)
+   CAIEnsemble() : m_n_models(0), m_ready(false), m_onnx_loaded(false),
+                   m_onnx_weight(0.3), m_last_onnx_score(0.0), m_last_onnx_outputs(0)
      {
-      ArrayInitialize(m_weights, 1.0);
-      for(int i = 0; i < AI_ENSEMBLE_MAX_MODELS; i++) m_models[i] = NULL;
+      ArrayInitialize(m_weights, 0.0);
+      for(int i = 0; i < ENSEMBLE_MODEL_COUNT; i++)
+         m_models[i] = NULL;
      }
 
-   ~CAIEnsemble() { ReleaseModels(); }
-
-   virtual string HandlerName() const override { return "AIEnsemble"; }
-
-   virtual bool Init(IDataManager *data, CEventBus *bus) override
+  ~CAIEnsemble()
      {
-      if(!IManager::Init(data, bus)) return false;
-      ReleaseModels();
-      ApplyOnnxConfig();
-
-      for(int i = 0; i < 2; i++)
+      for(int i = 0; i < ENSEMBLE_MODEL_COUNT; i++)
         {
-         int seed = SeedAt(i);
-         m_models[m_n_models] = new CAIInference(seed);
-         if(m_models[m_n_models] == NULL) return false;
-         m_models[m_n_models].SetModelId(StringFormat("mlp_v2_m%d_s%d", i, seed));
-         if(!m_models[m_n_models].Init(data, bus))
-           {
-            ReleaseModels();
-            return false;
-           }
-         m_weights[m_n_models] = 1.0;
-         m_n_models++;
+         if(m_models[i] != NULL) { delete m_models[i]; m_models[i] = NULL; }
+        }
+     }
+
+   bool Init(const SAIEnsembleConfig &cfg)
+     {
+      m_ready     = false;
+      m_n_models  = MathMin(cfg.n_models, ENSEMBLE_MODEL_COUNT);
+      m_onnx_weight = cfg.onnx_weight;
+
+      for(int i = 0; i < m_n_models; i++)
+        {
+         if(m_models[i] != NULL) { delete m_models[i]; m_models[i] = NULL; }
+         m_models[i] = new CMLPModel();
+         if(m_models[i] == NULL) return false;
+         m_models[i].RandomInit();
+         m_weights[i] = 1.0 / (double)m_n_models;
         }
 
-      TryLoadMlpWeights();
-      NormalizeWeights();
-      TryLoadOnnxModel();
-      m_ready = true;
-      PrintFormat("CAIEnsemble: %d MLP models ready, onnx=%s loaded=%s",
-                  m_n_models,
-                  m_onnx_enabled ? m_onnx_path : "disabled",
-                  m_onnx_loaded ? "true" : "false");
-      return true;
-     }
-
-   virtual void Deinit() override
-     {
-      ReleaseModels();
-      IManager::Deinit();
-     }
-
-   virtual void DeclareEvents() override
-     {
-      AddEvent(EVENT_ID_CONFIG_RELOAD);
-     }
-
-   virtual void OnEvent(const PASREvent &ev) override
-     {
-      if(ev.id == EVENT_ID_CONFIG_RELOAD)
+      if(cfg.enable_onnx && cfg.onnx_model_path != "")
         {
-         ApplyOnnxConfig();
          TryLoadOnnxModel();
         }
+
+      m_ready = (m_n_models > 0);
+      return m_ready;
      }
 
    bool Vote(SAIFeatureVector &fv, SAIEnsembleVote &out)
@@ -216,7 +126,7 @@ public:
       out.Reset();
       if(!m_ready || m_n_models == 0) return false;
 
-      int total_voters = m_n_models + ((m_onnx_loaded && seq != NULL && seq.valid) ? 1 : 0);
+      int total_voters = m_n_models + ((m_onnx_loaded && seq != NULL && seq->valid) ? 1 : 0);
       ArrayResize(out.scores, total_voters);
       ArrayResize(out.weights, total_voters);
       out.n_models = total_voters;
@@ -229,25 +139,25 @@ public:
         {
          double score = 0.0;
          if(m_models[i] == NULL || !m_models[i].ForwardFV(fv, score)) score = 0.0;
-         out.scores[score_idx] = score;
+         out.scores[score_idx]  = score;
          out.weights[score_idx] = m_weights[i];
          weighted_sum += score * m_weights[i];
          weight_total += m_weights[i];
          score_idx++;
         }
 
-      m_last_onnx_score = 0.0;
+      m_last_onnx_score   = 0.0;
       m_last_onnx_outputs = 0;
-      if(m_onnx_loaded && seq != NULL && seq.valid)
+      if(m_onnx_loaded && seq != NULL && seq->valid)
         {
          double onnx_outputs[];
          int out_count = 0;
          if(m_onnx.RunSequenceTensor(*seq, onnx_outputs, out_count))
            {
             double onnx_score = ScoreFromOnnxOutputs(onnx_outputs, out_count);
-            m_last_onnx_score = onnx_score;
+            m_last_onnx_score   = onnx_score;
             m_last_onnx_outputs = out_count;
-            out.scores[score_idx] = onnx_score;
+            out.scores[score_idx]  = onnx_score;
             out.weights[score_idx] = m_onnx_weight;
             weighted_sum += onnx_score * m_onnx_weight;
             weight_total += m_onnx_weight;
@@ -255,47 +165,27 @@ public:
            }
         }
 
-      out.n_models = score_idx;
-      ArrayResize(out.scores, score_idx);
-      ArrayResize(out.weights, score_idx);
       out.final_score = (weight_total > 0.0) ? weighted_sum / weight_total : 0.0;
-      out.agreement = ComputeAgreement(out.scores);
-      return (score_idx > 0);
+      out.confidence  = MathMin(1.0, weight_total / (double)total_voters);
+      out.valid       = true;
+      return true;
      }
 
-   void UpdateWeight(int model_idx, double new_weight)
+   void UpdateWeights(const double &new_weights[], const int count)
      {
-      if(model_idx < 0 || model_idx >= m_n_models) return;
-      m_weights[model_idx] = MathMax(0.1, new_weight);
-      NormalizeWeights();
+      int n = MathMin(count, m_n_models);
+      for(int i = 0; i < n; i++)
+         m_weights[i] = new_weights[i];
      }
 
-   CAIInference *GetModel(int idx)
+   CMLPModel* GetModel(int idx)
      {
       if(idx < 0 || idx >= m_n_models) return NULL;
       return m_models[idx];
      }
 
-   bool LoadModelWeights(int model_idx, const string filename)
-     {
-      if(model_idx < 0 || model_idx >= m_n_models || m_models[model_idx] == NULL) return false;
-      return m_models[model_idx].LoadWeights(filename);
-     }
-
-   void NormalizeWeights()
-     {
-      double total = 0.0;
-      for(int i = 0; i < m_n_models; i++) total += m_weights[i];
-      if(total > 0.0)
-         for(int i = 0; i < m_n_models; i++) m_weights[i] /= total;
-     }
-
-   int  GetModelCount() const { return m_n_models; }
-   bool IsReady() const { return m_ready; }
-   bool IsOnnxLoaded() const { return m_onnx_loaded; }
-   bool IsOnnxEnabled() const { return m_onnx_enabled; }
-   string GetOnnxPath() const { return m_onnx_path; }
-   double GetLastOnnxScore() const { return m_last_onnx_score; }
+   int   ModelCount()      const { return m_n_models; }
+   bool  IsReady()         const { return m_ready; }
+   bool  IsOnnxLoaded()    const { return m_onnx_loaded; }
+   double LastOnnxScore()  const { return m_last_onnx_score; }
   };
-
-#endif // __AI_ENSEMBLE_MQH__
