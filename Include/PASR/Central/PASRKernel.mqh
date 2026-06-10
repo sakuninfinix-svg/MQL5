@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Central/PASRKernel.mqh — v0.23                                   |
+//| Central/PASRKernel.mqh — v0.24                                   |
 //| Compatibility facade for Centralized Modular Pipeline migration    |
 //+------------------------------------------------------------------+
 #property strict
@@ -671,11 +671,14 @@ public:
       m_cfg = cfg;
       m_last_error = "";
 
-      // Initialize audit log system first for early logging
+      // FIX: CAuditLogSystem inherits IManager::Init(IDataManager*, CEventBus*).
+      // It does NOT accept StrategyConfig. The event bus is not yet created here,
+      // so we pass NULL for both — AuditLogSystem guards against NULL data in Init()
+      // and will operate in minimal/buffer-only mode until the event bus is ready.
       m_audit_log = new CAuditLogSystem();
       if(m_audit_log != NULL)
         {
-         if(!m_audit_log.Init(cfg))
+         if(!m_audit_log.Init(NULL, NULL))
            {
             delete m_audit_log;
             m_audit_log = NULL;
@@ -756,15 +759,16 @@ public:
          delete m_event_bus;
          m_event_bus = NULL;
         }
-      
-      // Shutdown audit log last to capture all shutdown events
+
+      // FIX: CAuditLogSystem inherits Deinit() from IManager, not Shutdown().
+      // Shutdown() was not declared as virtual in the class hierarchy.
       if(m_audit_log != NULL)
         {
-         m_audit_log.Shutdown();
+         m_audit_log.Deinit();
          delete m_audit_log;
          m_audit_log = NULL;
         }
-      
+
       m_ready = false;
       ResetRuntimeState();
       SetState(PASR_KERNEL_STOPPED);
@@ -820,6 +824,18 @@ public:
       if(data != NULL)
          data.OnTrade(trans);
       PublishTradeTransactionEvent(trans);
+     }
+
+   void OnChartEvent(const int id,
+                     const long &lparam,
+                     const double &dparam,
+                     const string &sparam)
+     {
+      if(!m_ready || m_pipeline == NULL)
+         return;
+      CDashboardManager *dash = m_services.Dashboard();
+      if(dash != NULL)
+         dash.OnChartEvent(id, lparam, dparam, sparam);
      }
 
    bool IsReady() const
