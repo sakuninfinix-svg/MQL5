@@ -39,14 +39,14 @@ private:
      }
 
    // FIX v1.03: explicit int feat_dim — no 'const' on array param
-   void Project(double &input[], int feat_dim, double &W[], int out_dim, double &out[])
+   void Project(double &x[], int feat_dim, double &W[], int out_dim, double &out[])
      {
       ArrayResize(out, out_dim);
       for(int j = 0; j < out_dim; j++)
         {
          double z = 0.0;
          for(int i = 0; i < feat_dim; i++)
-            z += input[i] * W[i * out_dim + j];
+            z += x[i] * W[i * out_dim + j];
          out[j] = z;
         }
      }

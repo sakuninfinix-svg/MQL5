@@ -67,9 +67,9 @@ private:
    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
    double Clamp(double v, double lo, double hi) const { return MathMax(lo, MathMin(hi, v)); }
 
-   const SAISequenceTensor *GetSequencePtr() const
+   const SAISequenceTensor &GetSequencePtr() const
      {
-      return m_last_sequence_valid ? &m_last_sequence : NULL;
+      return m_last_sequence_valid ? *m_last_sequence : NULL;
      }
 
    void SetUnavailable(SAIInferenceResult &out_result, string reason)
@@ -556,7 +556,7 @@ public:
 
       SAIEnsembleVote vote;
       vote.Reset();
-      const SAISequenceTensor *seq_ptr = m_last_sequence_valid ? GetSequencePtr() : NULL;
+      const SAISequenceTensor &seq_ptr = m_last_sequence_valid ? GetSequencePtr() : NULL;
       if(!m_ensemble.Vote(fv, seq_ptr, vote) || vote.n_models <= 0)
         {
          SetUnavailable(out_result, "Ensemble vote failed");

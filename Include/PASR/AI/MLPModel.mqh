@@ -37,13 +37,13 @@ private:
    double Sigmoid(double x)  const { return 1.0 / (1.0 + MathExp(-x)); }
 
    // FIX v1.02: explicit feat_dim param — avoids any const/ArraySize issue
-   void Forward1(double &input[], int feat_dim, double &h1[]) const
+   void Forward1(double &x[], int feat_dim, double &h1[]) const
      {
       for(int j = 0; j < MLP_HIDDEN1; j++)
         {
          double z = m_b1[j];
          for(int i = 0; i < feat_dim; i++)
-            z += input[i] * m_W1[i * MLP_HIDDEN1 + j];
+            z += x[i] * m_W1[i * MLP_HIDDEN1 + j];
          h1[j] = ReLU(z);
         }
      }
@@ -103,14 +103,14 @@ public:
      }
 
    // FIX v1.02: Forward takes explicit feat_dim — caller passes AI_FEATURE_DIM
-   bool Forward(double &input[], int feat_dim, double &out_score) const
+   bool Forward(double &x[], int feat_dim, double &out_score) const
      {
       out_score = 0.0;
       if(!m_loaded || feat_dim < 1) return false;
 
       double h1[MLP_HIDDEN1];
       double h2[MLP_HIDDEN2];
-      Forward1(input, feat_dim, h1);
+      Forward1(x, feat_dim, h1);
       Forward2(h1, h2);
       out_score = Forward3(h2);
       return true;
@@ -123,13 +123,13 @@ public:
      }
 
    // FIX v1.02: OnlineUpdate takes explicit feat_dim and lr params
-   void OnlineUpdate(double &input[], int feat_dim, double label, double lr = 0.01)
+   void OnlineUpdate(double &x[], int feat_dim, double label, double lr = 0.01)
      {
       if(!m_loaded || feat_dim < 1) return;
 
       double h1[MLP_HIDDEN1];
       double h2[MLP_HIDDEN2];
-      Forward1(input, feat_dim, h1);
+      Forward1(x, feat_dim, h1);
       Forward2(h1, h2);
       double y = Forward3(h2);
 
@@ -155,7 +155,7 @@ public:
             d1[j] += d2[k] * m_W2[j * MLP_HIDDEN2 + k];
          d1[j] *= (h1[j] > 0 ? 1.0 : 0.0);
          for(int i = 0; i < feat_dim; i++)
-            m_W1[i * MLP_HIDDEN1 + j] -= lr * d1[j] * input[i];
+            m_W1[i * MLP_HIDDEN1 + j] -= lr * d1[j] * x[i];
          m_b1[j] -= lr * d1[j];
         }
 

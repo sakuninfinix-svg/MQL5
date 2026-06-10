@@ -117,12 +117,12 @@ public:
    // 2-arg overload — no sequence tensor
    bool Vote(SAIFeatureVector &fv, SAIEnsembleVote &out)
      {
-      const SAISequenceTensor *nullSeq = NULL;
+      const SAISequenceTensor &nullSeq = NULL;
       return Vote(fv, nullSeq, out);
      }
 
    // 3-arg overload — seq is a nullable pointer
-   bool Vote(SAIFeatureVector &fv, const SAISequenceTensor *seq, SAIEnsembleVote &out)
+   bool Vote(SAIFeatureVector &fv, const SAISequenceTensor &seq, SAIEnsembleVote &out)
      {
       out.Reset();
       if(!m_ready || m_n_models == 0) return false;

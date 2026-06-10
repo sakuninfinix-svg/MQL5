@@ -113,7 +113,7 @@ private:
      }
 
    // FIX v1.03: explicit int input_size param — no more 'input comma expected'
-   void LSTMForwardStep(LSTMLayer &layer, double &input[], int input_size, double &output[])
+   void LSTMForwardStep(LSTMLayer &layer, double &x[], int input_size, double &output[])
      {
       double i_gate[LSTM_HIDDEN_SIZE];
       double f_gate[LSTM_HIDDEN_SIZE];
@@ -123,22 +123,22 @@ private:
       for(int j = 0; j < LSTM_HIDDEN_SIZE; j++)
         {
          double xi = layer.b_i[j];
-         for(int i = 0; i < input_size;        i++) xi += input[i]    * layer.W_xi[i][j];
+         for(int i = 0; i < input_size;        i++) xi += x[i]    * layer.W_xi[i][j];
          for(int i = 0; i < LSTM_HIDDEN_SIZE;  i++) xi += layer.h[i]  * layer.W_hi[i][j];
          i_gate[j] = Sigmoid(xi);
 
          double xf = layer.b_f[j];
-         for(int i = 0; i < input_size;        i++) xf += input[i]    * layer.W_xf[i][j];
+         for(int i = 0; i < input_size;        i++) xf += x[i]    * layer.W_xf[i][j];
          for(int i = 0; i < LSTM_HIDDEN_SIZE;  i++) xf += layer.h[i]  * layer.W_hf[i][j];
          f_gate[j] = Sigmoid(xf);
 
          double xo = layer.b_o[j];
-         for(int i = 0; i < input_size;        i++) xo += input[i]    * layer.W_xo[i][j];
+         for(int i = 0; i < input_size;        i++) xo += x[i]    * layer.W_xo[i][j];
          for(int i = 0; i < LSTM_HIDDEN_SIZE;  i++) xo += layer.h[i]  * layer.W_ho[i][j];
          o_gate[j] = Sigmoid(xo);
 
          double xg = layer.b_h[j];
-         for(int i = 0; i < input_size;        i++) xg += input[i]    * layer.W_xh[i][j];
+         for(int i = 0; i < input_size;        i++) xg += x[i]    * layer.W_xh[i][j];
          for(int i = 0; i < LSTM_HIDDEN_SIZE;  i++) xg += layer.h[i]  * layer.W_hh[i][j];
          g_gate[j] = Tanh(xg);
 

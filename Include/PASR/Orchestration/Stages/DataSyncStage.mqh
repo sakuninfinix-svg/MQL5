@@ -33,7 +33,7 @@ public:
          if(m_debug) Print("[DataSyncStage] DataManager is NULL");
          return STAGE_ABORT;
         }
-      if(!m_data->IsReady())
+      if(!m_data.IsReady())
         {
          if(m_debug) Print("[DataSyncStage] DataManager not ready");
          return STAGE_SKIP;
