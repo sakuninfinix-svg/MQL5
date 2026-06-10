@@ -2,22 +2,27 @@
 //| AIEnsemble.mqh                                                   |
 //| Multi-model voting ensemble with ONNX bridge integration         |
 //+------------------------------------------------------------------+
-#pragma once
-#include "../Core/AITypes.mqh"
+#property strict
+#ifndef __PASR_AI_ENSEMBLE_MQH__
+#define __PASR_AI_ENSEMBLE_MQH__
+
+#include "AITypes.mqh"
 #include "MLPModel.mqh"
 #include "ONNXBridge.mqh"
 
-//──────────────────────────────────────────────────────────────────
-// Ensemble configuration & result types
-//──────────────────────────────────────────────────────────────────
+//------------------------------------------------------------------
+// SAIEnsembleVote is declared in AITypes.mqh (line ~198).
+// DO NOT redeclare here — it would cause 'identifier already used'.
+//------------------------------------------------------------------
+
 struct SAIEnsembleConfig
   {
-   int    n_models;           // number of MLP models
-   double onnx_weight;        // weight assigned to the ONNX voter
-   bool   enable_onnx;        // whether ONNX voter is active
-   string onnx_model_path;    // path to the ONNX model file
-   int    seq_len;            // ONNX sequence length
-   int    feat_dim;           // ONNX feature dimension
+   int    n_models;
+   double onnx_weight;
+   bool   enable_onnx;
+   string onnx_model_path;
+   int    seq_len;
+   int    feat_dim;
 
    SAIEnsembleConfig()
      {
@@ -25,32 +30,11 @@ struct SAIEnsembleConfig
       onnx_weight     = 0.3;
       enable_onnx     = false;
       onnx_model_path = "";
-      seq_len         = AI_SEQUENCE_LEN;
+      seq_len         = AI_SEQ_LEN;
       feat_dim        = AI_FEATURE_DIM;
      }
   };
 
-struct SAIEnsembleVote
-  {
-   double scores[];
-   double weights[];
-   int    n_models;
-   double final_score;
-   double confidence;
-   bool   valid;
-
-   void Reset()
-     {
-      ArrayResize(scores,  0);
-      ArrayResize(weights, 0);
-      n_models    = 0;
-      final_score = 0.0;
-      confidence  = 0.0;
-      valid       = false;
-     }
-  };
-
-//──────────────────────────────────────────────────────────────────
 class CAIEnsemble
   {
 private:
@@ -116,18 +100,21 @@ public:
       return m_ready;
      }
 
+   // 2-arg overload — no sequence tensor
    bool Vote(SAIFeatureVector &fv, SAIEnsembleVote &out)
      {
       return Vote(fv, NULL, out);
      }
 
+   // 3-arg overload — with optional sequence tensor pointer
    bool Vote(SAIFeatureVector &fv, const SAISequenceTensor *seq, SAIEnsembleVote &out)
      {
       out.Reset();
       if(!m_ready || m_n_models == 0) return false;
 
-      int total_voters = m_n_models + ((m_onnx_loaded && seq != NULL && seq->valid) ? 1 : 0);
-      ArrayResize(out.scores, total_voters);
+      bool use_onnx = (m_onnx_loaded && seq != NULL && seq.valid);
+      int total_voters = m_n_models + (use_onnx ? 1 : 0);
+      ArrayResize(out.scores,  total_voters);
       ArrayResize(out.weights, total_voters);
       out.n_models = total_voters;
 
@@ -148,7 +135,7 @@ public:
 
       m_last_onnx_score   = 0.0;
       m_last_onnx_outputs = 0;
-      if(m_onnx_loaded && seq != NULL && seq->valid)
+      if(use_onnx)
         {
          double onnx_outputs[];
          int out_count = 0;
@@ -189,3 +176,5 @@ public:
    bool  IsOnnxLoaded()    const { return m_onnx_loaded; }
    double LastOnnxScore()  const { return m_last_onnx_score; }
   };
+
+#endif // __PASR_AI_ENSEMBLE_MQH__

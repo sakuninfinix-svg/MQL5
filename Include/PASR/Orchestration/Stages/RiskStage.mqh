@@ -7,50 +7,43 @@
 #define __ORCHESTRATION_RISK_STAGE_MQH__
 
 #include "PipelineStageBase.mqh"
-#include "../../Risk/RiskManager.mqh"
+#include "../../Trade/RiskManager.mqh"
 
 class CRiskStage : public CPipelineStageBase
-{
+  {
 private:
-   // REMOVED: bool m_enabled — inherited from CPipelineStageBase
-   // REMOVED: bool m_debug   — inherited from CPipelineStageBase
    CRiskManager *m_risk_mgr;
 
 public:
    CRiskStage() : CPipelineStageBase("Risk"), m_risk_mgr(NULL) {}
 
-   virtual bool Init(IDataManager *data, CEventBus *bus) override
-   {
-      if(!CPipelineStageBase::Init(data, bus)) return false;
-      return true;
-   }
-
    void SetRiskManager(CRiskManager *mgr) { m_risk_mgr = mgr; }
 
-   virtual bool Execute(SPipelineContext &ctx) override
-   {
-      if(!m_enabled) return true;
-      if(!ctx.signal_ready) return true;
-
+   // FIX: match IPipelineStage abstract signature exactly
+   virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
+     {
+      if(!m_enabled) return STAGE_SKIP;
       if(m_risk_mgr == NULL)
-      {
+        {
          if(m_debug) Print("[RiskStage] RiskManager is NULL");
-         return false;
-      }
+         return STAGE_SKIP;
+        }
 
-      ctx.risk_approved = m_risk_mgr->EvaluateSignal(ctx.signal_out, ctx.risk_out);
+      bool approved = m_risk_mgr.EvaluateSignal(ctx.signal, ctx.risk_result);
+      ctx.trading_allowed = approved;
 
       if(m_debug)
          PrintFormat("[RiskStage] Risk %s — lot=%.2f sl=%.5f tp=%.5f",
-                     ctx.risk_approved ? "APPROVED" : "REJECTED",
-                     ctx.risk_out.lot_size,
-                     ctx.risk_out.sl_price,
-                     ctx.risk_out.tp_price);
+                     approved ? "APPROVED" : "REJECTED",
+                     ctx.risk_result.lot_size,
+                     ctx.risk_result.sl_price,
+                     ctx.risk_result.tp_price);
 
-      return true;
-   }
+      return STAGE_OK;
+     }
 
-   virtual string StageName() const override { return "Risk"; }
-};
+   // FIX: IPipelineStage pure virtual is Name() — override it here
+   virtual string Name() const override { return "Risk"; }
+  };
 
 #endif // __ORCHESTRATION_RISK_STAGE_MQH__

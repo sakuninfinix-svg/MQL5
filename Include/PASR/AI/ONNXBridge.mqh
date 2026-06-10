@@ -2,8 +2,11 @@
 //| ONNXBridge.mqh                                                   |
 //| Wrapper for MQL5 ONNX runtime — scalar and sequence inference    |
 //+------------------------------------------------------------------+
-#pragma once
-#include "../Core/AITypes.mqh"
+#property strict
+#ifndef __PASR_AI_ONNX_BRIDGE_MQH__
+#define __PASR_AI_ONNX_BRIDGE_MQH__
+
+#include "AITypes.mqh"
 
 #ifdef PASR_ENABLE_ONNX
 #include <Math/Stat/Normal.mqh>
@@ -40,12 +43,12 @@ private:
 public:
    CONNXBridge() : m_session(INVALID_HANDLE), m_loaded(false), m_model_path(""),
                    m_input_mode(ONNX_INPUT_SCALAR), m_input_size(AI_FEATURE_DIM),
-                   m_output_size(1), m_seq_len(AI_SEQUENCE_LEN), m_feat_dim(AI_FEATURE_DIM) {}
+                   m_output_size(1), m_seq_len(AI_SEQ_LEN), m_feat_dim(AI_FEATURE_DIM) {}
 
   ~CONNXBridge() { Unload(); }
 
    bool Load(const string path, const ENUM_ONNX_INPUT_MODE mode = ONNX_INPUT_SCALAR,
-             const int seq_len = AI_SEQUENCE_LEN, const int feat_dim = AI_FEATURE_DIM,
+             const int seq_len = AI_SEQ_LEN, const int feat_dim = AI_FEATURE_DIM,
              const int output_size = 1)
      {
       Unload();
@@ -153,7 +156,13 @@ public:
 
    bool RunFV(const SAIFeatureVector &fv, double &out_score)
      {
-      return Run((float&)fv.features, out_score);
+      // MQL5 forbids casting const struct member to float&[] directly.
+      // Copy features to a local float array first.
+      float fv_f[];
+      ArrayResize(fv_f, AI_FEATURE_DIM);
+      for(int i = 0; i < AI_FEATURE_DIM; i++)
+         fv_f[i] = (float)fv.features[i];
+      return Run(fv_f, out_score);
      }
 
    bool   IsLoaded()        const { return m_loaded; }
@@ -163,3 +172,5 @@ public:
    int    GetSeqLen()       const { return m_seq_len; }
    int    GetFeatDim()      const { return m_feat_dim; }
   };
+
+#endif // __PASR_AI_ONNX_BRIDGE_MQH__
