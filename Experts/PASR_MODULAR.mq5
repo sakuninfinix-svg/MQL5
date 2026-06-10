@@ -46,7 +46,7 @@ input int    InpNewsBufferMinutes = 30;
 input group "AI"
 input bool   InpEnableAI = false;
 input double InpAIMinConfidence = 0.60;
-input double InpAILearningRate = 0.001;
+input double InpAILearningRate = 0.0003;       // was 0.001 — reduced to prevent online overfitting
 input int    InpAITrainIntervalBars = 5;
 input int    InpAIReplayBufferSize = 512;
 input int    InpAIMinibatchSize = 32;
@@ -59,7 +59,7 @@ input group "AI Regime Thresholds"
 input double InpAITrendEntryThreshold = 0.60;
 input double InpAITrendRiskMultiplier = 1.20;
 input double InpAIRangeEntryThreshold = 0.65;
-input double InpAIRangeRiskMultiplier = 1.30;
+input double InpAIRangeRiskMultiplier = 1.10;  // was 1.30 — ranging market is noisy, reduce risk
 input double InpAIVolatileEntryThreshold = 0.85;
 input double InpAIVolatileRiskMultiplier = 0.90;
 input double InpAIConservativeEntryThreshold = 0.95;
@@ -68,14 +68,14 @@ input double InpAIScalpEntryThreshold = 0.70;
 input double InpAIScalpRiskMultiplier = 1.00;
 
 input group "AI Decision Rules"
-input double InpAIMinExpectedR = 0.35;
-input double InpAIMaxFailureProbability = 0.72;
+input double InpAIMinExpectedR = 0.50;                  // was 0.35 — below 0.50 is net-negative after spread
+input double InpAIMaxFailureProbability = 0.55;         // was 0.72 — 72% fail rate made AI gate useless
 input double InpAIStrongConfidenceBuffer = 0.10;
 input double InpAIStrongConfidenceMin = 0.75;
 input double InpAIStrongExpectedR = 1.20;
-input double InpAIStrongMaxFailureProbability = 0.45;
+input double InpAIStrongMaxFailureProbability = 0.40;   // was 0.45 — tighter for "strong" signals
 input double InpAIDriftFailureWeight = 0.35;
-input double InpAIRegimeFailureWeight = 0.15;
+input double InpAIRegimeFailureWeight = 0.25;           // was 0.15 — regime mismatch is a primary loss cause
 input double InpAIConfidenceRewardWeight = 2.00;
 input double InpAIEdgeRewardWeight = 1.25;
 input double InpAIRegimeRewardWeight = 0.75;
