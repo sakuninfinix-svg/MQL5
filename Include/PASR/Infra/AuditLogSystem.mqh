@@ -149,7 +149,9 @@ public:
         m_enabled(true), m_write_to_file(true), m_console_echo(false)
      {
       // FIX: ArrayInitialize needs 2 params
-      ArrayInitialize(m_buffer, 0);
+      for(int i = 0; i < ArraySize(m_buffer); i++)
+         m_buffer[i].Reset();
+
       // FIX: symbol_clean built via StringReplace on a non-const local copy
       m_symbol_clean = _Symbol;
       StringReplace(m_symbol_clean, "/", "_");
@@ -158,7 +160,6 @@ public:
 
    // FIX: IManager override signatures match base class exactly
    virtual string HandlerName() const override { return "AuditLogSystem"; }
-
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
@@ -179,7 +180,6 @@ public:
 
    virtual void DeclareEvents() override {}
    virtual void OnEvent(const PASREvent &ev) override {}
-
    virtual bool IsHealthy() const override
      {
       // m_initialized inherited from IManager; m_enabled is local
