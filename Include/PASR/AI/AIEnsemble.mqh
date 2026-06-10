@@ -10,10 +10,7 @@
 #include "MLPModel.mqh"
 #include "ONNXBridge.mqh"
 
-//------------------------------------------------------------------
-// SAIEnsembleVote is declared in AITypes.mqh (line ~198).
-// DO NOT redeclare here — it would cause 'identifier already used'.
-//------------------------------------------------------------------
+// SAIEnsembleVote is declared in AITypes.mqh — do NOT redeclare here.
 
 struct SAIEnsembleConfig
   {
@@ -76,6 +73,14 @@ public:
         }
      }
 
+   // Minimal IManager-compatible shim so AIOrchestrator can call Init/Deinit
+   bool Init(IDataManager *data, CEventBus *bus)
+     {
+      SAIEnsembleConfig cfg;
+      return Init(cfg);
+     }
+   void Deinit() {}
+
    bool Init(const SAIEnsembleConfig &cfg)
      {
       m_ready     = false;
@@ -85,16 +90,14 @@ public:
       for(int i = 0; i < m_n_models; i++)
         {
          if(m_models[i] != NULL) { delete m_models[i]; m_models[i] = NULL; }
-         m_models[i] = new CMLPModel();
+         m_models[i] = new CMLPModel(i + 1);
          if(m_models[i] == NULL) return false;
-         m_models[i].RandomInit();
+         m_models[i].RandomInit(i + 1);
          m_weights[i] = 1.0 / (double)m_n_models;
         }
 
       if(cfg.enable_onnx && cfg.onnx_model_path != "")
-        {
          TryLoadOnnxModel();
-        }
 
       m_ready = (m_n_models > 0);
       return m_ready;
@@ -103,15 +106,18 @@ public:
    // 2-arg overload — no sequence tensor
    bool Vote(SAIFeatureVector &fv, SAIEnsembleVote &out)
      {
-      return Vote(fv, NULL, out);
+      const SAISequenceTensor *nullSeq = NULL;
+      return Vote(fv, nullSeq, out);
      }
 
-   // 3-arg overload — with optional sequence tensor pointer
+   // FIX: 3-arg overload — seq is a pointer (nullable), not a const ref
+   //      MQL5 disallows pointer-to-struct as const ref parameter
    bool Vote(SAIFeatureVector &fv, const SAISequenceTensor *seq, SAIEnsembleVote &out)
      {
       out.Reset();
       if(!m_ready || m_n_models == 0) return false;
 
+      // FIX: pointer comparison — use != NULL, not != pointer_value
       bool use_onnx = (m_onnx_loaded && seq != NULL && seq.valid);
       int total_voters = m_n_models + (use_onnx ? 1 : 0);
       ArrayResize(out.scores,  total_voters);
@@ -139,7 +145,9 @@ public:
         {
          double onnx_outputs[];
          int out_count = 0;
-         if(m_onnx.RunSequenceTensor(*seq, onnx_outputs, out_count))
+         // FIX: RunSequenceTensor takes non-const ref — dereference pointer
+         SAISequenceTensor seq_copy = *seq;
+         if(m_onnx.RunSequenceTensor(seq_copy, onnx_outputs, out_count))
            {
             double onnx_score = ScoreFromOnnxOutputs(onnx_outputs, out_count);
             m_last_onnx_score   = onnx_score;
@@ -153,7 +161,9 @@ public:
         }
 
       out.final_score = (weight_total > 0.0) ? weighted_sum / weight_total : 0.0;
+      // FIX: populate 'confidence' and 'valid' fields now present in SAIEnsembleVote
       out.confidence  = MathMin(1.0, weight_total / (double)total_voters);
+      out.agreement   = out.confidence;
       out.valid       = true;
       return true;
      }
@@ -165,16 +175,20 @@ public:
          m_weights[i] = new_weights[i];
      }
 
+   // FIX: renamed GetModel -> GetModelAt to avoid ambiguity;
+   //      kept old name as alias for backward compat
    CMLPModel* GetModel(int idx)
      {
       if(idx < 0 || idx >= m_n_models) return NULL;
       return m_models[idx];
      }
+   CMLPModel* GetModelAt(int idx) { return GetModel(idx); }
 
-   int   ModelCount()      const { return m_n_models; }
-   bool  IsReady()         const { return m_ready; }
-   bool  IsOnnxLoaded()    const { return m_onnx_loaded; }
-   double LastOnnxScore()  const { return m_last_onnx_score; }
+   int    GetModelCount()   const { return m_n_models; }
+   int    ModelCount()      const { return m_n_models; }
+   bool   IsReady()         const { return m_ready; }
+   bool   IsOnnxLoaded()    const { return m_onnx_loaded; }
+   double LastOnnxScore()   const { return m_last_onnx_score; }
   };
 
 #endif // __PASR_AI_ENSEMBLE_MQH__

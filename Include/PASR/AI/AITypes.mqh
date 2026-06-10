@@ -1,4 +1,4 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //|                                                      AITypes.mqh |
 //|                        Shared structs & enums for AI subsystem   |
 //+------------------------------------------------------------------+
@@ -20,6 +20,11 @@
 #endif
 #ifndef AI_SEQ_TENSOR_SIZE
 #define AI_SEQ_TENSOR_SIZE (AI_SEQ_LEN * AI_SEQ_FEATURE_DIM)
+#endif
+
+// FIX: define ENSEMBLE_MODEL_COUNT used by CAIEnsemble
+#ifndef ENSEMBLE_MODEL_COUNT
+#define ENSEMBLE_MODEL_COUNT 3
 #endif
 
 #ifndef AI_DEFAULT_CONF_THRESHOLD
@@ -195,21 +200,26 @@ struct SAITrainSample
    void Reset() { Clear(); }
   };
 
+// FIX: added 'confidence' and 'valid' fields required by CAIEnsemble and CAIOrchestrator
 struct SAIEnsembleVote
   {
    double scores[];
    double weights[];
    int    n_models;
    double final_score;
-   double agreement;
+   double agreement;    // kept for backward compat (used by ConfidenceCalibrator)
+   double confidence;   // FIX: field referenced in CAIEnsemble::Vote and CAIOrchestrator
+   bool   valid;        // FIX: field referenced in CAIOrchestrator
 
    void Clear()
      {
       ArrayResize(scores, 0);
       ArrayResize(weights, 0);
-      n_models = 0;
+      n_models    = 0;
       final_score = 0.0;
-      agreement = 0.0;
+      agreement   = 0.0;
+      confidence  = 0.0;
+      valid       = false;
      }
 
    void Reset() { Clear(); }
