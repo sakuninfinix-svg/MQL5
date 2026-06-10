@@ -22,7 +22,10 @@ public:
       m_data = data;
       return (m_data != NULL);
      }
-
+   void Bind(IDataManager *data)
+      {
+         m_data = data;
+      }
    // FIX: match IPipelineStage abstract signature exactly:
    //   ENUM_STAGE_RESULT Execute(PipelineContext &ctx)
    virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
@@ -33,7 +36,7 @@ public:
          if(m_debug) Print("[DataSyncStage] DataManager is NULL");
          return STAGE_ABORT;
         }
-      if(!m_data.IsReady())
+      if(!m_data.IsInitialized())
         {
          if(m_debug) Print("[DataSyncStage] DataManager not ready");
          return STAGE_SKIP;

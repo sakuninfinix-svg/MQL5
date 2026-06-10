@@ -18,6 +18,10 @@ public:
    CRiskStage() : CPipelineStageBase("Risk"), m_risk_mgr(NULL) {}
 
    void SetRiskManager(CRiskManager *mgr) { m_risk_mgr = mgr; }
+   void Bind(CRiskManager *mgr)
+  {
+   m_risk_mgr = mgr;
+  }
 
    // FIX: match IPipelineStage abstract signature exactly
    virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
@@ -29,8 +33,8 @@ public:
          return STAGE_SKIP;
         }
 
-      bool approved = m_risk_mgr.EvaluateSignal(ctx.signal, ctx.risk_result);
-      ctx.trading_allowed = approved;
+      ctx.risk_result = m_risk_mgr->CheckRisk(ctx.signal);
+      ctx.trading_allowed = ctx.risk_result.allowed;
 
       if(m_debug)
          PrintFormat("[RiskStage] Risk %s — lot=%.2f sl=%.5f tp=%.5f",

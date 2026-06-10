@@ -6,8 +6,6 @@
 #include <PASR/Core/PASR.mqh>
 #include <PASR/Central/PASRKernel.mqh>
 
-input bool InpDebugMode = true;
-input bool InpEnableProfiling = true;
 input int  InpTimerSeconds = 1;
 
 input group "PASR Identity"
@@ -138,8 +136,6 @@ StrategyConfig BuildConfigFromInputs()
    cfg.EAName = InpEAName;
    cfg.Version = "2.16.0";
    cfg.MagicNumber = InpMagicNumber;
-   cfg.Debug = InpDebugMode;
-   cfg.Profiling = InpEnableProfiling;
 
    cfg.Risk.LotSize             = InpLotSize;
    cfg.Risk.RiskPercent         = InpRiskPercent;
@@ -168,7 +164,7 @@ StrategyConfig BuildConfigFromInputs()
    cfg.Market.FilterNewsTime       = InpFilterNewsTime;
    cfg.Market.NewsBufferMinutes    = InpNewsBufferMinutes;
 
-   cfg.AI.Enable             = InpEnableAI;
+   cfg.AI.EnableAI           = InpEnableAI;
    cfg.AI.MinConfidence      = InpAIMinConfidence;
    cfg.AI.LearningRate       = InpAILearningRate;
    cfg.AI.TrainIntervalBars  = InpAITrainIntervalBars;
@@ -177,49 +173,50 @@ StrategyConfig BuildConfigFromInputs()
    cfg.AI.PersistWeights     = InpAIPersistWeights;
    cfg.AI.ModelFileName      = InpAIModelFileName;
    cfg.AI.EnableOnnx         = InpAIEnableOnnx;
-   cfg.AI.ModelOnnxFileName  = InpAIModelOnnxFileName;
+   cfg.AI.OnnxModelFileName  = InpAIModelOnnxFileName;
 
-   cfg.AI.Regime.TrendEntryThreshold        = InpAITrendEntryThreshold;
-   cfg.AI.Regime.TrendRiskMultiplier        = InpAITrendRiskMultiplier;
-   cfg.AI.Regime.RangeEntryThreshold        = InpAIRangeEntryThreshold;
-   cfg.AI.Regime.RangeRiskMultiplier        = InpAIRangeRiskMultiplier;
-   cfg.AI.Regime.VolatileEntryThreshold     = InpAIVolatileEntryThreshold;
-   cfg.AI.Regime.VolatileRiskMultiplier     = InpAIVolatileRiskMultiplier;
-   cfg.AI.Regime.ConservativeEntryThreshold = InpAIConservativeEntryThreshold;
-   cfg.AI.Regime.ConservativeRiskMultiplier = InpAIConservativeRiskMultiplier;
-   cfg.AI.Regime.ScalpEntryThreshold        = InpAIScalpEntryThreshold;
-   cfg.AI.Regime.ScalpRiskMultiplier        = InpAIScalpRiskMultiplier;
+   cfg.AI.TrendEntryThreshold        = InpAITrendEntryThreshold;
+   cfg.AI.TrendRiskMultiplier        = InpAITrendRiskMultiplier;
+   cfg.AI.RangeEntryThreshold        = InpAIRangeEntryThreshold;
+   cfg.AI.RangeRiskMultiplier        = InpAIRangeRiskMultiplier;
+   cfg.AI.VolatileEntryThreshold     = InpAIVolatileEntryThreshold;
+   cfg.AI.VolatileRiskMultiplier     = InpAIVolatileRiskMultiplier;
+   cfg.AI.ConservativeEntryThreshold = InpAIConservativeEntryThreshold;
+   cfg.AI.ConservativeRiskMultiplier = InpAIConservativeRiskMultiplier;
+   cfg.AI.ScalpEntryThreshold        = InpAIScalpEntryThreshold;
+   cfg.AI.ScalpRiskMultiplier        = InpAIScalpRiskMultiplier;
 
-   cfg.AI.Decision.MinExpectedR              = InpAIMinExpectedR;
-   cfg.AI.Decision.MaxFailureProbability     = InpAIMaxFailureProbability;
-   cfg.AI.Decision.StrongConfidenceBuffer    = InpAIStrongConfidenceBuffer;
-   cfg.AI.Decision.StrongConfidenceMin       = InpAIStrongConfidenceMin;
-   cfg.AI.Decision.StrongExpectedR           = InpAIStrongExpectedR;
-   cfg.AI.Decision.StrongMaxFailureProbability = InpAIStrongMaxFailureProbability;
-   cfg.AI.Decision.DriftFailureWeight        = InpAIDriftFailureWeight;
-   cfg.AI.Decision.RegimeFailureWeight       = InpAIRegimeFailureWeight;
-   cfg.AI.Decision.ConfidenceRewardWeight    = InpAIConfidenceRewardWeight;
-   cfg.AI.Decision.EdgeRewardWeight          = InpAIEdgeRewardWeight;
-   cfg.AI.Decision.RegimeRewardWeight        = InpAIRegimeRewardWeight;
-   cfg.AI.Decision.FailurePenaltyWeight      = InpAIFailurePenaltyWeight;
-   cfg.AI.Decision.RiskFailureWeight         = InpAIRiskFailureWeight;
+   cfg.AI.MinExpectedR                  = InpAIMinExpectedR;
+   cfg.AI.MaxFailureProbability         = InpAIMaxFailureProbability;
+   cfg.AI.StrongConfidenceBuffer        = InpAIStrongConfidenceBuffer;
+   cfg.AI.StrongConfidenceMin           = InpAIStrongConfidenceMin;
+   cfg.AI.StrongExpectedR               = InpAIStrongExpectedR;
+   cfg.AI.StrongMaxFailureProbability   = InpAIStrongMaxFailureProbability;
+   cfg.AI.DriftFailureWeight            = InpAIDriftFailureWeight;
+   cfg.AI.RegimeFailureWeight           = InpAIRegimeFailureWeight;
+   cfg.AI.ConfidenceRewardWeight        = InpAIConfidenceRewardWeight;
+   cfg.AI.EdgeRewardWeight              = InpAIEdgeRewardWeight;
+   cfg.AI.RegimeRewardWeight            = InpAIRegimeRewardWeight;
+   cfg.AI.FailurePenaltyWeight          = InpAIFailurePenaltyWeight;
+   cfg.AI.RiskFailureWeight             = InpAIRiskFailureWeight;
 
    cfg.Signal.UseMTF              = InpUseMTF;
-   cfg.Signal.Lookback            = InpSignalLookback;
+   cfg.Signal.SignalLookback      = InpSignalLookback;
    cfg.Signal.MinConfluence       = InpMinConfluence;
    cfg.Signal.MinScore            = InpSignalMinScore;
    cfg.Signal.MinDominanceGap     = InpSignalMinDominanceGap;
    cfg.Signal.MaxSourceAgeSeconds = InpMaxSourceAgeSeconds;
-   cfg.Signal.CooldownBars        = InpSignalCooldownBars;
+   cfg.Signal.SignalCooldownBars  = InpSignalCooldownBars;
    cfg.Signal.MinRRRatio          = InpMinRRRatio;
    cfg.Signal.MaxSignalATR        = InpMaxSignalATR;
-   cfg.Signal.UrgencyHighThreshold   = InpUrgencyHighThreshold;
+   cfg.Signal.UrgencyHighThreshold= InpUrgencyHighThreshold;
    cfg.Signal.UrgencyMediumThreshold = InpUrgencyMediumThreshold;
 
-   cfg.Pattern.Enable           = InpEnablePatterns;
-   cfg.Pattern.MinScore         = InpMinPatternScore;
-   cfg.Pattern.MinDominanceGap  = InpMinPatternDominanceGap;
-   cfg.Pattern.LookbackBars     = InpPatternLookbackBars;
+   cfg.Pattern.EnablePatterns = InpEnablePatterns;
+   cfg.Pattern.MinPatternScore = InpMinPatternScore;
+   cfg.Pattern.PatternLookbackBars = InpPatternLookbackBars;
+
+   cfg.Pattern.MinPatternDominanceGap  = InpMinPatternDominanceGap;
    cfg.Pattern.PinBarRatio      = InpPinBarRatio;
    cfg.Pattern.EngulfMultiplier = InpEngulfMultiplier;
    cfg.Pattern.RequireConfirmation = InpRequireConfirmation;

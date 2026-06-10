@@ -18,6 +18,10 @@ public:
    CSignalStage() : CPipelineStageBase("Signal"), m_signal_mgr(NULL) {}
 
    void SetSignalManager(CSignalManager *mgr) { m_signal_mgr = mgr; }
+   void Bind(CSignalManager *mgr, CAIOrchestrator *ai, CAnalysisSRManager *sr, CPatternManager *pattern)
+  {
+   m_signal_mgr = mgr;
+  }
 
    // FIX: match IPipelineStage abstract signature exactly
    virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
@@ -29,11 +33,11 @@ public:
          return STAGE_SKIP;
         }
 
-      bool ok = m_signal_mgr.Evaluate(ctx.signal);
-
+      ctx.signal = m_signal_mgr.AggregateSignals();
+      bool ok = (ctx.signal.direction != SIGNAL_NONE);
       if(m_debug && ok)
-         PrintFormat("[SignalStage] Signal: dir=%d score=%.3f confidence=%.3f",
-                     ctx.signal.direction, ctx.signal.score, ctx.signal.confidence);
+         PrintFormat("[SignalStage] Signal: dir=%d confidence=%.3f",
+                     ctx.signal.direction, ctx.signal.confidence);
 
       return ok ? STAGE_OK : STAGE_SKIP;
      }
