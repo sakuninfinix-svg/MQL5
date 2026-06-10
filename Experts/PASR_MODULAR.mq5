@@ -138,127 +138,125 @@ StrategyConfig BuildConfigFromInputs()
    cfg.EAName = InpEAName;
    cfg.Version = "2.16.0";
    cfg.MagicNumber = InpMagicNumber;
+   cfg.Debug = InpDebugMode;
+   cfg.Profiling = InpEnableProfiling;
 
-   cfg.Risk.LotSize              = InpLotSize;
-   cfg.Risk.RiskPercent          = InpRiskPercent;
-   cfg.Risk.SLMultiplier         = InpSLMultiplier;
-   cfg.Risk.TPMultiplier         = InpTPMultiplier;
-   cfg.Risk.MaxDailyLossPct      = InpMaxDailyLossPct;
-   cfg.Risk.MaxDrawdownPct       = InpMaxDrawdownPct;
-   cfg.Risk.MaxOpenPositions     = InpMaxOpenPositions;
-   cfg.Risk.MaxConsecLoss        = InpMaxConsecLoss;
-   cfg.Risk.UseBreakEven         = InpUseBreakEven;
-   cfg.Risk.BreakEvenATRMult     = InpBreakEvenATRMult;
-   cfg.Risk.UseTrailingStop      = InpUseTrailingStop;
-   cfg.Risk.TrailATRMult         = InpTrailATRMult;
-   cfg.Risk.RecoveryEnabled      = InpRecoveryEnabled;
-   cfg.Risk.MaxRecoveryAttempts  = InpMaxRecoveryAttempts;
-   cfg.Risk.RecoveryCooldownBars = InpRecoveryCooldownBars;
-   cfg.Risk.PartialClosePct      = InpPartialClosePct;
-   cfg.Risk.MaxTradeDurationDays = InpMaxTradeDurationDays;
+   cfg.Risk.LotSize             = InpLotSize;
+   cfg.Risk.RiskPercent         = InpRiskPercent;
+   cfg.Risk.SLMultiplier        = InpSLMultiplier;
+   cfg.Risk.TPMultiplier        = InpTPMultiplier;
+   cfg.Risk.MaxDailyLossPct     = InpMaxDailyLossPct;
+   cfg.Risk.MaxDrawdownPct      = InpMaxDrawdownPct;
+   cfg.Risk.MaxOpenPositions    = InpMaxOpenPositions;
+   cfg.Risk.MaxConsecLoss       = InpMaxConsecLoss;
+   cfg.Risk.UseBreakEven        = InpUseBreakEven;
+   cfg.Risk.BreakEvenATRMult    = InpBreakEvenATRMult;
+   cfg.Risk.UseTrailingStop     = InpUseTrailingStop;
+   cfg.Risk.TrailATRMult        = InpTrailATRMult;
+   cfg.Risk.RecoveryEnabled     = InpRecoveryEnabled;
+   cfg.Risk.MaxRecoveryAttempts = InpMaxRecoveryAttempts;
+   cfg.Risk.RecoveryCooldownBars= InpRecoveryCooldownBars;
+   cfg.Risk.PartialClosePct     = InpPartialClosePct;
+   cfg.Risk.MaxTradeDurationDays= InpMaxTradeDurationDays;
 
-   cfg.Market.ATRPeriod           = InpATRPeriod;
-   cfg.Market.ADXPeriod           = InpADXPeriod;
-   cfg.Market.ADXTrendThreshold   = InpADXTrendThreshold;
-   cfg.Market.SpreadFilterPips    = InpSpreadFilterPips;
-   cfg.Market.SessionStartHour    = InpSessionStartHour;
-   cfg.Market.SessionEndHour      = InpSessionEndHour;
-   cfg.Market.FilterNewsTime      = InpFilterNewsTime;
-   cfg.Market.NewsBufferMinutes   = InpNewsBufferMinutes;
+   cfg.Market.ATRPeriod            = InpATRPeriod;
+   cfg.Market.ADXPeriod            = InpADXPeriod;
+   cfg.Market.ADXTrendThreshold    = InpADXTrendThreshold;
+   cfg.Market.SpreadFilterPips     = InpSpreadFilterPips;
+   cfg.Market.SessionStartHour     = InpSessionStartHour;
+   cfg.Market.SessionEndHour       = InpSessionEndHour;
+   cfg.Market.FilterNewsTime       = InpFilterNewsTime;
+   cfg.Market.NewsBufferMinutes    = InpNewsBufferMinutes;
 
-   cfg.AI.EnableAI             = InpEnableAI;
-   cfg.AI.MinConfidence        = InpAIMinConfidence;
-   cfg.AI.LearningRate         = InpAILearningRate;
-   cfg.AI.TrainIntervalBars    = InpAITrainIntervalBars;
-   cfg.AI.ReplayBufferSize     = InpAIReplayBufferSize;
-   cfg.AI.MinibatchSize        = InpAIMinibatchSize;
-   cfg.AI.PersistWeights       = InpAIPersistWeights;
-   cfg.AI.ModelFileName        = InpAIModelFileName;
-   cfg.AI.EnableOnnx           = InpAIEnableOnnx;
-   cfg.AI.ModelOnnxFileName    = InpAIModelOnnxFileName;
+   cfg.AI.Enable             = InpEnableAI;
+   cfg.AI.MinConfidence      = InpAIMinConfidence;
+   cfg.AI.LearningRate       = InpAILearningRate;
+   cfg.AI.TrainIntervalBars  = InpAITrainIntervalBars;
+   cfg.AI.ReplayBufferSize   = InpAIReplayBufferSize;
+   cfg.AI.MinibatchSize      = InpAIMinibatchSize;
+   cfg.AI.PersistWeights     = InpAIPersistWeights;
+   cfg.AI.ModelFileName      = InpAIModelFileName;
+   cfg.AI.EnableOnnx         = InpAIEnableOnnx;
+   cfg.AI.ModelOnnxFileName  = InpAIModelOnnxFileName;
 
-   cfg.AI.RegimeThresholds.TrendEntry         = InpAITrendEntryThreshold;
-   cfg.AI.RegimeThresholds.TrendRiskMult      = InpAITrendRiskMultiplier;
-   cfg.AI.RegimeThresholds.RangeEntry         = InpAIRangeEntryThreshold;
-   cfg.AI.RegimeThresholds.RangeRiskMult      = InpAIRangeRiskMultiplier;
-   cfg.AI.RegimeThresholds.VolatileEntry      = InpAIVolatileEntryThreshold;
-   cfg.AI.RegimeThresholds.VolatileRiskMult   = InpAIVolatileRiskMultiplier;
-   cfg.AI.RegimeThresholds.ConservativeEntry  = InpAIConservativeEntryThreshold;
-   cfg.AI.RegimeThresholds.ConservativeRiskMult = InpAIConservativeRiskMultiplier;
-   cfg.AI.RegimeThresholds.ScalpEntry         = InpAIScalpEntryThreshold;
-   cfg.AI.RegimeThresholds.ScalpRiskMult      = InpAIScalpRiskMultiplier;
+   cfg.AI.Regime.TrendEntryThreshold        = InpAITrendEntryThreshold;
+   cfg.AI.Regime.TrendRiskMultiplier        = InpAITrendRiskMultiplier;
+   cfg.AI.Regime.RangeEntryThreshold        = InpAIRangeEntryThreshold;
+   cfg.AI.Regime.RangeRiskMultiplier        = InpAIRangeRiskMultiplier;
+   cfg.AI.Regime.VolatileEntryThreshold     = InpAIVolatileEntryThreshold;
+   cfg.AI.Regime.VolatileRiskMultiplier     = InpAIVolatileRiskMultiplier;
+   cfg.AI.Regime.ConservativeEntryThreshold = InpAIConservativeEntryThreshold;
+   cfg.AI.Regime.ConservativeRiskMultiplier = InpAIConservativeRiskMultiplier;
+   cfg.AI.Regime.ScalpEntryThreshold        = InpAIScalpEntryThreshold;
+   cfg.AI.Regime.ScalpRiskMultiplier        = InpAIScalpRiskMultiplier;
 
-   cfg.AI.DecisionRules.MinExpectedR            = InpAIMinExpectedR;
-   cfg.AI.DecisionRules.MaxFailureProbability   = InpAIMaxFailureProbability;
-   cfg.AI.DecisionRules.StrongConfidenceBuffer  = InpAIStrongConfidenceBuffer;
-   cfg.AI.DecisionRules.StrongConfidenceMin     = InpAIStrongConfidenceMin;
-   cfg.AI.DecisionRules.StrongExpectedR         = InpAIStrongExpectedR;
-   cfg.AI.DecisionRules.StrongMaxFailureProb    = InpAIStrongMaxFailureProbability;
-   cfg.AI.DecisionRules.DriftFailureWeight      = InpAIDriftFailureWeight;
-   cfg.AI.DecisionRules.RegimeFailureWeight     = InpAIRegimeFailureWeight;
-   cfg.AI.DecisionRules.ConfidenceRewardWeight  = InpAIConfidenceRewardWeight;
-   cfg.AI.DecisionRules.EdgeRewardWeight        = InpAIEdgeRewardWeight;
-   cfg.AI.DecisionRules.RegimeRewardWeight      = InpAIRegimeRewardWeight;
-   cfg.AI.DecisionRules.FailurePenaltyWeight    = InpAIFailurePenaltyWeight;
-   cfg.AI.DecisionRules.RiskFailureWeight       = InpAIRiskFailureWeight;
+   cfg.AI.Decision.MinExpectedR              = InpAIMinExpectedR;
+   cfg.AI.Decision.MaxFailureProbability     = InpAIMaxFailureProbability;
+   cfg.AI.Decision.StrongConfidenceBuffer    = InpAIStrongConfidenceBuffer;
+   cfg.AI.Decision.StrongConfidenceMin       = InpAIStrongConfidenceMin;
+   cfg.AI.Decision.StrongExpectedR           = InpAIStrongExpectedR;
+   cfg.AI.Decision.StrongMaxFailureProbability = InpAIStrongMaxFailureProbability;
+   cfg.AI.Decision.DriftFailureWeight        = InpAIDriftFailureWeight;
+   cfg.AI.Decision.RegimeFailureWeight       = InpAIRegimeFailureWeight;
+   cfg.AI.Decision.ConfidenceRewardWeight    = InpAIConfidenceRewardWeight;
+   cfg.AI.Decision.EdgeRewardWeight          = InpAIEdgeRewardWeight;
+   cfg.AI.Decision.RegimeRewardWeight        = InpAIRegimeRewardWeight;
+   cfg.AI.Decision.FailurePenaltyWeight      = InpAIFailurePenaltyWeight;
+   cfg.AI.Decision.RiskFailureWeight         = InpAIRiskFailureWeight;
 
-   cfg.Signal.UseMTF               = InpUseMTF;
-   cfg.Signal.Lookback             = InpSignalLookback;
-   cfg.Signal.MinConfluence        = InpMinConfluence;
-   cfg.Signal.MinScore             = InpSignalMinScore;
-   cfg.Signal.MinDominanceGap      = InpSignalMinDominanceGap;
-   cfg.Signal.MaxSourceAgeSeconds  = InpMaxSourceAgeSeconds;
-   cfg.Signal.CooldownBars         = InpSignalCooldownBars;
-   cfg.Signal.MinRRRatio           = InpMinRRRatio;
-   cfg.Signal.MaxSignalATR         = InpMaxSignalATR;
-   cfg.Signal.UrgencyHighThreshold = InpUrgencyHighThreshold;
-   cfg.Signal.UrgencyMedThreshold  = InpUrgencyMediumThreshold;
+   cfg.Signal.UseMTF              = InpUseMTF;
+   cfg.Signal.Lookback            = InpSignalLookback;
+   cfg.Signal.MinConfluence       = InpMinConfluence;
+   cfg.Signal.MinScore            = InpSignalMinScore;
+   cfg.Signal.MinDominanceGap     = InpSignalMinDominanceGap;
+   cfg.Signal.MaxSourceAgeSeconds = InpMaxSourceAgeSeconds;
+   cfg.Signal.CooldownBars        = InpSignalCooldownBars;
+   cfg.Signal.MinRRRatio          = InpMinRRRatio;
+   cfg.Signal.MaxSignalATR        = InpMaxSignalATR;
+   cfg.Signal.UrgencyHighThreshold   = InpUrgencyHighThreshold;
+   cfg.Signal.UrgencyMediumThreshold = InpUrgencyMediumThreshold;
 
-   cfg.Pattern.EnablePatterns      = InpEnablePatterns;
-   cfg.Pattern.MinPatternScore     = InpMinPatternScore;
-   cfg.Pattern.MinDominanceGap     = InpMinPatternDominanceGap;
-   cfg.Pattern.LookbackBars        = InpPatternLookbackBars;
-   cfg.Pattern.PinBarRatio         = InpPinBarRatio;
-   cfg.Pattern.EngulfMultiplier    = InpEngulfMultiplier;
+   cfg.Pattern.Enable           = InpEnablePatterns;
+   cfg.Pattern.MinScore         = InpMinPatternScore;
+   cfg.Pattern.MinDominanceGap  = InpMinPatternDominanceGap;
+   cfg.Pattern.LookbackBars     = InpPatternLookbackBars;
+   cfg.Pattern.PinBarRatio      = InpPinBarRatio;
+   cfg.Pattern.EngulfMultiplier = InpEngulfMultiplier;
    cfg.Pattern.RequireConfirmation = InpRequireConfirmation;
 
    cfg.Display.ShowDashboard    = InpShowDashboard;
    cfg.Display.ShowSignalArrows = InpShowSignalArrows;
    cfg.Display.EnableAlerts     = InpEnableAlerts;
-   cfg.Display.EnablePush       = InpEnablePushNotify;
+   cfg.Display.EnablePushNotify = InpEnablePushNotify;
    cfg.Display.FontSize         = InpFontSize;
-
-   cfg.DebugMode   = InpDebugMode;
 
    return cfg;
   }
 
 bool ValidateConfig(const StrategyConfig &cfg)
   {
-   if(cfg.MagicNumber <= 0)
-     {
-      Print("[PASR_MODULAR] Invalid MagicNumber");
-      return false;
-     }
-   if(cfg.Risk.LotSize <= 0.0 || cfg.Risk.RiskPercent <= 0.0)
-     {
-      Print("[PASR_MODULAR] Invalid risk parameters");
-      return false;
-     }
+   if(cfg.Risk.LotSize <= 0.0)
+     { Print("[Config] Invalid LotSize"); return false; }
+   if(cfg.Risk.MaxDailyLossPct <= 0.0 || cfg.Risk.MaxDailyLossPct > 100.0)
+     { Print("[Config] Invalid MaxDailyLossPct"); return false; }
+   if(cfg.Risk.MaxDrawdownPct <= 0.0 || cfg.Risk.MaxDrawdownPct > 100.0)
+     { Print("[Config] Invalid MaxDrawdownPct"); return false; }
    return true;
   }
 
-double OnTester()
+double BuildTesterFitness()
   {
    double profit           = TesterStatistics(STAT_PROFIT);
    double profitFactor     = TesterStatistics(STAT_PROFIT_FACTOR);
    double recoveryFactor   = TesterStatistics(STAT_RECOVERY_FACTOR);
    double expectedPayoff   = TesterStatistics(STAT_EXPECTED_PAYOFF);
-   double equityDrawdownPct= TesterStatistics(STAT_EQUITY_DD_RELATIVE) * 100.0;
-   double sharpeRatio      = TesterStatistics(STAT_SHARPE_RATIO);
    int    trades           = (int)TesterStatistics(STAT_TRADES);
+   double equityDrawdownPct= TesterStatistics(STAT_EQUITY_DD_RELATIVE);
+   double sharpeRatio      = TesterStatistics(STAT_SHARPE_RATIO);
 
    if(trades < 10)
+      return -1000.0;
+   if(profit < 0.0)
       return -1000.0 - MathAbs(profit) - equityDrawdownPct;
 
    profit = MathMin(1000000.0, profit);
@@ -298,18 +296,29 @@ int OnInit()
    return INIT_SUCCEEDED;
   }
 
+double OnTester()
+  {
+   return BuildTesterFitness();
+  }
+
 void OnDeinit(const int reason)
   {
    EventKillTimer();
-   g_kernel.Deinit();
+   g_kernel.OnDeinit(reason);
    g_state.Reset();
   }
 
 void OnTick()
   {
    if(!g_state.initialized) return;
-   g_kernel.OnTick();
    g_state.last_tick = TimeCurrent();
+#ifdef PASR_QA_BUILD
+   CEventBus *bus = g_kernel.GetEventBus();
+   CRiskManager *risk = g_kernel.GetRiskManager();
+   if(bus != NULL && risk != NULL)
+      g_qa.OnTick(_Symbol, bus, risk);
+#endif
+   g_kernel.OnTick();
   }
 
 void OnTimer()
@@ -319,15 +328,17 @@ void OnTimer()
   }
 
 void OnTradeTransaction(const MqlTradeTransaction &trans,
-                        const MqlTradeRequest     &req,
-                        const MqlTradeResult      &res)
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
   {
    if(!g_state.initialized) return;
-   g_kernel.OnTradeTransaction(trans, req, res);
+   g_kernel.OnTradeTransaction(trans, request, result);
   }
 
-void OnChartEvent(const int id, const long &lparam,
-                  const double &dparam, const string &sparam)
+void OnChartEvent(const int id,
+                  const long &lparam,
+                  const double &dparam,
+                  const string &sparam)
   {
    if(!g_state.initialized) return;
    g_kernel.OnChartEvent(id, lparam, dparam, sparam);
