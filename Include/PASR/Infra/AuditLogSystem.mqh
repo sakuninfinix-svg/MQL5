@@ -150,7 +150,7 @@ public:
      {
       // FIX: ArrayInitialize needs 2 params
       for(int i = 0; i < ArraySize(m_buffer); i++)
-         m_buffer[i].Reset();
+         m_buffer[i].Clear();
 
       // FIX: symbol_clean built via StringReplace on a non-const local copy
       m_symbol_clean = _Symbol;
