@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Orchestration/Stages/AIInferStage.mqh - v0.10                   |
+//| Orchestration/Stages/AIInferStage.mqh - v0.11                   |
 //| Runtime AIInfer pipeline stage                                   |
 //+------------------------------------------------------------------+
 #property strict
@@ -19,47 +19,4 @@ private:
 public:
    CAIInferStage() : m_ai_orch(NULL), m_enabled(true) {}
 
-   void Bind(CAIOrchestrator *ai_orch)
-     {
-      m_ai_orch = ai_orch;
-     }
-
-   void SetEnabled(const bool enabled)
-     {
-      m_enabled = enabled;
-     }
-
-   virtual string Name() const override { return "AIInferStage"; }
-   virtual bool IsEnabled() const override { return m_enabled; }
-
-   virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
-     {
-      virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
-      {
-         if(!m_enabled)
-            return STAGE_SKIP;
-
-         if(m_ai_orch == NULL)
-            return STAGE_SKIP;
-
-         SAIInferenceResult last = m_ai_orch->GetLastResult();
-         AIFeatureValidationResult validation = m_ai_orch->GetLastValidation();
-
-         ctx.ai_result.model_healthy = m_ai_orch->IsHealthy();
-         ctx.ai_result.score = last.score;
-         ctx.ai_result.drift_index = last.drift_score;
-         ctx.ai_result.model_name = last.model_id;
-         ctx.ai_result.validation_valid = validation.passed;
-         ctx.ai_result.validation_reason = validation.reason;
-         ctx.ai_result.invalid_feature_index = -1;
-
-         ctx.ai_score = (float)last.score;
-         ctx.drift_score = (float)last.drift_score;
-
-         if(!validation.passed && validation.reason != "")
-            ctx.ai_veto = true;
-
-         return STAGE_OK;
-         }
-      };
-#endif // __PASR_ORCHESTRATION_AI_INFER_STAGE_MQH__
+   void Bind(CAIOrchestrator *ai_or
