@@ -21,19 +21,23 @@ enum ENUM_ONNX_INPUT_MODE
 class CONNXBridge
   {
 private:
-   long              m_session;
-   bool              m_loaded;
-   string            m_model_path;
+   long                 m_session;
+   bool                 m_loaded;
+   string               m_model_path;
    ENUM_ONNX_INPUT_MODE m_input_mode;
-   int               m_input_size;
-   int               m_output_size;
-   int               m_seq_len;
-   int               m_feat_dim;
+   int                  m_input_size;
+   int                  m_output_size;
+   int                  m_seq_len;
+   int                  m_feat_dim;
 
    bool SetSequenceInputShape()
      {
 #ifdef PASR_ENABLE_ONNX
-      long input_shape[] = {1, m_seq_len, m_feat_dim};
+      long input_shape[];
+      ArrayResize(input_shape, 3);
+      input_shape[0] = 1;
+      input_shape[1] = m_seq_len;
+      input_shape[2] = m_feat_dim;
       return OnnxSetInputShape(m_session, 0, input_shape);
 #else
       return false;
@@ -47,8 +51,10 @@ public:
 
   ~CONNXBridge() { Unload(); }
 
-   bool Load(const string path, const ENUM_ONNX_INPUT_MODE mode = ONNX_INPUT_SCALAR,
-             const int seq_len = AI_SEQ_LEN, const int feat_dim = AI_FEATURE_DIM,
+   bool Load(const string path,
+             const ENUM_ONNX_INPUT_MODE mode = ONNX_INPUT_SCALAR,
+             const int seq_len = AI_SEQ_LEN,
+             const int feat_dim = AI_FEATURE_DIM,
              const int output_size = 1)
      {
       Unload();
@@ -72,7 +78,11 @@ public:
    void Unload()
      {
 #ifdef PASR_ENABLE_ONNX
-      if(m_session != INVALID_HANDLE) { OnnxRelease(m_session); m_session = INVALID_HANDLE; }
+      if(m_session != INVALID_HANDLE)
+        {
+         OnnxRelease(m_session);
+         m_session = INVALID_HANDLE;
+        }
 #endif
       m_loaded = false;
      }
@@ -97,7 +107,7 @@ public:
 #endif
      }
 
-   bool RunSequence(float &input[],
+   bool RunSequence(float &sequence_input[],
                     const int seq_len,
                     const int feat_dim,
                     double &outputs[],
@@ -111,7 +121,7 @@ public:
          return false;
 
       const int expected = seq_len * feat_dim;
-      if(ArraySize(input) < expected)
+      if(ArraySize(sequence_input) < expected)
          return false;
 
 #ifdef PASR_ENABLE_ONNX
@@ -121,7 +131,7 @@ public:
       float input_f[];
       ArrayResize(input_f, expected);
       for(int i = 0; i < expected; i++)
-         input_f[i] = input[i];
+         input_f[i] = sequence_input[i];
 
       float output_f[];
       ArrayResize(output_f, m_output_size);
@@ -141,7 +151,7 @@ public:
 #endif
      }
 
-   bool RunSequenceTensor(const SAISequenceTensor &tensor, double &outputs[], int &out_count)
+   bool RunSequenceTensor(SAISequenceTensor &tensor, double &outputs[], int &out_count)
      {
       out_count = 0;
       if(!tensor.valid)
@@ -156,8 +166,6 @@ public:
 
    bool RunFV(const SAIFeatureVector &fv, double &out_score)
      {
-      // MQL5 forbids casting const struct member to float&[] directly.
-      // Copy features to a local float array first.
       float fv_f[];
       ArrayResize(fv_f, AI_FEATURE_DIM);
       for(int i = 0; i < AI_FEATURE_DIM; i++)
@@ -165,12 +173,12 @@ public:
       return Run(fv_f, out_score);
      }
 
-   bool   IsLoaded()        const { return m_loaded; }
-   string GetModelPath()    const { return m_model_path; }
-   long   GetSession()      const { return m_session; }
+   bool                 IsLoaded() const { return m_loaded; }
+   string               GetModelPath() const { return m_model_path; }
+   long                 GetSession() const { return m_session; }
    ENUM_ONNX_INPUT_MODE GetInputMode() const { return m_input_mode; }
-   int    GetSeqLen()       const { return m_seq_len; }
-   int    GetFeatDim()      const { return m_feat_dim; }
+   int                  GetSeqLen() const { return m_seq_len; }
+   int                  GetFeatDim() const { return m_feat_dim; }
   };
 
 #endif // __PASR_AI_ONNX_BRIDGE_MQH__
