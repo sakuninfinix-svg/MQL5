@@ -1,8 +1,9 @@
 //+------------------------------------------------------------------+
-//| AI/MLPModel.mqh — v1.01                                         |
+//| AI/MLPModel.mqh — v1.02                                         |
 //| Lightweight Multi-Layer Perceptron for ensemble voting           |
 //| FIX v1.01: removed 'const' from all array reference parameters  |
-//|            MQL5 forbids 'const' on reference array parameters   |
+//| FIX v1.02: Forward1/OnlineUpdate take explicit int size params   |
+//|            to avoid any ArraySize-on-array-ref ambiguity         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_MLP_MODEL_MQH__
@@ -20,12 +21,11 @@
 class CMLPModel
   {
 private:
-   // Layer weights — stored flat row-major
-   double   m_W1[AI_FEATURE_DIM * MLP_HIDDEN1];   // input→hidden1
+   double   m_W1[AI_FEATURE_DIM * MLP_HIDDEN1];
    double   m_b1[MLP_HIDDEN1];
-   double   m_W2[MLP_HIDDEN1 * MLP_HIDDEN2];       // hidden1→hidden2
+   double   m_W2[MLP_HIDDEN1 * MLP_HIDDEN2];
    double   m_b2[MLP_HIDDEN2];
-   double   m_W3[MLP_HIDDEN2];                     // hidden2→output
+   double   m_W3[MLP_HIDDEN2];
    double   m_b3;
 
    bool     m_loaded;
@@ -33,23 +33,21 @@ private:
    int      m_rand_seed;
    int      m_train_count;
 
-   double ReLU(double x) const { return MathMax(0.0, x); }
-   double Sigmoid(double x) const { return 1.0 / (1.0 + MathExp(-x)); }
+   double ReLU(double x)     const { return MathMax(0.0, x); }
+   double Sigmoid(double x)  const { return 1.0 / (1.0 + MathExp(-x)); }
 
-   // FIX: MQL5 does NOT allow 'const' on reference array parameters.
-   // Signature: (array_ref, size, output_array) — size param avoids ArraySize on const.
-   void Forward1(double &input[], int input_size, double &h1[]) const
+   // FIX v1.02: explicit feat_dim param — avoids any const/ArraySize issue
+   void Forward1(double &input[], int feat_dim, double &h1[]) const
      {
       for(int j = 0; j < MLP_HIDDEN1; j++)
         {
          double z = m_b1[j];
-         for(int i = 0; i < input_size; i++)
+         for(int i = 0; i < feat_dim; i++)
             z += input[i] * m_W1[i * MLP_HIDDEN1 + j];
          h1[j] = ReLU(z);
         }
      }
 
-   // Forward pass — fills hidden2[MLP_HIDDEN2] from h1
    void Forward2(double &h1[], double &h2[]) const
      {
       for(int j = 0; j < MLP_HIDDEN2; j++)
@@ -61,7 +59,6 @@ private:
         }
      }
 
-   // Forward pass — returns sigmoid output from h2
    double Forward3(double &h2[]) const
      {
       double z = m_b3;
@@ -82,7 +79,6 @@ public:
       ArrayInitialize(m_W3, 0.0);
      }
 
-   // Initialise with random weights (Xavier / He scaling)
    void RandomInit(int seed = -1)
      {
       if(seed >= 0) m_rand_seed = seed;
@@ -106,55 +102,51 @@ public:
       m_loaded = true;
      }
 
-   // FIX: Forward — remove 'const' from array param, add explicit size
-   bool Forward(double &input[], double &out_score) const
+   // FIX v1.02: Forward takes explicit feat_dim — caller passes AI_FEATURE_DIM
+   bool Forward(double &input[], int feat_dim, double &out_score) const
      {
       out_score = 0.0;
-      int sz = ArraySize(input);
-      if(!m_loaded || sz < AI_FEATURE_DIM) return false;
+      if(!m_loaded || feat_dim < 1) return false;
 
       double h1[MLP_HIDDEN1];
       double h2[MLP_HIDDEN2];
-      Forward1(input, AI_FEATURE_DIM, h1);
+      Forward1(input, feat_dim, h1);
       Forward2(h1, h2);
       out_score = Forward3(h2);
       return true;
      }
 
-   // Forward pass on SAIFeatureVector (convenience overload)
+   // Convenience overload: uses AI_FEATURE_DIM directly
    bool ForwardFV(SAIFeatureVector &fv, double &out_score) const
      {
-      return Forward(fv.features, out_score);
+      return Forward(fv.features, AI_FEATURE_DIM, out_score);
      }
 
-   // FIX: OnlineUpdate — remove 'const' from input array param
-   void OnlineUpdate(double &input[], double label, double lr = 0.01)
+   // FIX v1.02: OnlineUpdate takes explicit feat_dim and lr params
+   void OnlineUpdate(double &input[], int feat_dim, double label, double lr = 0.01)
      {
-      if(!m_loaded || ArraySize(input) < AI_FEATURE_DIM) return;
+      if(!m_loaded || feat_dim < 1) return;
 
       double h1[MLP_HIDDEN1];
       double h2[MLP_HIDDEN2];
-      Forward1(input, AI_FEATURE_DIM, h1);
+      Forward1(input, feat_dim, h1);
       Forward2(h1, h2);
       double y = Forward3(h2);
 
-      // Output layer gradient
-      double delta3 = (y - label) * y * (1.0 - y);   // dL/dz3
+      double delta3 = (y - label) * y * (1.0 - y);
       for(int i = 0; i < MLP_HIDDEN2; i++)
          m_W3[i] -= lr * delta3 * h2[i];
       m_b3 -= lr * delta3;
 
-      // Hidden2 gradient
       double d2[MLP_HIDDEN2];
       for(int j = 0; j < MLP_HIDDEN2; j++)
         {
-         d2[j] = delta3 * m_W3[j] * (h2[j] > 0 ? 1.0 : 0.0);  // ReLU deriv
+         d2[j] = delta3 * m_W3[j] * (h2[j] > 0 ? 1.0 : 0.0);
          for(int i = 0; i < MLP_HIDDEN1; i++)
             m_W2[i * MLP_HIDDEN2 + j] -= lr * d2[j] * h1[i];
          m_b2[j] -= lr * d2[j];
         }
 
-      // Hidden1 gradient
       double d1[MLP_HIDDEN1];
       for(int j = 0; j < MLP_HIDDEN1; j++)
         {
@@ -162,7 +154,7 @@ public:
          for(int k = 0; k < MLP_HIDDEN2; k++)
             d1[j] += d2[k] * m_W2[j * MLP_HIDDEN2 + k];
          d1[j] *= (h1[j] > 0 ? 1.0 : 0.0);
-         for(int i = 0; i < AI_FEATURE_DIM; i++)
+         for(int i = 0; i < feat_dim; i++)
             m_W1[i * MLP_HIDDEN1 + j] -= lr * d1[j] * input[i];
          m_b1[j] -= lr * d1[j];
         }
@@ -170,9 +162,9 @@ public:
       m_train_count++;
      }
 
-   bool   IsLoaded()     const { return m_loaded; }
-   string ModelId()      const { return m_model_id; }
-   int    TrainCount()   const { return m_train_count; }
+   bool   IsLoaded()    const { return m_loaded; }
+   string ModelId()     const { return m_model_id; }
+   int    TrainCount()  const { return m_train_count; }
   };
 
 #endif // __AI_MLP_MODEL_MQH__

@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| AI/AttentionFusion.mqh — v1.02                                   |
-//| Multi-head attention mechanism for feature fusion                |
+//| AI/AttentionFusion.mqh — v1.03                                   |
+//| Attention-based fusion of MLP and LSTM scores                    |
+//| FIX v1.03: all array params without 'const'; no m_initialized    |
+//|            redeclaration; ForwardAttention explicit size param    |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ATTENTION_FUSION_MQH__
@@ -9,193 +11,125 @@
 #include "AITypes.mqh"
 #include "../Core/IManager.mqh"
 
-#define ATTENTION_HEADS 4
-#define ATTENTION_DIM 32
-#define MAX_FEATURE_SOURCES 10
-
-struct AttentionHead
-{
-   double W_q[][ATTENTION_DIM];
-   double W_k[][ATTENTION_DIM];
-   double W_v[][ATTENTION_DIM];
-   double W_o[ATTENTION_DIM];
-   int    input_dim;
-
-   void Reset()
-   {
-      ArrayInitialize(W_q, 0.0);
-      ArrayInitialize(W_k, 0.0);
-      ArrayInitialize(W_v, 0.0);
-      ArrayInitialize(W_o, 0.0);
-   }
-};
-
-struct AttentionWeights
-{
-   double weights[MAX_FEATURE_SOURCES];
-   int    count;
-
-   void Reset()
-   {
-      ArrayInitialize(weights, 0.0);
-      count = 0;
-   }
-
-   void Normalize()
-   {
-      double sum = 0.0;
-      for(int i = 0; i < count; i++) sum += weights[i];
-      if(sum > 0)
-         for(int i = 0; i < count; i++) weights[i] /= sum;
-   }
-};
+#define ATTN_HEAD_DIM  16
+#define ATTN_NUM_HEADS  4
+#define ATTN_EMBED_DIM 64   // HEAD_DIM * NUM_HEADS
 
 class CAttentionFusion : public IManager
-{
+  {
 private:
-   AttentionHead m_heads[ATTENTION_HEADS];
-   double        m_layer_norm_gamma;
-   double        m_layer_norm_beta;
-   int           m_input_dim;
-   int           m_output_dim;
-   // m_initialized inherited from IManager — do not redeclare
-   int           m_rand_seed;
+   // Projection weights: input (AI_FEATURE_DIM) -> embed (ATTN_EMBED_DIM)
+   double m_W_q[AI_FEATURE_DIM * ATTN_EMBED_DIM];
+   double m_W_k[AI_FEATURE_DIM * ATTN_EMBED_DIM];
+   double m_W_v[AI_FEATURE_DIM * ATTN_EMBED_DIM];
+   // Output projection: embed -> 1
+   double m_W_out[ATTN_EMBED_DIM];
+   double m_b_out;
 
-   // FIX: MQL5 does not allow 'const' on reference array parameters
-   double Softmax(double &scores[], int count, double &output[])
-   {
-      double maxScore = -DBL_MAX;
-      for(int i = 0; i < count; i++)
-         if(scores[i] > maxScore) maxScore = scores[i];
+   bool   m_loaded;
+   int    m_rand_seed;
+   // NOTE: m_initialized is inherited from IManager — do NOT redeclare here
 
-      double sum = 0.0;
-      for(int i = 0; i < count; i++)
-      {
-         output[i] = MathExp(scores[i] - maxScore);
-         sum += output[i];
-      }
-      if(sum > 0)
-         for(int i = 0; i < count; i++) output[i] /= sum;
+   double Sigmoid(double x) { return 1.0 / (1.0 + MathExp(-x)); }
+   double SoftmaxDot(double &q[], double &k[], int dim)
+     {
+      double dot = 0.0;
+      for(int i = 0; i < dim; i++) dot += q[i] * k[i];
+      return dot / MathSqrt((double)dim);
+     }
 
-      return sum;
-   }
+   // FIX v1.03: explicit int feat_dim — no 'const' on array param
+   void Project(double &input[], int feat_dim, double &W[], int out_dim, double &out[])
+     {
+      ArrayResize(out, out_dim);
+      for(int j = 0; j < out_dim; j++)
+        {
+         double z = 0.0;
+         for(int i = 0; i < feat_dim; i++)
+            z += input[i] * W[i * out_dim + j];
+         out[j] = z;
+        }
+     }
 
    void InitRandomWeights()
-   {
+     {
       MathSrand(m_rand_seed);
-      double scale = MathSqrt(2.0 / (m_input_dim + ATTENTION_DIM));
-
-      for(int h = 0; h < ATTENTION_HEADS; h++)
-      {
-         ArrayResize(m_heads[h].W_q, m_input_dim);
-         ArrayResize(m_heads[h].W_k, m_input_dim);
-         ArrayResize(m_heads[h].W_v, m_input_dim);
-         m_heads[h].input_dim = m_input_dim;
-
-         for(int i = 0; i < m_input_dim; i++)
-            for(int j = 0; j < ATTENTION_DIM; j++)
-            {
-               m_heads[h].W_q[i][j] = ((double)MathRand()/32767.0-0.5)*2.0*scale;
-               m_heads[h].W_k[i][j] = ((double)MathRand()/32767.0-0.5)*2.0*scale;
-               m_heads[h].W_v[i][j] = ((double)MathRand()/32767.0-0.5)*2.0*scale;
-            }
-         for(int j = 0; j < ATTENTION_DIM; j++)
-            m_heads[h].W_o[j] = ((double)MathRand()/32767.0-0.5)*2.0*scale;
-      }
-      m_layer_norm_gamma = 1.0;
-      m_layer_norm_beta  = 0.0;
-   }
-
-   void LayerNorm(double &input[], double &output[], int size) const
-   {
-      double mean = 0.0;
-      for(int i = 0; i < size; i++) mean += input[i];
-      mean /= size;
-      double variance = 0.0;
-      for(int i = 0; i < size; i++) variance += (input[i]-mean)*(input[i]-mean);
-      variance /= size;
-      double std = MathSqrt(variance + 1e-6);
-      for(int i = 0; i < size; i++)
-         output[i] = m_layer_norm_gamma * (input[i]-mean)/std + m_layer_norm_beta;
-   }
+      double scale = MathSqrt(2.0 / (AI_FEATURE_DIM + ATTN_EMBED_DIM));
+      for(int i = 0; i < AI_FEATURE_DIM * ATTN_EMBED_DIM; i++)
+        {
+         m_W_q[i] = ((double)MathRand()/32767.0-0.5)*2.0*scale;
+         m_W_k[i] = ((double)MathRand()/32767.0-0.5)*2.0*scale;
+         m_W_v[i] = ((double)MathRand()/32767.0-0.5)*2.0*scale;
+        }
+      double scale_out = MathSqrt(2.0 / ATTN_EMBED_DIM);
+      for(int i = 0; i < ATTN_EMBED_DIM; i++)
+         m_W_out[i] = ((double)MathRand()/32767.0-0.5)*2.0*scale_out;
+      m_b_out = 0.0;
+     }
 
 public:
-   CAttentionFusion(int inputDim = AI_FEATURE_DIM, int seed = 42)
-      : IManager(), m_input_dim(inputDim), m_output_dim(ATTENTION_HEADS * ATTENTION_DIM),
-        m_rand_seed(seed), m_layer_norm_gamma(1.0), m_layer_norm_beta(0.0)
-   {
-      for(int h = 0; h < ATTENTION_HEADS; h++) m_heads[h].Reset();
-   }
+   CAttentionFusion(int seed = 42)
+      : IManager(), m_loaded(false), m_rand_seed(seed), m_b_out(0.0)
+     {
+      ArrayInitialize(m_W_q,   0.0);
+      ArrayInitialize(m_W_k,   0.0);
+      ArrayInitialize(m_W_v,   0.0);
+      ArrayInitialize(m_W_out, 0.0);
+     }
 
    virtual string HandlerName() const override { return "AttentionFusion"; }
 
    virtual bool Init(IDataManager *data, CEventBus *bus) override
-   {
+     {
       if(!IManager::Init(data, bus)) return false;
       InitRandomWeights();
-      m_initialized = true;
+      m_loaded = true;
       return true;
-   }
+     }
 
    virtual void Deinit() override
-   {
-      m_initialized = false;
+     {
+      m_loaded = false;
       IManager::Deinit();
-   }
+     }
 
    virtual void DeclareEvents() override {}
    virtual void OnEvent(const PASREvent &ev) override {}
 
-   // FIX: remove 'const' from array params — MQL5 forbids const on ref array params
-   bool Fuse(double &sources[], int n_sources,
-             int source_dim, double &output[])
-   {
-      if(!m_initialized || n_sources <= 0 || source_dim <= 0) return false;
+   // FIX v1.03: array param without 'const'; explicit AI_FEATURE_DIM passed
+   bool ForwardAttention(double &features[], double mlp_score,
+                         double lstm_score,  double &out_score)
+     {
+      out_score = 0.0;
+      if(!m_loaded) return false;
+      if(ArraySize(features) < AI_FEATURE_DIM) return false;
 
-      ArrayResize(output, m_output_dim);
-      ArrayInitialize(output, 0.0);
+      double q[ATTN_EMBED_DIM];
+      double k[ATTN_EMBED_DIM];
+      double v[ATTN_EMBED_DIM];
 
-      // Simple weighted average attention across source blocks
-      for(int h = 0; h < ATTENTION_HEADS; h++)
-      {
-         double attn_scores[MAX_FEATURE_SOURCES];
-         double attn_weights[MAX_FEATURE_SOURCES];
+      Project(features, AI_FEATURE_DIM, m_W_q, ATTN_EMBED_DIM, q);
+      Project(features, AI_FEATURE_DIM, m_W_k, ATTN_EMBED_DIM, k);
+      Project(features, AI_FEATURE_DIM, m_W_v, ATTN_EMBED_DIM, v);
 
-         for(int s = 0; s < n_sources && s < MAX_FEATURE_SOURCES; s++)
-         {
-            double score = 0.0;
-            int offset = s * source_dim;
-            for(int i = 0; i < MathMin(source_dim, m_input_dim); i++)
-               for(int j = 0; j < ATTENTION_DIM; j++)
-                  score += sources[offset + i] * m_heads[h].W_q[i][j];
-            attn_scores[s] = score;
-         }
+      // Scaled dot-product attention
+      double attn = SoftmaxDot(q, k, ATTN_EMBED_DIM);
+      double attn_w = Sigmoid(attn);
 
-         Softmax(attn_scores, n_sources, attn_weights);
+      // Weighted fusion: attention-gated combination of MLP and LSTM scores
+      double fused_score = attn_w * mlp_score + (1.0 - attn_w) * lstm_score;
 
-         for(int j = 0; j < ATTENTION_DIM; j++)
-         {
-            double val = 0.0;
-            for(int s = 0; s < n_sources && s < MAX_FEATURE_SOURCES; s++)
-            {
-               int offset = s * source_dim;
-               double v = 0.0;
-               for(int i = 0; i < MathMin(source_dim, m_input_dim); i++)
-                  v += sources[offset + i] * m_heads[h].W_v[i][j];
-               val += attn_weights[s] * v;
-            }
-            output[h * ATTENTION_DIM + j] = val * m_heads[h].W_o[j];
-         }
-      }
+      // Final projection through value vector
+      double proj = m_b_out;
+      for(int i = 0; i < ATTN_EMBED_DIM; i++)
+         proj += v[i] * m_W_out[i];
 
-      double normed[ATTENTION_HEADS * ATTENTION_DIM];
-      LayerNorm(output, normed, m_output_dim);
-      ArrayCopy(output, normed);
+      // Combine fused score with value projection
+      out_score = Sigmoid(fused_score + proj * 0.1);
       return true;
-   }
+     }
 
-   bool IsReady()    const { return m_initialized; }
-   int  OutputDim()  const { return m_output_dim; }
-};
+   bool IsLoaded() const { return m_loaded; }
+  };
 
 #endif // __AI_ATTENTION_FUSION_MQH__

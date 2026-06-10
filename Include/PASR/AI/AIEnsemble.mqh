@@ -1,6 +1,9 @@
 //+------------------------------------------------------------------+
-//| AIEnsemble.mqh                                                   |
+//| AIEnsemble.mqh — v1.03                                          |
 //| Multi-model voting ensemble with ONNX bridge integration         |
+//| FIX v1.03: add IsReady()/GetModelCount()/GetModel() accessors    |
+//|            fix SAISequenceTensor pointer handling                 |
+//|            update Vote() calls to new MLPModel.Forward signature |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_AI_ENSEMBLE_MQH__
@@ -9,8 +12,6 @@
 #include "AITypes.mqh"
 #include "MLPModel.mqh"
 #include "ONNXBridge.mqh"
-
-// SAIEnsembleVote is declared in AITypes.mqh — do NOT redeclare here.
 
 struct SAIEnsembleConfig
   {
@@ -45,7 +46,7 @@ private:
    double            m_last_onnx_score;
    int               m_last_onnx_outputs;
 
-   double ScoreFromOnnxOutputs(double &outputs[], const int count)
+   double ScoreFromOnnxOutputs(double &outputs[], int count)
      {
       if(count <= 0) return 0.0;
       return MathMax(0.0, MathMin(1.0, outputs[0]));
@@ -73,7 +74,7 @@ public:
         }
      }
 
-   // Minimal IManager-compatible shim so AIOrchestrator can call Init/Deinit
+   // IManager-compatible shim
    bool Init(IDataManager *data, CEventBus *bus)
      {
       SAIEnsembleConfig cfg;
@@ -83,8 +84,8 @@ public:
 
    bool Init(const SAIEnsembleConfig &cfg)
      {
-      m_ready     = false;
-      m_n_models  = MathMin(cfg.n_models, ENSEMBLE_MODEL_COUNT);
+      m_ready    = false;
+      m_n_models = MathMin(cfg.n_models, ENSEMBLE_MODEL_COUNT);
       m_onnx_weight = cfg.onnx_weight;
 
       for(int i = 0; i < m_n_models; i++)
@@ -103,7 +104,15 @@ public:
       return m_ready;
      }
 
-   bool IsOnnxLoaded() const { return m_onnx_loaded; }
+   // FIX v1.03: accessors required by AIFeatureValidator and AITrainer
+   bool       IsReady()        const { return m_ready; }
+   bool       IsOnnxLoaded()   const { return m_onnx_loaded; }
+   int        GetModelCount()  const { return m_n_models; }
+   CMLPModel* GetModel(int idx)
+     {
+      if(idx < 0 || idx >= m_n_models) return NULL;
+      return m_models[idx];
+     }
 
    // 2-arg overload — no sequence tensor
    bool Vote(SAIFeatureVector &fv, SAIEnsembleVote &out)
@@ -112,14 +121,12 @@ public:
       return Vote(fv, nullSeq, out);
      }
 
-   // 3-arg overload — seq is a nullable pointer (NOT a const ref).
-   // MQL5 does not allow pointer-to-struct as a const reference parameter.
+   // 3-arg overload — seq is a nullable pointer
    bool Vote(SAIFeatureVector &fv, const SAISequenceTensor *seq, SAIEnsembleVote &out)
      {
       out.Reset();
       if(!m_ready || m_n_models == 0) return false;
 
-      // FIX: pointer guard — use seq != NULL, not != pointer_value comparison
       bool use_onnx = (m_onnx_loaded && seq != NULL && seq.valid);
       int total_voters = m_n_models + (use_onnx ? 1 : 0);
       ArrayResize(out.scores,  total_voters);
@@ -132,12 +139,12 @@ public:
 
       for(int i = 0; i < m_n_models; i++)
         {
-         // FIX: guard against invalid/deleted model pointer
          if(CheckPointer(m_models[i]) == POINTER_INVALID) continue;
 
          double score = 0.5;
-         m_models[i].ForwardFV(fv, score);
-         score = score * 2.0 - 1.0;   // remap [0,1] → [-1,+1]
+         // FIX v1.03: Forward now requires explicit feat_dim
+         m_models[i].Forward(fv.features, AI_FEATURE_DIM, score);
+         score = score * 2.0 - 1.0;
 
          out.scores[score_idx]  = score;
          out.weights[score_idx] = m_weights[i];
@@ -148,7 +155,6 @@ public:
 
       if(use_onnx)
         {
-         // seq is guaranteed non-NULL here (checked in use_onnx)
          out.scores[score_idx]  = m_last_onnx_score * 2.0 - 1.0;
          out.weights[score_idx] = m_onnx_weight;
          weighted_sum += out.scores[score_idx] * m_onnx_weight;
@@ -161,7 +167,6 @@ public:
       out.final_score = weighted_sum / weight_total;
       out.confidence  = MathAbs(out.final_score);
 
-      // Agreement: fraction of voters on the same side as final_score
       int agree = 0;
       for(int i = 0; i < score_idx; i++)
          if((out.final_score >= 0.0 && out.scores[i] >= 0.0) ||
