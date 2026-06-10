@@ -66,10 +66,13 @@ private:
 
    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
    double Clamp(double v, double lo, double hi) const { return MathMax(lo, MathMin(hi, v)); }
-
-   const SAISequenceTensor &GetSequencePtr() const
+   bool CopyLastSequence(SAISequenceTensor &dest)
      {
-      return m_last_sequence_valid ? *m_last_sequence : NULL;
+      if(!m_last_sequence_valid)
+         return false;
+
+      dest = m_last_sequence;
+      return true;
      }
 
    void SetUnavailable(SAIInferenceResult &out_result, string reason)
@@ -412,7 +415,7 @@ public:
 
       if(m_use_attention)
         {
-         m_attention = new CAttentionFusion(AI_FEATURE_DIM, 43);
+         m_attention = new CAttentionFusion(43);
          if(m_attention == NULL || !m_attention.Init(data, bus))
            {
             Print("AI: Attention fusion init failed, falling back to standard fusion");
@@ -545,19 +548,18 @@ public:
 
       double lstm_score = 0.0;
       bool lstm_used = false;
-      if(m_use_lstm && m_lstm != NULL && m_lstm.IsSequenceFilled())
-        {
-         if(m_lstm.ForwardFV(fv, lstm_score))
-           {
+      if(m_use_lstm && m_lstm != NULL)
+         {
+            if(m_lstm.ForwardSequence(fv.features, lstm_score))
+            {
             lstm_used = true;
             if(m_debugMode) PrintFormat("[AIOrchestrator] LSTM prediction: %.4f", lstm_score);
-           }
-        }
+            }
+         }
 
       SAIEnsembleVote vote;
       vote.Reset();
-      const SAISequenceTensor &seq_ptr = m_last_sequence_valid ? GetSequencePtr() : NULL;
-      if(!m_ensemble.Vote(fv, seq_ptr, vote) || vote.n_models <= 0)
+      if(!m_ensemble.Vote(fv, vote) || vote.n_models <= 0)
         {
          SetUnavailable(out_result, "Ensemble vote failed");
          return false;
