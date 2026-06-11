@@ -11,4 +11,4 @@ private:
    CAIOrchestrator *m_ai_orch;
 public:
    CAIInferStage() : CPipelineStageBase("AIInfer"), m_ai_orch(NULL) {}
-   void SetAIOrchestrator(CAIOrchestrator *orch) { m_ai_orch = orch;
+   void SetAIOrchestrator(CAIOrchestrator *orch) { m_ai_orch = orch; }
