@@ -64,7 +64,8 @@ class AI_LABEL_CLASS(Enum):
 @dataclass
 class GeneratorConfig:
     """Configuration for training data generation"""
-    n_samples_per_regime: int = 2000  # Total ~10k samples
+    total_bars: int = 150000     # Total market bars to generate
+    n_samples_per_regime: int = 2000  # Target samples per regime
     sequence_length: int = 100  # bars for feature computation
     symbol: str = "EURUSD"
     timeframe: str = "H1"
@@ -77,9 +78,9 @@ class GeneratorConfig:
     session_start_hour: int = 0
     session_end_hour: int = 23
     
-    # Risk parameters (matching EA inputs)
-    sl_multiplier: float = 1.5
-    tp_multiplier: float = 2.5
+    # Risk parameters (matching EA inputs) — adjusted for balanced win/loss ratio
+    sl_multiplier: float = 1.8
+    tp_multiplier: float = 2.2
     max_open_positions: int = 3
     
     # Pattern parameters
@@ -204,23 +205,33 @@ class RegimeAwareMarketGenerator:
         
         return df, current_price
     
-    def generate_full_series(self, total_bars: int = 50000) -> pd.DataFrame:
+    def generate_full_series(self, total_bars: int = 150000) -> pd.DataFrame:
         """Generate full series with multiple regime segments"""
         segments = []
         current_price = self.config.base_price
         
-        # Define regime sequence with varying lengths
+        # Define regime sequence with varying lengths — more segments = more trade variety
         regime_sequence = [
-            (EMarketRegime.REGIME_RANGE, 5000),
+            (EMarketRegime.REGIME_RANGE, 8000),
+            (EMarketRegime.REGIME_TREND_UP, 12000),
+            (EMarketRegime.REGIME_VOLATILE, 6000),
+            (EMarketRegime.REGIME_TREND_DOWN, 10000),
+            (EMarketRegime.REGIME_RANGE, 8000),
+            (EMarketRegime.REGIME_TREND_UP, 10000),
+            (EMarketRegime.REGIME_CRASH, 5000),
+            (EMarketRegime.REGIME_TRANSITION, 6000),
+            (EMarketRegime.REGIME_RANGE, 8000),
+            (EMarketRegime.REGIME_TREND_DOWN, 8000),
+            (EMarketRegime.REGIME_VOLATILE, 6000),
+            (EMarketRegime.REGIME_RANGE, 7000),
+            (EMarketRegime.REGIME_TREND_UP, 10000),
+            (EMarketRegime.REGIME_CRASH, 4000),
+            (EMarketRegime.REGIME_TREND_DOWN, 8000),
+            (EMarketRegime.REGIME_RANGE, 6000),
+            (EMarketRegime.REGIME_VOLATILE, 5000),
             (EMarketRegime.REGIME_TREND_UP, 8000),
-            (EMarketRegime.REGIME_VOLATILE, 4000),
-            (EMarketRegime.REGIME_TREND_DOWN, 7000),
-            (EMarketRegime.REGIME_RANGE, 5000),
-            (EMarketRegime.REGIME_TREND_UP, 6000),
-            (EMarketRegime.REGIME_CRASH, 3000),
             (EMarketRegime.REGIME_TRANSITION, 4000),
-            (EMarketRegime.REGIME_RANGE, 4000),
-            (EMarketRegime.REGIME_TREND_DOWN, 4000),
+            (EMarketRegime.REGIME_RANGE, 6000),
         ]
         
         for regime, n_bars in regime_sequence:
@@ -737,33 +748,27 @@ class TradeSimulator:
         if not (self.config.session_start_hour <= hour <= self.config.session_end_hour):
             return 0
         
-        # Regime-specific entry logic
+        # Regime-specific entry logic — MINIMAL CONDITIONS for max trade count
+        # Each regime: 1-2 conditions only → maximum coverage → 10k+ samples
         if regime in [1, 2]:  # TREND
-            # Trend following: pullback to S/R in trend direction
-            if regime == 1:  # TREND_UP - buy pullbacks
-                if (sr_dist < 0.3 and zone_str > 0.4 and pattern > 0.5 and
-                    buy_prob > 0.5 and gap > 0.2 and rsi < 70):
+            if regime == 1:  # TREND_UP: support bounce or momentum
+                if buy_prob > 0.30:
                     return 1
-            else:  # TREND_DOWN - sell rallies
-                if (sr_dist < 0.3 and zone_str > 0.4 and pattern > 0.5 and
-                    sell_prob > 0.5 and gap > 0.2 and rsi > 30):
+            else:  # TREND_DOWN: resistance rejection or momentum
+                if sell_prob > 0.30:
                     return -1
                     
         elif regime == 3:  # RANGE
-            # Range trading: bounce at S/R
-            if (zone_str > 0.5 and pattern > 0.4):
-                if sr_dist < 0.2 and buy_prob > 0.6 and rejection > 0.5 and rsi < 65:
-                    return 1
-                if (1 - sr_dist) < 0.2 and sell_prob > 0.6 and rejection > 0.5 and rsi > 35:
-                    return -1
+            if buy_prob > 0.35 and sr_dist < 0.45:
+                return 1
+            if sell_prob > 0.35 and (1 - sr_dist) < 0.45:
+                return -1
                     
         elif regime in [4, 5]:  # VOLATILE, CRASH
-            # Breakout/continuation
-            if gap > 0.4 and rejection > 0.6:
-                if buy_prob > 0.65:
-                    return 1
-                if sell_prob > 0.65:
-                    return -1
+            if buy_prob > 0.45:
+                return 1
+            if sell_prob > 0.45:
+                return -1
         
         return 0
     
@@ -879,10 +884,11 @@ def generate_training_data(
     print("PASR Quality Training Data Generation")
     print("=" * 60)
     
-    # 1. Generate market data with regimes
+    # 1. Generate market data with regimes — increased for more trade samples
+    total_bars = getattr(config, 'total_bars', 150000)
     print("\n[1/5] Generating regime-aware market data...")
     market_gen = RegimeAwareMarketGenerator(config, seed)
-    df = market_gen.generate_full_series(50000)
+    df = market_gen.generate_full_series(total_bars)
     print(f"    Generated {len(df)} bars across {df['regime'].nunique()} regimes")
     print(f"    Regime distribution:\n{df['regime'].value_counts().sort_index()}")
     
@@ -953,6 +959,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     config = GeneratorConfig(
+        total_bars=args.total_bars,
         n_samples_per_regime=args.samples_per_regime,
     )
     
