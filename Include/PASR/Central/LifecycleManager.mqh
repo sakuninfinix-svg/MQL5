@@ -40,6 +40,7 @@ private:
       return true;
      }
 
+public:
    void MarkDeinitialized(const string name)
      {
       int idx = FindInitialized(name);
@@ -51,6 +52,8 @@ private:
       if(m_initialized_count >= 0 && m_initialized_count < PASR_CENTRAL_MAX_MODULES)
          m_initialized[m_initialized_count] = "";
      }
+
+private:
 
 public:
    CLifecycleManager()
@@ -108,7 +111,12 @@ public:
         }
 
       if(m_bus != NULL && !m_bus.Register(module))
-         PrintFormat("[Lifecycle] EventBus register failed for %s", name);
+        {
+         m_last_error = name + ".EventBus registration failed";
+         Print("[Lifecycle] ", m_last_error);
+         module.Deinit();
+         return false;
+        }
 
       MarkInitialized(name);
       return true;

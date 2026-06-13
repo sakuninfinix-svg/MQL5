@@ -2,6 +2,7 @@
 //| Core/Events.mqh — CANONICAL v2.18                                |
 //| All event type definitions for the PASR framework                |
 //+------------------------------------------------------------------+
+#property strict
 #ifndef CORE_EVENTS_MQH
 #define CORE_EVENTS_MQH
 

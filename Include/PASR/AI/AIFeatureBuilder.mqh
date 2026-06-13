@@ -94,9 +94,12 @@ private:
 
    double PriceReturn(int bars_back)
      {
-      int shift = m_useClosedBarsOnly ? MathMax(1, bars_back) : bars_back;
-      double c0 = iClose(_Symbol, PERIOD_CURRENT, 1);
-      double cn = iClose(_Symbol, PERIOD_CURRENT, shift);
+      // bars_back=1 -> 1-bar return (close[1] vs close[2])
+      // bars_back=2 -> 2-bar return (close[1] vs close[3])
+      int c0_shift = m_useClosedBarsOnly ? 1 : 0;
+      int cn_shift = c0_shift + bars_back;
+      double c0 = iClose(_Symbol, PERIOD_CURRENT, c0_shift);
+      double cn = iClose(_Symbol, PERIOD_CURRENT, cn_shift);
       if(cn == 0.0) return 0.0;
       return (c0 - cn) / cn;
      }

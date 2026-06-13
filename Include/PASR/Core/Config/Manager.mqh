@@ -135,7 +135,7 @@ private:
       // optional identity fields so bad numeric values are caught by the
       // validator instead of being silently overwritten.
       if(StringLen(cfg.EAName) == 0)  cfg.EAName  = "PASR";
-      if(StringLen(cfg.Version) == 0) cfg.Version = "2.15.0";
+      if(StringLen(cfg.Version) == 0) cfg.Version = "2.16.0";
       if(cfg.MagicNumber <= 0)        cfg.MagicNumber = 123456;
      }
 

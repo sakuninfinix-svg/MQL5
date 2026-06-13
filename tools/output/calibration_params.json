@@ -1,0 +1,17 @@
+{
+  "metadata": {
+    "brier_score": 0.21170641796416795,
+    "log_loss": 0.6141638211971934,
+    "roc_auc": 0.8775859649122807,
+    "n_train": 4000,
+    "n_test": 1000,
+    "method": "platt",
+    "timestamp": "2026-06-12T16:52:48.008907+00:00"
+  },
+  "params": {
+    "platt_A": 1.2793142293343236,
+    "platt_B": -0.3465543618093771,
+    "threshold": 0.55,
+    "agreement_alpha": 0.3
+  }
+}

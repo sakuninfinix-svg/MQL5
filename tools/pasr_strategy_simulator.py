@@ -15,6 +15,9 @@ from dataclasses import dataclass, asdict
 from typing import List, Dict, Tuple, Optional
 import random
 
+builtins_max = max
+builtins_min = min
+
 @dataclass
 class PASRConfig:
     """Konfigurasi Parameter PASR"""
@@ -95,16 +98,16 @@ class MarketDataGenerator:
             # High-low range
             hl_range = abs(volatility * np.random.randn() * 0.5)
             
-            high = open_price + max(0, trend_move) + hl_range
-            low = open_price + min(0, trend_move) - hl_range
+            high = open_price + builtins_max(0, trend_move) + hl_range
+            low = open_price + builtins_min(0, trend_move) - hl_range
             
             # Close with some momentum
             close_move = trend_move * 0.7 + volatility_move * 0.3
             close = open_price + close_move
             
             # Ensure realistic OHLC relationships
-            high = max(high, open, close)
-            low = min(low, open, close)
+            high = builtins_max(high, open_price, close)
+            low = builtins_min(low, open_price, close)
             
             # Volume with some randomness
             volume = int(1000 + abs(np.random.randn()) * 500)
@@ -590,7 +593,7 @@ def main():
     # Generate synthetic market data
     print("1. Generating synthetic market data...")
     generator = MarketDataGenerator(seed=42)
-    data = generator.generate_candlestick_data(n_bars=5000, trend=0.00005, volatility=0.0008)
+    data = generator.generate_candlestick_data(n_bars=500, trend=0.00005, volatility=0.0008)
     print(f"   Generated {len(data)} candlesticks")
     print()
     
@@ -612,7 +615,7 @@ def main():
     # Run parameter optimization
     print("3. Running parameter optimization (this may take several minutes)...")
     optimizer = ParameterOptimizer(data)
-    results = optimizer.optimize_parameters(param_ranges, n_iterations=50)
+    results = optimizer.optimize_parameters(param_ranges, n_iterations=10)
     print()
     
     # Display results

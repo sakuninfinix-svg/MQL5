@@ -262,8 +262,7 @@ struct SAIRiskDecision
    bool                   allow_trade;
    int                    direction;
    ENUM_AI_DECISION_CLASS decisionClass;
-   double                 risk_multiplier;
-   double                 riskMultiplier;
+   double                 risk_multiplier;   // canonical field
    double                 confidence;
    double                 failureProbability;
    double                 expectedR;
@@ -278,7 +277,6 @@ struct SAIRiskDecision
       direction = 0;
       decisionClass = AI_DECISION_NO_TRADE;
       risk_multiplier = 1.0;
-      riskMultiplier = 1.0;
       confidence = 0.0;
       failureProbability = 1.0;
       expectedR = 0.0;
@@ -291,10 +289,10 @@ struct SAIRiskDecision
    void Reset() { Clear(); }
   };
 
+// FIX: removed duplicate labelClass — use label_class only
 struct SAITradeLabel
   {
-   ENUM_AI_LABEL_CLASS label_class;
-   ENUM_AI_LABEL_CLASS labelClass;
+   ENUM_AI_LABEL_CLASS label_class;   // canonical field
    double   label;
    double   reward;
    bool     valid;
@@ -308,7 +306,6 @@ struct SAITradeLabel
    void Clear()
      {
       label_class = AI_LABEL_INVALID;
-      labelClass = AI_LABEL_INVALID;
       label = 0.0;
       reward = 0.0;
       valid = false;

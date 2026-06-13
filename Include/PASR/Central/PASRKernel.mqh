@@ -160,6 +160,10 @@ private:
          hardFail = true;
          if(module != NULL)
            {
+            // FIX: Unsubscribe from event bus before deleting to prevent dangling pointer
+            if(m_event_bus != NULL)
+               m_event_bus.Unsubscribe(module);
+            m_lifecycle.MarkDeinitialized(name);
             module.Deinit();
             delete module;
            }
@@ -520,6 +524,21 @@ private:
      {
       bool hardFail = false;
 
+      // FIX: Initialize AuditLogSystem now that EventBus exists
+      if(m_audit_log == NULL)
+        {
+         m_audit_log = new CAuditLogSystem();
+         if(m_audit_log != NULL)
+           {
+            if(!m_audit_log.Init(m_services.Data(), m_event_bus))
+              {
+               delete m_audit_log;
+               m_audit_log = NULL;
+               if(m_debug) Print("[PASRKernel] AuditLogSystem init failed; continuing without audit");
+              }
+           }
+        }
+
       CTelemetryRecorder *telemetry = CModuleFactory::CreateTelemetryRecorder();
       if(!InitOptionalManager(PASR_MOD_TELEMETRY_RECORDER, telemetry,
                               "Telemetry init failed; continuing without telemetry", hardFail))
@@ -671,19 +690,8 @@ public:
       m_cfg = cfg;
       m_last_error = "";
 
-      // FIX: CAuditLogSystem inherits IManager::Init(IDataManager*, CEventBus*).
-      // It does NOT accept StrategyConfig. The event bus is not yet created here,
-      // so we pass NULL for both — AuditLogSystem guards against NULL data in Init()
-      // and will operate in minimal/buffer-only mode until the event bus is ready.
-      m_audit_log = new CAuditLogSystem();
-      if(m_audit_log != NULL)
-        {
-         if(!m_audit_log.Init(NULL, NULL))
-           {
-            delete m_audit_log;
-            m_audit_log = NULL;
-           }
-        }
+      // AuditLogSystem deferred until after EventBus is created
+      m_audit_log = NULL;
 
       m_event_bus = CModuleFactory::CreateEventBus();
       if(m_event_bus == NULL)

@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-06-13T01:13:40.977655",
+  "config": {
+    "lot_size": 0.01,
+    "risk_percent": 1.95,
+    "sl_multiplier": 2.17,
+    "tp_multiplier": 1.75,
+    "max_daily_loss_pct": 3.0,
+    "max_drawdown_pct": 10.0,
+    "max_open_positions": 3,
+    "use_break_even": true,
+    "break_even_atr_mult": 1.0,
+    "use_trailing_stop": true,
+    "trail_atr_mult": 1.0,
+    "atr_period": 15,
+    "adx_period": 16,
+    "adx_trend_threshold": 26.5,
+    "spread_filter_pips": 3.0,
+    "session_start_hour": 0,
+    "session_end_hour": 23,
+    "min_pattern_score": 42.5,
+    "pattern_lookback_bars": 39,
+    "pin_bar_ratio": 2.0,
+    "engulf_multiplier": 1.1
+  },
+  "results": {
+    "trades": 5372,
+    "wins": 3452,
+    "win_rate": 0.6425912137006702,
+    "profit_factor": 1.4555860684149848,
+    "total_r": 870.9409400867004,
+    "return_pct": 16.98334833166662,
+    "max_dd_pct": 1.7108800474001957,
+    "sharpe": 9.926673911168717,
+    "fitness": 17.206771108594932,
+    "avg_duration": 0.0,
+    "tp_rate": 0.6422189128816084,
+    "sl_rate": 0.35517498138495907
+  },
+  "num_bars": 50000,
+  "regimes_tested": [
+    "TREND_UP",
+    "TREND_DOWN",
+    "RANGE",
+    "VOLATILE",
+    "CRASH",
+    "RECOVERY",
+    "CHOPPY"
+  ]
+}

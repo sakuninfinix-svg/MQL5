@@ -2,6 +2,7 @@
 //| Core/Globals.mqh - CANONICAL v2.17                               |
 //| Account-safe GV helpers, logging, validation, perf timer         |
 //+------------------------------------------------------------------+
+#property strict
 #ifndef CORE_GLOBALS_MQH
 #define CORE_GLOBALS_MQH
 
@@ -53,15 +54,24 @@ bool IsValidVolume(const double volume)
   {
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   // FIX: Handle symbol info failure — if minLot is 0, reject
+   if(minLot <= 0.0 || maxLot <= 0.0) return false;
    return (volume >= minLot && volume <= maxLot);
   }
 
-bool IsMarketOpen()
+// FIX: Renamed from IsMarketOpen — this checks tick freshness, not market hours.
+// For actual market hours, use SymbolInfoSessionTrade.
+bool IsTickFresh(const int maxAgeSeconds = 60)
   {
    MqlTick lastTick;
    if(!SymbolInfoTick(_Symbol, lastTick)) return false;
-   return ((TimeCurrent() - lastTick.time) < 60);
+   // Also check that tick has a valid price
+   if(lastTick.bid <= 0.0 || lastTick.ask <= 0.0) return false;
+   return ((TimeCurrent() - lastTick.time) < maxAgeSeconds);
   }
+
+// Backward-compatible alias
+bool IsMarketOpen() { return IsTickFresh(60); }
 
 bool IsSpreadAcceptable(const double maxPips)
   {

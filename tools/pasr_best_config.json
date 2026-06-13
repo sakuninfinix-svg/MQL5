@@ -1,0 +1,23 @@
+{
+  "lot_size": 0.01,
+  "risk_percent": 1.9513669483944587,
+  "sl_multiplier": 2.1735187853797644,
+  "tp_multiplier": 1.7512178830920717,
+  "max_daily_loss_pct": 3.0,
+  "max_drawdown_pct": 10.0,
+  "max_open_positions": 3,
+  "use_break_even": true,
+  "break_even_atr_mult": 1.0,
+  "use_trailing_stop": true,
+  "trail_atr_mult": 1.0,
+  "atr_period": 15,
+  "adx_period": 16,
+  "adx_trend_threshold": 26.509859228786183,
+  "spread_filter_pips": 3.0,
+  "session_start_hour": 0,
+  "session_end_hour": 23,
+  "min_pattern_score": 42.52490469369814,
+  "pattern_lookback_bars": 39,
+  "pin_bar_ratio": 2.0,
+  "engulf_multiplier": 1.1
+}

@@ -7,13 +7,15 @@
 
 set -e  # Exit on error
 
-# Configuration paths
-MT5_DIR="/media/agus/40A604FEA604F666/Program Files/MetaTrader 5"
-MT5_DATA_DIR="/media/agus/40A604FEA604F666/Users/agsi/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075"
-EA_FILE="$MT5_DATA_DIR/MQL5/Experts/PASR_MODULAR.mq5"
-PRESETS_DIR="$MT5_DATA_DIR/MQL5/Presets"
-TOOLS_DIR="$MT5_DATA_DIR/MQL5/tools"
-TESTER_DIR="$MT5_DATA_DIR/Tester"
+# Configuration paths (auto-detect from script location)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TOOLS_DIR="$SCRIPT_DIR"
+MQL5_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+DATA_DIR="$(cd "$MQL5_DIR/.." && pwd)"
+MT5_DIR="/home/agus/.mt5/drive_c/Program Files/MetaTrader 5"
+EA_FILE="$MQL5_DIR/Experts/PASR_MODULAR.mq5"
+PRESETS_DIR="$MQL5_DIR/Presets"
+TESTER_DIR="$DATA_DIR/Tester"
 
 # Colors for output
 RED='\033[0;31m'
@@ -222,7 +224,7 @@ main() {
     # Run baseline test
     log_info "Starting optimization process..."
     run_single_test "Baseline Test" \
-        "$PRESETS_DIR/PASR_v2_Baseline.set" \
+        "$PRESETS_DIR/PASR_EPIC_MASTER.set" \
         "$TESTER_DIR/Baseline"
     
     # Ask user for optimization approach
@@ -240,30 +242,30 @@ main() {
         1)
             log_info "Running full systematic optimization..."
             run_optimization "Risk_Optimization" \
-                "$PRESETS_DIR/PASR_v2_RiskOptimization.ini" \
+                "$PRESETS_DIR/PASR_EPIC_MASTER.set" \
                 "$TESTER_DIR/Risk_Optimization"
             
             run_optimization "Market_Optimization" \
-                "$PRESETS_DIR/PASR_v2_MarketOptimization.ini" \
+                "$PRESETS_DIR/PASR_EPIC_MASTER.set" \
                 "$TESTER_DIR/Market_Optimization"
             
             run_optimization "Pattern_Optimization" \
-                "$PRESETS_DIR/PASR_v2_PatternOptimization.ini" \
+                "$PRESETS_DIR/PASR_EPIC_MASTER.set" \
                 "$TESTER_DIR/Pattern_Optimization"
             ;;
         2)
             run_optimization "Risk_Optimization" \
-                "$PRESETS_DIR/PASR_v2_RiskOptimization.ini" \
+                "$PRESETS_DIR/PASR_EPIC_MASTER.set" \
                 "$TESTER_DIR/Risk_Optimization"
             ;;
         3)
             run_optimization "Market_Optimization" \
-                "$PRESETS_DIR/PASR_v2_MarketOptimization.ini" \
+                "$PRESETS_DIR/PASR_EPIC_MASTER.set" \
                 "$TESTER_DIR/Market_Optimization"
             ;;
         4)
             run_optimization "Pattern_Optimization" \
-                "$PRESETS_DIR/PASR_v2_PatternOptimization.ini" \
+                "$PRESETS_DIR/PASR_EPIC_MASTER.set" \
                 "$TESTER_DIR/Pattern_Optimization"
             ;;
         5)

@@ -62,7 +62,18 @@ public:
       plan.sl = ctx.risk_result.stopLoss;
       plan.tp = ctx.risk_result.takeProfit;
       plan.lot = ctx.risk_result.lotSize;
-      plan.slPoints = ctx.signal.slPoints;
+
+      // FIX: Normalize lot size to broker's volume step
+      double volStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+      double volMin = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+      double volMax = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+      if(volStep > 0) plan.lot = MathRound(plan.lot / volStep) * volStep;
+      plan.lot = MathMax(volMin, MathMin(volMax, plan.lot));
+
+      // FIX: Recalculate slPoints from actual risk-adjusted prices (tpPoints not on TradePlan struct)
+      plan.slPoints = (plan.entryPrice > 0 && plan.sl > 0) ?
+         MathAbs(plan.entryPrice - plan.sl) / SymbolInfoDouble(_Symbol, SYMBOL_POINT) : 0;
+
       plan.comment = StringFormat("PASR|%s|%.0f", ctx.signal.primarySource, ctx.signal.confidence * 100.0);
       bool buyStopsOk = (plan.direction == SIGNAL_BUY && plan.sl < plan.entryPrice && plan.tp > plan.entryPrice);
       bool sellStopsOk = (plan.direction == SIGNAL_SELL && plan.sl > plan.entryPrice && plan.tp < plan.entryPrice);
@@ -74,7 +85,7 @@ public:
       ctx.plan.sl = plan.sl;
       ctx.plan.tp = plan.tp;
       ctx.plan.slPoints = plan.slPoints;
-      ctx.plan.tpPoints = ctx.signal.tpPoints;
+      // tpPoints removed - not in TradePlan struct
       ctx.plan.lot = plan.lot;
       ctx.plan.valid = plan.valid;
 

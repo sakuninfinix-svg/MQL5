@@ -13,6 +13,7 @@
 *.swp
 *.swo
 *.tmp
+.mql-auto-forwards
 
 # Dependencies
 node_modules/

@@ -1,4 +1,4 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //| AI/AIOrchestrator.mqh — v3.30                                    |
 //| AI-first, risk-aware strategy brain for PASR                      |
 //| Business constants are sourced from StrategyConfig.AI             |
@@ -54,7 +54,7 @@ private:
    datetime                  m_lastStrategyChange;
    int                       m_regimeStreak;
    double                    m_entryThreshold;
-   double                    m_riskMultiplier;
+   double                    m_risk_multiplier;
 
    bool                      m_useAI;
    double                    m_vetoThreshold;
@@ -175,32 +175,32 @@ private:
          case REGIME_TREND_DOWN:
             m_currentStrategy = STRAT_TREND_FOLLOW;
             m_entryThreshold = m_cfg.AI.TrendEntryThreshold;
-            m_riskMultiplier = m_cfg.AI.TrendRiskMultiplier;
+            m_risk_multiplier = m_cfg.AI.TrendRiskMultiplier;
             m_strategyConfidence = m_cfg.AI.TrendStrategyConfidence;
             break;
          case REGIME_RANGE:
             m_currentStrategy = STRAT_RANGE_TRADING;
             m_entryThreshold = m_cfg.AI.RangeEntryThreshold;
-            m_riskMultiplier = m_cfg.AI.RangeRiskMultiplier;
+            m_risk_multiplier = m_cfg.AI.RangeRiskMultiplier;
             m_strategyConfidence = m_cfg.AI.RangeStrategyConfidence;
             break;
          case REGIME_VOLATILE:
             m_currentStrategy = STRAT_BREAKOUT;
             m_entryThreshold = m_cfg.AI.VolatileEntryThreshold;
-            m_riskMultiplier = m_cfg.AI.VolatileRiskMultiplier;
+            m_risk_multiplier = m_cfg.AI.VolatileRiskMultiplier;
             m_strategyConfidence = m_cfg.AI.VolatileStrategyConfidence;
             break;
          case REGIME_CRASH:
          case REGIME_UNKNOWN:
             m_currentStrategy = STRAT_CONSERVATIVE;
             m_entryThreshold = m_cfg.AI.ConservativeEntryThreshold;
-            m_riskMultiplier = m_cfg.AI.ConservativeRiskMultiplier;
+            m_risk_multiplier = m_cfg.AI.ConservativeRiskMultiplier;
             m_strategyConfidence = m_cfg.AI.ConservativeStrategyConfidence;
             break;
          default:
             m_currentStrategy = STRAT_SCALP_AI;
             m_entryThreshold = m_cfg.AI.ScalpEntryThreshold;
-            m_riskMultiplier = m_cfg.AI.ScalpRiskMultiplier;
+            m_risk_multiplier = m_cfg.AI.ScalpRiskMultiplier;
             m_strategyConfidence = m_cfg.AI.ScalpStrategyConfidence;
             break;
         }
@@ -271,7 +271,7 @@ private:
       if(margin < 0.0 || decision.expectedR < m_cfg.AI.MinExpectedR || decision.failureProbability > m_cfg.AI.MaxFailureProbability)
         {
          decision.decisionClass = AI_DECISION_NO_TRADE;
-         decision.riskMultiplier = 0.0;
+         decision.risk_multiplier = 0.0;
          decision.reason = StringFormat("AI_NO_TRADE conf=%.2f th=%.2f expR=%.2f fail=%.2f",
                                         res.confidence, threshold, decision.expectedR, decision.failureProbability);
          return false;
@@ -287,16 +287,16 @@ private:
 
       double volBoost = (m_detectedRegime == REGIME_VOLATILE) ? m_cfg.AI.VolatileSLBoost : 1.0;
       double rangeTighten = (m_detectedRegime == REGIME_RANGE) ? m_cfg.AI.RangeSLTighten : 1.0;
-      decision.recommendedSL_ATR = Clamp(1.0 * volBoost * rangeTighten / MathMax(0.7, m_riskMultiplier),
+      decision.recommendedSL_ATR = Clamp(1.0 * volBoost * rangeTighten / MathMax(0.7, m_risk_multiplier),
                                          m_cfg.AI.MinSL_ATR, m_cfg.AI.MaxSL_ATR);
       decision.recommendedTP_ATR = Clamp(decision.recommendedSL_ATR * MathMax(m_cfg.AI.MinTPExpectedR, decision.expectedR),
                                          m_cfg.AI.MinTP_ATR, m_cfg.AI.MaxTP_ATR);
-      decision.riskMultiplier = Clamp(m_riskMultiplier * res.confidence * (1.0 - decision.failureProbability * m_cfg.AI.RiskFailureWeight),
+      decision.risk_multiplier = Clamp(m_risk_multiplier * res.confidence * (1.0 - decision.failureProbability * m_cfg.AI.RiskFailureWeight),
                                       m_cfg.AI.MinRiskMultiplier, m_cfg.AI.MaxRiskMultiplier);
       decision.reason = StringFormat("AI_RISK_AWARE %s conf=%.2f expR=%.2f fail=%.2f SL=%.2fATR TP=%.2fATR risk=%.2f",
                                      GetStrategyDescription(), decision.confidence, decision.expectedR,
                                      decision.failureProbability, decision.recommendedSL_ATR,
-                                     decision.recommendedTP_ATR, decision.riskMultiplier);
+                                     decision.recommendedTP_ATR, decision.risk_multiplier);
       return true;
      }
 
@@ -334,7 +334,7 @@ public:
         m_open_features_valid(false), m_last_sequence_valid(false),
         m_currentStrategy(STRAT_NONE), m_detectedRegime(REGIME_UNKNOWN),
         m_strategyConfidence(0.0), m_lastStrategyChange(0), m_regimeStreak(0),
-        m_entryThreshold(0.70), m_riskMultiplier(1.0),
+        m_entryThreshold(0.70), m_risk_multiplier(1.0),
         m_useAI(true), m_vetoThreshold(AI_DEFAULT_CONF_THRESHOLD),
         m_driftVetoThreshold(0.75), m_highConfidenceThreshold(0.80),
         m_hATRRegime(INVALID_HANDLE), m_hADXRegime(INVALID_HANDLE)
@@ -355,7 +355,7 @@ public:
    EMarketRegime   GetCurrentRegime() const { return m_detectedRegime; }
    double          GetStrategyConfidence() const { return m_strategyConfidence; }
    double          GetEntryThreshold() const { return m_entryThreshold; }
-   double          GetRiskMultiplier() const { return m_riskMultiplier; }
+   double          GetRiskMultiplier() const { return m_risk_multiplier; }
    string          GetStrategyDescription() const;
 
    void ConfigureParameters(bool useAI, double vetoThresh, double driftVeto, double highThresh)
@@ -664,11 +664,11 @@ public:
       m_last_label.hitTPBeforeSL = was_profitable;
       m_last_label.durationBars = 0.0;
       if(m_last_result.direction > 0)
-         m_last_label.labelClass = was_profitable ? AI_LABEL_GOOD_BUY : AI_LABEL_BAD_BUY;
+         m_last_label.label_class = was_profitable ? AI_LABEL_GOOD_BUY : AI_LABEL_BAD_BUY;
       else if(m_last_result.direction < 0)
-         m_last_label.labelClass = was_profitable ? AI_LABEL_GOOD_SELL : AI_LABEL_BAD_SELL;
+         m_last_label.label_class = was_profitable ? AI_LABEL_GOOD_SELL : AI_LABEL_BAD_SELL;
       else
-         m_last_label.labelClass = AI_LABEL_NO_TRADE;
+         m_last_label.label_class = AI_LABEL_NO_TRADE;
 
       sample.label = was_profitable ? MathMax(0.25, MathMin(1.0, m_last_label.realizedR)) : -1.0;
       sample.weight = MathMax(0.1, MathMin(2.0, m_last_result.confidence + MathAbs(m_last_label.realizedR) * 0.25));
@@ -756,7 +756,7 @@ void CAIOrchestrator::AdjustRiskParameters(double &riskPercent, double &maxDrawd
       maxDrawdown *= 0.5;
      }
    else
-      riskPercent *= m_riskMultiplier;
+      riskPercent *= m_risk_multiplier;
   }
 
 #endif // __AI_ORCHESTRATOR_MQH__

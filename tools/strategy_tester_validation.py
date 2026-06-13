@@ -70,7 +70,7 @@ def write_text(path: Path, text: str) -> None:
 
 
 def tester_ini(mql5_root: Path, out_dir: Path, args: argparse.Namespace) -> str:
-    preset = mql5_root / "Presets" / "PASR_BusinessLogicValidation.set"
+    preset = mql5_root / "Presets" / "PASR_EPIC_MASTER.set"
     report = out_dir / "PASR_MODULAR_validation_report"
     if platform.system() == "Linux":
         preset = Path(wine_path(preset))

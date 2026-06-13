@@ -4,7 +4,8 @@
 //+------------------------------------------------------------------+
 #ifndef CORE_IMANAGER_MQH
 #define CORE_IMANAGER_MQH
-#include "IDataManager.mqh"
+class CDataManager;
+#define IDataManager CDataManager
 #include "EventBus.mqh"
 #include "Config/Types.mqh"
 #define PASR_MAX_EVENT_ID 100

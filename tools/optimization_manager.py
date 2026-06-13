@@ -94,7 +94,7 @@ class PASROptimizationManager:
         """Run baseline test with default parameters"""
         print("🔄 Running baseline test...")
         
-        preset_file = self.presets_dir / "PASR_v2_Baseline.set"
+        preset_file = self.presets_dir / "PASR_EPIC_MASTER.set"
         output_dir = Path(self.config.data_dir) / "Tester" / "Baseline"
         output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -207,12 +207,15 @@ class PASROptimizationManager:
 def main():
     """Main execution function"""
     
-    # MT5 Configuration
+    # MT5 Configuration (detect paths from script location)
+    script_dir = Path(__file__).resolve().parent
+    mql5_dir = script_dir.parent
+    data_dir = mql5_dir.parent
     mt5_config = MT5Config(
-        terminal_path="/media/agus/40A604FEA604F666/Program Files/MetaTrader 5/terminal64.exe",
-        tester_path="/media/agus/40A604FEA604F666/Program Files/MetaTrader 5/metatester64.exe",
-        data_dir="/media/agus/40A604FEA604F666/Users/agsi/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075",
-        ea_path="/media/agus/40A604FEA604F666/Users/agsi/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/Experts/PASR_MODULAR.mq5",
+        terminal_path=str(Path.home() / ".mt5/drive_c/Program Files/MetaTrader 5/terminal64.exe"),
+        tester_path=str(Path.home() / ".mt5/drive_c/Program Files/MetaTrader 5/metatester64.exe"),
+        data_dir=str(data_dir),
+        ea_path=str(mql5_dir / "Experts/PASR_MODULAR.mq5"),
         symbol="EURUSD",
         timeframe="H1",
         deposit=10000,
@@ -236,9 +239,9 @@ def main():
     
     # Run optimization phases
     optimization_phases = [
-        ("Risk_Optimization", "PASR_v2_RiskOptimization.ini"),
-        ("Market_Optimization", "PASR_v2_MarketOptimization.ini"),
-        ("Pattern_Optimization", "PASR_v2_PatternOptimization.ini")
+        ("Risk_Optimization", "PASR_EPIC_MASTER.set"),
+        ("Market_Optimization", "PASR_EPIC_MASTER.set"),
+        ("Pattern_Optimization", "PASR_EPIC_MASTER.set")
     ]
     
     for phase_name, preset_file in optimization_phases:

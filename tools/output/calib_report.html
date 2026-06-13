@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html><head><title>PASR Calibration Report</title></head>
+<body style="font-family:sans-serif;max-width:800px;margin:40px auto">
+<h1>PASR Confidence Calibration Report</h1>
+<p>Generated: 2026-06-12T16:52:48.008907+00:00 | Method: <strong>platt</strong></p>
+<h2>Metrics</h2>
+<table border="1" cellpadding="6"><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Brier Score</td><td>0.2117</td></tr>
+<tr><td>Log Loss</td><td>0.6142</td></tr>
+<tr><td>ROC AUC</td><td>0.8776</td></tr>
+<tr><td>Train samples</td><td>4000</td></tr>
+<tr><td>Test samples</td><td>1000</td></tr>
+</table>
+<h2>Exported MQL5 Params</h2>
+<pre>{
+  "platt_A": 1.2793142293343236,
+  "platt_B": -0.3465543618093771,
+  "threshold": 0.55,
+  "agreement_alpha": 0.3
+}</pre>
+<h2>Deployment</h2>
+<ol>
+<li>Copy <code>PASR_calibration_params.bin</code> to <code>MT5/MQL5/Files/</code></li>
+<li>Restart EA. <code>ConfidenceCalibrator.mqh</code> loads it automatically.</li>
+</ol>
+</body></html>

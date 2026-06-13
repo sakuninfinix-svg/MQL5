@@ -59,7 +59,9 @@ public:
         }
       if(!ctx.new_bar)
         {
-         ctx.plan.valid = false;
+         // FIX: Do NOT invalidate the plan on intra-bar ticks.
+         // The plan was established on the new-bar tick; intra-bar ticks should
+         // still allow downstream stages (Execution, Position) to see it.
          return STAGE_SKIP;
         }
 

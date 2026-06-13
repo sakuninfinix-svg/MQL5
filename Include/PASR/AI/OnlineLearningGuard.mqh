@@ -28,19 +28,21 @@ private:
    int      m_drift_count;
    double   m_last_drift;
 
-   double ComputePSI(const SAIFeatureVector &fv)
+   // FIX: Renamed from ComputePSI — this computes a normalized z-score average,
+   // NOT true Population Stability Index. The name was misleading.
+   double ComputeDriftScore(const SAIFeatureVector &fv)
      {
       if(!m_ref_built) return 0.0;
-      double psi = 0.0;
+      double score = 0.0;
       int valid_dims = 0;
       for(int i = 0; i < AI_FEATURE_DIM; i++)
         {
          double ref_sd = MathSqrt(MathMax(m_ref_var[i], 1e-10));
          double z = MathAbs(fv.features[i] - m_ref_mean[i]) / ref_sd;
-         psi += MathMin(z, 3.0) / 3.0;
+         score += MathMin(z, 3.0) / 3.0;
          valid_dims++;
         }
-      return (valid_dims > 0) ? psi / valid_dims : 0.0;
+      return (valid_dims > 0) ? score / valid_dims : 0.0;
      }
 
 public:
@@ -89,11 +91,24 @@ public:
 
    double ComputeDrift(const SAIFeatureVector &fv)
      {
-      FeedFeature(fv);
-      m_last_drift = ComputePSI(fv);
+      // FIX: If reference not built yet, just feed and return 0.0
+      // Do NOT compute drift on a feature that is part of the reference itself
+      if(!m_ref_built)
+        {
+         FeedFeature(fv);
+         m_last_drift = 0.0;
+         return 0.0;
+        }
+
+      // Compute drift BEFORE feeding — avoid self-inclusion bias
+      m_last_drift = ComputeDriftScore(fv);
       m_drift_history[m_drift_head] = m_last_drift;
       m_drift_head = (m_drift_head + 1) % GUARD_WINDOW;
       m_drift_count = MathMin(m_drift_count + 1, GUARD_WINDOW);
+
+      // Feed after scoring (for next window's reference)
+      FeedFeature(fv);
+
       return m_last_drift;
      }
 

@@ -239,6 +239,15 @@ struct PipelineContext
    float             ai_score;
    float             drift_score;
    bool              ai_veto;
+   // FIX: Additional AI fields for infer stage gating
+   double            ai_confidence;
+   double            ai_min_confidence;
+   bool              ai_valid;
+
+   // FIX: Pattern fields for downstream stage access
+   bool              pattern_detected;
+   ENUM_SIGNAL_DIR   pattern_direction;
+   double            pattern_score;
 
    SRiskResult       risk_result;
    bool              trading_allowed;
@@ -297,6 +306,12 @@ struct PipelineContext
       ai_score = 0;
       drift_score = 0;
       ai_veto = false;
+      ai_confidence = 0.0;
+      ai_min_confidence = 0.0;
+      ai_valid = false;
+      pattern_detected = false;
+      pattern_direction = SIGNAL_NONE;
+      pattern_score = 0.0;
       ZeroMemory(risk_result);
       trading_allowed = false;
       ZeroMemory(plan);

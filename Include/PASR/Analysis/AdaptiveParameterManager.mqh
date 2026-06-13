@@ -152,7 +152,7 @@ public:
       return true;
      }
 
-   bool Initialize(DataManager *dataMgr, CEventBus *eventBus,
+   bool Initialize(CDataManager *dataMgr, CEventBus *eventBus,
                    CMarketRegimeDetector *regimeDetector,
                    double baseSL, double baseTP, double baseRisk)
      {

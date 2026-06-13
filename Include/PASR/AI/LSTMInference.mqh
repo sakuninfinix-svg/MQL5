@@ -56,9 +56,16 @@ private:
    bool      m_sequence_filled;
    int       m_rand_seed;
 
-   double Sigmoid(double x) { return 1.0 / (1.0 + MathExp(-x)); }
+   double Sigmoid(double x)
+     {
+      // FIX: Clamp input to prevent MathExp overflow (produces NaN for x < -709)
+      x = MathMax(-500.0, MathMin(500.0, x));
+      return 1.0 / (1.0 + MathExp(-x));
+     }
    double Tanh(double x)
      {
+      // FIX: Clamp input to prevent MathExp overflow
+      x = MathMax(-500.0, MathMin(500.0, x));
       double e2 = MathExp(2.0 * x);
       return (e2 - 1.0) / (e2 + 1.0);
      }

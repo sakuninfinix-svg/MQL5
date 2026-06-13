@@ -88,7 +88,10 @@ public:
       plan.urgency         = (sig.confidence >= 0.75) ? SIGNAL_URGENCY_HIGH
                            : (sig.confidence >= 0.45) ? SIGNAL_URGENCY_MEDIUM
                            : SIGNAL_URGENCY_LOW;
-      plan.partialClosePct = MathMax(0.0, MathMin(100.0, m_cfg.Risk.PartialClosePct * 100.0));
+      // FIX: Handle both fraction (0.5) and percentage (50) input formats
+      double rawPct = m_cfg.Risk.PartialClosePct;
+      plan.partialClosePct = MathMax(0.0, MathMin(100.0,
+         (rawPct <= 1.0) ? rawPct * 100.0 : rawPct));
 
       if(sig.direction == SIGNAL_BUY)
         {

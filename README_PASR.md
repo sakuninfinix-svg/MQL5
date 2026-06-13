@@ -119,6 +119,18 @@ OOP_ARCHITECTURE
 PERF_METRICS
 ```
 
+---
+
+## Compile On Windsurf
+
+If `mql_tools.compileFile` hits the Linux/Wine temp-path bug, use the workspace task:
+
+- `Compile current MQL5 file`
+
+The task runs [`tools/compile_mq5.sh`](./tools/compile_mq5.sh) and compiles the active `.mq5` file through MetaEditor with a Wine-safe path conversion.
+
+Because the task is marked as the default build task, you can also run it with `Ctrl+Shift+B` in most VS Code-compatible editors.
+
 Remaining cleanup for legacy `PERF_METRICS` is tracked in Issue #181.
 
 ---

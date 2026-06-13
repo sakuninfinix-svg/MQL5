@@ -50,7 +50,10 @@ public:
          m_timer.Start();
          if(ctx.new_bar) m_regime.OnNewBar();
          ctx.regime = m_regime.GetRegime();
-         ctx.regime_confidence = m_regime.IsReady() ? 1.0 : 0.0;
+         // FIX: Use ADX-based continuous confidence instead of binary 0/1
+         double adx = m_regime.GetADX();
+         double adxThresh = m_regime.GetADXThreshold();
+         ctx.regime_confidence = (adxThresh > 0) ? MathMin(1.0, adx / (adxThresh * 1.5)) : (m_regime.IsReady() ? 0.7 : 0.3);
          if(m_profiling) m_timer.Log("Stage5_RegimeDet");
          return STAGE_OK;
         }

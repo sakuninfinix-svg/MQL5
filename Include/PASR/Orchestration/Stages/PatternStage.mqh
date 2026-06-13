@@ -67,6 +67,12 @@ public:
       EMarketRegime regime = (ctx.regime == REGIME_UNKNOWN) ? REGIME_RANGE : ctx.regime;
       SPatternResult result;
       bool found = m_pattern.Detect(rates, 1, atrPoints, regime, result);
+
+      // FIX: Store pattern result in context for downstream stages
+      ctx.pattern_detected = found;
+      ctx.pattern_direction = (ENUM_SIGNAL_DIR)result.direction;
+      ctx.pattern_score = result.confluenceScore;
+
       if(m_debug)
         {
          if(found)

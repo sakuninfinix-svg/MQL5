@@ -19,6 +19,7 @@ private:
    double   m_threshold;
    double   m_agreement_alpha;
    int      m_calib_samples;
+   int      m_correct_count;         // FIX: track actual accuracy rate
    double   m_sum_correct_conf;
    double   m_sum_total_conf;
    bool     m_external_params_loaded;
@@ -35,9 +36,9 @@ private:
 
 public:
    CConfidenceCalibrator()
-      : IManager(), m_platt_A(-1.0), m_platt_B(0.0),
+      : IManager(), m_platt_A(1.0), m_platt_B(0.0),
         m_threshold(AI_DEFAULT_CONF_THRESHOLD), m_agreement_alpha(0.3),
-        m_calib_samples(0), m_sum_correct_conf(0.0), m_sum_total_conf(0.0),
+        m_calib_samples(0), m_correct_count(0), m_sum_correct_conf(0.0), m_sum_total_conf(0.0),
         m_external_params_loaded(false), m_params_file("")
      {}
 
@@ -67,13 +68,17 @@ public:
      {
       m_calib_samples++;
       m_sum_total_conf += raw_conf;
-      if(was_correct) m_sum_correct_conf += raw_conf;
+      if(was_correct) m_correct_count++;
       if(m_calib_samples % 50 == 0)
         {
-         double accuracy_est = m_sum_correct_conf / MathMax(1, m_calib_samples);
+         // FIX: Use actual accuracy rate (correct / total), not mean confidence
+         double accuracy_est = (double)m_correct_count / MathMax(1, m_calib_samples);
          double target_logit = MathLog(MathMax(0.01, accuracy_est) /
                                        MathMax(0.01, 1.0 - accuracy_est));
-         m_platt_B = target_logit;
+         // Update both A (scale) and B (offset) for proper Platt scaling
+         double target_slope = MathMax(0.5, accuracy_est * 2.0);
+         m_platt_A = target_slope;
+         m_platt_B = target_logit - target_slope * 0.5;
         }
      }
 

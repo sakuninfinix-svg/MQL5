@@ -155,9 +155,30 @@ private:
       double tp = plan.tp;
       ClampStopsToMinLevel(plan.direction, sl, tp);
 
-      bool sent = (plan.direction == SIGNAL_BUY)
-         ? m_trade.Buy(plan.lot, _Symbol, 0, sl, tp, plan.comment)
-         : m_trade.Sell(plan.lot, _Symbol, 0, sl, tp, plan.comment);
+      // FIX: Use plan.entryPrice for limit orders when it differs from market price
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double marketPrice = (plan.direction == SIGNAL_BUY) ? ask : bid;
+      double priceThreshold = _Point * 10; // 10 points tolerance for "market price"
+
+      bool useLimitOrder = (plan.entryPrice > 0 &&
+                            MathAbs(plan.entryPrice - marketPrice) > priceThreshold);
+
+      bool sent;
+      if(useLimitOrder)
+        {
+         // Limit order: use plan.entryPrice
+         sent = (plan.direction == SIGNAL_BUY)
+            ? m_trade.BuyLimit(plan.lot, plan.entryPrice, _Symbol, sl, tp, ORDER_TIME_GTC, 0, plan.comment)
+            : m_trade.SellLimit(plan.lot, plan.entryPrice, _Symbol, sl, tp, ORDER_TIME_GTC, 0, plan.comment);
+        }
+      else
+        {
+         // Market order: use current price (0 = auto)
+         sent = (plan.direction == SIGNAL_BUY)
+            ? m_trade.Buy(plan.lot, _Symbol, 0, sl, tp, plan.comment)
+            : m_trade.Sell(plan.lot, _Symbol, 0, sl, tp, plan.comment);
+        }
 
       result.retcode = (int)m_trade.ResultRetcode();
       result.comment = m_trade.ResultComment();
@@ -209,9 +230,18 @@ public:
       if(!IManager::Init(data, bus)) return false;
       m_trade.SetExpertMagicNumber(m_cfg.MagicNumber);
       m_trade.SetDeviationInPoints((int)MathMax(10.0, m_cfg.Market.SpreadFilterPips * 10.0));
-      m_trade.SetTypeFilling(ORDER_FILLING_IOC);
+
+      // FIX: Detect supported filling modes instead of hardcoding IOC
+      int fillingMode = (int)SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+      if((fillingMode & SYMBOL_FILLING_IOC) != 0)
+         m_trade.SetTypeFilling(ORDER_FILLING_IOC);
+      else if((fillingMode & SYMBOL_FILLING_FOK) != 0)
+         m_trade.SetTypeFilling(ORDER_FILLING_FOK);
+      else
+         m_trade.SetTypeFilling(ORDER_FILLING_RETURN);
+
       m_snapshot.maxRetries = m_maxRetries;
-      Print("[Exec] v3.20 Init OK");
+      Print("[Exec] v3.20 Init OK — filling mode set to broker-supported mode");
       return true;
      }
 
@@ -298,6 +328,8 @@ public:
       if(m_ledger.IsStale(PASR_EXEC_LEDGER_TIMEOUT_SEC))
         {
          m_ledger.MarkTimeout("BrokerConfirmationTimeout");
+         // FIX: Clear pending state on ledger timeout to prevent duplicate positions
+         ClearPendingRetry("LedgerTimeout");
          SyncLedgerSnapshot();
         }
       if(!m_has_pending) return;

@@ -241,28 +241,56 @@ class AITrainingDataPreprocessor:
         """Balance dataset by undersampling majority class"""
         if 'label' not in df.columns:
             return df
-        
-        label_counts = df['label'].value_counts()
+
+        # Exclude neutral label (0.0 = no trade) from balancing - not a real outcome
+        df_trainable = df[df['label'] != 0.0].copy()
+        if len(df_trainable) == 0:
+            return df
+            
+        label_counts = df_trainable['label'].value_counts()
         min_count = label_counts.min()
         
-        # Only balance if severe imbalance
+        # Only balance if severe imbalance AND minimum class has reasonable samples
         max_count = label_counts.max()
         if max_count / min_count < 3.0:  # Less than 3:1 ratio
-            print("Dataset is reasonably balanced, skipping balancing")
+            print("Trainable labels (+1/-1) are reasonably balanced, skipping balancing")
+            # Return original df (including neutral samples if any)
             return df
+        
+        # Don't balance if minority class is tiny (< 50 samples) - would lose too much data
+        if min_count < 50:
+            print(f"Minority class too small ({min_count} samples), skipping aggressive balancing")
+            # Instead, just slightly undersample the majority class
+            target_max = min(max_count, min_count * 5)  # Cap at 5:1 ratio
+            balanced_dfs = []
+            for label in label_counts.index:
+                label_df = df_trainable[df_trainable['label'] == label]
+                if len(label_df) > target_max:
+                    balanced_df = label_df.sample(n=target_max, random_state=42)
+                else:
+                    balanced_df = label_df
+                balanced_dfs.append(balanced_df)
+            # Add back neutral samples
+            neutral_df = df[df['label'] == 0.0]
+            balanced_dfs.append(neutral_df)
+            balanced_df = pd.concat(balanced_dfs, ignore_index=True)
+            print(f"Mildly balanced dataset size: {len(balanced_df)} (capped at 5:1 ratio on trainable labels)")
+            return balanced_df
         
         print(f"Balancing dataset: max_count={max_count}, min_count={min_count}")
         
         balanced_dfs = []
         for label in label_counts.index:
-            label_df = df[df['label'] == label]
+            label_df = df_trainable[df_trainable['label'] == label]
             if len(label_df) > min_count:
                 # Undersample
                 balanced_df = label_df.sample(n=min_count, random_state=42)
             else:
                 balanced_df = label_df
             balanced_dfs.append(balanced_df)
-        
+        # Add back neutral samples
+        neutral_df = df[df['label'] == 0.0]
+        balanced_dfs.append(neutral_df)
         balanced_df = pd.concat(balanced_dfs, ignore_index=True)
         print(f"Balanced dataset size: {len(balanced_df)}")
         

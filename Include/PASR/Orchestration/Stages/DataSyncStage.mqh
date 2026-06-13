@@ -34,7 +34,7 @@ public:
       if(m_data == NULL)
         {
          if(m_debug) Print("[DataSyncStage] DataManager is NULL");
-         return STAGE_ABORT;
+         return STAGE_SKIP;
         }
       if(!m_data.IsInitialized())
         {

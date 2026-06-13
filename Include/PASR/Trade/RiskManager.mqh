@@ -192,6 +192,9 @@ private:
          if(m_debugMode) PrintFormat("[Risk] Duplicate PnL ignored ticket=%I64u profit=%.2f", ticket, profit);
          return;
         }
+      // FIX: Update consec loss counter BEFORE adding PnL — both operations now protected
+      // by the single duplicate check above, preventing double-counting if dual event paths fire
+      m_consecLoss = (profit < 0.0) ? m_consecLoss + 1 : 0;
       m_dailyLoss += profit;
       if(ticket > 0) MarkPnLAccounted(ticket, profit);
       CheckDailyLossBreaker(m_dailyLoss);
@@ -291,7 +294,8 @@ private:
          if(m_debugMode) PrintFormat("[Risk] Duplicate trade-close ignored ticket=%I64u profit=%.2f", ticket, profit);
          return;
         }
-      OnTradeClosed(profit);
+      // FIX: OnTradeClosed (consecLoss sync) is now called inside AccumulateClosedPnL
+      // after the duplicate check, so both operations are protected by a single gate.
       AccumulateClosedPnL(ticket, profit);
      }
 

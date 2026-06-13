@@ -319,7 +319,7 @@ public:
       m_params.momentum_score = 0.0;
      }
 
-   EMarketRegime Detect(const string symbol, ENUM_TIMEFRAMES tf, DataManager *dataMgr)
+   EMarketRegime Detect(const string symbol, ENUM_TIMEFRAMES tf, CDataManager *dataMgr)
      {
       datetime currentBarTime = iTime(symbol, tf, 0);
       if(currentBarTime == m_last_update && m_update_count > 0)

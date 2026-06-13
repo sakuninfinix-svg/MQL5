@@ -1,11 +1,16 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //| PASR_MODULAR.mq5                                                 |
 //| Centralized Modular PASR Expert Advisor                          |
 //+------------------------------------------------------------------+
 #property strict
 #include <PASR/Core/PASR.mqh>
 #include <PASR/Central/PASRKernel.mqh>
+#include <PASR/Central/ModuleNames.mqh>
+#include <PASR/Central/ModuleRegistry.mqh>
+#include <PASR/Central/ServiceLocator.mqh>
 
+input bool InpDebugMode = true;
+input bool InpEnableProfiling = true;
 input int  InpTimerSeconds = 1;
 
 input group "PASR Identity"
@@ -49,7 +54,7 @@ input int    InpAITrainIntervalBars = 5;
 input int    InpAIReplayBufferSize = 512;
 input int    InpAIMinibatchSize = 32;
 input bool   InpAIPersistWeights = true;
-input string InpAIModelFileName = "PASR_mlp_m0.bin";
+input string InpAIModelFileName = "PASR_gbr_m0.bin";
 input bool   InpAIEnableOnnx = false;
 input string InpAIModelOnnxFileName = "PASR_sequence.onnx";
 
@@ -110,6 +115,7 @@ input bool   InpEnablePushNotify = false;
 input int    InpFontSize = 9;
 
 CPASRKernel g_kernel;
+CPerformanceReport g_report;
 
 struct EAState
   {
@@ -214,9 +220,9 @@ StrategyConfig BuildConfigFromInputs()
 
    cfg.Pattern.EnablePatterns = InpEnablePatterns;
    cfg.Pattern.MinPatternScore = InpMinPatternScore;
-   cfg.Pattern.PatternLookbackBars = InpPatternLookbackBars;
+   cfg.Pattern.LookbackBars = InpPatternLookbackBars;
 
-   cfg.Pattern.MinPatternDominanceGap  = InpMinPatternDominanceGap;
+   cfg.Pattern.MinDominanceGap  = InpMinPatternDominanceGap;
    cfg.Pattern.PinBarRatio      = InpPinBarRatio;
    cfg.Pattern.EngulfMultiplier = InpEngulfMultiplier;
    cfg.Pattern.RequireConfirmation = InpRequireConfirmation;
@@ -241,15 +247,29 @@ bool ValidateConfig(const StrategyConfig &cfg)
    return true;
   }
 
+void ExportBacktestReport()
+  {
+   CPipelineEngine *pipeline = g_kernel.Pipeline();
+   if(pipeline == NULL) return;
+   CJournalManager *journal = pipeline.Journal();
+   if(journal == NULL) return;
+
+   g_report.SetJournal(journal);
+   g_report.SetFilePrefix(InpEAName);
+   g_report.ExportHTML();
+  }
+
 double BuildTesterFitness()
   {
-   double profit           = TesterStatistics(STAT_PROFIT);
-   double profitFactor     = TesterStatistics(STAT_PROFIT_FACTOR);
-   double recoveryFactor   = TesterStatistics(STAT_RECOVERY_FACTOR);
-   double expectedPayoff   = TesterStatistics(STAT_EXPECTED_PAYOFF);
-   int    trades           = (int)TesterStatistics(STAT_TRADES);
-   double equityDrawdownPct= TesterStatistics(STAT_EQUITY_DD_RELATIVE);
-   double sharpeRatio      = TesterStatistics(STAT_SHARPE_RATIO);
+    double profit           = TesterStatistics(STAT_PROFIT);
+    double profitFactor     = TesterStatistics(STAT_PROFIT_FACTOR);
+    double recoveryFactor   = TesterStatistics(STAT_RECOVERY_FACTOR);
+    double expectedPayoff   = TesterStatistics(STAT_EXPECTED_PAYOFF);
+    int    trades           = (int)TesterStatistics(STAT_TRADES);
+    double winTrades        = TesterStatistics(STAT_PROFIT_TRADES);
+    double winRate          = (trades > 0) ? (winTrades / trades) : 0.0;
+    double equityDrawdownPct= TesterStatistics(STAT_EQUITY_DD_RELATIVE);
+    double sharpeRatio      = TesterStatistics(STAT_SHARPE_RATIO);
 
    if(trades < 10)
       return -1000.0;
@@ -268,9 +288,13 @@ double BuildTesterFitness()
    score += 2.0 * MathLog(1.0 + profitFactor);
    score += 1.5 * MathLog(1.0 + recoveryFactor);
    score += MathLog(1.0 + expectedPayoff);
+   score += 0.5 * winRate;
    score += 0.25 * sharpeRatio;
    score += MathMin(2.0, (double)trades / 50.0);
    score -= 0.15 * equityDrawdownPct;
+
+   PrintFormat("[Tester] trades=%d winRate=%.2f pf=%.2f rf=%.2f exp=%.2f dd=%.2f sharpe=%.2f score=%.3f",
+               trades, winRate, profitFactor, recoveryFactor, expectedPayoff, equityDrawdownPct, sharpeRatio, score);
    return score;
   }
 
@@ -279,7 +303,7 @@ int OnInit()
    g_state.Reset();
    StrategyConfig cfg = BuildConfigFromInputs();
    if(!ValidateConfig(cfg))
-      return INIT_PARAMETERS_INCORRECT;
+      return INIT_FAILED;
 
    g_kernel.SetDebugMode(InpDebugMode);
    g_kernel.SetProfilingEnabled(InpEnableProfiling);
@@ -301,6 +325,8 @@ double OnTester()
 void OnDeinit(const int reason)
   {
    EventKillTimer();
+   if(MQLInfoInteger(MQL_TESTER))
+      ExportBacktestReport();
    g_kernel.OnDeinit(reason);
    g_state.Reset();
   }

@@ -33,12 +33,13 @@ public:
          return STAGE_SKIP;
         }
 
-      ctx.risk_result = m_risk_mgr->CheckRisk(ctx.signal);
+      SRiskResult rr = m_risk_mgr.CheckRisk(ctx.signal);
+      ctx.risk_result = rr;
       ctx.trading_allowed = ctx.risk_result.allowed;
 
       if(m_debug)
          PrintFormat("[RiskStage] Risk %s — lot=%.2f sl=%.5f tp=%.5f",
-                     approved ? "APPROVED" : "REJECTED",
+                     ctx.risk_result.allowed ? "APPROVED" : "REJECTED",
                      ctx.risk_result.lot_size,
                      ctx.risk_result.sl_price,
                      ctx.risk_result.tp_price);

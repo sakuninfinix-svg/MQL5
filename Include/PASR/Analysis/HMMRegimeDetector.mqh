@@ -88,9 +88,9 @@ private:
    int m_regime_streak;
    datetime m_last_state_change;
    
-   double m_atr_handle;
-   double m_adx_handle;
-   double m_rsi_handle;
+   int m_atr_handle;
+   int m_adx_handle;
+   int m_rsi_handle;
    
    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
    

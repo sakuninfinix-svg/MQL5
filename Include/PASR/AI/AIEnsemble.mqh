@@ -55,9 +55,24 @@ private:
       return MathMax(0.0, MathMin(1.0, outputs[0]));
      }
 
-   void TryLoadOnnxModel()
+   void TryLoadOnnxModel(const string path)
      {
-      m_onnx_loaded = false;
+      if(path == "")
+        {
+         m_onnx_loaded = false;
+         return;
+        }
+      // FIX: Pass correct parameters — ONNX_INPUT_SEQUENCE for sequence models
+      m_onnx_loaded = m_onnx.Load(path, ONNX_INPUT_SEQUENCE);
+      if(m_onnx_loaded)
+        {
+         // Query output size after successful load
+         m_last_onnx_outputs = 1;  // Default; override if bridge exposes getter
+         PrintFormat("[AIEnsemble] ONNX model loaded: %s (seq=%d feat=%d)",
+                     path, m_onnx.GetSeqLen(), m_onnx.GetFeatDim());
+        }
+      else
+         PrintFormat("[AIEnsemble] ONNX model load failed: %s", path);
      }
 
 public:
@@ -101,7 +116,7 @@ public:
         }
 
       if(cfg.enable_onnx && cfg.onnx_model_path != "")
-         TryLoadOnnxModel();
+         TryLoadOnnxModel(cfg.onnx_model_path);
 
       m_ready = (m_n_models > 0);
       return m_ready;

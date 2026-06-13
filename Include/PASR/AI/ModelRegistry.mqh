@@ -59,10 +59,14 @@ public:
    bool Register(const SModelDescriptor &desc)
    {
       if(m_count >= REGISTRY_MAX_MODELS) return false;
+      // FIX: Reject empty IDs
+      if(StringLen(desc.id) == 0) return false;
       if(Find(desc.id) >= 0) return false;  // already registered
-      
+
       m_models[m_count] = desc;
       m_models[m_count].created_at = TimeCurrent();
+      // FIX: Mark as loaded when registered into memory
+      m_models[m_count].loaded = true;
       m_count++;
       PrintFormat("ModelRegistry: Registered '%s' (type=%d, v%.1f)",
                   desc.id, (int)desc.type, desc.version);
@@ -127,10 +131,12 @@ public:
       double best_acc = -1.0;
       for(int i=0; i<m_count; i++)
       {
-         if(!m_models[i].loaded) continue;
-         if(m_models[i].perf.accuracy > best_acc)
+         // FIX: Also consider active models with no performance data yet
+         if(!m_models[i].loaded && !m_models[i].active) continue;
+         double acc = (m_models[i].perf.samples > 0) ? m_models[i].perf.accuracy : 0.0;
+         if(acc > best_acc)
          {
-            best_acc = m_models[i].perf.accuracy;
+            best_acc = acc;
             best_idx = i;
          }
       }
