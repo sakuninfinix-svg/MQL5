@@ -424,9 +424,33 @@ private:
          if(hardFail) return false;
         }
 
+      // Optional: CNN 1D Pattern Recognizer
+      CCNNPatternRecognizer *cnnPattern = CModuleFactory::CreateCNNPatternRecognizer();
+      if(cnnPattern != NULL)
+        {
+         if(!m_lifecycle.InitOptional(cnnPattern, PASR_MOD_CNN_PATTERN_RECOGNIZER))
+           {
+            Print("[PASRKernel] CNNPatternRecognizer init failed; continuing without CNN patterns");
+            cnnPattern.Deinit();
+            delete cnnPattern;
+            cnnPattern = NULL;
+           }
+         else if(!RegisterOwnedManager(PASR_MOD_CNN_PATTERN_RECOGNIZER, cnnPattern))
+           {
+            Print("[PASRKernel] CNNPatternRecognizer registry bind failed; continuing without CNN patterns");
+            cnnPattern.Deinit();
+            delete cnnPattern;
+            cnnPattern = NULL;
+           }
+        }
+
       CPatternManager *pattern = CModuleFactory::CreatePatternManager();
       if(!InitCriticalManager(PASR_MOD_PATTERN_MANAGER, pattern))
          return false;
+
+      // Connect CNN pattern recognizer to PatternManager if available
+      if(cnnPattern != NULL)
+         pattern.SetCNNPatternRecognizer(cnnPattern);
 
       CSignalManager *signal = CModuleFactory::CreateSignalManager();
       if(!InitCriticalManager(PASR_MOD_SIGNAL_MANAGER, signal))

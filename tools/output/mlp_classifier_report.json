@@ -1,0 +1,103 @@
+{
+  "timestamp": "2026-06-13T06:39:45.631364+00:00",
+  "input_csv": "/media/agus/40A604FEA604F666/Users/agsi/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/tools/output/AI_Training_Data_Augmented.csv",
+  "type": "classifier_binary_v2",
+  "shape": [
+    34,
+    64,
+    32,
+    1
+  ],
+  "output_activation": "sigmoid",
+  "optimizer": "adam+weight_decay",
+  "lr_scheduler": "cosine_annealing",
+  "dropout_rate": 0.1,
+  "loss_function": "focal_loss_gamma_1.0",
+  "label_smoothing": 0.02,
+  "models": [
+    {
+      "seed": 42,
+      "n_train": 14352,
+      "n_test": 3588,
+      "loss": 0.7976683974266052,
+      "accuracy": 0.49191750278706803,
+      "precision": 0.9921875,
+      "recall": 0.2786615469007131,
+      "f1_score": 0.4351177730192719,
+      "roc_auc": 0.994462634358892,
+      "confusion_matrix": {
+        "tn": 1761,
+        "fp": 4,
+        "fn": 1315,
+        "tp": 508
+      },
+      "test_win_rate": 0.5080825090408325,
+      "test_pred_win_rate": 0.40997770345596435,
+      "architecture": "34->64x32->1",
+      "optimizer": "adam+weight_decay",
+      "dropout_rate": 0.1,
+      "lr_scheduler": "cosine_annealing",
+      "focal_gamma": 1.0,
+      "label_smoothing": 0.02,
+      "optimal_threshold": 0.2,
+      "optimal_f1": 0.888888888888889,
+      "file": "PASR_mlp_m0.bin"
+    },
+    {
+      "seed": 137,
+      "n_train": 14352,
+      "n_test": 3588,
+      "loss": 0.9986612200737,
+      "accuracy": 0.49944258639910816,
+      "precision": 0.996415770609319,
+      "recall": 0.4643652561247216,
+      "f1_score": 0.6334979111279908,
+      "roc_auc": 0.9930714708280306,
+      "confusion_matrix": {
+        "tn": 1789,
+        "fp": 3,
+        "fn": 962,
+        "tp": 834
+      },
+      "test_win_rate": 0.5005574226379395,
+      "test_pred_win_rate": 0.391025641025641,
+      "architecture": "34->64x32->1",
+      "optimizer": "adam+weight_decay",
+      "dropout_rate": 0.1,
+      "lr_scheduler": "cosine_annealing",
+      "focal_gamma": 1.0,
+      "label_smoothing": 0.02,
+      "optimal_threshold": 0.2,
+      "optimal_f1": 0.8702719599874962,
+      "file": "PASR_mlp_m1.bin"
+    },
+    {
+      "seed": 73,
+      "n_train": 14352,
+      "n_test": 3588,
+      "loss": 1.024276852607727,
+      "accuracy": 0.4947045707915273,
+      "precision": 0.9989764585465711,
+      "recall": 0.5383342526199669,
+      "f1_score": 0.6996415770609319,
+      "roc_auc": 0.9962726163933409,
+      "confusion_matrix": {
+        "tn": 1774,
+        "fp": 1,
+        "fn": 837,
+        "tp": 976
+      },
+      "test_win_rate": 0.50529545545578,
+      "test_pred_win_rate": 0.3843366778149387,
+      "architecture": "34->64x32->1",
+      "optimizer": "adam+weight_decay",
+      "dropout_rate": 0.1,
+      "lr_scheduler": "cosine_annealing",
+      "focal_gamma": 1.0,
+      "label_smoothing": 0.02,
+      "optimal_threshold": 0.2,
+      "optimal_f1": 0.8615288220551377,
+      "file": "PASR_mlp_m2.bin"
+    }
+  ]
+}

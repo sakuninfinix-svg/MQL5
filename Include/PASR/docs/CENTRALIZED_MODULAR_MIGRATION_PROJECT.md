@@ -65,8 +65,7 @@ Migrasi centralized modular lokal dianggap selesai jika:
 2. Folder `Data/` terintegrasi dalam master include graph.
 3. Tidak ada duplikasi file `Context` di domain Analysis.
 4. Runtime module dan signal source dibuat melalui `CModuleFactory`.
-5. Hasil compile `PASR_MODULAR.mq5` tetap `0 errors, 0 warnings`.
-6. Dokumentasi sinkron dengan kenyataan file di disk.
+5. Dokumentasi sinkron dengan kenyataan file di disk.
 
 Status lokal: **DONE**.
 

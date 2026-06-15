@@ -8,6 +8,7 @@
 #include <PASR/Central/ModuleNames.mqh>
 #include <PASR/Central/ModuleRegistry.mqh>
 #include <PASR/Central/ServiceLocator.mqh>
+#include <PASR/AI/AIRetrainTrigger.mqh>
 
 input bool InpDebugMode = true;
 input bool InpEnableProfiling = true;
@@ -48,8 +49,8 @@ input int    InpNewsBufferMinutes = 30;
 
 input group "AI"
 input bool   InpEnableAI = false;
-input double InpAIMinConfidence = 0.60;
-input double InpAILearningRate = 0.0003;       // was 0.001 — reduced to prevent online overfitting
+input double InpAIMinConfidence = 0.60; // AI Min Confidence
+input double InpAILearningRate = 0.0003;       // AI Learning Rate
 input int    InpAITrainIntervalBars = 5;
 input int    InpAIReplayBufferSize = 512;
 input int    InpAIMinibatchSize = 32;
@@ -62,9 +63,9 @@ input group "AI Regime Thresholds"
 input double InpAITrendEntryThreshold = 0.60;
 input double InpAITrendRiskMultiplier = 1.20;
 input double InpAIRangeEntryThreshold = 0.65;
-input double InpAIRangeRiskMultiplier = 1.10;  // was 1.30 — ranging market is noisy, reduce risk
-input double InpAIVolatileEntryThreshold = 0.85;
-input double InpAIVolatileRiskMultiplier = 0.90;
+input double InpAIRangeRiskMultiplier = 1.10;  // AI Range Risk Multiplier
+input double InpAIVolatileEntryThreshold = 0.85; //AI Volatile Entry 
+input double InpAIVolatileRiskMultiplier = 0.90; 
 input double InpAIConservativeEntryThreshold = 0.95;
 input double InpAIConservativeRiskMultiplier = 0.10;
 input double InpAIScalpEntryThreshold = 0.70;
@@ -99,23 +100,29 @@ input double InpUrgencyHighThreshold = 0.75;
 input double InpUrgencyMediumThreshold = 0.55;
 
 input group "Pattern"
-input bool   InpEnablePatterns = true;
-input double InpMinPatternScore = 45.0;
-input double InpMinPatternDominanceGap = 0.05;
-input int    InpPatternLookbackBars = 50;
-input double InpPinBarRatio = 2.0;
-input double InpEngulfMultiplier = 1.1;
-input bool   InpRequireConfirmation = false;
+input bool   InpEnablePatterns = true; //Enable Pattern
+input double InpMinPatternScore = 45.0; // Min Pattern Score
+input double InpMinPatternDominanceGap = 0.05; //Min Pattern Dominance Gap
+input int    InpPatternLookbackBars = 50; //Pattern Lookback Bars
+input double InpPinBarRatio = 2.0; // Pinbar Multiplier
+input double InpEngulfMultiplier = 1.1; // Engulfing Multiplier
+input bool   InpRequireConfirmation = false; //Require Confirmation
+
+input group "Auto-Retrain"
+input bool   InpAutoRetrainEnabled = false; // Ijinkan Online Learning
+input int    InpAutoRetrainTradeThreshold = 200; // Online Learning Threshold
+input string InpAutoRetrainWeightsFile = "PASR_mlp_m0.bin"; //Online Learning Otomatis
 
 input group "Display"
-input bool   InpShowDashboard = true;
-input bool   InpShowSignalArrows = true;
-input bool   InpEnableAlerts = false;
-input bool   InpEnablePushNotify = false;
-input int    InpFontSize = 9;
+input bool   InpShowDashboard = true; // Lihat DashBoard
+input bool   InpShowSignalArrows = true; 
+input bool   InpEnableAlerts = false; //Alerts
+input bool   InpEnablePushNotify = false; //Notifikasi
+input int    InpFontSize = 9; //Ukuran Font
 
 CPASRKernel g_kernel;
 CPerformanceReport g_report;
+CAIRetrainTrigger g_retrain;
 
 struct EAState
   {
@@ -251,7 +258,7 @@ void ExportBacktestReport()
   {
    CPipelineEngine *pipeline = g_kernel.Pipeline();
    if(pipeline == NULL) return;
-   CJournalManager *journal = g_kernel.Services().Journal();
+   CJournalManager *journal = g_kernel.Services()->Journal();
    if(journal == NULL) return;
 
    g_report.SetJournal(journal);
@@ -314,6 +321,13 @@ int OnInit()
    g_qa.Init();
 #endif
    g_state.initialized = true;
+
+   if(InpAutoRetrainEnabled)
+     {
+      g_retrain.Init(InpAutoRetrainWeightsFile, InpAutoRetrainTradeThreshold);
+      Print("[PASR] Auto-retrain trigger enabled");
+     }
+
    return INIT_SUCCEEDED;
   }
 
@@ -348,6 +362,8 @@ void OnTimer()
   {
    if(!g_state.initialized) return;
    g_kernel.OnTimer();
+   if(InpAutoRetrainEnabled)
+      g_retrain.Check();
   }
 
 void OnTradeTransaction(const MqlTradeTransaction &trans,
@@ -356,6 +372,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
   {
    if(!g_state.initialized) return;
    g_kernel.OnTradeTransaction(trans, request, result);
+   if(InpAutoRetrainEnabled && trans.type == TRADE_TRANSACTION_DEAL_ADD)
+      g_retrain.OnTradeClosed();
   }
 
 void OnChartEvent(const int id,

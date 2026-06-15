@@ -64,7 +64,7 @@ class AI_LABEL_CLASS(Enum):
 @dataclass
 class GeneratorConfig:
     """Configuration for training data generation"""
-    total_bars: int = 150000     # Total market bars to generate
+    total_bars: int = 500000     # Total market bars to generate
     n_samples_per_regime: int = 2000  # Target samples per regime
     sequence_length: int = 100  # bars for feature computation
     symbol: str = "EURUSD"
@@ -78,7 +78,7 @@ class GeneratorConfig:
     session_start_hour: int = 0
     session_end_hour: int = 23
     
-    # Risk parameters (matching EA inputs) — adjusted for balanced win/loss ratio
+    # Risk parameters — optimized for quality + balance
     sl_multiplier: float = 1.8
     tp_multiplier: float = 2.2
     max_open_positions: int = 3
@@ -94,12 +94,12 @@ class GeneratorConfig:
         if self.regime_params is None:
             self.regime_params = {
                 EMarketRegime.REGIME_TREND_UP: {
-                    "trend": 0.00015, "volatility": 0.0008, "adx_base": 35,
-                    "vol_scale": 1.0, "pattern_quality_boost": 0.15
+                    "trend": 0.00030, "volatility": 0.0008, "adx_base": 35,
+                    "vol_scale": 1.0, "pattern_quality_boost": 0.20
                 },
                 EMarketRegime.REGIME_TREND_DOWN: {
-                    "trend": -0.00015, "volatility": 0.0008, "adx_base": 35,
-                    "vol_scale": 1.0, "pattern_quality_boost": 0.15
+                    "trend": -0.00030, "volatility": 0.0008, "adx_base": 35,
+                    "vol_scale": 1.0, "pattern_quality_boost": 0.20
                 },
                 EMarketRegime.REGIME_RANGE: {
                     "trend": 0.0, "volatility": 0.0006, "adx_base": 15,
@@ -110,7 +110,7 @@ class GeneratorConfig:
                     "vol_scale": 2.0, "pattern_quality_boost": -0.05
                 },
                 EMarketRegime.REGIME_CRASH: {
-                    "trend": -0.0003, "volatility": 0.0025, "adx_base": 40,
+                    "trend": -0.0005, "volatility": 0.0025, "adx_base": 40,
                     "vol_scale": 3.0, "pattern_quality_boost": -0.10
                 },
                 EMarketRegime.REGIME_TRANSITION: {
@@ -210,28 +210,28 @@ class RegimeAwareMarketGenerator:
         segments = []
         current_price = self.config.base_price
         
-        # Define regime sequence with varying lengths — more segments = more trade variety
+        # Define regime sequence with longer segments — stronger persistent trends for MLP learning
         regime_sequence = [
-            (EMarketRegime.REGIME_RANGE, 8000),
-            (EMarketRegime.REGIME_TREND_UP, 12000),
-            (EMarketRegime.REGIME_VOLATILE, 6000),
-            (EMarketRegime.REGIME_TREND_DOWN, 10000),
-            (EMarketRegime.REGIME_RANGE, 8000),
-            (EMarketRegime.REGIME_TREND_UP, 10000),
-            (EMarketRegime.REGIME_CRASH, 5000),
-            (EMarketRegime.REGIME_TRANSITION, 6000),
-            (EMarketRegime.REGIME_RANGE, 8000),
-            (EMarketRegime.REGIME_TREND_DOWN, 8000),
-            (EMarketRegime.REGIME_VOLATILE, 6000),
-            (EMarketRegime.REGIME_RANGE, 7000),
-            (EMarketRegime.REGIME_TREND_UP, 10000),
-            (EMarketRegime.REGIME_CRASH, 4000),
-            (EMarketRegime.REGIME_TREND_DOWN, 8000),
-            (EMarketRegime.REGIME_RANGE, 6000),
-            (EMarketRegime.REGIME_VOLATILE, 5000),
-            (EMarketRegime.REGIME_TREND_UP, 8000),
-            (EMarketRegime.REGIME_TRANSITION, 4000),
-            (EMarketRegime.REGIME_RANGE, 6000),
+            (EMarketRegime.REGIME_RANGE, 25000),
+            (EMarketRegime.REGIME_TREND_UP, 35000),
+            (EMarketRegime.REGIME_VOLATILE, 18000),
+            (EMarketRegime.REGIME_TREND_DOWN, 30000),
+            (EMarketRegime.REGIME_RANGE, 25000),
+            (EMarketRegime.REGIME_TREND_UP, 30000),
+            (EMarketRegime.REGIME_CRASH, 15000),
+            (EMarketRegime.REGIME_TRANSITION, 18000),
+            (EMarketRegime.REGIME_RANGE, 25000),
+            (EMarketRegime.REGIME_TREND_DOWN, 25000),
+            (EMarketRegime.REGIME_VOLATILE, 18000),
+            (EMarketRegime.REGIME_RANGE, 20000),
+            (EMarketRegime.REGIME_TREND_UP, 30000),
+            (EMarketRegime.REGIME_CRASH, 12000),
+            (EMarketRegime.REGIME_TREND_DOWN, 25000),
+            (EMarketRegime.REGIME_RANGE, 18000),
+            (EMarketRegime.REGIME_VOLATILE, 15000),
+            (EMarketRegime.REGIME_TREND_UP, 25000),
+            (EMarketRegime.REGIME_TRANSITION, 12000),
+            (EMarketRegime.REGIME_RANGE, 20000),
         ]
         
         for regime, n_bars in regime_sequence:
@@ -647,10 +647,16 @@ class TradeSimulation:
             label = 0.0  # Neutral/small outcome
         
         # Weight: higher for clearer outcomes, longer duration, higher confidence
+        # Khusus untuk TP hits: bobot lebih tinggi untuk kompensasi class imbalance
         weight = 1.0
+        if abs(self.profit_r) > 0.5:
+            weight *= 1.3
         if abs(self.profit_r) > 1.0:
             weight *= 1.5
         if abs(self.profit_r) > 2.0:
+            weight *= 2.0
+        # TP hit = sinyal kuat → bobot ekstra (kompensasi imbalance 57/43)
+        if self.hit_tp and self.profit_r > 0:
             weight *= 2.0
         if self.duration_bars > 20:
             weight *= 1.2
@@ -748,27 +754,29 @@ class TradeSimulator:
         if not (self.config.session_start_hour <= hour <= self.config.session_end_hour):
             return 0
         
-        # Regime-specific entry logic — MINIMAL CONDITIONS for max trade count
-        # Each regime: 1-2 conditions only → maximum coverage → 10k+ samples
+        # Regime-specific entry logic — MEDIUM CONDITIONS for best quality
+        # 3-4 conditions → feature diversity + enough samples
         if regime in [1, 2]:  # TREND
-            if regime == 1:  # TREND_UP: support bounce or momentum
-                if buy_prob > 0.30:
+            if regime == 1:  # TREND_UP
+                if (sr_dist < 0.45 and pattern > 0.35 and buy_prob > 0.35 and rsi < 73):
                     return 1
-            else:  # TREND_DOWN: resistance rejection or momentum
-                if sell_prob > 0.30:
+            else:  # TREND_DOWN
+                if (sr_dist < 0.45 and pattern > 0.35 and sell_prob > 0.35 and rsi > 27):
                     return -1
                     
         elif regime == 3:  # RANGE
-            if buy_prob > 0.35 and sr_dist < 0.45:
-                return 1
-            if sell_prob > 0.35 and (1 - sr_dist) < 0.45:
-                return -1
+            if (zone_str > 0.35 and pattern > 0.30):
+                if sr_dist < 0.30 and buy_prob > 0.40 and rejection > 0.35:
+                    return 1
+                if (1 - sr_dist) < 0.30 and sell_prob > 0.40 and rejection > 0.35:
+                    return -1
                     
         elif regime in [4, 5]:  # VOLATILE, CRASH
-            if buy_prob > 0.45:
-                return 1
-            if sell_prob > 0.45:
-                return -1
+            if (gap > 0.25 and rejection > 0.35):
+                if buy_prob > 0.50:
+                    return 1
+                if sell_prob > 0.50:
+                    return -1
         
         return 0
     

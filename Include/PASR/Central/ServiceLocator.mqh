@@ -103,6 +103,9 @@ public:
 
    CSessionState* Session() const
      { return (CSessionState*)Lookup(PASR_MOD_SESSION_STATE); }
+
+   CCNNPatternRecognizer* CNNPatternRecognizer() const
+     { return (CCNNPatternRecognizer*)Lookup(PASR_MOD_CNN_PATTERN_RECOGNIZER); }
   };
 
 #endif // __PASR_CENTRAL_SERVICE_LOCATOR_MQH__

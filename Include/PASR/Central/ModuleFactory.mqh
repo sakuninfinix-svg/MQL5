@@ -1,10 +1,12 @@
 //+------------------------------------------------------------------+
-//| Central/ModuleFactory.mqh - v1.00                                |
+//| Central/ModuleFactory.mqh - v1.01                                |
 //| Central allocation factory for PASR runtime modules               |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_CENTRAL_MODULE_FACTORY_MQH__
 #define __PASR_CENTRAL_MODULE_FACTORY_MQH__
+
+#include "../Analysis/CNNPatternRecognizer.mqh"
 
 class CModuleFactory
   {
@@ -32,6 +34,9 @@ public:
 
    static CPatternManager* CreatePatternManager()
      { return new CPatternManager(); }
+
+   static CCNNPatternRecognizer* CreateCNNPatternRecognizer(int seed = 44)
+     { return new CCNNPatternRecognizer(seed); }
 
    static CSignalManager* CreateSignalManager()
      { return new CSignalManager(); }

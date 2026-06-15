@@ -1,7 +1,8 @@
 //+------------------------------------------------------------------+
-//| Analysis/Pattern/PatternManager.mqh — v3.30                      |
+//| Analysis/Pattern/PatternManager.mqh — v3.31                      |
 //| Trainable probabilistic pattern scoring for PASR                  |
 //| Loads PASR_pattern_weights.bin, falls back to safe defaults       |
+//| Optional CNN 1D pattern recognition augmentation                  |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PATTERN_MANAGER_MQH__
@@ -10,6 +11,7 @@
 #include "../../Core/IManager.mqh"
 #include "../../Data/RegimeTypes.mqh"
 #include "../MarketRegimeDetector.mqh"
+#include "../../Analysis/CNNPatternRecognizer.mqh"
 #include "PatternTypes.mqh"
 
 #define PATTERN_HISTORY_CAPACITY 200
@@ -129,6 +131,8 @@ private:
    bool           m_requireConfirmation;
    bool           m_externalWeightsLoaded;
    string         m_weightsFile;
+   CCNNPatternRecognizer *m_cnnRecognizer;
+   double         m_cnnWeight;
 
    double         m_bias[PATTERN_TRAINABLE_COUNT];
    double         m_w[PATTERN_TRAINABLE_COUNT][PATTERN_FEATURE_COUNT];
@@ -478,7 +482,8 @@ public:
         m_lastScanBarTime(0), m_totalPatternsDetected(0), m_totalValidSignals(0),
         m_minConfluenceScore(0.40), m_minDominanceGap(0.05), m_regimeBoostFactor(0.20),
         m_pinBarRatio(2.0), m_engulfMultiplier(1.1), m_requireConfirmation(true),
-        m_externalWeightsLoaded(false), m_weightsFile("")
+        m_externalWeightsLoaded(false), m_weightsFile(""),
+        m_cnnRecognizer(NULL), m_cnnWeight(0.25)
      {
       InitDefaultWeights();
       ClearHistory();
@@ -487,6 +492,13 @@ public:
      }
 
    ~CPatternManager() {}
+
+   void SetCNNPatternRecognizer(CCNNPatternRecognizer *recognizer, double weight = 0.25)
+     {
+      m_cnnRecognizer = recognizer;
+      m_cnnWeight = MathMax(0.0, MathMin(1.0, weight));
+     }
+
    virtual string HandlerName() const override { return "PatternManager"; }
 
    virtual bool Init(IDataManager *data, CEventBus *bus) override
@@ -562,6 +574,30 @@ public:
       EvaluateFakey(rates, scanShift, atrPoints, votes[3]);
       EvaluateInsideBar(rates, scanShift, atrPoints, votes[4]);
 
+      // Optional CNN pattern recognition augmentation
+      double cnnBuyScore = 0.0;
+      double cnnSellScore = 0.0;
+      if(m_cnnRecognizer != NULL && m_cnnRecognizer.IsBufferFilled())
+        {
+         CNNPatternRecognizer::CNNPatternOutput cnnOutput;
+         if(m_cnnRecognizer.RecognizePattern(rates, scanShift, cnnOutput) && cnnOutput.confidence > 0.5)
+           {
+            ENUM_PATTERN_TYPE cnnPattern = m_cnnRecognizer.GetPatternType(cnnOutput.dominant_pattern);
+            if(cnnPattern != PATTERN_NONE)
+              {
+               // Map CNN pattern to direction
+               int cnnDir = (cnnPattern == PATTERN_PINBAR || cnnPattern == PATTERN_ENGULFING || 
+                             cnnPattern == PATTERN_INSIDE_BAR_BREAKOUT) ? 1 : -1;
+               // For bottom/tweezer, check if it's bullish or bearish based on dominant pattern
+               // For simplicity, use the pattern confidence as a score modifier
+               if(cnnDir == 1)
+                 cnnBuyScore = cnnOutput.confidence;
+               else
+                 cnnSellScore = cnnOutput.confidence;
+              }
+           }
+        }
+
       for(int i = 0; i < 5; i++)
          if(votes[i].valid) votes[i].regimeWeight = CalculateRegimeWeight(currentRegime, votes[i].type, votes[i].dir);
 
@@ -570,6 +606,13 @@ public:
 
       double buyScore = AggregateProbability(votes, 1);
       double sellScore = AggregateProbability(votes, -1);
+
+      // Blend CNN scores with rule-based scores
+      if(cnnBuyScore > 0.0 || cnnSellScore > 0.0)
+        {
+         buyScore = Clamp01(buyScore * (1.0 - m_cnnWeight) + cnnBuyScore * m_cnnWeight);
+         sellScore = Clamp01(sellScore * (1.0 - m_cnnWeight) + cnnSellScore * m_cnnWeight);
+        }
       double totalScore = MathMax(buyScore, sellScore);
       double conflictScore = MathMin(buyScore, sellScore);
       double dominanceGap = totalScore - conflictScore;
@@ -618,12 +661,13 @@ public:
       outResult.conflictScore = conflictScore;
       outResult.dominanceGap = dominanceGap;
       outResult.barTime = curTime;
-      outResult.reason = votes[bestIdx].label + StringFormat(" | PatternScore %.2f gap %.2f conflict %.2f | rej %.2f trap %.2f reclaim %.2f ft %.2f | %s%s",
+      outResult.reason = votes[bestIdx].label + StringFormat(" | PatternScore %.2f gap %.2f conflict %.2f | rej %.2f trap %.2f reclaim %.2f ft %.2f | %s%s%s",
                          finalScore, dominanceGap, conflictScore,
                          m_lastFeatures.rejectionQuality, m_lastFeatures.trapQuality,
                          m_lastFeatures.reclaimQuality, m_lastFeatures.followThrough,
                          BuildConfluenceLabel(votes, direction),
-                         m_externalWeightsLoaded ? " | trainable" : " | fallback");
+                         m_externalWeightsLoaded ? " | trainable" : " | fallback",
+                         (m_cnnRecognizer != NULL && (cnnBuyScore > 0.0 || cnnSellScore > 0.0)) ? " | cnn" : "");
 
       m_lastResult = outResult;
       m_totalValidSignals++;

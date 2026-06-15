@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-06-12T16:47:28.582570+00:00",
-  "input_csv": "/media/agus/40A604FEA604F666/Users/agsi/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/tools/output/AI_Training_Data_Processed.csv",
+  "timestamp": "2026-06-13T05:07:20.370222+00:00",
+  "input_csv": "/media/agus/40A604FEA604F666/Users/agsi/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/tools/output/AI_Training_Data_Strong_Processed.csv",
   "shape": [
     34,
     64,
@@ -10,22 +10,22 @@
   "models": [
     {
       "seed": 42,
-      "n_train": 919,
-      "n_test": 230,
-      "mae": 0.9114610552787781,
-      "mse": 0.9660165309906006,
-      "r2": -0.05270022940817176,
-      "loss": 0.9651042222976685,
+      "n_train": 12769,
+      "n_test": 3193,
+      "mae": 0.9889592528343201,
+      "mse": 0.9884399771690369,
+      "r2": -0.01200985413487854,
+      "loss": 0.9883973002433777,
       "file": "PASR_mlp_m0.bin"
     },
     {
       "seed": 137,
-      "n_train": 919,
-      "n_test": 230,
-      "mae": 0.892952024936676,
-      "mse": 0.904015064239502,
-      "r2": -0.05904849661615641,
-      "loss": 0.9027987122535706,
+      "n_train": 12769,
+      "n_test": 3193,
+      "mae": 0.9909971356391907,
+      "mse": 0.9894135594367981,
+      "r2": -0.005988786942151769,
+      "loss": 0.9849125146865845,
       "file": "PASR_mlp_m1.bin"
     }
   ]

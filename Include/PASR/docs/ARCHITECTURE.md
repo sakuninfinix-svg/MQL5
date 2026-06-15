@@ -2,7 +2,6 @@
 
 **Version:** 14.01-RANGE-TRADING-OPTIMIZED
 **Last Updated:** 2026-01-XX
-**Status:** ✅ Production Ready | AI Enhanced | Optimization Optimized
 
 PASR is an MQL5 Expert Advisor framework built around a centralized runtime kernel and a modular trading pipeline, featuring intelligent market regime detection, adaptive risk management, and optimized telemetry for strategy testing.
 

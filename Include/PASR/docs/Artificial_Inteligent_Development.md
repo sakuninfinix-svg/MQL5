@@ -2,6 +2,64 @@
 
 Dokumen ini merinci arsitektur AI yang sedang berjalan di sistem PASR dan menguraikan grand design untuk pengembangan kapabilitas kecerdasan buatan di masa depan, dengan fokus pada Deep Learning.
 
+---
+
+## Status Update — 15 Juni 2026
+
+### ✅ Sudah Tercapai (100% Code Complete)
+
+| Komponen | Modul | Status Integrasi |
+|----------|-------|-----------------|
+| **SequenceFeatureBuilder** | `AI/` | ✅ `Build()` → tensor [64×12], `InjectRegime()`, `InjectStructure()` |
+| **ONNXBridge v2** | `AI/` | ✅ `Load()`, `Run()`, `RunSequence()`, `RunSequenceTensor()`, `RunFV()` |
+| **AIEnsemble ONNX slot** | `AI/` | ✅ Fallback MLP jika ONNX gagal load, blend vote ONNX (w=1.5) + MLP |
+| **AIFeatureValidator** | `AI/` | ✅ `Validate()`, `ValidateSequence()` — NaN, outlier, shape, stale |
+| **LSTMInference** | `AI/` | ✅ 2-layer LSTM (128 hidden, seq=50), terintegrasi di `AIOrchestrator` |
+| **AttentionFusion** | `AI/` | ✅ 4-head attention fusion, terintegrasi di `AIOrchestrator` |
+| **ConfidenceCalibrator** | `AI/` | ✅ Platt scaling + agreement-weighted calibration |
+| **OnlineLearningGuard** | `AI/` | ✅ Drift detection (z-score), veto mechanism |
+| **AITrainer** | `AI/` | ✅ Ring buffer 500, retrain every 50, online SGD |
+| **AIOrchestrator** | `AI/` | ✅ Full pipeline: feature → validate → ensemble → LSTM → attention → calibrate → drift check |
+| **AISignalSource** | `AI/` | ✅ ISignalSource adapter, w=1.2 voter |
+| **AICalibrationBridge** | `AI/` | ✅ Sync threshold dengan `CAdaptiveConfig` |
+| **AIRetrainTrigger** | `AI/` | ✅ Trade counter + weights file change detection |
+| **ModelRegistry** | `AI/` | ✅ 8-model registry dengan versioning dan perf tracking |
+| **HMMRegimeDetector** | `Analysis/` | ✅ 6-state HMM, forward algorithm, online transition learning |
+| **CNNPatternRecognizer** | `Analysis/` | ✅ 1D CNN (2 conv + dense), 6 pattern output |
+| **AdaptivePipelineEngine** | `Orchestration/` | ✅ Regime-adaptive pipeline wrapper |
+| **DynamicWeightManager** | `Signal/` | ✅ Bayesian weight adaptation, performance tracking |
+
+### ⚠️ Sudah Ada Kode, Perlu Integrasi Manual
+
+| Komponen | Status | Tindakan |
+|----------|--------|----------|
+| **DynamicWeightManager → SignalManager** | ⚠️ Kode siap | Integrasi per panduan `SignalManagerIntegration.mqh` |
+| **HMMRegimeDetector → PASRKernel** | ⚠️ Kode siap | Opsional — bisa ganti `MarketRegimeDetector` |
+| **CNNPatternRecognizer → PatternManager** | ⚠️ Kode siap | Opsional — augmentasi pattern detection |
+| **AdaptivePipelineEngine → PASRKernel** | ⚠️ Kode siap | Opsional — ganti `PipelineEngine` |
+
+### ❌ Belum Tercapai (Menunggu Resource/Lingkungan)
+
+| Item | Fase | Hambatan |
+|------|------|----------|
+| **Compile gate `PASR_MODULAR.mq5` diverifikasi** | Fase 1 | Butuh akses MetaEditor dengan full include chain |
+| **Load ONNX model nyata di Strategy Tester** | Fase 2 | Butuh `#define PASR_ENABLE_ONNX` + file `.onnx` hasil training |
+| **Latency inferensi ONNX < 50ms** | Fase 2 | Butuh model ONNX nyata untuk benchmark |
+| **Training pipeline Python (PyTorch → ONNX)** | Fase 3 | `tools/train_transformer.py` belum dibuat |
+| **Model MVP accuracy > baseline MLP** | Fase 3 | Menunggu training pipeline |
+| **Walk-forward test Transformer backend** | Fase 4 | Menunggu model ONNX |
+| **Dashboard backend aktif + model version** | Fase 4 | Implementasi setelah model siap |
+| **Prosedur retrain periodik** | Fase 4 | Dokumentasi menyusul |
+
+### Ringkasan Progress
+
+```
+Fase 1 (Data Layer):       ■■■■■■■■■■ 100%
+Fase 2 (ONNX v2):          ■■■■■■■■■■ 100%  (kode), ■■○○○○○○○○ 20%  (runtime test)
+Fase 3 (Training Python):  ■□□□□□□□□□  10%  (tools/export_onnx.py ada)
+Fase 4 (Production):       ■□□□□□□□□□  10%  (arsitektur siap)
+```
+
 ## 1. Desain AI Saat Ini (Current AI Architecture)
 
 Arsitektur AI PASR saat ini menggunakan pendekatan **Hybrid AI-Signal Filtering**, di mana AI berperan sebagai **Confidence Layer** dan **Veto Mechanism** terhadap sinyal trading berbasis Price Action/Support Resistance tradisional. Ini dirancang untuk robustness dan fleksibilitas.
