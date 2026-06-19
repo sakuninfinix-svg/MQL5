@@ -245,6 +245,29 @@ private:
       return MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, th));
      }
 
+   bool BuildGBRMTFFeatures(SAIFeatureVector &out_fv[])
+     {
+      if(m_feat == NULL) return false;
+
+      ENUM_TIMEFRAMES tfs[4] = { PERIOD_H4, PERIOD_H1, PERIOD_M15, PERIOD_M5 };
+      ArrayResize(out_fv, 4);
+
+      int built = 0;
+      for(int i = 0; i < 4; i++)
+        {
+         out_fv[i].Reset();
+         if(m_feat.Build(out_fv[i], tfs[i]))
+           {
+            if(out_fv[i].timestamp <= 0) out_fv[i].timestamp = TimeCurrent();
+            if(out_fv[i].symbol == "") out_fv[i].symbol = _Symbol;
+            out_fv[i].timeframe = tfs[i];
+            built++;
+           }
+        }
+
+      return (built > 0);
+     }
+
    bool BuildRiskDecision(const SAIInferenceResult &res, SAIRiskDecision &decision)
      {
       decision.Reset();
@@ -547,6 +570,11 @@ public:
          return false;
         }
 
+      SAIFeatureVector gbr_mtf_fv[];
+      bool gbr_mtf_ready = false;
+      if(m_use_gbr && m_gbr != NULL && m_gbr.IsLoaded() && m_cfg.Signal.UseMTF)
+         gbr_mtf_ready = BuildGBRMTFFeatures(gbr_mtf_fv);
+
       SAIFeatureVector fv;
       fv.Reset();
       if(!m_feat.Build(fv))
@@ -557,7 +585,7 @@ public:
 
       if(fv.timestamp <= 0) fv.timestamp = TimeCurrent();
       if(fv.symbol == "") fv.symbol = _Symbol;
-      if(fv.timeframe == PERIOD_CURRENT) fv.timeframe = _Period;
+      if(fv.timeframe == PERIOD_CURRENT && !m_cfg.Signal.UseMTF) fv.timeframe = _Period;
 
       if(!m_validator.Validate(fv, m_ensemble, m_last_validation))
         {
@@ -611,9 +639,25 @@ public:
       double gbr_score = 0.0;
       double gbr_conf  = 0.0;
       bool   gbr_used  = false;
+      bool   gbr_mtf_used = false;
       if(m_use_gbr && m_gbr != NULL && m_gbr.IsLoaded())
         {
-         if(m_gbr.Predict(fv, gbr_score, gbr_conf))
+         if(gbr_mtf_ready)
+           {
+            SGBRMTFResult mtf_result;
+            mtf_result.Clear();
+            if(m_gbr.PredictMTF(gbr_mtf_fv, mtf_result) && mtf_result.valid)
+              {
+               gbr_score = mtf_result.score;
+               gbr_conf  = mtf_result.confidence;
+               gbr_used = true;
+               gbr_mtf_used = true;
+               if(m_debugMode) PrintFormat("[AIOrchestrator] GBR MTF prediction: %.4f (conf=%.4f, tf=%d)",
+                                           gbr_score, gbr_conf, mtf_result.n_timeframes);
+              }
+           }
+
+         if(!gbr_used && m_gbr.Predict(fv, gbr_score, gbr_conf))
            {
             gbr_used = true;
             if(m_debugMode) PrintFormat("[AIOrchestrator] GBR prediction: %.4f (conf=%.4f)", gbr_score, gbr_conf);
@@ -630,7 +674,7 @@ public:
          double total = lstmW + ensW + gbrW;
          if(total <= 0.0) { lstmW = 0.4; ensW = 0.3; gbrW = 0.3; total = 1.0; }
          final_score = (lstmW * lstm_score + ensW * vote.final_score + gbrW * gbr_score) / total;
-         out_result.model_id = "lstm+ensemble+gbr";
+         out_result.model_id = gbr_mtf_used ? "lstm+ensemble+gbr_mtf" : "lstm+ensemble+gbr";
         }
       else if(lstm_used)
         {
@@ -649,7 +693,7 @@ public:
          double total = ensW + gbrW;
          if(total <= 0.0) { ensW = 0.7; gbrW = 0.3; total = 1.0; }
          final_score = (ensW * vote.final_score + gbrW * gbr_score) / total;
-         out_result.model_id = "ensemble+gbr";
+         out_result.model_id = gbr_mtf_used ? "ensemble+gbr_mtf" : "ensemble+gbr";
         }
       else
         {

@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/AISignalSource.mqh — v1.00                                    |
+//| AI/AISignalSource.mqh — v1.01                                    |
 //| Copyright @2026                                                  |
 //| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
@@ -11,6 +11,9 @@
 #include "AIOrchestrator.mqh"
 #include "../Signal/ISignalSource.mqh"
 
+// AI is intentionally kept as a post-signal gate in AIInferStage.
+// This source remains as a compatibility shell for older PASRKernel wiring,
+// but it no longer calls CAIOrchestrator::Predict() during SignalStage.
 class CAISignalSource : public ISignalSource
   {
 private:
@@ -38,7 +41,7 @@ private:
 
 public:
    CAISignalSource(CAIOrchestrator *ai)
-      : m_ai(ai), m_name("AISignalSource"), m_lastEvaluated(0),
+      : m_ai(ai), m_name("AISignalSource(DISABLED_GATE_ONLY)"), m_lastEvaluated(0),
         m_lastDirection(SIGNAL_NONE), m_lastConfidence(0.0), m_lastScore(0.0),
         m_lastDrift(0.0), m_lastVetoed(false), m_lastReason("")
      {}
@@ -54,43 +57,11 @@ public:
       SAIInferenceResult result;
       result.Clear();
 
-      if(m_ai == NULL)
-        {
-         StoreLast(out, result, "AI orchestrator NULL");
-         return false;
-        }
-      if(!m_ai.IsReady())
-        {
-         StoreLast(out, result, "AI not ready");
-         return false;
-        }
-
-      if(!m_ai.Predict(result))
-        {
-         out.direction  = SIGNAL_NONE;
-         out.confidence = 0.0;
-         out.reason     = result.vetoed ? result.veto_reason : "AI prediction unavailable";
-         StoreLast(out, result, out.reason);
-         return false;
-        }
-
-      if(result.vetoed || !result.valid)
-        {
-         out.direction  = SIGNAL_NONE;
-         out.confidence = 0.0;
-         out.reason     = result.veto_reason;
-         StoreLast(out, result, out.reason);
-         return false;
-        }
-
-      if(result.direction > 0) out.direction = SIGNAL_BUY;
-      else if(result.direction < 0) out.direction = SIGNAL_SELL;
-      else out.direction = SIGNAL_NONE;
-
-      out.confidence = result.confidence;
-      out.reason = StringFormat("%s score=%.3f drift=%.3f", m_name, result.score, result.drift_score);
+      out.direction  = SIGNAL_NONE;
+      out.confidence = 0.0;
+      out.reason     = "AI signal source disabled: AI is evaluated once in AIInferStage";
       StoreLast(out, result, out.reason);
-      return (out.direction != SIGNAL_NONE && out.confidence > 0.0);
+      return false;
      }
 
    void SetName(string name) { m_name = name; }
