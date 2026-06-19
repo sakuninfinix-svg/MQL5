@@ -1,8 +1,7 @@
 //+------------------------------------------------------------------+
-//| Analysis/Pattern/PatternManager.mqh — v3.31                      |
-//| Trainable probabilistic pattern scoring for PASR                  |
-//| Loads PASR_pattern_weights.bin, falls back to safe defaults       |
-//| Optional CNN 1D pattern recognition augmentation                  |
+//| Analysis/Pattern/PatternManager.mqh — v1.0                       |
+//| Copyright 2026                                                   |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PATTERN_MANAGER_MQH__
@@ -154,12 +153,12 @@ private:
 
    void InitDefaultWeights()
      {
-      // These defaults reproduce the previous manual regression-style scores.
-      SetPatternWeights(PATTERN_IDX_PINBAR,  -2.20, 2.80, 1.30, 1.00, 0.70, 0.00); // wick, smallBody, atr, follow
-      SetPatternWeights(PATTERN_IDX_ENGULF,  -2.05, 2.20, 1.25, 1.25, 0.80, 0.00); // bodyRatio, closePower, atr, follow
-      SetPatternWeights(PATTERN_IDX_TWEEZER, -2.10, 2.60, 1.40, 1.00, 0.65, 0.00); // equality, body, atr, follow
-      SetPatternWeights(PATTERN_IDX_FAKEY,   -2.00, 2.00, 1.65, 1.15, 0.90, 0.00); // trap, reclaim, body, atr
-      SetPatternWeights(PATTERN_IDX_INSIDE,  -2.15, 2.40, 1.55, 1.20, 0.55, 0.00); // compression, closeBias, motherATR, follow
+      // Nilai default ini mereproduksi skor gaya regresi manual sebelumnya.
+      SetPatternWeights(PATTERN_IDX_PINBAR,  -2.20, 2.80, 1.30, 1.00, 0.70, 1.10); // wick, smallBody, atr, follow, protrusion
+      SetPatternWeights(PATTERN_IDX_ENGULF,  -2.05, 2.20, 1.25, 1.25, 0.80, 1.15); // bodyRatio, closePower, atr, follow, volSurge
+      SetPatternWeights(PATTERN_IDX_TWEEZER, -2.10, 2.60, 1.40, 1.00, 0.65, 0.95); // equality, body, atr, follow, wickPct
+      SetPatternWeights(PATTERN_IDX_FAKEY,   -2.00, 2.00, 1.65, 1.15, 0.90, 0.85); // trap, reclaim, body, atr, follow
+      SetPatternWeights(PATTERN_IDX_INSIDE,  -2.15, 2.40, 1.55, 1.20, 0.55, 1.05); // compression, closeBias, motherATR, follow, volDecline
       m_externalWeightsLoaded = false;
       m_weightsFile = "";
      }
@@ -192,7 +191,7 @@ private:
          (int)MathRound(nFeatures) != PATTERN_FEATURE_COUNT)
         {
          FileClose(handle);
-         PrintFormat("[PatternManager] invalid pattern weight header in '%s'", filename);
+         PrintFormat("[PatternManager] header bobot pola tidak valid di '%s'", filename);
          return false;
         }
 
@@ -206,13 +205,13 @@ private:
       FileClose(handle);
       if(!ok)
         {
-         PrintFormat("[PatternManager] truncated pattern weights in '%s'; keeping defaults", filename);
+         PrintFormat("[PatternManager] bobot pola terpotong di '%s'; menggunakan nilai default", filename);
          InitDefaultWeights();
          return false;
         }
       m_externalWeightsLoaded = true;
       m_weightsFile = filename;
-      PrintFormat("[PatternManager] loaded trainable pattern weights from '%s'", filename);
+      PrintFormat("[PatternManager] berhasil memuat bobot pola yang dapat dilatih dari '%s'", filename);
       return true;
      }
 
@@ -369,13 +368,16 @@ private:
       double smallBody = Clamp01(1.0 - CandleBody(r, s) / range);
       double atrQuality = NormalizeATRFactor(range, atr);
       double follow = FollowThroughScore(r, s, dir);
-      double score = ScorePattern(PATTERN_IDX_PINBAR, wickPct, smallBody, atrQuality, follow);
+      double protrusion = (dir == 1) ? SafeDiv(r[s+1].low - r[s].low, atr * _Point)
+                                     : SafeDiv(r[s].high - r[s+1].high, atr * _Point);
+      double score = ScorePattern(PATTERN_IDX_PINBAR, wickPct, smallBody, atrQuality, follow, Clamp01(protrusion));
 
       vote.valid = true; vote.type = PATTERN_PINBAR; vote.dir = dir; vote.extreme = extreme;
       vote.score = score; vote.rejectionQuality = wickPct; vote.trapQuality = 0.0;
       vote.reclaimQuality = Clamp01((dir == 1) ? SafeDiv(CandleClose(r,s) - bodyMid, MathMax(range * 0.5, _Point))
                                                : SafeDiv(bodyMid - CandleClose(r,s), MathMax(range * 0.5, _Point)));
-      vote.followThrough = follow; vote.label = (dir == 1) ? "Pinbar Bull" : "Pinbar Bear";
+      vote.followThrough = follow; vote.label = (dir == 1) ? "Pinbar Bullish" : "Pinbar Bearish";
+      vote.trapQuality = Clamp01(protrusion); // Simpan ke trapQuality agar muncul di log/UI sebagai "trap"
      }
 
    void EvaluateEngulfing(const MqlRates &r[], int s, double atr, SPatternVote &vote)
@@ -395,12 +397,13 @@ private:
       double closePower = (dir == 1) ? SafeDiv(c1 - CandleLow(r, s), MathMax(CandleRange(r, s), _Point))
                                      : SafeDiv(CandleHigh(r, s) - c1, MathMax(CandleRange(r, s), _Point));
       double follow = FollowThroughScore(r, s, dir);
-      double score = ScorePattern(PATTERN_IDX_ENGULF, bodyRatio, Clamp01(closePower), atrQuality, follow);
+      double volSurge = Clamp01(SafeDiv((double)r[s].tick_volume, (double)r[s+1].tick_volume * 1.5));
+      double score = ScorePattern(PATTERN_IDX_ENGULF, bodyRatio, Clamp01(closePower), atrQuality, follow, volSurge);
 
       vote.valid = true; vote.type = PATTERN_ENGULFING; vote.dir = dir; vote.extreme = extreme;
-      vote.score = score; vote.rejectionQuality = bodyRatio; vote.trapQuality = 0.0;
+      vote.score = score; vote.rejectionQuality = bodyRatio; vote.trapQuality = volSurge;
       vote.reclaimQuality = Clamp01(closePower); vote.followThrough = follow;
-      vote.label = (dir == 1) ? "Engulf Bull" : "Engulf Bear";
+      vote.label = (dir == 1) ? "Engulfing Bullish" : "Engulfing Bearish";
      }
 
    void EvaluateTweezer(const MqlRates &r[], int s, double atr, SPatternVote &vote)
@@ -418,10 +421,11 @@ private:
       double bodyPct = Clamp01(CandleBody(r, s) / MathMax(CandleRange(r, s), _Point));
       double atrQuality = NormalizeATRFactor(CandleRange(r, s), atr);
       double follow = FollowThroughScore(r, s, dir);
-      double score = ScorePattern(PATTERN_IDX_TWEEZER, equality, bodyPct, atrQuality, follow);
+      double wickPct = Clamp01(((dir == 1) ? LowerWick(r, s) : UpperWick(r, s)) / MathMax(CandleRange(r, s), _Point));
+      double score = ScorePattern(PATTERN_IDX_TWEEZER, equality, bodyPct, atrQuality, follow, wickPct);
 
       vote.valid = true; vote.type = PATTERN_BOTTOM; vote.dir = dir; vote.extreme = extreme;
-      vote.score = score; vote.rejectionQuality = equality; vote.trapQuality = 0.0;
+      vote.score = score; vote.rejectionQuality = equality; vote.trapQuality = wickPct;
       vote.reclaimQuality = bodyPct; vote.followThrough = follow;
       vote.label = (dir == 1) ? "Tweezer Bottom" : "Tweezer Top";
      }
@@ -442,7 +446,8 @@ private:
       double reclaimQuality = (dir == 1) ? Clamp01((c0 - l1) / insideRange) : Clamp01((h1 - c0) / insideRange);
       double atrQuality = NormalizeATRFactor(CandleRange(r, s), atr);
       double bodyPct = Clamp01(CandleBody(r, s) / MathMax(CandleRange(r, s), _Point));
-      double score = ScorePattern(PATTERN_IDX_FAKEY, trapQuality, reclaimQuality, bodyPct, atrQuality);
+      double follow = FollowThroughScore(r, s, dir);
+      double score = ScorePattern(PATTERN_IDX_FAKEY, trapQuality, reclaimQuality, bodyPct, atrQuality, follow);
 
       vote.valid = true; vote.type = PATTERN_FAKEY; vote.dir = dir; vote.extreme = extreme;
       vote.score = score; vote.rejectionQuality = bodyPct; vote.trapQuality = trapQuality;
@@ -468,12 +473,13 @@ private:
       double closeBias = (dir == 1) ? Clamp01((close - mid) / (motherRange * 0.5)) : Clamp01((mid - close) / (motherRange * 0.5));
       double motherATR = NormalizeATRFactor(motherRange, atr);
       double follow = FollowThroughScore(r, s, dir);
-      double score = ScorePattern(PATTERN_IDX_INSIDE, compression, closeBias, motherATR, follow);
+      double volDecline = Clamp01(SafeDiv((double)r[s+1].tick_volume - (double)r[s].tick_volume, (double)r[s+1].tick_volume));
+      double score = ScorePattern(PATTERN_IDX_INSIDE, compression, closeBias, motherATR, follow, volDecline);
 
       vote.valid = true; vote.type = PATTERN_INSIDE_BAR_BREAKOUT; vote.dir = dir; vote.extreme = extreme;
-      vote.score = score; vote.rejectionQuality = compression; vote.trapQuality = 0.0;
+      vote.score = score; vote.rejectionQuality = compression; vote.trapQuality = volDecline;
       vote.reclaimQuality = closeBias; vote.followThrough = follow;
-      vote.label = (dir == 1) ? "Inside Bull" : "Inside Bear";
+      vote.label = (dir == 1) ? "Inside Bar Bullish" : "Inside Bar Bearish";
      }
 
 public:
@@ -513,7 +519,7 @@ public:
       m_lastScanBarTime = 0;
       m_totalPatternsDetected = 0;
       m_totalValidSignals = 0;
-      PrintFormat("[PatternManager] v3.30 Init OK trainable_weights=%s", m_externalWeightsLoaded ? "true" : "false");
+      PrintFormat("[PatternManager] v3.30 Inisialisasi OK bobot_latih=%s", m_externalWeightsLoaded ? "true" : "false");
       return true;
      }
 
@@ -556,8 +562,8 @@ public:
       m_lastFeatures.Clear();
       int scanShift = shift;
       if(m_requireConfirmation && scanShift < 1) scanShift = 1;
-      if(scanShift < 0 || atrPoints <= 0.0) { outResult.reason = "Invalid shift/ATR"; return false; }
-      if(scanShift + 2 >= ArraySize(rates)) { outResult.reason = "Insufficient bars"; return false; }
+      if(scanShift < 0 || atrPoints <= 0.0) { outResult.reason = "Shift/ATR tidak valid"; return false; }
+      if(scanShift + 2 >= ArraySize(rates)) { outResult.reason = "Bar tidak mencukupi"; return false; }
 
       datetime curTime = rates[scanShift].time;
       if(curTime == m_lastScanBarTime)
@@ -574,22 +580,22 @@ public:
       EvaluateFakey(rates, scanShift, atrPoints, votes[3]);
       EvaluateInsideBar(rates, scanShift, atrPoints, votes[4]);
 
-      // Optional CNN pattern recognition augmentation
+      // Augmentasi pengenalan pola CNN opsional
       double cnnBuyScore = 0.0;
       double cnnSellScore = 0.0;
       if(m_cnnRecognizer != NULL && m_cnnRecognizer.IsBufferFilled())
         {
-         CNNPatternRecognizer::CNNPatternOutput cnnOutput;
+         CNNPatternOutput cnnOutput;
          if(m_cnnRecognizer.RecognizePattern(rates, scanShift, cnnOutput) && cnnOutput.confidence > 0.5)
            {
             ENUM_PATTERN_TYPE cnnPattern = m_cnnRecognizer.GetPatternType(cnnOutput.dominant_pattern);
             if(cnnPattern != PATTERN_NONE)
               {
-               // Map CNN pattern to direction
-               int cnnDir = (cnnPattern == PATTERN_PINBAR || cnnPattern == PATTERN_ENGULFING || 
+               // Memetakan pola CNN ke arah pergerakan
+               int cnnDir = (cnnPattern == PATTERN_PINBAR || cnnPattern == PATTERN_ENGULFING ||
                              cnnPattern == PATTERN_INSIDE_BAR_BREAKOUT) ? 1 : -1;
-               // For bottom/tweezer, check if it's bullish or bearish based on dominant pattern
-               // For simplicity, use the pattern confidence as a score modifier
+               // Untuk bottom/tweezer, periksa apakah bullish atau bearish berdasarkan pola dominan
+               // Untuk penyederhanaan, gunakan tingkat kepercayaan pola sebagai pengubah skor
                if(cnnDir == 1)
                  cnnBuyScore = cnnOutput.confidence;
                else
@@ -607,7 +613,7 @@ public:
       double buyScore = AggregateProbability(votes, 1);
       double sellScore = AggregateProbability(votes, -1);
 
-      // Blend CNN scores with rule-based scores
+      // Campurkan skor CNN dengan skor berbasis aturan
       if(cnnBuyScore > 0.0 || cnnSellScore > 0.0)
         {
          buyScore = Clamp01(buyScore * (1.0 - m_cnnWeight) + cnnBuyScore * m_cnnWeight);
@@ -633,13 +639,13 @@ public:
 
       if(finalScore < m_minConfluenceScore)
         {
-         outResult.reason = StringFormat("Pattern regression weak | buy=%.2f sell=%.2f final=%.2f", buyScore, sellScore, finalScore);
+         outResult.reason = StringFormat("Regresi pola lemah | beli=%.2f jual=%.2f akhir=%.2f", buyScore, sellScore, finalScore);
          m_lastResult = outResult;
          return false;
         }
       if(dominanceGap < m_minDominanceGap)
         {
-         outResult.reason = StringFormat("Pattern regression conflict | buy=%.2f sell=%.2f gap=%.2f", buyScore, sellScore, dominanceGap);
+         outResult.reason = StringFormat("Konflik regresi pola | beli=%.2f jual=%.2f selisih=%.2f", buyScore, sellScore, dominanceGap);
          m_lastResult = outResult;
          return false;
         }
@@ -648,7 +654,7 @@ public:
       int bestIdx = FindBestVote(votes, direction);
       if(bestIdx < 0)
         {
-         outResult.reason = "No dominant pattern";
+         outResult.reason = "Tidak ada pola dominan";
          m_lastResult = outResult;
          return false;
         }
@@ -661,12 +667,12 @@ public:
       outResult.conflictScore = conflictScore;
       outResult.dominanceGap = dominanceGap;
       outResult.barTime = curTime;
-      outResult.reason = votes[bestIdx].label + StringFormat(" | PatternScore %.2f gap %.2f conflict %.2f | rej %.2f trap %.2f reclaim %.2f ft %.2f | %s%s%s",
+      outResult.reason = votes[bestIdx].label + StringFormat(" | SkorPola %.2f selisih %.2f konflik %.2f | rej %.2f trap %.2f reclaim %.2f ft %.2f | %s%s%s",
                          finalScore, dominanceGap, conflictScore,
                          m_lastFeatures.rejectionQuality, m_lastFeatures.trapQuality,
                          m_lastFeatures.reclaimQuality, m_lastFeatures.followThrough,
                          BuildConfluenceLabel(votes, direction),
-                         m_externalWeightsLoaded ? " | trainable" : " | fallback",
+                         m_externalWeightsLoaded ? " | terlatih" : " | cadangan",
                          (m_cnnRecognizer != NULL && (cnnBuyScore > 0.0 || cnnSellScore > 0.0)) ? " | cnn" : "");
 
       m_lastResult = outResult;

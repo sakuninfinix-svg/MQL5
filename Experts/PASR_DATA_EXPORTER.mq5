@@ -64,6 +64,14 @@ struct TradeRecord {
    double    atrAtEntry;
    double    rsiAtEntry;
    double    maAtEntry;
+   double    patBuy;
+   double    patSell;
+   double    patConflict;
+   double    patGap;
+   double    patReject;
+   double    patTrap;
+   double    patReclaim;
+   double    patFollow;
 };
 TradeRecord g_pendingRecords[];  // Trades waiting for exit
 
@@ -92,6 +100,94 @@ double GetATR(int shift) {
 }
 
 //+------------------------------------------------------------------+
+//| Helper: Compute 8 pattern features from recent candles           |
+//| Matches real_feature_extractor.py CandlestickPatterns logic      |
+//+------------------------------------------------------------------+
+void GetPatternFeatures(double &buy_prob, double &sell_prob, double &conflict,
+                        double &gap, double &reject, double &trap,
+                        double &reclaim, double &follow) {
+   buy_prob = sell_prob = conflict = gap = reject = trap = reclaim = follow = 0.0;
+
+   double o[], h[], l[], c[];
+   ArraySetAsSeries(o, true); ArraySetAsSeries(h, true);
+   ArraySetAsSeries(l, true); ArraySetAsSeries(c, true);
+   if(CopyOpen(_Symbol, _Period, 0, 5, o) < 5) return;
+   if(CopyHigh(_Symbol, _Period, 0, 5, h) < 5) return;
+   if(CopyLow(_Symbol, _Period, 0, 5, l) < 5) return;
+   if(CopyClose(_Symbol, _Period, 0, 5, c) < 5) return;
+
+   double bull_score = 0.0, bear_score = 0.0;
+   double reject_buy = 0.0, reject_sell = 0.0;
+   double weights[3] = {1.0, 0.7, 0.5};
+
+   for(int k = 0; k < 3; k++) {
+      double body       = MathAbs(c[k] - o[k]);
+      double total_range = h[k] - l[k];
+      if(total_range < _Point) continue;
+
+      double upper_wick = h[k] - MathMax(o[k], c[k]);
+      double lower_wick = MathMin(o[k], c[k]) - l[k];
+      bool   is_bull    = (c[k] > o[k]);
+      bool   is_bear    = (c[k] < o[k]);
+      double w = weights[k];
+
+      // Pin bar buy
+      if(lower_wick >= 2.0 * body && upper_wick <= 0.3 * total_range)
+         bull_score += w * 0.8;
+      // Pin bar sell
+      if(upper_wick >= 2.0 * body && lower_wick <= 0.3 * total_range)
+         bear_score += w * 0.8;
+
+      // Engulfing
+      if(k < 2) {
+         double prev_body = MathAbs(c[k+1] - o[k+1]);
+         bool   prev_bull = (c[k+1] > o[k+1]);
+         bool   prev_bear = (c[k+1] < o[k+1]);
+         if(prev_bear && is_bull && body > prev_body * 1.1)
+            bull_score += w * 0.9;
+         if(prev_bull && is_bear && body > prev_body * 1.1)
+            bear_score += w * 0.9;
+      }
+
+      // Rejection candles
+      double close_pos = (total_range > 0) ? (c[k] - l[k]) / total_range : 0.5;
+      if(close_pos > 0.7 && lower_wick > 1.5 * body)
+         reject_buy = MathMax(reject_buy, w * close_pos);
+      if(close_pos < 0.3 && upper_wick > 1.5 * body)
+         reject_sell = MathMax(reject_sell, w * (1.0 - close_pos));
+   }
+
+   buy_prob  = MathMax(0.0, MathMin(1.0, bull_score / 2.5));
+   sell_prob = MathMax(0.0, MathMin(1.0, bear_score / 2.5));
+   conflict  = MathMax(0.0, MathMin(1.0, MathMin(buy_prob, sell_prob) * 2.0));
+   gap       = MathMax(0.0, MathMin(1.0, MathAbs(buy_prob - sell_prob)));
+   reject    = MathMax(0.0, MathMin(1.0, MathMax(reject_buy, reject_sell)));
+
+   // Trap: price broke recent range then reversed (last 3 bars vs bars 3-4)
+   double recent_high = MathMax(h[0], MathMax(h[1], h[2]));
+   double recent_low  = MathMin(l[0], MathMin(l[1], l[2]));
+   double prev_high   = MathMax(h[3], h[4]);
+   double prev_low    = MathMin(l[3], l[4]);
+   if(c[0] < prev_low && h[0] > prev_high) trap = 0.8;
+   else if(c[0] > prev_high && l[0] < prev_low) trap = 0.8;
+   else if(c[0] < recent_low) trap = 0.5;
+   else if(c[0] > recent_high) trap = 0.5;
+   trap = MathMax(0.0, MathMin(1.0, trap));
+
+   // Reclaim: price re-entered a previous S/R zone
+   double range_mid = (prev_high + prev_low) * 0.5;
+   if(MathAbs(c[0] - range_mid) < (prev_high - prev_low) * 0.1)
+      reclaim = 0.7;
+   else
+      reclaim = 0.3;
+   reclaim = MathMax(0.0, MathMin(1.0, reclaim));
+
+   // Follow-through: momentum continuation in last 3 bars
+   double ret3 = (c[0] - c[2]) / MathMax(c[2], _Point);
+   follow = MathMax(0.0, MathMin(1.0, MathAbs(ret3) / 0.01));
+}
+
+//+------------------------------------------------------------------+
 //| Write CSV header
 //+------------------------------------------------------------------+
 bool InitCSV() {
@@ -108,7 +204,9 @@ bool InitCSV() {
       "sl_price", "tp_price",
       "profit_pips", "profit_r",
       "hit_tp", "hit_sl", "duration_bars",
-      "atr_at_entry", "rsi_at_entry", "ma_at_entry"
+      "atr_at_entry", "rsi_at_entry", "ma_at_entry",
+      "pat_buy", "pat_sell", "pat_conflict", "pat_gap",
+      "pat_reject", "pat_trap", "pat_reclaim", "pat_follow"
    );
    FileFlush(g_fileHandle);
    Print("CSV initialized: ", InpExportFileName);
@@ -178,7 +276,15 @@ void WriteTradeToCSV(const TradeRecord &rec) {
       (string)rec.durationBars,
       DoubleToString(rec.atrAtEntry, 6),
       DoubleToString(rec.rsiAtEntry, 1),
-      DoubleToString(rec.maAtEntry, 5)
+      DoubleToString(rec.maAtEntry, 5),
+      DoubleToString(rec.patBuy, 4),
+      DoubleToString(rec.patSell, 4),
+      DoubleToString(rec.patConflict, 4),
+      DoubleToString(rec.patGap, 4),
+      DoubleToString(rec.patReject, 4),
+      DoubleToString(rec.patTrap, 4),
+      DoubleToString(rec.patReclaim, 4),
+      DoubleToString(rec.patFollow, 4)
    );
    FileFlush(g_fileHandle);
    g_totalExported++;
@@ -268,6 +374,10 @@ void RecordPosition(ulong ticket, int direction, double entryPrice,
    g_pendingRecords[n].atrAtEntry = GetATR(0);
    g_pendingRecords[n].rsiAtEntry = GetRSI(0);
    g_pendingRecords[n].maAtEntry = iMA(_Symbol, _Period, InpMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 0);
+   GetPatternFeatures(g_pendingRecords[n].patBuy, g_pendingRecords[n].patSell,
+                      g_pendingRecords[n].patConflict, g_pendingRecords[n].patGap,
+                      g_pendingRecords[n].patReject, g_pendingRecords[n].patTrap,
+                      g_pendingRecords[n].patReclaim, g_pendingRecords[n].patFollow);
 }
 
 //+------------------------------------------------------------------+
@@ -284,9 +394,17 @@ void ProcessClosedPosition(ulong ticket) {
    }
    if(idx < 0) return;  // Not tracked by us
    
-   // Get history order
-   CHistoryOrderInfo history;
-   if(!history.SelectByIndex(HistoryOrderSelect(ticket))) return;
+    // Get history order — iterate to find matching ticket
+    CHistoryOrderInfo history;
+    bool found = false;
+    for(int hi = HistoryOrdersTotal() - 1; hi >= 0; hi--) {
+       ulong hTicket = HistoryOrderGetTicket(hi);
+       if(hTicket == ticket && history.SelectByIndex(hi)) {
+          found = true;
+          break;
+       }
+    }
+    if(!found) return;
    
    TradeRecord &rec = g_pendingRecords[idx];
    rec.exitTime = history.TimeDone();
@@ -297,10 +415,10 @@ void ProcessClosedPosition(ulong ticket) {
    double pointSize = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
    if(rec.direction == 1) {
-      rec.exitPrice = history.Price();
+      rec.exitPrice = history.PriceOpen();
       rec.profitPips = (rec.exitPrice - rec.entryPrice) / pointSize;
    } else {
-      rec.exitPrice = history.Price();
+      rec.exitPrice = history.PriceOpen();
       rec.profitPips = (rec.entryPrice - rec.exitPrice) / pointSize;
    }
    
@@ -429,16 +547,20 @@ void OnTick() {
 void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result) {
-   // Detect closed position
-   if(trans.type == TRADE_TRANSACTION_DEAL_ADD) {
-      // Get the history order info
-      CHistoryOrderInfo history;
-      if(history.SelectByIndex(HistoryOrderSelect(trans.order))) {
-         if(history.Magic() == InpMagicNumber && history.OrderType() <= ORDER_TYPE_SELL) {
-            ProcessClosedPosition(trans.order);
-         }
-      }
-   }
+    // Detect closed position
+    if(trans.type == TRADE_TRANSACTION_DEAL_ADD) {
+       // Get the history order info
+       CHistoryOrderInfo history;
+       for(int hi = HistoryOrdersTotal() - 1; hi >= 0; hi--) {
+          ulong hTicket = HistoryOrderGetTicket(hi);
+          if(hTicket == trans.order && history.SelectByIndex(hi)) {
+             if(history.Magic() == InpMagicNumber && history.Type() <= ORDER_TYPE_SELL) {
+                ProcessClosedPosition(trans.order);
+             }
+             break;
+          }
+       }
+    }
 }
 
 //+------------------------------------------------------------------+

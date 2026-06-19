@@ -1,25 +1,8 @@
 //+------------------------------------------------------------------+
-//| PASR/AI/AIRetrainTrigger.mqh                                      |
+//| PASR/AI/AIRetrainTrigger.mqh                                     |
 //| Auto-learning trigger system for PASR EA                         |
-//|                                                                   |
-//| Standalone module — does NOT require CAIInference.                |
-//| Tracks trade count and writes retrain_trigger.flag when           |
-//| threshold reached. Also detects weights file changes.             |
-//|                                                                   |
-//| Usage in EA:                                                     |
-//|   #include <PASR/AI/AIRetrainTrigger.mqh>                        |
-//|                                                                   |
-//|   CAIRetrainTrigger g_retrain;                                    |
-//|                                                                   |
-//|   OnInit():                                                       |
-//|     g_retrain.Init("PASR_mlp_m0.bin", 200);                      |
-//|                                                                   |
-//|   OnTimer():                                                      |
-//|     g_retrain.Check();                                            |
-//|                                                                   |
-//|   OnTradeTransaction():                                           |
-//|     if(trans.type == TRADE_TRANSACTION_DEAL_ADD)                 |
-//|       g_retrain.OnTradeClosed();                                  |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |                                    |//| Standalone module — does NOT require CAIInference.                |//| Tracks trade count and writes retrain_trigger.flag when           |//| threshold reached. Also detects weights file changes.             |//|                                                                   |//| Usage in EA:                                                     |//|   #include <PASR/AI/AIRetrainTrigger.mqh>                        |//|                                                                   |//|   CAIRetrainTrigger g_retrain;                                    |//|                                                                   |//|   OnInit():                                                       |//|     g_retrain.Init("PASR_mlp_m0.bin", 200);                      |//|                                                                   |//|   OnTimer():                                                      |//|     g_retrain.Check();                                            |//|                                                                   |//|   OnTradeTransaction():                                           |//|     if(trans.type == TRADE_TRANSACTION_DEAL_ADD)                 |//|       g_retrain.OnTradeClosed();                                  |
 //+------------------------------------------------------------------+
 #ifndef __AI_RETRAIN_TRIGGER_MQH__
 #define __AI_RETRAIN_TRIGGER_MQH__

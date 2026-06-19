@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
 //|                                                      AITypes.mqh |
 //|                        Shared structs & enums for AI subsystem   |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_TYPES_MQH__

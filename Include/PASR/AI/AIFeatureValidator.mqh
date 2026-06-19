@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| AI/AIFeatureValidator.mqh — v1.02                               |
+//| AI/AIFeatureValidator.mqh — v1.02                                |
 //| Validates feature vectors and sequence tensors before inference  |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_FEATURE_VALIDATOR_MQH__

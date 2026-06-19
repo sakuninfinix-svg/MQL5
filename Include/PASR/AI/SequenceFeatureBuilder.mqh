@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
 //| AI/SequenceFeatureBuilder.mqh — v1.00                            |
 //| Builds [AI_SEQ_LEN x AI_SEQ_FEATURE_DIM] tensors for Transformer |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_SEQUENCE_FEATURE_BUILDER_MQH__

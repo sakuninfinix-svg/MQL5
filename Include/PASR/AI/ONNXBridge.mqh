@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
 //| ONNXBridge.mqh                                                   |
 //| Wrapper for MQL5 ONNX runtime — scalar and sequence inference    |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_AI_ONNX_BRIDGE_MQH__

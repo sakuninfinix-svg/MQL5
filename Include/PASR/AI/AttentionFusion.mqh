@@ -1,8 +1,8 @@
 //+------------------------------------------------------------------+
-//| AI/AttentionFusion.mqh — v1.03                                   |
+//| AI/AttentionFusion.mqh — v1.00                                   |
 //| Attention-based fusion of MLP and LSTM scores                    |
-//| FIX v1.03: all array params without 'const'; no m_initialized    |
-//|            redeclaration; ForwardAttention explicit size param    |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ATTENTION_FUSION_MQH__

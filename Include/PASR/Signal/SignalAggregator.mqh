@@ -7,8 +7,8 @@
 #define __SIGNAL_AGGREGATOR_MQH__
 
 #include "ISignalSource.mqh"
+#include "../Trade/TradePlan.mqh"
 #include "SignalConfig.mqh"
-#include "SignalScorer.mqh"
 
 #define PASR_MAX_SIGNAL_SOURCES 32
 
@@ -145,7 +145,6 @@ private:
    CRegisteredSource  m_sources[PASR_MAX_SIGNAL_SOURCES];
    int                m_sourceCount;
    const CSignalConfig *m_config;
-   CSignalScorer      m_scorer;
    SignalAggregatorSnapshot m_snapshot;
 
    double  m_totalVoterWeight;
@@ -316,7 +315,6 @@ public:
    void Init(const CSignalConfig &config)
      {
       m_config = &config;
-      m_scorer.Init(config);
       RefreshSnapshot();
      }
 
@@ -422,7 +420,7 @@ public:
          agg.multiplierFactor    = m_multiplierFactor;
          agg.confluence          = m_bullConfluence;
          agg.contributingSources = m_bullSources;
-         agg.urgency             = m_scorer.GetUrgencyLevel(normBull);
+         agg.urgency             = ENUM_SIGNAL_URGENCY(m_config.GetUrgencyLevel(normBull));
          m_lastDecisionReason    = "BUY accepted";
         }
       else if(normBear > normBull && bearQualified)
@@ -433,7 +431,7 @@ public:
          agg.multiplierFactor    = m_multiplierFactor;
          agg.confluence          = m_bearConfluence;
          agg.contributingSources = m_bearSources;
-         agg.urgency             = m_scorer.GetUrgencyLevel(normBear);
+         agg.urgency             = ENUM_SIGNAL_URGENCY(m_config.GetUrgencyLevel(normBear));
          m_lastDecisionReason    = "SELL accepted";
         }
       else

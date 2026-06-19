@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
 //| AI/AIFeatureBuilder.mqh                                          |
-//| copyright agsicentre                                             |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_FEATURE_BUILDER_MQH__
@@ -205,7 +206,7 @@ public:
      }
 
    virtual void DeclareEvents() override {}
-   virtual void OnEvent(const PASREvent &ev) override 
+   virtual void OnEvent(const PASREvent &ev) override
      {
       if(ev.id == EVENT_ID_CONFIG_RELOAD)
         {
@@ -269,8 +270,8 @@ public:
 
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
-      f[22] = (double)dt.hour / 23.0;
-      f[23] = (double)dt.day_of_week / 6.0;
+      f[22] = MathSin(2.0 * M_PI * (double)dt.hour / 24.0) * 0.5 + 0.5;
+      f[23] = MathCos(2.0 * M_PI * (double)dt.hour / 24.0) * 0.5 + 0.5;
       f[24] = MathMax(-3.0, MathMin(3.0, ZScore(20))) / 3.0;
       f[25] = ReturnSkew(20);
 

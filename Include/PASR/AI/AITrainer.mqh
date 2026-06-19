@@ -1,8 +1,8 @@
 //+------------------------------------------------------------------+
-//| AI/AITrainer.mqh — v1.03                                        |
+//| AI/AITrainer.mqh — v1.00                                        |
 //| Online trainer: collects samples and retrains MLP ensemble       |
-//| FIX v1.03: use ensemble.GetModelCount()/GetModel() directly;     |
-//|            pass ArraySize(features)+AI_FEATURE_DIM to OnlineUpdate|
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_TRAINER_MQH__

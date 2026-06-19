@@ -1,8 +1,8 @@
 //+------------------------------------------------------------------+
-//| AI/LSTMInference.mqh — v1.03                                     |
+//| AI/LSTMInference.mqh — v1.00                                     |
 //| LSTM-based inference engine for time series prediction           |
-//| FIX v1.03: LSTMForwardStep explicit int param to match 4-arg     |
-//|            call sites; all 'input' array params without 'const'  |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_LSTM_INFERENCE_MQH__

@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| AI/ConfidenceCalibrator.mqh — v1.03                              |
-//| Platt scaling + agreement-weighted confidence calibration         |
+//| AI/ConfidenceCalibrator.mqh — v1.00                              |
+//| Platt scaling + agreement-weighted confidence calibration        |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __CONFIDENCE_CALIBRATOR_MQH__

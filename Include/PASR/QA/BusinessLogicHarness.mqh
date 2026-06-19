@@ -241,8 +241,8 @@ private:
       cfg.Pattern.LookbackBars = 64;
       cfg.Risk.RecoveryCooldownBars = 7;
       cfg.Market.SpreadFilterPips = 2.5;
-      cfg.Market.SessionStartHour = 2;
-      cfg.Market.SessionEndHour = 18;
+      // Restrict Monday session to 02:00-18:00 (120-1080 minutes)
+      cfg.Market.Sessions[1] = DaySession(120, 1080, true);
 
       CSignalConfig config;
       config.ApplyStrategyConfig(cfg, true);
@@ -259,8 +259,9 @@ private:
       m_assert.IsTrue("session filter enabled for restricted window", config.GetUseSessionFilter());
       m_assert.IsTrue("debug mode forwarded", config.GetDebugMode());
 
-      cfg.Market.SessionStartHour = 0;
-      cfg.Market.SessionEndHour = 23;
+      // Reset all days to full-day active (= no session filter)
+      for(int i = 0; i < 7; i++)
+         cfg.Market.Sessions[i] = DaySession(0, 1380, true);
       config.ApplyStrategyConfig(cfg, false);
       m_assert.IsFalse("session filter disabled for full-day session", config.GetUseSessionFilter());
       m_assert.IsFalse("debug mode can be disabled", config.GetDebugMode());

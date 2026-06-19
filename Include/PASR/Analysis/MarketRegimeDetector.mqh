@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| Analysis/MarketRegimeDetector.mqh — v2.05                        |
+//| Analysis/MarketRegimeDetector.mqh — v1.00                        |
 //| Canonical EMarketRegime detector                                 |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_MARKET_REGIME_DETECTOR_MQH__

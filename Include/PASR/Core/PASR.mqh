@@ -52,6 +52,7 @@
 // Layer 3: Analysis base modules and helpers
 #include <PASR/Analysis/Pattern/PatternTypes.mqh>
 #include <PASR/Analysis/Pattern/PatternManager.mqh>
+#include <PASR/Analysis/CNNPatternRecognizer.mqh>
 #include <PASR/Analysis/SRDetector.mqh>
 #include <PASR/Analysis/SRManager.mqh>
 #include <PASR/Analysis/SRZoneScorer.mqh>

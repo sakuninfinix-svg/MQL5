@@ -116,8 +116,11 @@ StrategyConfig BuildConfig()
    cfg.Market.ADXPeriod = InpADXPeriod;
    cfg.Market.ADXTrendThreshold = (InpADXThresholdOverride > 0) ? InpADXThresholdOverride : tc.adxTrendThreshold;
    cfg.Market.SpreadFilterPips = InpSpreadFilterPips;
-   cfg.Market.SessionStartHour = tc.sessionStartHour;
-   cfg.Market.SessionEndHour = tc.sessionEndHour;
+   // Set per-day sessions: Mon-Fri from profile, Sun/Sat inactive
+   cfg.Market.Sessions[0] = DaySession(0, 0, false);
+   for(int d = 1; d <= 5; d++)
+      cfg.Market.Sessions[d] = DaySession(tc.sessionStartMin, tc.sessionEndMin, true);
+   cfg.Market.Sessions[6] = DaySession(0, 0, false);
    cfg.Market.FilterNewsTime = false;
    cfg.Market.NewsBufferMinutes = 30;
 

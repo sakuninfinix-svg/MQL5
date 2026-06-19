@@ -85,8 +85,11 @@ StrategyConfig BuildConfigFromTestProfile(const SStrategyTestConfig &testCfg)
    cfg.Market.ADXPeriod = InpADXPeriod;
    cfg.Market.ADXTrendThreshold = (InpADXTrendThresholdOverride > 0) ? InpADXTrendThresholdOverride : testCfg.adxTrendThreshold;
    cfg.Market.SpreadFilterPips = (InpSpreadFilterPipsOverride > 0) ? InpSpreadFilterPipsOverride : testCfg.spreadFilterPips;
-   cfg.Market.SessionStartHour = testCfg.sessionStartHour;
-   cfg.Market.SessionEndHour = testCfg.sessionEndHour;
+   // Set per-day sessions: Mon-Fri from profile, Sun/Sat inactive
+   cfg.Market.Sessions[0] = DaySession(0, 0, false);
+   for(int d = 1; d <= 5; d++)
+      cfg.Market.Sessions[d] = DaySession(testCfg.sessionStartMin, testCfg.sessionEndMin, true);
+   cfg.Market.Sessions[6] = DaySession(0, 0, false);
    cfg.Market.FilterNewsTime = false;
    cfg.Market.NewsBufferMinutes = 30;
 

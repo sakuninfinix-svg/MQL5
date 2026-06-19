@@ -1,0 +1,12 @@
+{
+  "model": "direction_logistic_regression",
+  "features": 35,
+  "filter": "LOW+MID vol (exclude HIGH>70th percentile)",
+  "buy_auc": 0.785193462008476,
+  "buy_acc": 0.6482424183936887,
+  "sell_auc": 0.7873440802919268,
+  "sell_acc": 0.622415498564501,
+  "n_train": 469755,
+  "n_test": 82898,
+  "export_path": "/media/agus/40A604FEA604F666/Users/agsi/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/tools/output/PASR_direction.bin"
+}

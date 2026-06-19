@@ -39,8 +39,7 @@ struct ConfigManagerSnapshot
    int      adxPeriod;
    double   adxTrendThreshold;
    double   spreadFilterPips;
-   int      sessionStartHour;
-   int      sessionEndHour;
+   DaySession sessions[7];   // Per-day session
    bool     filterNewsTime;
    int      newsBufferMinutes;
 
@@ -92,8 +91,7 @@ struct ConfigManagerSnapshot
       adxPeriod = 0;
       adxTrendThreshold = 0.0;
       spreadFilterPips = 0.0;
-      sessionStartHour = 0;
-      sessionEndHour = 0;
+      for(int i = 0; i < 7; i++) sessions[i] = DaySession();
       filterNewsTime = false;
       newsBufferMinutes = 0;
       aiEnabled = false;
@@ -166,8 +164,7 @@ private:
       m_snapshot.adxPeriod = m_cfg.Market.ADXPeriod;
       m_snapshot.adxTrendThreshold = m_cfg.Market.ADXTrendThreshold;
       m_snapshot.spreadFilterPips = m_cfg.Market.SpreadFilterPips;
-      m_snapshot.sessionStartHour = m_cfg.Market.SessionStartHour;
-      m_snapshot.sessionEndHour = m_cfg.Market.SessionEndHour;
+      for(int i = 0; i < 7; i++) m_snapshot.sessions[i] = m_cfg.Market.Sessions[i];
       m_snapshot.filterNewsTime = m_cfg.Market.FilterNewsTime;
       m_snapshot.newsBufferMinutes = m_cfg.Market.NewsBufferMinutes;
 
@@ -265,7 +262,7 @@ public:
 
    void PrintDiagnostics() const
      {
-      PrintFormat("[ConfigDiag] valid=%s status=%s magic=%I64d EA=%s v=%s risk=%.2f%% lot=%.2f maxDD=%.2f daily=%.2f open=%d AI=%s conf=%.2f session=%02d-%02d spread=%.2f patterns=%s dashboard=%s",
+      PrintFormat("[ConfigDiag] valid=%s status=%s magic=%I64d EA=%s v=%s risk=%.2f%% lot=%.2f maxDD=%.2f daily=%.2f open=%d AI=%s conf=%.2f session=%02d:%02d-%02d:%02d spread=%.2f patterns=%s dashboard=%s",
                   m_snapshot.valid ? "true" : "false",
                   m_snapshot.lastValidationStatus,
                   m_snapshot.magic,
@@ -278,8 +275,10 @@ public:
                   m_snapshot.maxOpenPositions,
                   m_snapshot.aiEnabled ? "true" : "false",
                   m_snapshot.aiMinConfidence,
-                  m_snapshot.sessionStartHour,
-                  m_snapshot.sessionEndHour,
+                  m_snapshot.sessions[1].StartMinutes / 60,
+                  m_snapshot.sessions[1].StartMinutes % 60,
+                  m_snapshot.sessions[1].EndMinutes / 60,
+                  m_snapshot.sessions[1].EndMinutes % 60,
                   m_snapshot.spreadFilterPips,
                   m_snapshot.patternsEnabled ? "true" : "false",
                   m_snapshot.showDashboard ? "true" : "false");

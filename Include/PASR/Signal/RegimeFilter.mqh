@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| Signal/RegimeFilter.mqh — v1.03                                  |
-//| Canonical regime filter using EMarketRegime from Data layer       |
+//| Signal/RegimeFilter.mqh — v1.00                                  |
+//| Canonical regime filter using EMarketRegime from Data layer      |
+//| Copyright 2026                                                   |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_REGIME_FILTER_MQH__

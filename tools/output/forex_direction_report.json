@@ -1,0 +1,46 @@
+[
+  {
+    "symbol": "eurusd",
+    "p70_threshold": 0.0003355364839080721,
+    "n_train": 124850,
+    "n_test": 21226,
+    "buy_auc": 0.78104321853971,
+    "buy_acc": 0.6283331762932253,
+    "sell_auc": 0.8036251699818008,
+    "sell_acc": 0.6471308772260436,
+    "export_path": "PASR_dir_eurusd.bin"
+  },
+  {
+    "symbol": "gbpusd",
+    "p70_threshold": 0.0004031615913845599,
+    "n_train": 124850,
+    "n_test": 24347,
+    "buy_auc": 0.7705158433090997,
+    "buy_acc": 0.6047562328007557,
+    "sell_auc": 0.7591619466283575,
+    "sell_acc": 0.5971166878876247,
+    "export_path": "PASR_dir_gbpusd.bin"
+  },
+  {
+    "symbol": "usdjpy",
+    "p70_threshold": 0.00036804517148993906,
+    "n_train": 124850,
+    "n_test": 19023,
+    "buy_auc": 0.8118873752079223,
+    "buy_acc": 0.6741313147242811,
+    "sell_auc": 0.7934684696761583,
+    "sell_acc": 0.6515270987751669,
+    "export_path": "PASR_dir_usdjpy.bin"
+  },
+  {
+    "symbol": "forex_combined",
+    "p70_threshold": 0.00036175662535242736,
+    "n_train": 374549,
+    "n_test": 60082,
+    "buy_auc": 0.8066847335725034,
+    "buy_acc": 0.6679371525581705,
+    "sell_auc": 0.8021059492187713,
+    "sell_acc": 0.6431044239539296,
+    "export_path": "PASR_dir_forex.bin"
+  }
+]

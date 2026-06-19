@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
 //| AI/ModelRegistry.mqh                                             |
 //| Model registration, versioning and lifecycle management          |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __MODEL_REGISTRY_MQH__
@@ -22,7 +24,7 @@ struct SModelDescriptor
    datetime          created_at;
    datetime          last_used;
    SAIModelPerf      perf;         // Performance tracking
-   
+
    void Reset()
    {
       id          = "";
@@ -48,13 +50,13 @@ private:
    SModelDescriptor m_models[REGISTRY_MAX_MODELS];
    int              m_count;
    string           m_active_id;    // currently active model ID
-   
+
 public:
    CModelRegistry() : m_count(0), m_active_id("")
    {
       for(int i=0; i<REGISTRY_MAX_MODELS; i++) m_models[i].Reset();
    }
-   
+
    //--- Register a model
    bool Register(const SModelDescriptor &desc)
    {
@@ -72,7 +74,7 @@ public:
                   desc.id, (int)desc.type, desc.version);
       return true;
    }
-   
+
    //--- Find by ID, return index or -1
    int Find(const string &id) const
    {
@@ -80,7 +82,7 @@ public:
          if(m_models[i].id == id) return i;
       return -1;
    }
-   
+
    //--- Get descriptor reference
    bool Get(const string &id, SModelDescriptor &out) const
    {
@@ -89,7 +91,7 @@ public:
       out = m_models[idx];
       return true;
    }
-   
+
    //--- Activate a model
    bool Activate(const string &id)
    {
@@ -104,7 +106,7 @@ public:
       PrintFormat("ModelRegistry: Activated '%s'", id);
       return true;
    }
-   
+
    //--- Deactivate a model
    bool Deactivate(const string &id)
    {
@@ -114,7 +116,7 @@ public:
       if(m_active_id == id) m_active_id = "";
       return true;
    }
-   
+
    //--- Update performance
    void UpdatePerf(const string &id, bool correct, double conf, double drift)
    {
@@ -123,7 +125,7 @@ public:
       m_models[idx].perf.Update(correct, conf, drift);
       m_models[idx].last_used = TimeCurrent();
    }
-   
+
    //--- Auto-select best model by accuracy
    string GetBestModelId() const
    {
@@ -142,7 +144,7 @@ public:
       }
       return (best_idx >= 0) ? m_models[best_idx].id : m_active_id;
    }
-   
+
    //--- Stats
    int    GetCount()          const { return m_count;     }
    string GetActiveId()       const { return m_active_id; }

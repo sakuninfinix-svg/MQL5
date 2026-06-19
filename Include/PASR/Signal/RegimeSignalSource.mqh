@@ -1,5 +1,7 @@
 //+------------------------------------------------------------------+
-//| Signal/RegimeSignalSource.mqh — v1.10                            |
+//| Signal/RegimeSignalSource.mqh — v1.00                            |
+//| Copyright 2026                                                   |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_REGIME_SOURCE_MQH__

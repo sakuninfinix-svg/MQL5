@@ -37,9 +37,8 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from generate_quality_training_data import (
-    AIFeatureExtractor, GeneratorConfig, AI_FEATURE_DIM
-)
+from real_feature_extractor import RealAIFeatureExtractor, AI_FEATURE_DIM
+from generate_quality_training_data import GeneratorConfig
 
 
 # ============================================================================
@@ -237,7 +236,7 @@ def compute_features_at_entries(
     df_ohlcv['regime'] = assign_regime(df_ohlcv['close'].to_numpy())
 
     print("Extracting 34 features (matching AIFeatureBuilder.mqh)...")
-    extractor = AIFeatureExtractor(config)
+    extractor = RealAIFeatureExtractor()
     features = extractor.extract_all_features(df_ohlcv)
     print(f"  Feature matrix: {features.shape}")
 

@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
 //| AI/OnlineLearningGuard.mqh — v1.02                               |
-//| Concept drift detection and veto guard for AI inference           |
+//| Concept drift detection and veto guard for AI inference          |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ONLINE_LEARNING_GUARD_MQH__

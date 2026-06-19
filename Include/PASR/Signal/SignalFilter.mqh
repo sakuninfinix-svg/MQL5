@@ -66,13 +66,21 @@ private:
      {
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
-      int startHour = MathMax(0, MathMin(23, m_cfg.Market.SessionStartHour));
-      int endHour = MathMax(0, MathMin(23, m_cfg.Market.SessionEndHour));
-      if(startHour == endHour)
-         return true;
-      if(startHour <= endHour)
+      int dow = dt.day_of_week;  // 0=Sun .. 6=Sat
+      if(dow < 0 || dow > 6) return true;
+      const DaySession &sess = m_cfg.Market.Sessions[dow];
+      if(!sess.Active)
         {
-         if(dt.hour < startHour || dt.hour > endHour)
+         r.passed = false;
+         r.reason = "OutOfSession";
+         return false;
+        }
+      int nowMin = dt.hour * 60 + dt.min;
+      int startMin = MathMax(0, MathMin(1439, sess.StartMinutes));
+      int endMin   = MathMax(0, MathMin(1439, sess.EndMinutes));
+      if(startMin <= endMin)
+        {
+         if(nowMin < startMin || nowMin > endMin)
            {
             r.passed = false;
             r.reason = "OutOfSession";
@@ -81,7 +89,8 @@ private:
         }
       else
         {
-         if(dt.hour > endHour && dt.hour < startHour)
+         // Wrap-around (e.g., 22:00-06:00)
+         if(nowMin > endMin && nowMin < startMin)
            {
             r.passed = false;
             r.reason = "OutOfSession";

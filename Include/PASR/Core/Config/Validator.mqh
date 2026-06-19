@@ -128,13 +128,21 @@ public:
       if(cfg.Market.SpreadFilterPips < 0.0)
          AddError(errors, "[Config.Market] SpreadFilterPips cannot be negative");
 
-      if(cfg.Market.SessionStartHour < 0 || cfg.Market.SessionStartHour > 23)
-         AddError(errors, "[Config.Market] SessionStartHour must be in [0, 23] (got " +
-                  IntegerToString(cfg.Market.SessionStartHour) + ")");
-
-      if(cfg.Market.SessionEndHour < 0 || cfg.Market.SessionEndHour > 23)
-         AddError(errors, "[Config.Market] SessionEndHour must be in [0, 23] (got " +
-                  IntegerToString(cfg.Market.SessionEndHour) + ")");
+      // Per-day session validation
+      for(int d = 0; d < 7; d++)
+        {
+         if(cfg.Market.Sessions[d].Active)
+           {
+            if(cfg.Market.Sessions[d].StartMinutes < 0 || cfg.Market.Sessions[d].StartMinutes > 1439)
+               AddError(errors, "[Config.Market] Sessions[" + IntegerToString(d) +
+                        "].StartMinutes must be in [0, 1439] (got " +
+                        IntegerToString(cfg.Market.Sessions[d].StartMinutes) + ")");
+            if(cfg.Market.Sessions[d].EndMinutes < 0 || cfg.Market.Sessions[d].EndMinutes > 1439)
+               AddError(errors, "[Config.Market] Sessions[" + IntegerToString(d) +
+                        "].EndMinutes must be in [0, 1439] (got " +
+                        IntegerToString(cfg.Market.Sessions[d].EndMinutes) + ")");
+           }
+        }
 
       //=== SECTION 4: AI ===============================================
 
@@ -235,14 +243,17 @@ public:
                   "%) must be < MaxDailyLossPct (" +
                   DoubleToString(cfg.Risk.MaxDailyLossPct, 2) + "%)");
 
-      // Session hours: start must be before end (unless 0-23 = all day)
-      if(cfg.Market.SessionStartHour > 0 || cfg.Market.SessionEndHour < 23)
+      // Per-day session: warn if start > end (allowed for wrap-around, but flag it)
+      for(int d = 0; d < 7; d++)
         {
-         if(cfg.Market.SessionStartHour >= cfg.Market.SessionEndHour)
-            AddError(errors, "[Config.Market] SessionStartHour (" +
-                     IntegerToString(cfg.Market.SessionStartHour) +
-                     ") must be < SessionEndHour (" +
-                     IntegerToString(cfg.Market.SessionEndHour) + ")");
+         if(cfg.Market.Sessions[d].Active &&
+            cfg.Market.Sessions[d].StartMinutes > 0 &&
+            cfg.Market.Sessions[d].EndMinutes > 0 &&
+            cfg.Market.Sessions[d].StartMinutes == cfg.Market.Sessions[d].EndMinutes)
+            AddError(errors, "[Config.Market] Sessions[" + IntegerToString(d) +
+                     "] has identical start/end minutes (" +
+                     IntegerToString(cfg.Market.Sessions[d].StartMinutes) +
+                     ") — this means no trading window");
         }
 
       // RULE 27 — Total theoretical risk guard

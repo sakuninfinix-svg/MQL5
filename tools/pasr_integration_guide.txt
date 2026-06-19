@@ -1,0 +1,72 @@
+PASR Inference Integration Guide v2
+====================================
+
+Files to deploy to MT5:
+  PASRInference.mqh        →  <MQL5>/Include/PASR/AI/PASRInference.mqh
+  PASR_vol_ridge.bin        →  <MQL5>/Files/PASR_vol_ridge.bin
+  PASR_dir_forex.bin        →  <MQL5>/Files/PASR_dir_forex.bin
+  PASR_dir_eurusd.bin       →  <MQL5>/Files/PASR_dir_eurusd.bin
+  PASR_dir_gbpusd.bin       →  <MQL5>/Files/PASR_dir_gbpusd.bin
+  PASR_dir_usdjpy.bin       →  <MQL5>/Files/PASR_dir_usdjpy.bin
+
+Step 1: Add include to main EA
+------------------------------
+    #include <PASR/AI/PASRInference.mqh>
+
+Step 2: Initialize in OnInit()
+------------------------------
+    int OnInit()
+    {
+        // Auto-loads correct direction model based on _Symbol
+        if(!g_PASR.Load("PASR_vol_ridge.bin"))
+            Print("PASR model loading FAILED");
+
+        // Or specify explicitly:
+        // g_PASR.Load("PASR_vol_ridge.bin", "PASR_dir_eurusd.bin");
+
+        return(INIT_SUCCEEDED);
+    }
+
+Step 3: Update volatility on each tick/bar
+------------------------------------------
+In OnTick(), on each NEW bar:
+
+    double close_buf[];
+    ArraySetAsSeries(close_buf, true);
+    CopyClose(_Symbol, PERIOD_CURRENT, 0, 32, close_buf);
+
+    float realized_vol = ComputeRealizedVol(close_buf, 8);
+    g_PASR.UpdateVolatility(realized_vol);
+
+Step 4: Get trade signal
+------------------------
+    float ai_features[34];
+    // ... fill from AIFeatureBuilder ...
+
+    float signal, pos_factor;
+    g_PASR.GetSignal(ai_features, signal, pos_factor);
+
+    // signal: +1 = BUY, -1 = SELL, 0 = no trade
+    // pos_factor: 0.0 = no trade, 0.2-3.0 = position multiplier
+
+    if(signal != 0.0f && pos_factor > 0.0f)
+    {
+        double lot = CalculateBaseLot() * pos_factor;
+        if(signal > 0) OpenBuy(lot);
+        else           OpenSell(lot);
+    }
+
+Model Details
+-------------
+Volatility:  PASR_vol_ridge.bin     (Ridge, 103 feat, R²=0.896)
+Direction:
+  EURUSD:    PASR_dir_eurusd.bin    (LogReg, BUY AUC=0.767, SELL AUC=0.789)
+  GBPUSD:    PASR_dir_gbpusd.bin    (LogReg, BUY AUC=0.771, SELL AUC=0.759)
+  USDJPY:    PASR_dir_usdjpy.bin    (LogReg, BUY AUC=0.812, SELL AUC=0.794)
+  Fallback:  PASR_dir_forex.bin     (LogReg, BUY AUC=0.805, SELL AUC=0.801)
+
+Performance (15% OOS test, 4 symbols):
+  Return: +12.5%, Sharpe: 1.68, MaxDD: 11.4%
+  Best: GBPUSD (+$1,395), Worst: XAUUSD (-$432)
+
+Note: XAUUSD uses forex model as approximate (gold has different dynamics).

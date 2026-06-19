@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-06-16T13:03:42.116131+00:00",
+  "input_npz": "volatility_m15_4sym.npz",
+  "type": "volatility_ridge_4sym",
+  "model": "Ridge(sag,alpha=100)",
+  "alpha": 100.0,
+  "n_features": 103,
+  "n_train": 631602,
+  "n_test": 157901,
+  "train_mse": 1.7683040809401973e-08,
+  "test_mse": 1.5156212285205584e-08,
+  "test_mae": 4.864961010753177e-05,
+  "pearson_r": 0.9467703592472612,
+  "r2_vs_mean": 0.8976062842906942,
+  "r2_vs_persist": 0.0409586559151206,
+  "top10_vol": 0.001064389361999929,
+  "bottom10_vol": 5.049218998465221e-06,
+  "spread_ratio": 210.80277213633724
+}

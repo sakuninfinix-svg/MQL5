@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| Analysis/SRManager.mqh - v6.0.4                                  |
-//| Responsibility: PIPELINE ORCHESTRATOR - IManager adapter          |
+//| Analysis/SRManager.mqh - v1.00                                   |
+//| Responsibility: PIPELINE ORCHESTRATOR - IManager adapter         |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_SR_MANAGER_MQH__

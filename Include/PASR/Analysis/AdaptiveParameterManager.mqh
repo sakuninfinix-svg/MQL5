@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| Analysis/AdaptiveParameterManager.mqh — v3.04                    |
-//| Dynamic SL/TP/lot sizing based on canonical market regime.        |
+//| Analysis/AdaptiveParameterManager.mqh — v1.00                    |
+//| Dynamic SL/TP/lot sizing based on canonical market regime.       |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_ADAPTIVE_PARAMETER_MANAGER_MQH__

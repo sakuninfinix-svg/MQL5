@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| Analysis/Pattern/PatternTypes.mqh — v2.03                        |
-//| Canonical pattern type definitions for PASR                       |
+//| Analysis/Pattern/PatternTypes.mqh — v1.00                        |
+//| Canonical pattern type definitions for PASR                      |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef PATTERN_TYPES_MQH

@@ -141,7 +141,18 @@ public:
       m_config.ATRBufferMult = MathMax(0.0, cfg.Signal.ATRBufferMult);
       m_config.MaxSpreadPoints = (cfg.Signal.MaxSpreadPoints > 0.0) ? cfg.Signal.MaxSpreadPoints : PipToPoints(cfg.Market.SpreadFilterPips);
       m_config.MinATRPoints = MathMax(0.0, cfg.Signal.MinATRPoints);
-      m_config.UseSessionFilter = cfg.Signal.UseSessionFilter || !(cfg.Market.SessionStartHour == 0 && cfg.Market.SessionEndHour == 23);
+      m_config.UseSessionFilter = cfg.Signal.UseSessionFilter;
+      // Auto-enable if any day is inactive or has restricted hours
+      if(!m_config.UseSessionFilter)
+        {
+         for(int i = 0; i < 7; i++)
+           {
+            if(!cfg.Market.Sessions[i].Active ||
+               cfg.Market.Sessions[i].StartMinutes > 0 ||
+               cfg.Market.Sessions[i].EndMinutes < 1380)
+              { m_config.UseSessionFilter = true; break; }
+           }
+        }
       m_config.UrgencyHighThreshold = Clamp01(cfg.Signal.UrgencyHighThreshold);
       m_config.UrgencyMediumThreshold = Clamp01(cfg.Signal.UrgencyMediumThreshold);
       m_config.DebugMode = debugMode;

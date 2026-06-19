@@ -1,7 +1,8 @@
 //+------------------------------------------------------------------+
-//| AI/AIOrchestrator.mqh — v3.30                                    |
-//| AI-first, risk-aware strategy brain for PASR                      |
-//| Business constants are sourced from StrategyConfig.AI             |
+//| AI/AIOrchestrator.mqh — v1.00                                    |
+//| Business constants are sourced from StrategyConfig.AI            |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_ORCHESTRATOR_MQH__

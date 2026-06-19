@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| Analysis/SRDetector.mqh — v1.0.3                                 |
+//| Analysis/SRDetector.mqh — v1.00                                 |
 //| Responsibility: PIVOT DETECTION ONLY                             |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_SR_DETECTOR_MQH__

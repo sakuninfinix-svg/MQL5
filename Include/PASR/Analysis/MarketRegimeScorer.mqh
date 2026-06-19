@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
 //| Analysis/MarketRegimeScorer.mqh — v1.0                           |
 //| Scores current market regime confidence                          |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_MARKET_REGIME_SCORER_MQH__

@@ -32,6 +32,8 @@ from typing import List, Dict, Tuple, Optional, Literal
 from enum import Enum
 from pathlib import Path
 
+from real_feature_extractor import RealAIFeatureExtractor
+
 # ============================================================================
 # CONSTANTS - Must match AITypes.mqh exactly
 # ============================================================================
@@ -434,182 +436,15 @@ class TechnicalIndicators:
 # FEATURE EXTRACTION - EXACT MATCH TO AIFeatureBuilder.mqh
 # ============================================================================
 class AIFeatureExtractor:
-    """
-    Extracts 34 features EXACTLY as AIFeatureBuilder.mqh does.
-    This ensures 100% compatibility between training and inference.
-    """
+    """Delegates to RealAIFeatureExtractor for correct feature computation."""
     
     def __init__(self, config: GeneratorConfig):
         self.config = config
-        self.indicators = TechnicalIndicators()
-        
-        # Baseline trackers (matching m_atr_baseline, m_vol_baseline)
-        self.atr_baselines = {}  # per regime
-        self.vol_baselines = {}  # per regime
+        self._extractor = RealAIFeatureExtractor()
         
     def extract_all_features(self, df: pd.DataFrame) -> np.ndarray:
-        """Extract all 34 features for each bar (from bar 50 onwards)"""
-        n = len(df)
-        features = np.zeros((n, AI_FEATURE_DIM), dtype=np.float32)
-        
-        # Precompute all indicators
-        close = df['close'].to_numpy()
-        high = df['high'].to_numpy()
-        low = df['low'].to_numpy()
-        volume = df['volume'].to_numpy()
-        regime = df['regime'].to_numpy()
-        
-        # ATRs at multiple periods
-        atr3 = self.indicators.atr(high, low, close, 3)
-        atr5 = self.indicators.atr(high, low, close, 5)
-        atr10 = self.indicators.atr(high, low, close, 10)
-        atr14 = self.indicators.atr(high, low, close, 14)
-        atr20 = self.indicators.atr(high, low, close, 20)
-        
-        # Other indicators
-        rsi = self.indicators.rsi(close, 14)
-        macd_main, macd_sig, macd_hist = self.indicators.macd(close)
-        cci = self.indicators.cci(high, low, close, 14)
-        stoch = self.indicators.stoch(high, low, close)
-        mfi = self.indicators.mfi(high, low, close, volume, 14)
-        
-        # S/R detection
-        sr_info = self.indicators.detect_sr_zones(high, low, close, 50)
-        
-        # Statistical features
-        zscore = self.indicators.zscore(close, 20)
-        skew = self.indicators.return_skew(close, 20)
-        
-        # Price returns
-        ret1 = self.indicators.price_return(close, 1)
-        ret2 = self.indicators.price_return(close, 2)
-        ret3 = self.indicators.price_return(close, 3)
-        ret5 = self.indicators.price_return(close, 5)
-        
-        # Update baselines per regime
-        for i in range(n):
-            r = int(regime[i])
-            if r not in self.atr_baselines:
-                self.atr_baselines[r] = atr14[i]
-                self.vol_baselines[r] = volume[i]
-            else:
-                alpha = 0.05
-                self.atr_baselines[r] = alpha * atr14[i] + (1 - alpha) * self.atr_baselines[r]
-                self.vol_baselines[r] = alpha * volume[i] + (1 - alpha) * self.vol_baselines[r]
-        
-        # Extract features for each bar starting from bar 50
-        for i in range(50, n):
-            r = int(regime[i])
-            atr_base = max(self.atr_baselines.get(r, atr14[i]), 1e-8)
-            vol_base = max(self.vol_baselines.get(r, volume[i]), 1.0)
-            
-            f = np.zeros(AI_FEATURE_DIM, dtype=np.float32)
-            
-            # === Features 0-3: Price Returns (f0-f3) ===
-            f[0] = ret1[i] / 0.05  # 1-bar return, clamped to [-0.05, 0.05] / 0.05
-            f[1] = ret2[i] / 0.05  # 2-bar return
-            f[2] = ret3[i] / 0.05  # 3-bar return
-            f[3] = ret5[i] / 0.05  # 5-bar return
-            
-            # === Features 4-7: ATR Ratios (f4-f7) ===
-            f[4] = min(atr3[i] / atr_base, 3.0) / 3.0
-            f[5] = min(atr5[i] / atr_base, 3.0) / 3.0
-            f[6] = min(atr10[i] / atr_base, 3.0) / 3.0
-            f[7] = min(atr20[i] / atr_base, 3.0) / 3.0
-            
-            # === Features 8-11: Momentum/Oscillators (f8-f11) ===
-            f[8] = rsi[i] / 100.0  # RSI normalized
-            
-            # MACD histogram normalized by ATR
-            macd_norm = macd_hist[i] / atr_base
-            f[9] = max(min(macd_norm, 1.0), -1.0) * 0.5 + 0.5  # Map [-1,1] -> [0,1]
-            
-            # CCI normalized
-            f[10] = max(min(cci[i] / 200.0, 1.0), -1.0) * 0.5 + 0.5  # Map [-200,200] -> [0,1]
-            
-            # Stochastic
-            f[11] = stoch[i] / 100.0
-            
-            # === Features 12-15: Volume (f12-f15) ===
-            vol_ratio = volume[i] / vol_base if vol_base > 0 else 1.0
-            f[12] = min(max(vol_ratio, 0.0), 5.0) / 5.0
-            
-            # OBV delta
-            obv_delta = volume[i] if close[i] > close[i-1] else -volume[i]
-            f[13] = max(min(obv_delta / vol_base, 3.0), -3.0) * 0.5 + 0.5
-            
-            # High volume spike
-            f[14] = 1.0 if volume[i] > 2.0 * vol_base else 0.0
-            
-            # MFI
-            f[15] = mfi[i] / 100.0
-            
-            # === Features 16-18: Structure (f16-f18) - Need pattern detection ===
-            # These come from InjectStructure calls - we'll simulate with S/R info
-            f[16] = sr_info['support_distance'][i]  # SR distance
-            f[17] = sr_info['zone_strength'][i]      # Zone strength
-            f[18] = min(max(sr_info['pattern_score'][i] / 100.0, 0.0), 1.0)  # Pattern score
-            
-            # === Features 19-21: Regime one-hot (f19-f21) ===
-            if r in [1, 2]:  # TREND_UP, TREND_DOWN
-                f[19], f[20], f[21] = 1.0, 0.0, 0.0
-            elif r in [4, 5]:  # VOLATILE, CRASH
-                f[19], f[20], f[21] = 0.0, 0.0, 1.0
-            else:  # RANGE, TRANSITION, UNKNOWN
-                f[19], f[20], f[21] = 0.0, 1.0, 0.0
-            
-            # === Features 22-25: Time & Statistics (f22-f25) ===
-            dt = df['timestamp'].iloc[i]
-            f[22] = dt.hour / 23.0
-            f[23] = dt.weekday() / 6.0
-            f[24] = (zscore[i] + 1.0) / 2.0  # Map [-1,1] -> [0,1]
-            f[25] = (skew[i] + 1.0) / 2.0     # Map [-1,1] -> [0,1]
-            
-            # === Features 26-33: Pattern Features (f26-f33) ===
-            # These require pattern detection - simulate realistic values
-            # Based on S/R position and regime
-            pos_in_range = 0.5  # default
-            if i >= 50:
-                recent_h = high[i-50:i].max()
-                recent_l = low[i-50:i].min()
-                range_sz = recent_h - recent_l
-                if range_sz > 0:
-                    pos_in_range = (close[i] - recent_l) / range_sz
-            
-            # Simulate pattern probabilities based on position and regime
-            is_near_support = pos_in_range < 0.3
-            is_near_resistance = pos_in_range > 0.7
-            
-            # Pattern features - base values modulated by regime and position
-            regime_boost = self.config.regime_params.get(EMarketRegime(r), {}).get("pattern_quality_boost", 0.0)
-            
-            # f26: pattern_buy_prob
-            f[26] = min(max(0.7 if is_near_support else 0.2 + regime_boost, 0.0), 1.0)
-            
-            # f27: pattern_sell_prob
-            f[27] = min(max(0.7 if is_near_resistance else 0.2 + regime_boost, 0.0), 1.0)
-            
-            # f28: pattern_conflict (both buy and sell signals)
-            f[28] = min(max(f[26] * f[27] * 2.0, 0.0), 1.0)
-            
-            # f29: pattern_gap (dominance gap)
-            f[29] = min(max(abs(f[26] - f[27]), 0.0), 1.0)
-            
-            # f30: rejection_quality (wick rejection at S/R)
-            f[30] = min(max(0.5 + (0.3 if (is_near_support or is_near_resistance) else 0.0) + regime_boost, 0.0), 1.0)
-            
-            # f31: trap_quality (false breakout detection)
-            f[31] = min(max(0.3 - regime_boost, 0.0), 1.0)
-            
-            # f32: reclaim_quality
-            f[32] = min(max(0.4 + regime_boost, 0.0), 1.0)
-            
-            # f33: follow_through
-            f[33] = min(max(0.5 + (0.2 if is_near_support or is_near_resistance else 0.0) + regime_boost, 0.0), 1.0)
-            
-            features[i] = f
-        
-        return features
+        """Extract all 34 features using real candlestick detection."""
+        return self._extractor.extract_all_features(df)
 
 
 # ============================================================================
@@ -920,7 +755,7 @@ def generate_training_data(
         label, weight, meta = trade.to_label()
         
         # Only keep trades with clear outcomes (non-zero label) or a sample of neutral
-        if label == 0.0 and np.random.random() > 0.1:  # Keep 10% of neutral
+        if label == 0.0 and np.random.random() > 0.4:  # Keep 40% of neutral
             continue
             
         row = {f'f{i}': trade.features_at_entry[i] for i in range(AI_FEATURE_DIM)}

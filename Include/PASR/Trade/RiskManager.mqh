@@ -87,8 +87,7 @@ private:
    int     m_maxOpenTrades;
    int     m_maxConsecLoss;
    double  m_maxSpreadPts;
-   int     m_sessionStartHour;
-   int     m_sessionEndHour;
+   DaySession m_sessions[7];  // Per-day session
    double  m_minLot;
    double  m_maxLot;
    double  m_lotStep;
@@ -243,14 +242,19 @@ private:
 
    bool SessionOK() const
      {
-      int start = MathMax(0, MathMin(23, m_sessionStartHour));
-      int end = MathMax(0, MathMin(23, m_sessionEndHour));
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
-      if(start == end) return true;
-      if(start < end)
-         return (dt.hour >= start && dt.hour <= end);
-      return (dt.hour >= start || dt.hour <= end);
+      int dow = dt.day_of_week;
+      if(dow < 0 || dow > 6) return true;
+      const DaySession &sess = m_sessions[dow];
+      if(!sess.Active) return false;
+      int nowMin = dt.hour * 60 + dt.min;
+      int startMin = MathMax(0, MathMin(1439, sess.StartMinutes));
+      int endMin   = MathMax(0, MathMin(1439, sess.EndMinutes));
+      if(startMin <= endMin)
+         return (nowMin >= startMin && nowMin <= endMin);
+      // Wrap-around
+      return (nowMin >= startMin || nowMin <= endMin);
      }
 
    void CheckDailyLossBreaker(double projectedDailyPnl)
@@ -276,8 +280,7 @@ private:
       m_maxOpenTrades = cfg.Risk.MaxOpenPositions;
       m_maxConsecLoss = cfg.Risk.MaxConsecLoss;
       m_maxSpreadPts  = PipToPoints(cfg.Market.SpreadFilterPips);
-      m_sessionStartHour = cfg.Market.SessionStartHour;
-      m_sessionEndHour = cfg.Market.SessionEndHour;
+      for(int i = 0; i < 7; i++) m_sessions[i] = cfg.Market.Sessions[i];
       return true;
      }
 
@@ -303,7 +306,6 @@ public:
    CRiskManager() : IManager(),
       m_riskPct(1.0), m_maxDDPct(10.0), m_dailyLossPct(3.0),
       m_maxOpenTrades(3), m_maxConsecLoss(5), m_maxSpreadPts(30),
-      m_sessionStartHour(0), m_sessionEndHour(23),
       m_minLot(0.01), m_maxLot(10.0), m_lotStep(0.01),
       m_openTrades(0), m_consecLoss(0), m_dailyLoss(0),
       m_peakEquity(0), m_lastResetDay(0), m_circuitBroken(false),
@@ -376,7 +378,7 @@ public:
       if(m_maxConsecLoss > 0 && m_consecLoss >= m_maxConsecLoss)
         { r.reason = StringFormat("ConsecLoss(%d>=%d)", m_consecLoss, m_maxConsecLoss); return r; }
       if(!SessionOK())
-        { r.reason = StringFormat("SessionClosed(%02d-%02d)", m_sessionStartHour, m_sessionEndHour); return r; }
+        { r.reason = "SessionClosed"; return r; }
       if(!SpreadOK())
         {
          double sp = (SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID)) / _Point;

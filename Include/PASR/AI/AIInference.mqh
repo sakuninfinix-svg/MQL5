@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
 //| AI/AIInference.mqh                                               |
-//| copyright agsicentre                                             |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_INFERENCE_MQH__
@@ -38,6 +39,7 @@ private:
    double   m_b2[AI_MLP_HIDDEN2];
    double   m_w3[AI_MLP_HIDDEN2];
    double   m_b3;
+   double   m_decision_threshold;
 
    double ReLU(double x) { return MathMax(0.0, x); }
    double Tanh(double x)
@@ -65,6 +67,7 @@ private:
       for(int i = 0; i < AI_MLP_HIDDEN2; i++)
          m_w3[i] = ((double)MathRand() / 32767.0 - 0.5) * 2.0 * scale3;
       m_b3 = 0.0;
+      m_decision_threshold = 0.5;
       m_external_weights_loaded = false;
       m_weights_file = "";
      }
@@ -79,7 +82,8 @@ private:
 public:
    CAIInference(int seed = 42)
       : IManager(), m_loaded(false), m_model_id("mlp_v2_34dim"), m_n_layers(3),
-        m_rand_seed(seed), m_external_weights_loaded(false), m_weights_file(""), m_b3(0.0)
+        m_rand_seed(seed), m_external_weights_loaded(false), m_weights_file(""), m_b3(0.0),
+        m_decision_threshold(0.5)
      {
       ArrayInitialize(m_b1, 0.0);
       ArrayInitialize(m_b2, 0.0);
@@ -153,6 +157,14 @@ public:
       for(int i = 0; i < AI_MLP_HIDDEN2 && ok; i++)
          ok = ReadFloatChecked(handle, m_w3[i]);
       if(ok) ok = ReadFloatChecked(handle, m_b3);
+
+      m_decision_threshold = 0.5;
+      double thresh_val = 0.0;
+      if(ok && ReadFloatChecked(handle, thresh_val))
+        {
+         m_decision_threshold = MathMax(0.1, MathMin(0.9, thresh_val));
+         PrintFormat("CAIInference: decision threshold=%.3f from '%s'", m_decision_threshold, filename);
+        }
 
       FileClose(handle);
       if(!ok)
@@ -254,6 +266,7 @@ public:
 
    bool   IsLoaded() const { return m_loaded; }
    bool   HasExternalWeights() const { return m_external_weights_loaded; }
+   double GetDecisionThreshold() const { return m_decision_threshold; }
    string GetWeightsFile() const { return m_weights_file; }
    string GetModelId() const { return m_model_id; }
    int    GetSeed() const { return m_rand_seed; }

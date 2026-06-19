@@ -49,8 +49,8 @@ struct SStrategyTestConfig
    // Market filters
    double adxTrendThreshold;
    double spreadFilterPips;
-   int    sessionStartHour;
-   int    sessionEndHour;
+   int    sessionStartMin;    // Minutes from midnight (weekday start)
+   int    sessionEndMin;      // Minutes from midnight (weekday end)
 
    // Signal parameters
    bool   useMTF;
@@ -109,8 +109,8 @@ SStrategyTestConfig GetStrategyConfig(ENUM_STRATEGY_PROFILE profile)
          cfg.useTrailingStop = true;
          cfg.adxTrendThreshold = 30.0;
          cfg.spreadFilterPips = 2.0;
-         cfg.sessionStartHour = 2;
-         cfg.sessionEndHour = 22;
+         cfg.sessionStartMin = 120;
+         cfg.sessionEndMin = 1320;
          cfg.useMTF = true;
          cfg.minConfluence = 2;
          cfg.signalMinScore = 0.55;
@@ -149,8 +149,8 @@ SStrategyTestConfig GetStrategyConfig(ENUM_STRATEGY_PROFILE profile)
          cfg.useTrailingStop = false;
          cfg.adxTrendThreshold = 25.0;
          cfg.spreadFilterPips = 3.0;
-         cfg.sessionStartHour = 0;
-         cfg.sessionEndHour = 23;
+         cfg.sessionStartMin = 0;
+         cfg.sessionEndMin = 1380;
          cfg.useMTF = true;
          cfg.minConfluence = 1;
          cfg.signalMinScore = 0.40;
@@ -189,8 +189,8 @@ SStrategyTestConfig GetStrategyConfig(ENUM_STRATEGY_PROFILE profile)
          cfg.useTrailingStop = true;
          cfg.adxTrendThreshold = 20.0;
          cfg.spreadFilterPips = 4.0;
-         cfg.sessionStartHour = 0;
-         cfg.sessionEndHour = 23;
+         cfg.sessionStartMin = 0;
+         cfg.sessionEndMin = 1380;
          cfg.useMTF = false;
          cfg.minConfluence = 1;
          cfg.signalMinScore = 0.35;
@@ -229,8 +229,8 @@ SStrategyTestConfig GetStrategyConfig(ENUM_STRATEGY_PROFILE profile)
          cfg.useTrailingStop = true;
          cfg.adxTrendThreshold = 28.0;
          cfg.spreadFilterPips = 2.5;
-         cfg.sessionStartHour = 1;
-         cfg.sessionEndHour = 21;
+         cfg.sessionStartMin = 60;
+         cfg.sessionEndMin = 1260;
          cfg.useMTF = true;
          cfg.minConfluence = 2;
          cfg.signalMinScore = 0.50;
@@ -269,8 +269,8 @@ SStrategyTestConfig GetStrategyConfig(ENUM_STRATEGY_PROFILE profile)
          cfg.useTrailingStop = false;
          cfg.adxTrendThreshold = 22.0;
          cfg.spreadFilterPips = 2.0;
-         cfg.sessionStartHour = 2;
-         cfg.sessionEndHour = 20;
+         cfg.sessionStartMin = 120;
+         cfg.sessionEndMin = 1200;
          cfg.useMTF = true;
          cfg.minConfluence = 2;
          cfg.signalMinScore = 0.45;
@@ -309,8 +309,8 @@ SStrategyTestConfig GetStrategyConfig(ENUM_STRATEGY_PROFILE profile)
          cfg.useTrailingStop = true;
          cfg.adxTrendThreshold = 20.0;
          cfg.spreadFilterPips = 3.0;
-         cfg.sessionStartHour = 0;
-         cfg.sessionEndHour = 23;
+         cfg.sessionStartMin = 0;
+         cfg.sessionEndMin = 1380;
          cfg.useMTF = true;
          cfg.minConfluence = 1;
          cfg.signalMinScore = 0.30;  // Low rule threshold, let AI gate
@@ -349,8 +349,8 @@ SStrategyTestConfig GetStrategyConfig(ENUM_STRATEGY_PROFILE profile)
          cfg.useTrailingStop = false;
          cfg.adxTrendThreshold = 25.0;
          cfg.spreadFilterPips = 3.0;
-         cfg.sessionStartHour = 0;
-         cfg.sessionEndHour = 23;
+         cfg.sessionStartMin = 0;
+         cfg.sessionEndMin = 1380;
          cfg.useMTF = true;
          cfg.minConfluence = 1;
          cfg.signalMinScore = 0.35;
@@ -389,8 +389,8 @@ SStrategyTestConfig GetStrategyConfig(ENUM_STRATEGY_PROFILE profile)
          cfg.useTrailingStop = true;
          cfg.adxTrendThreshold = 22.0;
          cfg.spreadFilterPips = 3.0;
-         cfg.sessionStartHour = 0;
-         cfg.sessionEndHour = 23;
+         cfg.sessionStartMin = 0;
+         cfg.sessionEndMin = 1380;
          cfg.useMTF = true;
          cfg.minConfluence = 1;
          cfg.signalMinScore = 0.35;

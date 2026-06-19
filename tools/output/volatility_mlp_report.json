@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-06-16T11:16:12.383845+00:00",
+  "input_npz": "/media/agus/40A604FEA604F666/Users/agsi/AppData/Roaming/MetaQuotes/Terminal/D0E8209F77C8CF37AD8BF550E51FF075/MQL5/tools/output/volatility_h1_seqs16.npz",
+  "type": "volatility_mlp_regression",
+  "architecture": "FlattenedSeq(16x34)->64->32->1",
+  "models": [
+    {
+      "seed": 42,
+      "n_train": 29971,
+      "n_test": 7493,
+      "train_mse": 0.567721426486969,
+      "test_mse": 0.6408652663230896,
+      "test_mae": 0.5247004628181458,
+      "pearson_r": 0.614250120150511,
+      "top10_vol": 0.0007549072033725679,
+      "bottom10_vol": 0.0007543237297795713,
+      "spread_ratio": 1.000773549079895,
+      "y_mean": 0.0007541318191215396,
+      "y_std": 0.000531631289049983,
+      "file": "PASR_vol_mlp_m0.bin"
+    }
+  ]
+}

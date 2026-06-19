@@ -328,7 +328,7 @@ class MLPClassifier:
     def predict_classes(self, X: np.ndarray, threshold: float = 0.5) -> np.ndarray:
         return (self.predict(X) > threshold).astype(float)
 
-    def export_mql5(self, path: str) -> None:
+    def export_mql5(self, path: str, threshold: float = 0.5) -> None:
         dims = self.layer_dims
         values = [float(d) for d in dims]
         for i in range(len(self.weights)):
@@ -336,11 +336,12 @@ class MLPClassifier:
             b = self.weights[i]['b']
             values.extend(W.ravel(order='C').tolist())
             values.extend(b.tolist())
+        values.append(float(threshold))
 
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with open(path, 'wb') as f:
             f.write(struct.pack(f'{len(values)}f', *values))
-        print(f"  Exported {path} ({len(values)} float32 values, arch={'->'.join(str(int(d)) for d in dims)})")
+        print(f"  Exported {path} ({len(values)} float32 values, arch={'->'.join(str(int(d)) for d in dims)}, threshold={threshold:.3f})")
 
 
 # ============================================================================
@@ -613,7 +614,7 @@ def main():
         )
 
         file_name = out_dir / f"PASR_mlp_m{idx}.bin"
-        model.export_mql5(str(file_name))
+        model.export_mql5(str(file_name), threshold=metrics['optimal_threshold'])
         metrics["file"] = file_name.name
         report["models"].append(metrics)
 

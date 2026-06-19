@@ -131,10 +131,17 @@ class AITrainingDataPreprocessor:
                 "std": float(df[col].std())
             }
             
-            # Warn if values are outside expected range (but allow some flexibility)
-            if min_val < -0.1 or max_val > 1.1:
+            # Warn if values are outside expected range
+            # f0-f3 are [-1,1], f4-f33 are [0,1]
+            col_idx = int(col[1:])
+            if col_idx < 4:
+                expected_min, expected_max = -1.1, 1.1
+            else:
+                expected_min, expected_max = -0.1, 1.1
+
+            if min_val < expected_min or max_val > expected_max:
                 validation_results["warnings"].append(
-                    f"{col}: Values outside expected range [0,1]: min={min_val:.3f}, max={max_val:.3f}")
+                    f"{col}: Values outside expected range: min={min_val:.3f}, max={max_val:.3f}")
         
         return validation_results["valid"], validation_results
     
@@ -221,20 +228,25 @@ class AITrainingDataPreprocessor:
         return validation_results["valid"], validation_results
     
     def normalize_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normalize features to [0,1] range if needed"""
+        """Clip features to expected ranges matching AIFeatureBuilder.mqh.
+
+        Features are already normalized by the extractor — we only clip
+        to remove floating-point outliers without rescaling.
+        """
         feature_cols = [f'f{i}' for i in range(self.feature_dim)]
-        
-        for col in feature_cols:
+
+        # f0-f3: price returns → [-1, 1]
+        for i in range(0, 4):
+            col = f'f{i}'
             if col in df.columns:
-                # Min-max normalization
-                min_val = df[col].min()
-                max_val = df[col].max()
-                
-                if max_val > min_val:
-                    df[col] = (df[col] - min_val) / (max_val - min_val)
-                else:
-                    df[col] = 0.5  # All values same, set to neutral
-        
+                df[col] = df[col].clip(-1.0, 1.0)
+
+        # f4-f33: all → [0, 1]
+        for i in range(4, self.feature_dim):
+            col = f'f{i}'
+            if col in df.columns:
+                df[col] = df[col].clip(0.0, 1.0)
+
         return df
     
     def balance_dataset(self, df: pd.DataFrame) -> pd.DataFrame:

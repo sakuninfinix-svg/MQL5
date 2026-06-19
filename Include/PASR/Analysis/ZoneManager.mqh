@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| Analysis/ZoneManager.mqh - v2.06                                 |
+//| Analysis/ZoneManager.mqh - v1.00                                 |
 //| Compile-safe supply/demand zone manager                          |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_ZONE_MANAGER_MQH__

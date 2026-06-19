@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
 //| AI/AICalibrationBridge.mqh                                       |
-//| copyright agsicentre                                             |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_CALIBRATION_BRIDGE_MQH__

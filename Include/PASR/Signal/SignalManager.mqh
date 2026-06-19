@@ -14,7 +14,6 @@
 #include "SignalDecisionEngine.mqh"
 #include "SignalFilterPipeline.mqh"
 #include "SignalCooldownManager.mqh"
-#include "SignalScorer.mqh"
 #include "../Analysis/Pattern/PatternManager.mqh"
 #include "../Analysis/SRManager.mqh"
 #include "../Data/SRStruct.mqh"
@@ -95,7 +94,6 @@ private:
    CSignalDecisionEngine   m_decisionEngine;
    CSignalFilterPipeline   m_filterPipeline;
    CSignalCooldownManager  m_cooldownMgr;
-   CSignalScorer           m_scorer;
    CSignalConfig           m_config;
 
    CPatternManager        *m_pattern;
@@ -118,7 +116,6 @@ private:
       m_aggregator.Init(m_config);
       m_filterPipeline.Init(m_config);
       m_cooldownMgr.Init(m_config);
-      m_scorer.Init(m_config);
       m_configReady = true;
      }
 

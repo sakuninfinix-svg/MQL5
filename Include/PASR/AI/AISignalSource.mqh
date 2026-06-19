@@ -1,5 +1,7 @@
 //+------------------------------------------------------------------+
-//| AI/AISignalSource.mqh — v1.10                                    |
+//| AI/AISignalSource.mqh — v1.00                                    |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_SIGNAL_SOURCE_MQH__

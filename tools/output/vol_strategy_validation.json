@@ -1,0 +1,12 @@
+{
+  "total_return_vol_adj": 0.025526307046651132,
+  "total_return_const": 0.1226741738775812,
+  "sharpe_vol_adj": 0.016031124653426092,
+  "sharpe_const": 0.05172611860551432,
+  "optimal_low_mult": 1.5,
+  "optimal_high_mult": 1.5,
+  "optimal_sharpe": 0.07131099391874265,
+  "vol_p30": 0.00010899530316237358,
+  "vol_p70": 0.0004171878797933459,
+  "vol_max": 0.010335282422602177
+}

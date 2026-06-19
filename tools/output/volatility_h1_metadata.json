@@ -1,0 +1,13 @@
+{
+  "n_samples": 37444,
+  "seq_len": 32,
+  "feature_dim": 34,
+  "forecast_bars": 12,
+  "symbols": [
+    "eurusd"
+  ],
+  "y_min": 0.0,
+  "y_max": 0.005557888653129339,
+  "y_mean": 0.0008083874708972871,
+  "y_median": 0.0006824812735430896
+}

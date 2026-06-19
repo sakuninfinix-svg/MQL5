@@ -1,9 +1,8 @@
 //+------------------------------------------------------------------+
-//| AI/MLPModel.mqh — v1.02                                         |
+//| AI/MLPModel.mqh — v1.00                                          |
 //| Lightweight Multi-Layer Perceptron for ensemble voting           |
-//| FIX v1.01: removed 'const' from all array reference parameters  |
-//| FIX v1.02: Forward1/OnlineUpdate take explicit int size params   |
-//|            to avoid any ArraySize-on-array-ref ambiguity         |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __AI_MLP_MODEL_MQH__

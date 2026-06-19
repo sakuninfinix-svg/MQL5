@@ -6,6 +6,8 @@
 #ifndef __PASR_CENTRAL_KERNEL_MQH__
 #define __PASR_CENTRAL_KERNEL_MQH__
 
+#include <PASR/Central/ServiceLocator.mqh>
+
 // v0.31 owns CPipelineEngine, runtime event loop, and manager bootstrap.
 
 enum ENUM_PASR_KERNEL_STATE
@@ -60,8 +62,12 @@ private:
       digest = digest * 31.0 + m_cfg.Pattern.MinPatternScore;
       digest = digest * 31.0 + (double)m_cfg.Pattern.LookbackBars;
       digest = digest * 31.0 + m_cfg.Market.SpreadFilterPips * 100.0;
-      digest = digest * 31.0 + (double)m_cfg.Market.SessionStartHour;
-      digest = digest * 31.0 + (double)m_cfg.Market.SessionEndHour;
+      for(int i = 0; i < 7; i++)
+        {
+         digest = digest * 31.0 + (m_cfg.Market.Sessions[i].Active ? 1.0 : 0.0);
+         digest = digest * 31.0 + (double)m_cfg.Market.Sessions[i].StartMinutes;
+         digest = digest * 31.0 + (double)m_cfg.Market.Sessions[i].EndMinutes;
+        }
       return MathMod(MathAbs(digest), 1000000007.0);
      }
 

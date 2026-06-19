@@ -1,0 +1,61 @@
+PASR Volatility Model — MQL5 Integration Guide
+================================================
+
+1. Copy Files to MT5:
+   - output/PASR_vol_ridge.bin  →  MQL5/Files/PASR_vol_ridge.bin
+   - tools/VolatilityInference.mqh  →  MQL5/Include/PASR/AI/VolatilityInference.mqh
+
+2. Inject into CRiskManager::CalcLot() (RiskManager.mqh):
+
+--- a/Include/PASR/Trade/RiskManager.mqh
++++ b/Include/PASR/Trade/RiskManager.mqh
+@@ -9,6 +9,7 @@
+ #include "../Core/IManager.mqh"
+ #include "../Core/PipelineTypes.mqh"
++#include "../AI/VolatilityInference.mqh"
+
+@@ -35,6 +36,7 @@
+    bool     m_volLoaded;
++   float    m_predVol;
+ 
+@@ -441,10 +443,22 @@
+    double CalcLot(double slPoints) const
+      {
+       if(slPoints <= 0.0) return m_minLot;
+-      double riskMoney = AccountBalance() * (m_riskPct / 100.0);
++      
++      // Base risk
++      double baseRisk = m_riskPct / 100.0;
++      
++      // Volatility adjustment: reduce risk when vol is high
++      if(g_VolPredictor.IsLoaded())
++      {
++         float predVol = g_VolPredictor.GetPersistence();  // or Predict()
++         float baseVol = 0.000269f;  // median vol from training
++         float volFactor = baseVol / fmax(predVol, baseVol * 0.01f);
++         volFactor = fmax(0.2f, fmin(3.0f, volFactor));
++         baseRisk *= volFactor;
++      }
++      
++      double riskMoney = AccountBalance() * baseRisk;
+       double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+       double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+       if(tickValue <= 0.0 || tickSize <= 0.0) return m_minLot;
+
+3. Load model at EA init:
+   In PASR_PRERELEASE.mq5 or PASRKernel.mqh, add to OnInit():
+   if(!g_VolPredictor.Load("PASR_vol_ridge.bin"))
+      Print("WARNING: Volatility model not loaded");
+
+4. Update persistence each bar:
+   In OnTick() or pipeline DataSync stage:
+   double closeBuff[];
+   ArraySetAsSeries(closeBuff, true);
+   CopyClose(_Symbol, PERIOD_CURRENT, 0, 16, closeBuff);
+   float vol8 = ComputeRealizedVol(closeBuff, 8);
+   g_VolPredictor.UpdateVolatility(vol8);
+
+5. Effect:
+   - Low vol (< 0.00005): risk multiplier → 3.0x (increase position)
+   - Normal vol (~0.00027): risk multiplier → 1.0x 
+   - High vol (> 0.0008): risk multiplier → ~0.3x (reduce position)

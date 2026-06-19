@@ -48,6 +48,25 @@ struct RiskConfig
   };
 
 //+------------------------------------------------------------------+
+//| DaySession — trading session for a single day of the week        |
+//|   StartMinutes / EndMinutes = minutes from midnight (0-1439)    |
+//|   Active = false means no trading on this day                    |
+//|   Index convention (MQL5 day_of_week):                           |
+//|     0=Sunday 1=Monday 2=Tuesday 3=Wednesday                     |
+//|     4=Thursday 5=Friday 6=Saturday                              |
+//+------------------------------------------------------------------+
+struct DaySession
+  {
+   int  StartMinutes;
+   int  EndMinutes;
+   bool Active;
+
+   DaySession() : StartMinutes(0), EndMinutes(1380), Active(true) {}
+   DaySession(int startMin, int endMin, bool active)
+      : StartMinutes(startMin), EndMinutes(endMin), Active(active) {}
+  };
+
+//+------------------------------------------------------------------+
 //| MarketConfig — indicator & session parameters                    |
 //+------------------------------------------------------------------+
 struct MarketConfig
@@ -56,16 +75,19 @@ struct MarketConfig
    int    ADXPeriod;
    double ADXTrendThreshold;
    double SpreadFilterPips;
-   int    SessionStartHour;
-   int    SessionEndHour;
+   DaySession Sessions[7];   // Per-day session: [0]=Sun .. [6]=Sat
    bool   FilterNewsTime;
    int    NewsBufferMinutes;
 
    MarketConfig()
       : ATRPeriod(14), ADXPeriod(14), ADXTrendThreshold(25.0),
         SpreadFilterPips(3.0),
-        SessionStartHour(0), SessionEndHour(23),
-        FilterNewsTime(false), NewsBufferMinutes(30) {}
+        FilterNewsTime(false), NewsBufferMinutes(30)
+     {
+      // Default: all 7 days active 00:00-23:00 (= no session filter)
+      for(int i = 0; i < 7; i++)
+         Sessions[i] = DaySession(0, 1380, true);
+     }
   };
 
 //+------------------------------------------------------------------+

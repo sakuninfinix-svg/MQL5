@@ -1,6 +1,8 @@
 //+------------------------------------------------------------------+
-//| Analysis/SRZoneStore.mqh - v1.1.1                                |
-//| SR zone storage with MQL5-safe sorted support/resistance indexes  |
+//| Analysis/SRZoneStore.mqh - v1.00                                 |
+//| SR zone storage with MQL5-safe sorted support/resistance indexes |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __ANALYSIS_SR_ZONE_STORE_MQH__

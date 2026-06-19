@@ -1,9 +1,8 @@
 //+------------------------------------------------------------------+
-//| AIEnsemble.mqh — v1.03                                          |
+//| AIEnsemble.mqh — v1.00                                           |
 //| Multi-model voting ensemble with ONNX bridge integration         |
-//| FIX v1.03: add IsReady()/GetModelCount()/GetModel() accessors    |
-//|            fix SAISequenceTensor pointer handling                 |
-//|            update Vote() calls to new MLPModel.Forward signature |
+//| Copyright @2026                                                  |
+//| agsicentre.wordpress.com                                         |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_AI_ENSEMBLE_MQH__

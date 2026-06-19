@@ -9,6 +9,7 @@
 #include <PASR/Central/ModuleRegistry.mqh>
 #include <PASR/Central/ServiceLocator.mqh>
 #include <PASR/AI/AIRetrainTrigger.mqh>
+#include <PASR/AI/GBRInference.mqh>
 
 input bool InpDebugMode = true;
 input bool InpEnableProfiling = true;
@@ -42,8 +43,13 @@ input int    InpATRPeriod = 14;
 input int    InpADXPeriod = 14;
 input double InpADXTrendThreshold = 25.0;
 input double InpSpreadFilterPips = 3.0;
-input int    InpSessionStartHour = 0;
-input int    InpSessionEndHour = 23;
+input string InpSessionSunday    = "00:00-23:00";   // Minggu
+input string InpSessionMonday    = "00:00-23:00";   // Senin
+input string InpSessionTuesday   = "00:00-23:00";   // Selasa
+input string InpSessionWednesday = "00:00-23:00";   // Rabu
+input string InpSessionThursday  = "00:00-23:00";   // Kamis
+input string InpSessionFriday    = "00:00-23:00";   // Jumat
+input string InpSessionSaturday  = "00:00-23:00";   // Sabtu
 input bool   InpFilterNewsTime = false;
 input int    InpNewsBufferMinutes = 30;
 
@@ -59,13 +65,27 @@ input string InpAIModelFileName = "PASR_gbr_m0.bin";
 input bool   InpAIEnableOnnx = false;
 input string InpAIModelOnnxFileName = "PASR_sequence.onnx";
 
+input group "GBR Configuration"
+input bool   InpEnableGBR = true;              // Enable GBR for MTF
+input int    InpGBRN_estimators = 150;         // Number of trees (100-200 optimal)
+input double InpGBRLearning_rate = 0.05;       // Learning rate (0.01-0.1 optimal)
+input int    InpGBRMax_depth = 4;              // Tree depth (3-6 optimal)
+input double InpGBRMin_samples_split = 0.03;   // Min samples split (2-5%)
+input double InpGBRMin_samples_leaf = 0.015;   // Min samples leaf (1-3%)
+input double InpGBRSubsample = 0.8;           // Stochastic sampling (0.7-0.9)
+input double InpGBRColsample_bytree = 0.7;     // Feature sampling (0.6-0.8)
+input double InpGBRReg_alpha = 0.05;           // L1 regularization (0.0-0.1)
+input double InpGBRReg_lambda = 0.8;          // L2 regularization (0.5-1.0)
+input double InpGBRGamma = 0.05;               // Min loss reduction (0.0-0.1)
+input string InpGBRModelPath = "PASR_gbr_m0.onnx"; // GBR ONNX model path
+
 input group "AI Regime Thresholds"
 input double InpAITrendEntryThreshold = 0.60;
 input double InpAITrendRiskMultiplier = 1.20;
 input double InpAIRangeEntryThreshold = 0.65;
 input double InpAIRangeRiskMultiplier = 1.10;  // AI Range Risk Multiplier
-input double InpAIVolatileEntryThreshold = 0.85; //AI Volatile Entry 
-input double InpAIVolatileRiskMultiplier = 0.90; 
+input double InpAIVolatileEntryThreshold = 0.85; //AI Volatile Entry
+input double InpAIVolatileRiskMultiplier = 0.90;
 input double InpAIConservativeEntryThreshold = 0.95;
 input double InpAIConservativeRiskMultiplier = 0.10;
 input double InpAIScalpEntryThreshold = 0.70;
@@ -115,7 +135,7 @@ input string InpAutoRetrainWeightsFile = "PASR_mlp_m0.bin"; //Online Learning Ot
 
 input group "Display"
 input bool   InpShowDashboard = true; // Lihat DashBoard
-input bool   InpShowSignalArrows = true; 
+input bool   InpShowSignalArrows = true;
 input bool   InpEnableAlerts = false; //Alerts
 input bool   InpEnablePushNotify = false; //Notifikasi
 input int    InpFontSize = 9; //Ukuran Font
@@ -123,6 +143,7 @@ input int    InpFontSize = 9; //Ukuran Font
 CPASRKernel g_kernel;
 CPerformanceReport g_report;
 CAIRetrainTrigger g_retrain;
+CGBRInference g_gbr;
 
 struct EAState
   {
@@ -141,6 +162,36 @@ EAState g_state;
 #include <PASR/QA/QAStressTest.mqh>
 CQAStressTest g_qa;
 #endif
+
+//+------------------------------------------------------------------+
+//| Parse "HH:MM-HH:MM" into a DaySession.                           |
+//| Empty string or invalid format → Active=false                    |
+//+------------------------------------------------------------------+
+DaySession ParseSessionString(const string s)
+  {
+   DaySession ds;
+   ds.Active = false;
+   ds.StartMinutes = 0;
+   ds.EndMinutes = 0;
+   if(StringLen(s) < 11) return ds;
+   int dashPos = StringFind(s, "-");
+   if(dashPos < 0) return ds;
+   string startStr = StringSubstr(s, 0, dashPos);
+   string endStr   = StringSubstr(s, dashPos + 1);
+   int sColon = StringFind(startStr, ":");
+   int eColon = StringFind(endStr, ":");
+   if(sColon < 0 || eColon < 0) return ds;
+   int sH = (int)StringToInteger(StringSubstr(startStr, 0, sColon));
+   int sM = (int)StringToInteger(StringSubstr(startStr, sColon + 1));
+   int eH = (int)StringToInteger(StringSubstr(endStr, 0, eColon));
+   int eM = (int)StringToInteger(StringSubstr(endStr, eColon + 1));
+   if(sH < 0 || sH > 23 || sM < 0 || sM > 59) return ds;
+   if(eH < 0 || eH > 23 || eM < 0 || eM > 59) return ds;
+   ds.StartMinutes = sH * 60 + sM;
+   ds.EndMinutes   = eH * 60 + eM;
+   ds.Active       = true;
+   return ds;
+  }
 
 StrategyConfig BuildConfigFromInputs()
   {
@@ -172,8 +223,13 @@ StrategyConfig BuildConfigFromInputs()
    cfg.Market.ADXPeriod            = InpADXPeriod;
    cfg.Market.ADXTrendThreshold    = InpADXTrendThreshold;
    cfg.Market.SpreadFilterPips     = InpSpreadFilterPips;
-   cfg.Market.SessionStartHour     = InpSessionStartHour;
-   cfg.Market.SessionEndHour       = InpSessionEndHour;
+   cfg.Market.Sessions[0]          = ParseSessionString(InpSessionSunday);
+   cfg.Market.Sessions[1]          = ParseSessionString(InpSessionMonday);
+   cfg.Market.Sessions[2]          = ParseSessionString(InpSessionTuesday);
+   cfg.Market.Sessions[3]          = ParseSessionString(InpSessionWednesday);
+   cfg.Market.Sessions[4]          = ParseSessionString(InpSessionThursday);
+   cfg.Market.Sessions[5]          = ParseSessionString(InpSessionFriday);
+   cfg.Market.Sessions[6]          = ParseSessionString(InpSessionSaturday);
    cfg.Market.FilterNewsTime       = InpFilterNewsTime;
    cfg.Market.NewsBufferMinutes    = InpNewsBufferMinutes;
 
@@ -212,6 +268,20 @@ StrategyConfig BuildConfigFromInputs()
    cfg.AI.RegimeRewardWeight            = InpAIRegimeRewardWeight;
    cfg.AI.FailurePenaltyWeight          = InpAIFailurePenaltyWeight;
    cfg.AI.RiskFailureWeight             = InpAIRiskFailureWeight;
+
+   // GBR Configuration
+   cfg.AI.EnableGBR                    = InpEnableGBR;
+   cfg.AI.GBRN_estimators               = InpGBRN_estimators;
+   cfg.AI.GBRLearning_rate             = InpGBRLearning_rate;
+   cfg.AI.GBRMax_depth                 = InpGBRMax_depth;
+   cfg.AI.GBRMin_samples_split         = InpGBRMin_samples_split;
+   cfg.AI.GBRMin_samples_leaf          = InpGBRMin_samples_leaf;
+   cfg.AI.GBRSubsample                 = InpGBRSubsample;
+   cfg.AI.GBRColsample_bytree          = InpGBRColsample_bytree;
+   cfg.AI.GBRReg_alpha                 = InpGBRReg_alpha;
+   cfg.AI.GBRReg_lambda                = InpGBRReg_lambda;
+   cfg.AI.GBRGamma                     = InpGBRGamma;
+   cfg.AI.GBRModelPath                 = InpGBRModelPath;
 
    cfg.Signal.UseMTF              = InpUseMTF;
    cfg.Signal.SignalLookback      = InpSignalLookback;
@@ -326,6 +396,41 @@ int OnInit()
      {
       g_retrain.Init(InpAutoRetrainWeightsFile, InpAutoRetrainTradeThreshold);
       Print("[PASR] Auto-retrain trigger enabled");
+     }
+
+   // Initialize GBR if enabled
+   if(InpEnableGBR)
+     {
+      SGBRConfig gbr_cfg;
+      gbr_cfg.n_estimators        = InpGBRN_estimators;
+      gbr_cfg.learning_rate       = InpGBRLearning_rate;
+      gbr_cfg.max_depth           = InpGBRMax_depth;
+      gbr_cfg.min_samples_split   = InpGBRMin_samples_split;
+      gbr_cfg.min_samples_leaf    = InpGBRMin_samples_leaf;
+      gbr_cfg.subsample           = InpGBRSubsample;
+      gbr_cfg.colsample_bytree    = InpGBRColsample_bytree;
+      gbr_cfg.reg_alpha           = InpGBRReg_alpha;
+      gbr_cfg.reg_lambda          = InpGBRReg_lambda;
+      gbr_cfg.gamma               = InpGBRGamma;
+
+      g_gbr.SetConfig(gbr_cfg);
+
+      // Try to load GBR model from ONNX file
+      if(InpGBRModelPath != "")
+        {
+         if(g_gbr.LoadModel(InpGBRModelPath))
+           {
+            PrintFormat("[PASR] GBR model loaded successfully from %s", InpGBRModelPath);
+           }
+         else
+           {
+            PrintFormat("[PASR] GBR model load failed from %s, using random initialization", InpGBRModelPath);
+           }
+        }
+      else
+        {
+         Print("[PASR] GBR enabled but no model path specified, using random initialization");
+        }
      }
 
    return INIT_SUCCEEDED;
