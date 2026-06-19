@@ -119,6 +119,7 @@ public:
 
    ISignalSource   *GetSource() const { return m_source; }
    double           GetWeight() const { return m_weight; }
+   void             SetWeight(double w) { m_weight = w; }
    ENUM_SOURCE_TYPE GetType()   const { return m_type;   }
 
    string GetName() const
@@ -340,6 +341,26 @@ public:
      }
 
    int SourceCount() const { return m_sourceCount; }
+
+   bool UpdateSourceWeight(int idx, double newWeight)
+     {
+      if(idx < 0 || idx >= m_sourceCount) return false;
+      m_sources[idx].SetWeight(newWeight);
+      return true;
+     }
+
+   string GetSourceName(int idx) const
+     {
+      if(idx < 0 || idx >= m_sourceCount) return "";
+      return m_sources[idx].GetName();
+     }
+
+   int GetSourceIndex(const string name) const
+     {
+      for(int i = 0; i < m_sourceCount; i++)
+         if(m_sources[i].GetName() == name) return i;
+      return -1;
+     }
 
    AggregatedSignal Aggregate()
      {

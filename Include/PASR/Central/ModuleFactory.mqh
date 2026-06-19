@@ -56,6 +56,9 @@ public:
    static CAISignalSource* CreateAISignalSource(CAIOrchestrator *ai)
      { return new CAISignalSource(ai); }
 
+   static CGBRInference* CreateGBRInference()
+     { return new CGBRInference(); }
+
    static CRiskManager* CreateRiskManager()
      { return new CRiskManager(); }
 

@@ -9,7 +9,6 @@
 #include <PASR/Central/ModuleRegistry.mqh>
 #include <PASR/Central/ServiceLocator.mqh>
 #include <PASR/AI/AIRetrainTrigger.mqh>
-#include <PASR/AI/GBRInference.mqh>
 
 input bool InpDebugMode = true;
 input bool InpEnableProfiling = true;
@@ -78,6 +77,7 @@ input double InpGBRReg_alpha = 0.05;           // L1 regularization (0.0-0.1)
 input double InpGBRReg_lambda = 0.8;          // L2 regularization (0.5-1.0)
 input double InpGBRGamma = 0.05;               // Min loss reduction (0.0-0.1)
 input string InpGBRModelPath = "PASR_gbr_m0.onnx"; // GBR ONNX model path
+input double InpGBRBlendWeight = 0.30;             // GBR blend weight in ensemble
 
 input group "AI Regime Thresholds"
 input double InpAITrendEntryThreshold = 0.60;
@@ -143,7 +143,6 @@ input int    InpFontSize = 9; //Ukuran Font
 CPASRKernel g_kernel;
 CPerformanceReport g_report;
 CAIRetrainTrigger g_retrain;
-CGBRInference g_gbr;
 
 struct EAState
   {
@@ -282,6 +281,7 @@ StrategyConfig BuildConfigFromInputs()
    cfg.AI.GBRReg_lambda                = InpGBRReg_lambda;
    cfg.AI.GBRGamma                     = InpGBRGamma;
    cfg.AI.GBRModelPath                 = InpGBRModelPath;
+   cfg.AI.GBRBlendWeight               = InpGBRBlendWeight;
 
    cfg.Signal.UseMTF              = InpUseMTF;
    cfg.Signal.SignalLookback      = InpSignalLookback;
@@ -396,41 +396,6 @@ int OnInit()
      {
       g_retrain.Init(InpAutoRetrainWeightsFile, InpAutoRetrainTradeThreshold);
       Print("[PASR] Auto-retrain trigger enabled");
-     }
-
-   // Initialize GBR if enabled
-   if(InpEnableGBR)
-     {
-      SGBRConfig gbr_cfg;
-      gbr_cfg.n_estimators        = InpGBRN_estimators;
-      gbr_cfg.learning_rate       = InpGBRLearning_rate;
-      gbr_cfg.max_depth           = InpGBRMax_depth;
-      gbr_cfg.min_samples_split   = InpGBRMin_samples_split;
-      gbr_cfg.min_samples_leaf    = InpGBRMin_samples_leaf;
-      gbr_cfg.subsample           = InpGBRSubsample;
-      gbr_cfg.colsample_bytree    = InpGBRColsample_bytree;
-      gbr_cfg.reg_alpha           = InpGBRReg_alpha;
-      gbr_cfg.reg_lambda          = InpGBRReg_lambda;
-      gbr_cfg.gamma               = InpGBRGamma;
-
-      g_gbr.SetConfig(gbr_cfg);
-
-      // Try to load GBR model from ONNX file
-      if(InpGBRModelPath != "")
-        {
-         if(g_gbr.LoadModel(InpGBRModelPath))
-           {
-            PrintFormat("[PASR] GBR model loaded successfully from %s", InpGBRModelPath);
-           }
-         else
-           {
-            PrintFormat("[PASR] GBR model load failed from %s, using random initialization", InpGBRModelPath);
-           }
-        }
-      else
-        {
-         Print("[PASR] GBR enabled but no model path specified, using random initialization");
-        }
      }
 
    return INIT_SUCCEEDED;

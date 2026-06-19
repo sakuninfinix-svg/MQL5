@@ -168,6 +168,21 @@ struct AIConfig
    double LSTMBlendWeight;
    double EnsembleBlendWeight;
 
+   //--- GBR (Gradient Boosting Regressor) configuration
+   bool   EnableGBR;
+   int    GBRN_estimators;
+   double GBRLearning_rate;
+   int    GBRMax_depth;
+   double GBRMin_samples_split;
+   double GBRMin_samples_leaf;
+   double GBRSubsample;
+   double GBRColsample_bytree;
+   double GBRReg_alpha;
+   double GBRReg_lambda;
+   double GBRGamma;
+   string GBRModelPath;
+   double GBRBlendWeight;  // Blend weight for GBR in ensemble
+
    AIConfig()
       : EnableAI(false),        MinConfidence(0.60),
         LearningRate(0.001),    TrainIntervalBars(5),
@@ -192,7 +207,12 @@ struct AIConfig
         RiskFailureWeight(0.45), MinRiskMultiplier(0.05), MaxRiskMultiplier(1.50),
         ConservativeSignalThreshold(90.0), LowStrategyConfidence(0.40),
         LowStrategySignalThreshold(70), RangeSignalThreshold(60), MeanRevertSignalThreshold(50),
-        LSTMBlendWeight(0.60), EnsembleBlendWeight(0.40) {}
+        LSTMBlendWeight(0.60), EnsembleBlendWeight(0.40),
+        EnableGBR(true), GBRN_estimators(150), GBRLearning_rate(0.05),
+        GBRMax_depth(4), GBRMin_samples_split(0.03), GBRMin_samples_leaf(0.015),
+        GBRSubsample(0.8), GBRColsample_bytree(0.7), GBRReg_alpha(0.05),
+        GBRReg_lambda(0.8), GBRGamma(0.05), GBRModelPath("PASR_gbr_m0.onnx"),
+        GBRBlendWeight(0.30) {}
   };
 
 //+------------------------------------------------------------------+

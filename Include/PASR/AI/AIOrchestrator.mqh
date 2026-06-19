@@ -18,6 +18,7 @@
 #include "AIFeatureValidator.mqh"
 #include "LSTMInference.mqh"
 #include "AttentionFusion.mqh"
+#include "GBRInference.mqh"
 #include "../Core/IManager.mqh"
 #include "../Core/PipelineTypes.mqh"
 
@@ -37,8 +38,10 @@ private:
 
    CLSTMInference           *m_lstm;
    CAttentionFusion         *m_attention;
+   CGBRInference            *m_gbr;
    bool                      m_use_lstm;
    bool                      m_use_attention;
+   bool                      m_use_gbr;
 
    SAIInferenceResult        m_last_result;
    SAIRiskDecision           m_last_decision;
@@ -129,6 +132,7 @@ private:
       if(m_seq_feat != NULL) { m_seq_feat.Deinit(); delete m_seq_feat; m_seq_feat = NULL; }
       if(m_lstm     != NULL) { delete m_lstm;        m_lstm     = NULL; }
       if(m_attention!= NULL) { delete m_attention;   m_attention= NULL; }
+      if(m_gbr      != NULL) { m_gbr.Deinit(); delete m_gbr; m_gbr = NULL; }
       ReleaseIndicator(m_hATRRegime);
       ReleaseIndicator(m_hADXRegime);
       m_open_features_valid = false;
@@ -330,7 +334,7 @@ public:
    CAIOrchestrator()
       : IManager(), m_feat(NULL), m_seq_feat(NULL), m_ensemble(NULL),
         m_trainer(NULL), m_calib(NULL), m_guard(NULL),
-        m_lstm(NULL), m_attention(NULL), m_use_lstm(true), m_use_attention(true),
+        m_lstm(NULL), m_attention(NULL), m_gbr(NULL), m_use_lstm(true), m_use_attention(true), m_use_gbr(true),
         m_ready(false), m_min_bars_required(50),
         m_open_features_valid(false), m_last_sequence_valid(false),
         m_currentStrategy(STRAT_NONE), m_detectedRegime(REGIME_UNKNOWN),
@@ -426,6 +430,42 @@ public:
          else Print("AI: Attention fusion initialized successfully");
         }
 
+      if(m_use_gbr && m_cfg.AI.EnableGBR)
+        {
+         m_gbr = new CGBRInference();
+         if(m_gbr != NULL && m_gbr.Init(data, bus))
+           {
+            SGBRConfig gbr_cfg;
+            gbr_cfg.n_estimators        = m_cfg.AI.GBRN_estimators;
+            gbr_cfg.learning_rate       = m_cfg.AI.GBRLearning_rate;
+            gbr_cfg.max_depth           = m_cfg.AI.GBRMax_depth;
+            gbr_cfg.min_samples_split   = m_cfg.AI.GBRMin_samples_split;
+            gbr_cfg.min_samples_leaf    = m_cfg.AI.GBRMin_samples_leaf;
+            gbr_cfg.subsample           = m_cfg.AI.GBRSubsample;
+            gbr_cfg.colsample_bytree    = m_cfg.AI.GBRColsample_bytree;
+            gbr_cfg.reg_alpha           = m_cfg.AI.GBRReg_alpha;
+            gbr_cfg.reg_lambda          = m_cfg.AI.GBRReg_lambda;
+            gbr_cfg.gamma               = m_cfg.AI.GBRGamma;
+            m_gbr.SetConfig(gbr_cfg);
+
+            if(m_cfg.AI.GBRModelPath != "")
+              {
+               if(m_gbr.LoadModel(m_cfg.AI.GBRModelPath))
+                  PrintFormat("AI: GBR model loaded from %s", m_cfg.AI.GBRModelPath);
+               else
+                  PrintFormat("AI: GBR model load failed from %s, GBR will use fallback", m_cfg.AI.GBRModelPath);
+              }
+            else
+               Print("AI: GBR enabled but no model path, GBR will use fallback");
+           }
+         else
+           {
+            Print("AI: GBR init failed");
+            if(m_gbr != NULL) { delete m_gbr; m_gbr = NULL; }
+            m_use_gbr = false;
+           }
+        }
+
       ConfigureParameters(m_cfg.AI.EnableAI, m_cfg.AI.MinConfidence, m_driftVetoThreshold,
                           MathMax(m_cfg.AI.MinConfidence, m_cfg.AI.StrongConfidenceMin));
       m_trainer.SetEnsemble(m_ensemble);
@@ -439,6 +479,7 @@ public:
       Print("  Current Regime: ", EnumToString(m_detectedRegime));
       Print("  LSTM Enabled: ", m_use_lstm ? "Yes" : "No");
       Print("  Attention Enabled: ", m_use_attention ? "Yes" : "No");
+      Print("  GBR Enabled: ", (m_use_gbr && m_gbr != NULL) ? "Yes" : "No");
       return true;
      }
 
@@ -566,8 +607,32 @@ public:
          return false;
         }
 
+      // --- GBR prediction (optional, independent model) ---
+      double gbr_score = 0.0;
+      double gbr_conf  = 0.0;
+      bool   gbr_used  = false;
+      if(m_use_gbr && m_gbr != NULL && m_gbr.IsLoaded())
+        {
+         if(m_gbr.Predict(fv, gbr_score, gbr_conf))
+           {
+            gbr_used = true;
+            if(m_debugMode) PrintFormat("[AIOrchestrator] GBR prediction: %.4f (conf=%.4f)", gbr_score, gbr_conf);
+           }
+        }
+
       double final_score = vote.final_score;
-      if(lstm_used)
+      if(lstm_used && gbr_used)
+        {
+         // Three-way blend: LSTM + Ensemble + GBR
+         double lstmW = MathMax(0.0, m_cfg.AI.LSTMBlendWeight);
+         double ensW  = MathMax(0.0, m_cfg.AI.EnsembleBlendWeight);
+         double gbrW  = MathMax(0.0, m_cfg.AI.GBRBlendWeight);
+         double total = lstmW + ensW + gbrW;
+         if(total <= 0.0) { lstmW = 0.4; ensW = 0.3; gbrW = 0.3; total = 1.0; }
+         final_score = (lstmW * lstm_score + ensW * vote.final_score + gbrW * gbr_score) / total;
+         out_result.model_id = "lstm+ensemble+gbr";
+        }
+      else if(lstm_used)
         {
          double lstmW = MathMax(0.0, m_cfg.AI.LSTMBlendWeight);
          double ensW  = MathMax(0.0, m_cfg.AI.EnsembleBlendWeight);
@@ -575,6 +640,16 @@ public:
          if(total <= 0.0) { lstmW = 0.6; ensW = 0.4; total = 1.0; }
          final_score = (lstmW * lstm_score + ensW * vote.final_score) / total;
          out_result.model_id = "lstm+ensemble";
+        }
+      else if(gbr_used)
+        {
+         // Two-way blend: Ensemble + GBR
+         double ensW = MathMax(0.0, m_cfg.AI.EnsembleBlendWeight);
+         double gbrW = MathMax(0.0, m_cfg.AI.GBRBlendWeight);
+         double total = ensW + gbrW;
+         if(total <= 0.0) { ensW = 0.7; gbrW = 0.3; total = 1.0; }
+         final_score = (ensW * vote.final_score + gbrW * gbr_score) / total;
+         out_result.model_id = "ensemble+gbr";
         }
       else
         {

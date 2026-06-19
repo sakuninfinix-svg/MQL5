@@ -261,9 +261,15 @@ public:
       ArrayResize(out_result.timeframe_weights, n);
       ArrayResize(out_result.feature_importance, AI_FEATURE_DIM);
       
+      //--- Pass 1: collect scores and compute weighted sum
+      double scores[];
+      double weights[];
+      ArrayResize(scores, n);
+      ArrayResize(weights, n);
+      
       double weighted_sum = 0.0;
       double weight_total = 0.0;
-      double variance_sum = 0.0;
+      int    valid_count  = 0;
       
       for(int i = 0; i < n; i++)
       {
@@ -278,17 +284,24 @@ public:
          double weight = m_tf_weights[i];
          out_result.timeframe_weights[i] = weight;
          
+         scores[valid_count]  = score;
+         weights[valid_count] = weight;
          weighted_sum += score * weight;
          weight_total += weight;
-         
-         // Calculate variance for confidence estimation
-         variance_sum += MathPow(score - weighted_sum/weight_total, 2) * weight;
+         valid_count++;
       }
       
-      if(weight_total <= 0.0) return false;
+      if(weight_total <= 0.0 || valid_count == 0) return false;
       
-      out_result.score = weighted_sum / weight_total;
-      out_result.confidence = CalculateConfidence(out_result.score, variance_sum/weight_total);
+      double final_mean = weighted_sum / weight_total;
+      
+      //--- Pass 2: compute variance from final mean
+      double variance_sum = 0.0;
+      for(int i = 0; i < valid_count; i++)
+         variance_sum += MathPow(scores[i] - final_mean, 2) * weights[i];
+      
+      out_result.score = final_mean;
+      out_result.confidence = CalculateConfidence(final_mean, variance_sum/weight_total);
       out_result.n_timeframes = n;
       out_result.valid = true;
       out_result.timestamp = TimeCurrent();

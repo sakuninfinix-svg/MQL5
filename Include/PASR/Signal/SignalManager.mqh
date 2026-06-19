@@ -16,6 +16,7 @@
 #include "SignalCooldownManager.mqh"
 #include "../Analysis/Pattern/PatternManager.mqh"
 #include "../Analysis/SRManager.mqh"
+#include "DynamicWeightManager.mqh"
 #include "../Data/SRStruct.mqh"
 #include "../Data/RegimeTypes.mqh"
 
@@ -95,6 +96,7 @@ private:
    CSignalFilterPipeline   m_filterPipeline;
    CSignalCooldownManager  m_cooldownMgr;
    CSignalConfig           m_config;
+   CDynamicWeightManager    *m_dynamicWeights;
 
    CPatternManager        *m_pattern;
    CAnalysisSRManager     *m_sr;
@@ -151,7 +153,7 @@ private:
 public:
    CSignalManager()
       : IManager(), m_pattern(NULL), m_sr(NULL), m_regime(NULL),
-        m_signalPending(false), m_lastProcessedBar(0), m_configReady(false)
+        m_signalPending(false), m_lastProcessedBar(0), m_configReady(false), m_dynamicWeights(NULL)
      {
       m_lastAggregated.Clear();
       m_lastDecisionResult.Clear();
@@ -164,6 +166,17 @@ public:
      {
       if(!IManager::Init(data, bus)) return false;
       EnsureConfigReady();
+      m_dynamicWeights = new CDynamicWeightManager();
+      if(m_dynamicWeights != NULL && m_dynamicWeights.Init(data, bus))
+        {
+         // Sources will be registered via RegisterSource() which syncs to DWM
+         Print("[SignalManager] DynamicWeightManager activated for adaptive signal weighting");
+        }
+      else
+        {
+         if(m_dynamicWeights != NULL) { delete m_dynamicWeights; m_dynamicWeights = NULL; }
+         Print("[SignalManager] DynamicWeightManager init failed, using static weights");
+        }
       RefreshSnapshot("Init");
       return true;
      }
@@ -171,6 +184,7 @@ public:
    virtual void Deinit() override
      {
       m_signalPending = false;
+      if(m_dynamicWeights != NULL) { m_dynamicWeights.Deinit(); delete m_dynamicWeights; m_dynamicWeights = NULL; }
       m_cooldownMgr.Clear();
       m_lastAggregated.Clear();
       m_lastDecisionResult.Clear();
@@ -186,6 +200,11 @@ public:
      {
       EnsureConfigReady();
       bool ok = m_aggregator.RegisterSource(src, weight);
+      if(ok && m_dynamicWeights != NULL)
+        {
+         string srcName = src.Name();
+         m_dynamicWeights.RegisterSource(srcName, weight);
+        }
       RefreshSnapshot(ok ? "SourceRegistered" : "SourceRejected");
       return ok;
      }
@@ -197,6 +216,21 @@ public:
       EnsureConfigReady();
       SSignal out;
       out.Clear();
+
+      // Apply dynamic weights if available
+      if(m_dynamicWeights != NULL)
+        {
+         m_dynamicWeights.UpdateWeights();
+         for(int i = 0; i < m_aggregator.SourceCount(); i++)
+           {
+            string name = m_aggregator.GetSourceName(i);
+            if(name != "")
+              {
+               double dynW = m_dynamicWeights.GetSourceWeight(name);
+               m_aggregator.UpdateSourceWeight(i, dynW);
+              }
+           }
+        }
 
       m_lastDecisionResult = m_decisionEngine.Decide(m_aggregator);
       m_lastAggregated = m_decisionEngine.GetLastAggregated();
@@ -226,6 +260,7 @@ public:
       AddEvent(EVENT_ID_ZONE_UPDATE);
       AddEvent(EVENT_ID_EMERGENCY_STOP);
       AddEvent(EVENT_ID_HEARTBEAT);
+      AddEvent(EVENT_ID_TRADE_CLOSE);
      }
 
    virtual void OnPriceUpdate() override {}
@@ -265,6 +300,10 @@ public:
          case EVENT_ID_HEARTBEAT:
             m_cooldownMgr.CleanupExpired();
             RefreshSnapshot("Heartbeat");
+            break;
+         case EVENT_ID_TRADE_CLOSE:
+            if(m_dynamicWeights != NULL)
+               m_dynamicWeights.UpdatePerformance(ev.comment, ev.profit > 0);
             break;
          default:
             break;
