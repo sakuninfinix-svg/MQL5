@@ -14,12 +14,13 @@
 class CAIFeatureBuilder : public IManager
   {
 private:
-   double   m_last_features[AI_FEATURE_DIM];
-   bool     m_last_valid;
-   datetime m_last_built;
-   double   m_atr_baseline;
-   double   m_vol_baseline;
-   int      m_build_count;
+   double          m_last_features[AI_FEATURE_DIM];
+   bool            m_last_valid;
+   datetime        m_last_built;
+   double          m_atr_baseline;
+   double          m_vol_baseline;
+   int             m_build_count;
+   ENUM_TIMEFRAMES m_tf;
 
    int      m_hRSI;
    int      m_hMACD;
@@ -51,18 +52,24 @@ private:
 
    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
 
+   ENUM_TIMEFRAMES ActiveTimeframe() const
+     {
+      return (m_tf == PERIOD_CURRENT ? (ENUM_TIMEFRAMES)_Period : m_tf);
+     }
+
    bool InitIndicators()
      {
-      if(m_hRSI   == INVALID_HANDLE) m_hRSI   = iRSI(_Symbol, PERIOD_CURRENT, 14, PRICE_CLOSE);
-      if(m_hMACD  == INVALID_HANDLE) m_hMACD  = iMACD(_Symbol, PERIOD_CURRENT, 12, 26, 9, PRICE_CLOSE);
-      if(m_hCCI   == INVALID_HANDLE) m_hCCI   = iCCI(_Symbol, PERIOD_CURRENT, 14, PRICE_TYPICAL);
-      if(m_hStoch == INVALID_HANDLE) m_hStoch = iStochastic(_Symbol, PERIOD_CURRENT, 5, 3, 3, MODE_SMA, STO_LOWHIGH);
-      if(m_hMFI   == INVALID_HANDLE) m_hMFI   = iMFI(_Symbol, PERIOD_CURRENT, 14, VOLUME_TICK);
-      if(m_hATR14 == INVALID_HANDLE) m_hATR14 = iATR(_Symbol, PERIOD_CURRENT, 14);
-      if(m_hATR3  == INVALID_HANDLE) m_hATR3  = iATR(_Symbol, PERIOD_CURRENT, 3);
-      if(m_hATR5  == INVALID_HANDLE) m_hATR5  = iATR(_Symbol, PERIOD_CURRENT, 5);
-      if(m_hATR10 == INVALID_HANDLE) m_hATR10 = iATR(_Symbol, PERIOD_CURRENT, 10);
-      if(m_hATR20 == INVALID_HANDLE) m_hATR20 = iATR(_Symbol, PERIOD_CURRENT, 20);
+      ENUM_TIMEFRAMES tf = ActiveTimeframe();
+      if(m_hRSI   == INVALID_HANDLE) m_hRSI   = iRSI(_Symbol, tf, 14, PRICE_CLOSE);
+      if(m_hMACD  == INVALID_HANDLE) m_hMACD  = iMACD(_Symbol, tf, 12, 26, 9, PRICE_CLOSE);
+      if(m_hCCI   == INVALID_HANDLE) m_hCCI   = iCCI(_Symbol, tf, 14, PRICE_TYPICAL);
+      if(m_hStoch == INVALID_HANDLE) m_hStoch = iStochastic(_Symbol, tf, 5, 3, 3, MODE_SMA, STO_LOWHIGH);
+      if(m_hMFI   == INVALID_HANDLE) m_hMFI   = iMFI(_Symbol, tf, 14, VOLUME_TICK);
+      if(m_hATR14 == INVALID_HANDLE) m_hATR14 = iATR(_Symbol, tf, 14);
+      if(m_hATR3  == INVALID_HANDLE) m_hATR3  = iATR(_Symbol, tf, 3);
+      if(m_hATR5  == INVALID_HANDLE) m_hATR5  = iATR(_Symbol, tf, 5);
+      if(m_hATR10 == INVALID_HANDLE) m_hATR10 = iATR(_Symbol, tf, 10);
+      if(m_hATR20 == INVALID_HANDLE) m_hATR20 = iATR(_Symbol, tf, 20);
 
       return (m_hRSI != INVALID_HANDLE && m_hMACD != INVALID_HANDLE &&
               m_hCCI != INVALID_HANDLE && m_hStoch != INVALID_HANDLE &&
@@ -85,6 +92,12 @@ private:
       if(m_hATR20 != INVALID_HANDLE) { IndicatorRelease(m_hATR20); m_hATR20 = INVALID_HANDLE; }
      }
 
+   void ResetBaselines()
+     {
+      m_atr_baseline = 0.0;
+      m_vol_baseline = 0.0;
+     }
+
    double GetIndicatorValue(int handle, int buffer, int shift)
      {
       if(m_useClosedBarsOnly && shift < 1) shift = 1;
@@ -95,12 +108,11 @@ private:
 
    double PriceReturn(int bars_back)
      {
-      // bars_back=1 -> 1-bar return (close[1] vs close[2])
-      // bars_back=2 -> 2-bar return (close[1] vs close[3])
+      ENUM_TIMEFRAMES tf = ActiveTimeframe();
       int c0_shift = m_useClosedBarsOnly ? 1 : 0;
       int cn_shift = c0_shift + bars_back;
-      double c0 = iClose(_Symbol, PERIOD_CURRENT, c0_shift);
-      double cn = iClose(_Symbol, PERIOD_CURRENT, cn_shift);
+      double c0 = iClose(_Symbol, tf, c0_shift);
+      double cn = iClose(_Symbol, tf, cn_shift);
       if(cn == 0.0) return 0.0;
       return (c0 - cn) / cn;
      }
@@ -120,9 +132,10 @@ private:
 
    double ZScore(int n)
      {
+      ENUM_TIMEFRAMES tf = ActiveTimeframe();
       double arr[];
       ArraySetAsSeries(arr, true);
-      if(CopyClose(_Symbol, PERIOD_CURRENT, 1, n, arr) < n) return 0.0;
+      if(CopyClose(_Symbol, tf, 1, n, arr) < n) return 0.0;
       double mean = 0.0, sq = 0.0;
       for(int i = 0; i < n; i++) mean += arr[i];
       mean /= n;
@@ -134,9 +147,10 @@ private:
 
    double ReturnSkew(int n)
      {
+      ENUM_TIMEFRAMES tf = ActiveTimeframe();
       double arr[];
       ArraySetAsSeries(arr, true);
-      if(CopyClose(_Symbol, PERIOD_CURRENT, 1, n + 1, arr) < n + 1) return 0.0;
+      if(CopyClose(_Symbol, tf, 1, n + 1, arr) < n + 1) return 0.0;
       double ret[];
       ArrayResize(ret, n);
       for(int i = 0; i < n; i++) ret[i] = (arr[i] - arr[i+1]) / MathMax(arr[i+1], 1e-10);
@@ -152,9 +166,10 @@ private:
 
    void UpdateBaselines()
      {
+      ENUM_TIMEFRAMES tf = ActiveTimeframe();
       double atrVal[1];
       double atr = (m_hATR14 != INVALID_HANDLE && CopyBuffer(m_hATR14, 0, 1, 1, atrVal) > 0) ? atrVal[0] : 0.0;
-      double vol = (double)iVolume(_Symbol, PERIOD_CURRENT, 1);
+      double vol = (double)iVolume(_Symbol, tf, 1);
       double alpha = 0.05;
       if(m_atr_baseline <= 0.0) m_atr_baseline = atr;
       else m_atr_baseline = alpha * atr + (1.0 - alpha) * m_atr_baseline;
@@ -166,6 +181,7 @@ public:
    CAIFeatureBuilder()
       : IManager(), m_last_valid(false), m_last_built(0),
         m_atr_baseline(0.0), m_vol_baseline(0.0), m_build_count(0),
+        m_tf(PERIOD_CURRENT),
         m_hRSI(INVALID_HANDLE), m_hMACD(INVALID_HANDLE), m_hCCI(INVALID_HANDLE),
         m_hStoch(INVALID_HANDLE), m_hMFI(INVALID_HANDLE), m_hATR14(INVALID_HANDLE),
         m_hATR3(INVALID_HANDLE), m_hATR5(INVALID_HANDLE),
@@ -186,12 +202,41 @@ public:
 
    virtual string HandlerName() const override { return "AIFeatureBuilder"; }
 
+   bool SetTimeframe(ENUM_TIMEFRAMES tf)
+     {
+      if(tf == PERIOD_CURRENT) tf = (ENUM_TIMEFRAMES)_Period;
+      if(tf == m_tf) return true;
+
+      bool was_initialized = IsInitialized();
+      CleanupIndicators();
+      ResetBaselines();
+      m_last_valid = false;
+      m_tf = tf;
+
+      if(was_initialized && !InitIndicators())
+        {
+         PrintFormat("[AIFeatureBuilder] Indicator re-init failed for tf=%s", EnumToString(m_tf));
+         return false;
+        }
+      return true;
+     }
+
+   ENUM_TIMEFRAMES GetTimeframe() const { return ActiveTimeframe(); }
+
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
+      return Init(data, bus, m_tf);
+     }
+
+   bool Init(IDataManager *data, CEventBus *bus, ENUM_TIMEFRAMES tf)
+     {
+      if(tf != PERIOD_CURRENT) m_tf = tf;
       if(!IManager::Init(data, bus)) return false;
+      CleanupIndicators();
+      ResetBaselines();
       if(!InitIndicators())
         {
-         Print("[AIFeatureBuilder] Indicator init failed");
+         PrintFormat("[AIFeatureBuilder] Indicator init failed for tf=%s", EnumToString(ActiveTimeframe()));
          CleanupIndicators();
          IManager::Deinit();
          return false;
@@ -217,8 +262,9 @@ public:
    bool Build(SAIFeatureVector &out)
      {
       out.Reset();
+      ENUM_TIMEFRAMES tf = ActiveTimeframe();
       if(!IsInitialized() && !InitIndicators()) return false;
-      int bars = iBars(_Symbol, PERIOD_CURRENT);
+      int bars = iBars(_Symbol, tf);
       if(bars < 50) return false;
 
       UpdateBaselines();
@@ -247,10 +293,10 @@ public:
       f[10] = NormIndicator(cci, -200.0, 200.0);
       f[11] = NormIndicator(stoch, 0.0, 100.0);
 
-      double vol0 = (double)iVolume(_Symbol, PERIOD_CURRENT, 1);
-      double vol1 = (double)iVolume(_Symbol, PERIOD_CURRENT, 2);
+      double vol0 = (double)iVolume(_Symbol, tf, 1);
+      double vol1 = (double)iVolume(_Symbol, tf, 2);
       double vol_ratio = (vol1 > 0.0) ? vol0 / vol1 : 1.0;
-      double obv_delta = (iClose(_Symbol, PERIOD_CURRENT, 1) > iClose(_Symbol, PERIOD_CURRENT, 2)) ? vol0 : -vol0;
+      double obv_delta = (iClose(_Symbol, tf, 1) > iClose(_Symbol, tf, 2)) ? vol0 : -vol0;
       double mfi = GetIndicatorValue(m_hMFI, 0, 1);
       f[12] = NormIndicator(vol_ratio, 0.0, 5.0);
       f[13] = NormIndicator(obv_delta / MathMax(m_vol_baseline, 1.0), -3.0, 3.0);
@@ -285,8 +331,11 @@ public:
       f[33] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_follow)    : 0.0;
 
       ArrayCopy(out.features, f);
+      out.symbol = _Symbol;
+      out.timeframe = tf;
+      out.timestamp = TimeCurrent();
       out.valid = true;
-      out.bar_time = iTime(_Symbol, PERIOD_CURRENT, 1);
+      out.bar_time = iTime(_Symbol, tf, 1);
 
       ArrayCopy(m_last_features, f);
       m_last_valid = true;
@@ -297,6 +346,15 @@ public:
       m_pending_pattern_features_valid = false;
       m_pending_regime = -1;
       return true;
+     }
+
+   bool Build(SAIFeatureVector &out, ENUM_TIMEFRAMES tf)
+     {
+      ENUM_TIMEFRAMES old_tf = m_tf;
+      if(!SetTimeframe(tf)) return false;
+      bool ok = Build(out);
+      if(old_tf != m_tf) SetTimeframe(old_tf);
+      return ok;
      }
 
    void InjectStructure(double sr_dist_norm, double zone_strength_norm, double pattern_score_norm)
