@@ -21,6 +21,7 @@ private:
    double          m_vol_baseline;
    int             m_build_count;
    ENUM_TIMEFRAMES m_tf;
+   bool            m_building_mtf;
 
    int      m_hRSI;
    int      m_hMACD;
@@ -177,11 +178,205 @@ private:
       else m_vol_baseline = alpha * vol + (1.0 - alpha) * m_vol_baseline;
      }
 
+   void CapturePending(double &sr, double &zone, double &pattern, bool &struct_valid, int &regime,
+                       double &buy, double &sell, double &conflict, double &gap,
+                       double &reject, double &trap, double &reclaim, double &follow,
+                       bool &pattern_valid)
+     {
+      sr = m_pending_sr_dist;
+      zone = m_pending_zone_str;
+      pattern = m_pending_pattern;
+      struct_valid = m_pending_struct_valid;
+      regime = m_pending_regime;
+      buy = m_pending_pattern_buy;
+      sell = m_pending_pattern_sell;
+      conflict = m_pending_pattern_conflict;
+      gap = m_pending_pattern_gap;
+      reject = m_pending_pattern_rejection;
+      trap = m_pending_pattern_trap;
+      reclaim = m_pending_pattern_reclaim;
+      follow = m_pending_pattern_follow;
+      pattern_valid = m_pending_pattern_features_valid;
+     }
+
+   void RestorePending(double sr, double zone, double pattern, bool struct_valid, int regime,
+                       double buy, double sell, double conflict, double gap,
+                       double reject, double trap, double reclaim, double follow,
+                       bool pattern_valid)
+     {
+      m_pending_sr_dist = sr;
+      m_pending_zone_str = zone;
+      m_pending_pattern = pattern;
+      m_pending_struct_valid = struct_valid;
+      m_pending_regime = regime;
+      m_pending_pattern_buy = buy;
+      m_pending_pattern_sell = sell;
+      m_pending_pattern_conflict = conflict;
+      m_pending_pattern_gap = gap;
+      m_pending_pattern_rejection = reject;
+      m_pending_pattern_trap = trap;
+      m_pending_pattern_reclaim = reclaim;
+      m_pending_pattern_follow = follow;
+      m_pending_pattern_features_valid = pattern_valid;
+     }
+
+   void ClearPending()
+     {
+      m_pending_struct_valid = false;
+      m_pending_pattern_features_valid = false;
+      m_pending_regime = -1;
+     }
+
+   bool BuildActive(SAIFeatureVector &out)
+     {
+      out.Reset();
+      ENUM_TIMEFRAMES tf = ActiveTimeframe();
+      if(!IsInitialized() && !InitIndicators()) return false;
+      int bars = iBars(_Symbol, tf);
+      if(bars < 50) return false;
+
+      UpdateBaselines();
+
+      double f[AI_FEATURE_DIM];
+      ArrayInitialize(f, 0.0);
+      f[0] = MathMax(-0.05, MathMin(0.05, PriceReturn(1))) / 0.05;
+      f[1] = MathMax(-0.05, MathMin(0.05, PriceReturn(2))) / 0.05;
+      f[2] = MathMax(-0.05, MathMin(0.05, PriceReturn(3))) / 0.05;
+      f[3] = MathMax(-0.05, MathMin(0.05, PriceReturn(5))) / 0.05;
+
+      f[4] = ATRRatioByHandle(m_hATR3);
+      f[5] = ATRRatioByHandle(m_hATR5);
+      f[6] = ATRRatioByHandle(m_hATR10);
+      f[7] = ATRRatioByHandle(m_hATR20);
+
+      double rsi = GetIndicatorValue(m_hRSI, 0, 1);
+      double macd_main = GetIndicatorValue(m_hMACD, 0, 1);
+      double macd_sig = GetIndicatorValue(m_hMACD, 1, 1);
+      double macd_hist = macd_main - macd_sig;
+      double cci = GetIndicatorValue(m_hCCI, 0, 1);
+      double stoch = GetIndicatorValue(m_hStoch, 0, 1);
+
+      f[8]  = NormIndicator(rsi, 0.0, 100.0);
+      f[9]  = MathMax(-1.0, MathMin(1.0, macd_hist / MathMax(m_atr_baseline, 1e-8))) * 0.5 + 0.5;
+      f[10] = NormIndicator(cci, -200.0, 200.0);
+      f[11] = NormIndicator(stoch, 0.0, 100.0);
+
+      double vol0 = (double)iVolume(_Symbol, tf, 1);
+      double vol1 = (double)iVolume(_Symbol, tf, 2);
+      double vol_ratio = (vol1 > 0.0) ? vol0 / vol1 : 1.0;
+      double obv_delta = (iClose(_Symbol, tf, 1) > iClose(_Symbol, tf, 2)) ? vol0 : -vol0;
+      double mfi = GetIndicatorValue(m_hMFI, 0, 1);
+      f[12] = NormIndicator(vol_ratio, 0.0, 5.0);
+      f[13] = NormIndicator(obv_delta / MathMax(m_vol_baseline, 1.0), -3.0, 3.0);
+      f[14] = (m_vol_baseline > 0.0 && vol0 > 2.0 * m_vol_baseline) ? 1.0 : 0.0;
+      f[15] = NormIndicator(mfi, 0.0, 100.0);
+
+      f[16] = m_pending_struct_valid ? Clamp01(m_pending_sr_dist)  : 0.5;
+      f[17] = m_pending_struct_valid ? Clamp01(m_pending_zone_str) : 0.5;
+      f[18] = m_pending_struct_valid ? Clamp01(m_pending_pattern)  : 0.5;
+
+      if(m_pending_regime == (int)REGIME_TREND_UP || m_pending_regime == (int)REGIME_TREND_DOWN)
+        { f[19] = 1.0; f[20] = 0.0; f[21] = 0.0; }
+      else if(m_pending_regime == (int)REGIME_VOLATILE || m_pending_regime == (int)REGIME_CRASH)
+        { f[19] = 0.0; f[20] = 0.0; f[21] = 1.0; }
+      else
+        { f[19] = 0.0; f[20] = 1.0; f[21] = 0.0; }
+
+      MqlDateTime dt;
+      TimeToStruct(TimeCurrent(), dt);
+      f[22] = MathSin(2.0 * M_PI * (double)dt.hour / 24.0) * 0.5 + 0.5;
+      f[23] = MathCos(2.0 * M_PI * (double)dt.hour / 24.0) * 0.5 + 0.5;
+      f[24] = MathMax(-3.0, MathMin(3.0, ZScore(20))) / 3.0;
+      f[25] = ReturnSkew(20);
+
+      f[26] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_buy)       : 0.0;
+      f[27] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_sell)      : 0.0;
+      f[28] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_conflict)  : 0.0;
+      f[29] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_gap)       : 0.0;
+      f[30] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_rejection) : 0.0;
+      f[31] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_trap)      : 0.0;
+      f[32] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_reclaim)   : 0.0;
+      f[33] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_follow)    : 0.0;
+
+      ArrayCopy(out.features, f);
+      out.symbol = _Symbol;
+      out.timeframe = tf;
+      out.timestamp = TimeCurrent();
+      out.valid = true;
+      out.bar_time = iTime(_Symbol, tf, 1);
+      return true;
+     }
+
+   bool BuildWeightedMTF(SAIFeatureVector &out)
+     {
+      out.Reset();
+      ENUM_TIMEFRAMES tfs[4] = { PERIOD_H4, PERIOD_H1, PERIOD_M15, PERIOD_M5 };
+      double weights[4] = { 0.35, 0.30, 0.25, 0.10 };
+      double agg[AI_FEATURE_DIM];
+      ArrayInitialize(agg, 0.0);
+
+      double sr, zone, pattern, buy, sell, conflict, gap, reject, trap, reclaim, follow;
+      bool struct_valid, pattern_valid;
+      int regime;
+      CapturePending(sr, zone, pattern, struct_valid, regime, buy, sell, conflict, gap,
+                     reject, trap, reclaim, follow, pattern_valid);
+
+      ENUM_TIMEFRAMES old_tf = m_tf;
+      bool old_building_mtf = m_building_mtf;
+      m_building_mtf = true;
+
+      double total_weight = 0.0;
+      datetime newest_bar = 0;
+      for(int i = 0; i < 4; i++)
+        {
+         RestorePending(sr, zone, pattern, struct_valid, regime, buy, sell, conflict, gap,
+                        reject, trap, reclaim, follow, pattern_valid);
+         SAIFeatureVector fv;
+         fv.Reset();
+         if(Build(fv, tfs[i]))
+           {
+            double w = weights[i];
+            for(int j = 0; j < AI_FEATURE_DIM; j++)
+               agg[j] += fv.features[j] * w;
+            total_weight += w;
+            if(fv.bar_time > newest_bar) newest_bar = fv.bar_time;
+           }
+        }
+
+      m_building_mtf = old_building_mtf;
+      SetTimeframe(old_tf);
+      RestorePending(sr, zone, pattern, struct_valid, regime, buy, sell, conflict, gap,
+                     reject, trap, reclaim, follow, pattern_valid);
+
+      if(total_weight <= 0.0)
+        {
+         ClearPending();
+         return false;
+        }
+
+      for(int j = 0; j < AI_FEATURE_DIM; j++)
+         agg[j] /= total_weight;
+
+      ArrayCopy(out.features, agg);
+      out.symbol = _Symbol;
+      out.timeframe = PERIOD_CURRENT;
+      out.timestamp = TimeCurrent();
+      out.bar_time = newest_bar;
+      out.valid = true;
+
+      ArrayCopy(m_last_features, agg);
+      m_last_valid = true;
+      m_last_built = TimeCurrent();
+      m_build_count++;
+      ClearPending();
+      return true;
+     }
+
 public:
    CAIFeatureBuilder()
       : IManager(), m_last_valid(false), m_last_built(0),
         m_atr_baseline(0.0), m_vol_baseline(0.0), m_build_count(0),
-        m_tf(PERIOD_CURRENT),
+        m_tf(PERIOD_CURRENT), m_building_mtf(false),
         m_hRSI(INVALID_HANDLE), m_hMACD(INVALID_HANDLE), m_hCCI(INVALID_HANDLE),
         m_hStoch(INVALID_HANDLE), m_hMFI(INVALID_HANDLE), m_hATR14(INVALID_HANDLE),
         m_hATR3(INVALID_HANDLE), m_hATR5(INVALID_HANDLE),
@@ -261,99 +456,34 @@ public:
 
    bool Build(SAIFeatureVector &out)
      {
-      out.Reset();
-      ENUM_TIMEFRAMES tf = ActiveTimeframe();
-      if(!IsInitialized() && !InitIndicators()) return false;
-      int bars = iBars(_Symbol, tf);
-      if(bars < 50) return false;
+      if(!m_building_mtf && m_cfg.Signal.UseMTF)
+         return BuildWeightedMTF(out);
 
-      UpdateBaselines();
-
-      double f[AI_FEATURE_DIM];
-      ArrayInitialize(f, 0.0);
-      f[0] = MathMax(-0.05, MathMin(0.05, PriceReturn(1))) / 0.05;
-      f[1] = MathMax(-0.05, MathMin(0.05, PriceReturn(2))) / 0.05;
-      f[2] = MathMax(-0.05, MathMin(0.05, PriceReturn(3))) / 0.05;
-      f[3] = MathMax(-0.05, MathMin(0.05, PriceReturn(5))) / 0.05;
-
-      f[4] = ATRRatioByHandle(m_hATR3);
-      f[5] = ATRRatioByHandle(m_hATR5);
-      f[6] = ATRRatioByHandle(m_hATR10);
-      f[7] = ATRRatioByHandle(m_hATR20);
-
-      double rsi = GetIndicatorValue(m_hRSI, 0, 1);
-      double macd_main = GetIndicatorValue(m_hMACD, 0, 1);
-      double macd_sig = GetIndicatorValue(m_hMACD, 1, 1);
-      double macd_hist = macd_main - macd_sig;
-      double cci = GetIndicatorValue(m_hCCI, 0, 1);
-      double stoch = GetIndicatorValue(m_hStoch, 0, 1);
-
-      f[8]  = NormIndicator(rsi, 0.0, 100.0);
-      f[9]  = MathMax(-1.0, MathMin(1.0, macd_hist / MathMax(m_atr_baseline, 1e-8))) * 0.5 + 0.5;
-      f[10] = NormIndicator(cci, -200.0, 200.0);
-      f[11] = NormIndicator(stoch, 0.0, 100.0);
-
-      double vol0 = (double)iVolume(_Symbol, tf, 1);
-      double vol1 = (double)iVolume(_Symbol, tf, 2);
-      double vol_ratio = (vol1 > 0.0) ? vol0 / vol1 : 1.0;
-      double obv_delta = (iClose(_Symbol, tf, 1) > iClose(_Symbol, tf, 2)) ? vol0 : -vol0;
-      double mfi = GetIndicatorValue(m_hMFI, 0, 1);
-      f[12] = NormIndicator(vol_ratio, 0.0, 5.0);
-      f[13] = NormIndicator(obv_delta / MathMax(m_vol_baseline, 1.0), -3.0, 3.0);
-      f[14] = (m_vol_baseline > 0.0 && vol0 > 2.0 * m_vol_baseline) ? 1.0 : 0.0;
-      f[15] = NormIndicator(mfi, 0.0, 100.0);
-
-      f[16] = m_pending_struct_valid ? Clamp01(m_pending_sr_dist)  : 0.5;
-      f[17] = m_pending_struct_valid ? Clamp01(m_pending_zone_str) : 0.5;
-      f[18] = m_pending_struct_valid ? Clamp01(m_pending_pattern)  : 0.5;
-
-      if(m_pending_regime == (int)REGIME_TREND_UP || m_pending_regime == (int)REGIME_TREND_DOWN)
-        { f[19] = 1.0; f[20] = 0.0; f[21] = 0.0; }
-      else if(m_pending_regime == (int)REGIME_VOLATILE || m_pending_regime == (int)REGIME_CRASH)
-        { f[19] = 0.0; f[20] = 0.0; f[21] = 1.0; }
-      else
-        { f[19] = 0.0; f[20] = 1.0; f[21] = 0.0; }
-
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-      f[22] = MathSin(2.0 * M_PI * (double)dt.hour / 24.0) * 0.5 + 0.5;
-      f[23] = MathCos(2.0 * M_PI * (double)dt.hour / 24.0) * 0.5 + 0.5;
-      f[24] = MathMax(-3.0, MathMin(3.0, ZScore(20))) / 3.0;
-      f[25] = ReturnSkew(20);
-
-      f[26] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_buy)       : 0.0;
-      f[27] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_sell)      : 0.0;
-      f[28] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_conflict)  : 0.0;
-      f[29] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_gap)       : 0.0;
-      f[30] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_rejection) : 0.0;
-      f[31] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_trap)      : 0.0;
-      f[32] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_reclaim)   : 0.0;
-      f[33] = m_pending_pattern_features_valid ? Clamp01(m_pending_pattern_follow)    : 0.0;
-
-      ArrayCopy(out.features, f);
-      out.symbol = _Symbol;
-      out.timeframe = tf;
-      out.timestamp = TimeCurrent();
-      out.valid = true;
-      out.bar_time = iTime(_Symbol, tf, 1);
-
-      ArrayCopy(m_last_features, f);
-      m_last_valid = true;
-      m_last_built = TimeCurrent();
-      m_build_count++;
-
-      m_pending_struct_valid = false;
-      m_pending_pattern_features_valid = false;
-      m_pending_regime = -1;
-      return true;
+      bool ok = BuildActive(out);
+      if(ok)
+        {
+         ArrayCopy(m_last_features, out.features);
+         m_last_valid = true;
+         m_last_built = TimeCurrent();
+         m_build_count++;
+        }
+      ClearPending();
+      return ok;
      }
 
    bool Build(SAIFeatureVector &out, ENUM_TIMEFRAMES tf)
      {
       ENUM_TIMEFRAMES old_tf = m_tf;
-      if(!SetTimeframe(tf)) return false;
-      bool ok = Build(out);
-      if(old_tf != m_tf) SetTimeframe(old_tf);
+      bool old_building_mtf = m_building_mtf;
+      m_building_mtf = true;
+      if(!SetTimeframe(tf))
+        {
+         m_building_mtf = old_building_mtf;
+         return false;
+        }
+      bool ok = BuildActive(out);
+      SetTimeframe(old_tf);
+      m_building_mtf = old_building_mtf;
       return ok;
      }
 
