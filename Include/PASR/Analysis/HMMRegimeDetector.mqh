@@ -347,7 +347,7 @@ public:
       // Initialize indicators
       m_atr_handle = iATR(_Symbol, _Period, 14);
       m_adx_handle = iADX(_Symbol, _Period, 14);
-      m_rsi_handle = iRSI(_Symbol, _Period, 14);
+      m_rsi_handle = iRSI(_Symbol, _Period, 14, PRICE_CLOSE);
 
       Print("[HMMRegimeDetector] Initialized with 6-state HMM for regime detection");
       return true;

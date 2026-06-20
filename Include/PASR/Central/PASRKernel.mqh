@@ -22,9 +22,10 @@ enum ENUM_PASR_KERNEL_STATE
 class CPASRKernel
   {
 private:
-   CEventBus              *m_event_bus;
-   CMarketRegimeDetector  *m_regime_detector;
-   CAdaptiveParameterManager *m_adaptive_manager;
+    CEventBus              *m_event_bus;
+    CMarketRegimeDetector  *m_regime_detector;
+    CHMMRegimeDetector     *m_hmm_regime;
+    CAdaptiveParameterManager *m_adaptive_manager;
    PatternSignalSource    *m_src_pattern;
    SRSignalSource         *m_src_sr;
    CRegimeSignalSource    *m_src_regime;
@@ -350,9 +351,10 @@ private:
       deps.bus = m_event_bus;
       deps.sanity = m_services.Sanity();
       deps.telemetry = m_services.Telemetry();
-      deps.adaptive = m_services.Adaptive();
-      deps.regime_det = m_regime_detector;
-      m_pipeline.InjectDependencies(deps);
+       deps.adaptive = m_services.Adaptive();
+       deps.regime_det = m_regime_detector;
+       deps.hmm_regime = m_hmm_regime;
+       m_pipeline.InjectDependencies(deps);
       return true;
      }
 
@@ -521,6 +523,12 @@ private:
                              vetoThreshold,
                              driftVetoThreshold,
                              highConfidenceThreshold);
+      // Enable external regime detection if HMMRegimeDetector is available
+      if(m_hmm_regime != NULL)
+        {
+         ai.UseExternalRegime(true);
+         Print("[PASRKernel] AI Orchestrator configured to use HMMRegimeDetector for regime detection");
+        }
       return true;
      }
 
@@ -735,6 +743,31 @@ public:
       if(m_regime_detector == NULL)
          Print("[PASRKernel] MarketRegimeDetector allocation failed; RegimeFilter remains primary");
 
+      m_hmm_regime = CModuleFactory::CreateHMMRegimeDetector();
+      if(m_hmm_regime != NULL)
+        {
+         if(!m_lifecycle.InitOptional(m_hmm_regime, PASR_MOD_HMM_REGIME_DETECTOR))
+           {
+            Print("[PASRKernel] HMMRegimeDetector init failed; continuing without HMM regime");
+            m_hmm_regime.Deinit();
+            delete m_hmm_regime;
+            m_hmm_regime = NULL;
+           }
+         else if(!m_registry.RegisterOrReplace(PASR_MOD_HMM_REGIME_DETECTOR, m_hmm_regime, true, false))
+           {
+            Print("[PASRKernel] HMMRegimeDetector registry bind failed");
+            m_hmm_regime.Deinit();
+            delete m_hmm_regime;
+            m_hmm_regime = NULL;
+           }
+         else
+           {
+            Print("[PASRKernel] HMMRegimeDetector initialized successfully");
+           }
+        }
+      else
+         Print("[PASRKernel] HMMRegimeDetector allocation failed");
+
       if(!InitManagerBootstrap())
         {
          SetState(PASR_KERNEL_FAILED, "Manager bootstrap failed");
@@ -786,6 +819,12 @@ public:
       ReleaseSignalSources();
       m_registry.Clear(true);
       m_adaptive_manager = NULL;
+      if(m_hmm_regime != NULL)
+        {
+         m_hmm_regime.Deinit();
+         delete m_hmm_regime;
+         m_hmm_regime = NULL;
+        }
       if(m_regime_detector != NULL)
         {
          m_regime_detector.Deinit();

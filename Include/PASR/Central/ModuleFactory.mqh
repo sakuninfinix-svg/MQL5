@@ -7,6 +7,7 @@
 #define __PASR_CENTRAL_MODULE_FACTORY_MQH__
 
 #include "../Analysis/CNNPatternRecognizer.mqh"
+#include "../Analysis/HMMRegimeDetector.mqh"
 
 class CModuleFactory
   {
@@ -26,11 +27,14 @@ public:
    static CRegimeFilter* CreateRegimeFilter()
      { return new CRegimeFilter(); }
 
-   static CMarketRegimeDetector* CreateMarketRegimeDetector()
-     { return new CMarketRegimeDetector(); }
+    static CMarketRegimeDetector* CreateMarketRegimeDetector()
+      { return new CMarketRegimeDetector(); }
 
-   static CAdaptiveParameterManager* CreateAdaptiveParameterManager()
-     { return new CAdaptiveParameterManager(); }
+    static CHMMRegimeDetector* CreateHMMRegimeDetector()
+      { return new CHMMRegimeDetector(); }
+
+    static CAdaptiveParameterManager* CreateAdaptiveParameterManager()
+      { return new CAdaptiveParameterManager(); }
 
    static CPatternManager* CreatePatternManager()
      { return new CPatternManager(); }

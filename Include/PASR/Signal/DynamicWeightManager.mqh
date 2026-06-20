@@ -54,11 +54,11 @@ struct SourcePerformance
 class CDynamicWeightManager : public IManager
 {
 private:
-   SourcePerformance m_sources[MAX_SIGNAL_SOURCES];
-   int m_sourceCount;
-   double m_weightHistory[][MAX_SIGNAL_SOURCES];
-   int m_historyHead;
-   bool m_historyFilled;
+    SourcePerformance m_sources[MAX_SIGNAL_SOURCES];
+    int m_sourceCount;
+    double m_weightHistory[];
+    int m_historyHead;
+    bool m_historyFilled;
    double m_learningRate;
    double m_minWeight;
    double m_maxWeight;
@@ -69,33 +69,34 @@ private:
       return MathMax(minVal, MathMin(maxVal, value));
    }
    
-   void SaveWeightHistory()
-   {
-      for(int i = 0; i < m_sourceCount; i++)
-         m_weightHistory[m_historyHead][i] = m_sources[i].currentWeight;
-      
-      m_historyHead = (m_historyHead + 1) % WEIGHT_HISTORY_SIZE;
-      if(!m_historyFilled && m_historyHead == 0)
-         m_historyFilled = true;
-   }
-   
-   double CalculateWeightedMovingAverage(int sourceIdx, int window = 20) const
-   {
-      if(!m_historyFilled) return m_sources[sourceIdx].currentWeight;
-      
-      double sum = 0.0;
-      int count = 0;
-      int actualWindow = MathMin(window, WEIGHT_HISTORY_SIZE);
-      
-      for(int i = 0; i < actualWindow; i++)
-      {
-         int idx = (m_historyHead - 1 - i + WEIGHT_HISTORY_SIZE) % WEIGHT_HISTORY_SIZE;
-         sum += m_weightHistory[idx][sourceIdx];
-         count++;
-      }
-      
-      return (count > 0) ? sum / count : m_sources[sourceIdx].currentWeight;
-   }
+    void SaveWeightHistory()
+    {
+       int baseIdx = m_historyHead * MAX_SIGNAL_SOURCES;
+       for(int i = 0; i < m_sourceCount; i++)
+          m_weightHistory[baseIdx + i] = m_sources[i].currentWeight;
+       
+       m_historyHead = (m_historyHead + 1) % WEIGHT_HISTORY_SIZE;
+       if(!m_historyFilled && m_historyHead == 0)
+          m_historyFilled = true;
+    }
+    
+    double CalculateWeightedMovingAverage(int sourceIdx, int window = 20) const
+    {
+       if(!m_historyFilled) return m_sources[sourceIdx].currentWeight;
+       
+       double sum = 0.0;
+       int count = 0;
+       int actualWindow = MathMin(window, WEIGHT_HISTORY_SIZE);
+       
+       for(int i = 0; i < actualWindow; i++)
+       {
+          int idx = (m_historyHead - 1 - i + WEIGHT_HISTORY_SIZE) % WEIGHT_HISTORY_SIZE;
+          sum += m_weightHistory[idx * MAX_SIGNAL_SOURCES + sourceIdx];
+          count++;
+       }
+       
+       return (count > 0) ? sum / count : m_sources[sourceIdx].currentWeight;
+    }
    
    void NormalizeWeights()
    {
@@ -118,9 +119,8 @@ public:
         m_learningRate(LEARNING_RATE), m_minWeight(MIN_WEIGHT), m_maxWeight(MAX_WEIGHT),
         m_lastUpdate(0)
    {
-      ArrayResize(m_weightHistory, WEIGHT_HISTORY_SIZE);
-      for(int i = 0; i < WEIGHT_HISTORY_SIZE; i++)
-         ArrayInitialize(m_weightHistory[i], 0.0);
+      ArrayResize(m_weightHistory, WEIGHT_HISTORY_SIZE * MAX_SIGNAL_SOURCES);
+      ArrayInitialize(m_weightHistory, 0.0);
       for(int i = 0; i < MAX_SIGNAL_SOURCES; i++)
          m_sources[i].Reset();
    }

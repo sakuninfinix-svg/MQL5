@@ -65,33 +65,91 @@ private:
    double                    m_driftVetoThreshold;
    double                    m_highConfidenceThreshold;
 
-   int                       m_hATRRegime;
-   int                       m_hADXRegime;
+    int                       m_hATRRegime;
+    int                       m_hADXRegime;
+    bool                      m_useExternalRegime;
 
-   double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
-   double Clamp(double v, double lo, double hi) const { return MathMax(lo, MathMin(hi, v)); }
-   bool CopyLastSequence(SAISequenceTensor &dest)
-     {
-      if(!m_last_sequence_valid)
-         return false;
+    double Clamp01(double v) const { return MathMax(0.0, MathMin(1.0, v)); }
+    double Clamp(double v, double lo, double hi) const { return MathMax(lo, MathMin(hi, v)); }
+    bool CopyLastSequence(SAISequenceTensor &dest)
+      {
+       if(!m_last_sequence_valid)
+          return false;
 
-      dest = m_last_sequence;
-      return true;
-     }
+       dest = m_last_sequence;
+       return true;
+      }
 
-   void SetUnavailable(SAIInferenceResult &out_result, string reason)
-     {
-      out_result.Reset();
-      out_result.valid = false;
-      out_result.vetoed = true;
-      out_result.veto_reason = reason;
-      out_result.timestamp = TimeCurrent();
-      m_last_result = out_result;
-      m_last_decision.Reset();
-      m_last_decision.reason = reason;
-      m_last_validation.Clear();
-      m_last_validation.reason = reason;
-     }
+    void SetUnavailable(SAIInferenceResult &out_result, string reason)
+      {
+       out_result.Reset();
+       out_result.valid = false;
+       out_result.vetoed = true;
+       out_result.veto_reason = reason;
+       out_result.timestamp = TimeCurrent();
+       m_last_result = out_result;
+       m_last_decision.Reset();
+       m_last_decision.reason = reason;
+       m_last_validation.Clear();
+       m_last_validation.reason = reason;
+      }
+
+    // Hard gate sequence: feature valid → regime → MTF alignment → drift → confidence
+    bool CheckHardGates(const SAIFeatureVector &fv, const SAISequenceTensor &seq, SGBRMTFResult &mtf_result, double drift, string &veto_reason)
+      {
+       // Gate 1: Feature validation
+       if(!m_validator.Validate(fv, m_ensemble, m_last_validation))
+         {
+          veto_reason = "AI validation failed: " + m_last_validation.reason;
+          return false;
+         }
+
+       // Gate 2: Regime gate (CRASH/UNKNOWN = no trade)
+       if(m_detectedRegime == REGIME_CRASH || m_detectedRegime == REGIME_UNKNOWN)
+         {
+          veto_reason = "Regime veto: " + EnumToString(m_detectedRegime);
+          return false;
+         }
+
+       // Gate 3: Volatility extreme
+       if(m_detectedRegime == REGIME_VOLATILE && drift > m_cfg.AI.VolatilityDriftThreshold)
+         {
+          veto_reason = "Volatile regime + high drift veto";
+          return false;
+         }
+
+       // Gate 4: MTF alignment (if MTF enabled and GBR loaded)
+       if(m_use_gbr && m_gbr != NULL && m_gbr.IsLoaded() && m_cfg.Signal.UseMTF && mtf_result.valid)
+         {
+          if(mtf_result.confidence < m_cfg.AI.MTFMinConfidence)
+            {
+             veto_reason = StringFormat("MTF alignment low: conf=%.3f", mtf_result.confidence);
+             return false;
+            }
+          if(MathAbs(mtf_result.score) < m_cfg.AI.MTFMinScore)
+            {
+             veto_reason = StringFormat("MTF score weak: score=%.3f", mtf_result.score);
+             return false;
+            }
+         }
+
+       // Gate 5: Drift veto
+       if(m_guard.ShouldVeto(drift))
+         {
+          veto_reason = StringFormat("Drift veto: %.3f", drift);
+          return false;
+         }
+
+       // Gate 6: Confidence threshold
+       double threshold = DynamicThreshold();
+       if(threshold > m_cfg.AI.MaxConfidenceThreshold)
+         {
+          veto_reason = StringFormat("Threshold too high: %.3f", threshold);
+          return false;
+         }
+
+       return true;
+      }
 
    void ReleaseIndicator(int &handle)
      {
@@ -141,36 +199,42 @@ private:
       m_last_sequence.Reset();
      }
 
-   void DetectRegime()
-     {
-      double trendStr = CalculateTrendStrength(m_cfg.AI.RegimeADXPeriod);
-      double vol      = CalculateVolatility(m_cfg.AI.RegimeATRPeriod);
+    void DetectRegime()
+      {
+       if(m_useExternalRegime)
+         {
+          // Regime is set externally via InjectContext from pipeline (HMMRegimeDetector)
+          return;
+         }
 
-      EMarketRegime newRegime = REGIME_UNKNOWN;
-      if(trendStr > m_cfg.AI.StrongTrendLevel && vol > m_cfg.AI.RangeVolatilityMax)
-         newRegime = REGIME_TREND_UP;
-      else if(trendStr < m_cfg.AI.RangeTrendMax && vol < m_cfg.AI.RangeVolatilityMax)
-         newRegime = REGIME_RANGE;
-      else if(vol > m_cfg.AI.VolatileLevel)
-         newRegime = REGIME_VOLATILE;
-      else if(trendStr > m_cfg.AI.TrendLevel)
-         newRegime = REGIME_TREND_UP;
-      else
-         newRegime = REGIME_TRANSITION;
+       double trendStr = CalculateTrendStrength(m_cfg.AI.RegimeADXPeriod);
+       double vol      = CalculateVolatility(m_cfg.AI.RegimeATRPeriod);
 
-      if(newRegime == m_detectedRegime)
-         m_regimeStreak++;
-      else
-        {
-         if(m_regimeStreak >= MathMax(1, m_cfg.AI.RegimeConfirmBars))
-           {
-            m_detectedRegime = newRegime;
-            m_regimeStreak = 1;
-           }
-         else
-            m_regimeStreak = 1;
-        }
-     }
+       EMarketRegime newRegime = REGIME_UNKNOWN;
+       if(trendStr > m_cfg.AI.StrongTrendLevel && vol > m_cfg.AI.RangeVolatilityMax)
+          newRegime = REGIME_TREND_UP;
+       else if(trendStr < m_cfg.AI.RangeTrendMax && vol < m_cfg.AI.RangeVolatilityMax)
+          newRegime = REGIME_RANGE;
+       else if(vol > m_cfg.AI.VolatileLevel)
+          newRegime = REGIME_VOLATILE;
+       else if(trendStr > m_cfg.AI.TrendLevel)
+          newRegime = REGIME_TREND_UP;
+       else
+          newRegime = REGIME_TRANSITION;
+
+       if(newRegime == m_detectedRegime)
+          m_regimeStreak++;
+       else
+         {
+          if(m_regimeStreak >= MathMax(1, m_cfg.AI.RegimeConfirmBars))
+            {
+             m_detectedRegime = newRegime;
+             m_regimeStreak = 1;
+            }
+          else
+             m_regimeStreak = 1;
+         }
+      }
 
    void SelectStrategy()
      {
@@ -354,19 +418,20 @@ private:
      }
 
 public:
-   CAIOrchestrator()
-      : IManager(), m_feat(NULL), m_seq_feat(NULL), m_ensemble(NULL),
-        m_trainer(NULL), m_calib(NULL), m_guard(NULL),
-        m_lstm(NULL), m_attention(NULL), m_gbr(NULL), m_use_lstm(true), m_use_attention(true), m_use_gbr(true),
-        m_ready(false), m_min_bars_required(50),
-        m_open_features_valid(false), m_last_sequence_valid(false),
-        m_currentStrategy(STRAT_NONE), m_detectedRegime(REGIME_UNKNOWN),
-        m_strategyConfidence(0.0), m_lastStrategyChange(0), m_regimeStreak(0),
-        m_entryThreshold(0.70), m_risk_multiplier(1.0),
-        m_useAI(true), m_vetoThreshold(AI_DEFAULT_CONF_THRESHOLD),
-        m_driftVetoThreshold(0.75), m_highConfidenceThreshold(0.80),
-        m_hATRRegime(INVALID_HANDLE), m_hADXRegime(INVALID_HANDLE)
-     {
+    CAIOrchestrator()
+       : IManager(), m_feat(NULL), m_seq_feat(NULL), m_ensemble(NULL),
+         m_trainer(NULL), m_calib(NULL), m_guard(NULL),
+         m_lstm(NULL), m_attention(NULL), m_gbr(NULL), m_use_lstm(true), m_use_attention(true), m_use_gbr(true),
+         m_ready(false), m_min_bars_required(50),
+         m_open_features_valid(false), m_last_sequence_valid(false),
+         m_currentStrategy(STRAT_NONE), m_detectedRegime(REGIME_UNKNOWN),
+         m_strategyConfidence(0.0), m_lastStrategyChange(0), m_regimeStreak(0),
+         m_entryThreshold(0.70), m_risk_multiplier(1.0),
+         m_useAI(true), m_vetoThreshold(AI_DEFAULT_CONF_THRESHOLD),
+         m_driftVetoThreshold(0.75), m_highConfidenceThreshold(0.80),
+         m_hATRRegime(INVALID_HANDLE), m_hADXRegime(INVALID_HANDLE),
+         m_useExternalRegime(false)
+      {
       m_last_result.Reset();
       m_last_decision.Reset();
       m_last_label.Reset();
@@ -386,20 +451,26 @@ public:
    double          GetRiskMultiplier() const { return m_risk_multiplier; }
    string          GetStrategyDescription() const;
 
-   void ConfigureParameters(bool useAI, double vetoThresh, double driftVeto, double highThresh)
-     {
-      m_useAI = useAI;
-      m_vetoThreshold = MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, vetoThresh));
-      m_driftVetoThreshold = MathMax(0.1, MathMin(1.0, driftVeto));
-      m_highConfidenceThreshold = MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, highThresh));
-      if(m_guard != NULL) m_guard.SetVetoThreshold(m_driftVetoThreshold);
-      if(m_calib != NULL) m_calib.SetThreshold(m_vetoThreshold);
-      PrintFormat("[AIOrchestrator] Configured: useAI=%s veto=%.2f drift=%.2f high=%.2f",
-                  useAI ? "true" : "false", m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold);
-     }
+    void ConfigureParameters(bool useAI, double vetoThresh, double driftVeto, double highThresh)
+      {
+       m_useAI = useAI;
+       m_vetoThreshold = MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, vetoThresh));
+       m_driftVetoThreshold = MathMax(0.1, MathMin(1.0, driftVeto));
+       m_highConfidenceThreshold = MathMax(AI_MIN_CONF_THRESHOLD, MathMin(AI_MAX_CONF_THRESHOLD, highThresh));
+       if(m_guard != NULL) m_guard.SetVetoThreshold(m_driftVetoThreshold);
+       if(m_calib != NULL) m_calib.SetThreshold(m_vetoThreshold);
+       PrintFormat("[AIOrchestrator] Configured: useAI=%s veto=%.2f drift=%.2f high=%.2f",
+                   useAI ? "true" : "false", m_vetoThreshold, m_driftVetoThreshold, m_highConfidenceThreshold);
+      }
 
-   bool ShouldAllowTrade(int signalStrength);
-   void AdjustRiskParameters(double &riskPercent, double &maxDrawdown);
+    void UseExternalRegime(bool useExternal)
+      {
+       m_useExternalRegime = useExternal;
+       PrintFormat("[AIOrchestrator] External regime detection: %s", useExternal ? "enabled" : "disabled");
+      }
+
+    bool ShouldAllowTrade(int signalStrength);
+    void AdjustRiskParameters(double &riskPercent, double &maxDrawdown);
 
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
@@ -556,25 +627,21 @@ public:
         }
      }
 
-   bool Predict(SAIInferenceResult &out_result)
-     {
-      out_result.Reset();
-      if(!m_useAI)
-        {
-         SetUnavailable(out_result, "AI disabled");
-         return false;
-        }
-      if(!m_ready || m_feat == NULL || m_guard == NULL || m_ensemble == NULL || m_calib == NULL)
-        {
-         SetUnavailable(out_result, "AI not ready");
-         return false;
-        }
+bool Predict(SAIInferenceResult &out_result)
+      {
+       out_result.Reset();
+       if(!m_useAI)
+         {
+          SetUnavailable(out_result, "AI disabled");
+          return false;
+         }
+       if(!m_ready || m_feat == NULL || m_guard == NULL || m_ensemble == NULL || m_calib == NULL)
+         {
+          SetUnavailable(out_result, "AI not ready");
+          return false;
+         }
 
-      SAIFeatureVector gbr_mtf_fv[];
-      bool gbr_mtf_ready = false;
-      if(m_use_gbr && m_gbr != NULL && m_gbr.IsLoaded() && m_cfg.Signal.UseMTF)
-         gbr_mtf_ready = BuildGBRMTFFeatures(gbr_mtf_fv);
-
+      // Build features
       SAIFeatureVector fv;
       fv.Reset();
       if(!m_feat.Build(fv))
@@ -587,12 +654,25 @@ public:
       if(fv.symbol == "") fv.symbol = _Symbol;
       if(fv.timeframe == PERIOD_CURRENT && !m_cfg.Signal.UseMTF) fv.timeframe = _Period;
 
-      if(!m_validator.Validate(fv, m_ensemble, m_last_validation))
+      // Build MTF features for GBR (primary path per AI_Development.md)
+      SAIFeatureVector gbr_mtf_fv[];
+      bool gbr_mtf_ready = false;
+      SGBRMTFResult mtf_result;
+      mtf_result.Clear();
+      if(m_use_gbr && m_gbr != NULL && m_gbr.IsLoaded() && m_cfg.Signal.UseMTF)
         {
-         SetUnavailable(out_result, "AI validation failed: " + m_last_validation.reason);
-         return false;
+         gbr_mtf_ready = BuildGBRMTFFeatures(gbr_mtf_fv);
+         if(gbr_mtf_ready)
+           {
+            if(!m_gbr.PredictMTF(gbr_mtf_fv, mtf_result))
+              {
+               mtf_result.Clear();
+               gbr_mtf_ready = false;
+              }
+           }
         }
 
+      // Build sequence for LSTM (optional, phase 2+)
       m_last_sequence_valid = false;
       m_last_sequence.Reset();
       if(m_seq_feat != NULL)
@@ -607,116 +687,86 @@ public:
            }
         }
 
+      // Compute drift
       double drift = m_guard.ComputeDrift(fv);
-      if(m_guard.ShouldVeto(drift))
+
+      // HARD GATE SEQUENCE (per AI_Development.md)
+      string veto_reason;
+      if(!CheckHardGates(fv, m_last_sequence, mtf_result, drift, veto_reason))
         {
-         SetUnavailable(out_result, StringFormat("Drift veto: %.3f", drift));
+         SetUnavailable(out_result, veto_reason);
          out_result.drift_score = drift;
          m_last_result = out_result;
          return false;
         }
 
-      double lstm_score = 0.0;
-      bool lstm_used = false;
-      if(m_use_lstm && m_lstm != NULL)
-         {
-            if(m_lstm.ForwardSequence(fv.features, lstm_score))
-            {
-            lstm_used = true;
-            if(m_debugMode) PrintFormat("[AIOrchestrator] LSTM prediction: %.4f", lstm_score);
-            }
-         }
+      // All gates passed - now compute confidence from models
+      // Priority: GBR MTF > Ensemble > LSTM
+      double final_score = 0.0;
+      double model_confidence = 0.0;
+      string model_id = "none";
 
-      SAIEnsembleVote vote;
-      vote.Reset();
-      if(!m_ensemble.Vote(fv, vote) || vote.n_models <= 0)
+      // 1. GBR MTF (primary for MTF)
+      if(gbr_mtf_ready && mtf_result.valid)
         {
-         SetUnavailable(out_result, "Ensemble vote failed");
-         return false;
+         final_score = mtf_result.score;
+         model_confidence = mtf_result.confidence;
+         model_id = "gbr_mtf";
         }
-
-      // --- GBR prediction (optional, independent model) ---
-      double gbr_score = 0.0;
-      double gbr_conf  = 0.0;
-      bool   gbr_used  = false;
-      bool   gbr_mtf_used = false;
-      if(m_use_gbr && m_gbr != NULL && m_gbr.IsLoaded())
-        {
-         if(gbr_mtf_ready)
-           {
-            SGBRMTFResult mtf_result;
-            mtf_result.Clear();
-            if(m_gbr.PredictMTF(gbr_mtf_fv, mtf_result) && mtf_result.valid)
-              {
-               gbr_score = mtf_result.score;
-               gbr_conf  = mtf_result.confidence;
-               gbr_used = true;
-               gbr_mtf_used = true;
-               if(m_debugMode) PrintFormat("[AIOrchestrator] GBR MTF prediction: %.4f (conf=%.4f, tf=%d)",
-                                           gbr_score, gbr_conf, mtf_result.n_timeframes);
-              }
-           }
-
-         if(!gbr_used && m_gbr.Predict(fv, gbr_score, gbr_conf))
-           {
-            gbr_used = true;
-            if(m_debugMode) PrintFormat("[AIOrchestrator] GBR prediction: %.4f (conf=%.4f)", gbr_score, gbr_conf);
-           }
-        }
-
-      double final_score = vote.final_score;
-      if(lstm_used && gbr_used)
-        {
-         // Three-way blend: LSTM + Ensemble + GBR
-         double lstmW = MathMax(0.0, m_cfg.AI.LSTMBlendWeight);
-         double ensW  = MathMax(0.0, m_cfg.AI.EnsembleBlendWeight);
-         double gbrW  = MathMax(0.0, m_cfg.AI.GBRBlendWeight);
-         double total = lstmW + ensW + gbrW;
-         if(total <= 0.0) { lstmW = 0.4; ensW = 0.3; gbrW = 0.3; total = 1.0; }
-         final_score = (lstmW * lstm_score + ensW * vote.final_score + gbrW * gbr_score) / total;
-         out_result.model_id = gbr_mtf_used ? "lstm+ensemble+gbr_mtf" : "lstm+ensemble+gbr";
-        }
-      else if(lstm_used)
-        {
-         double lstmW = MathMax(0.0, m_cfg.AI.LSTMBlendWeight);
-         double ensW  = MathMax(0.0, m_cfg.AI.EnsembleBlendWeight);
-         double total = lstmW + ensW;
-         if(total <= 0.0) { lstmW = 0.6; ensW = 0.4; total = 1.0; }
-         final_score = (lstmW * lstm_score + ensW * vote.final_score) / total;
-         out_result.model_id = "lstm+ensemble";
-        }
-      else if(gbr_used)
-        {
-         // Two-way blend: Ensemble + GBR
-         double ensW = MathMax(0.0, m_cfg.AI.EnsembleBlendWeight);
-         double gbrW = MathMax(0.0, m_cfg.AI.GBRBlendWeight);
-         double total = ensW + gbrW;
-         if(total <= 0.0) { ensW = 0.7; gbrW = 0.3; total = 1.0; }
-         final_score = (ensW * vote.final_score + gbrW * gbr_score) / total;
-         out_result.model_id = gbr_mtf_used ? "ensemble+gbr_mtf" : "ensemble+gbr";
-        }
+      // 2. Ensemble (fallback)
       else
         {
-         if(m_ensemble.IsOnnxLoaded() && m_last_sequence_valid)
-            out_result.model_id = "ensemble_mlp+onnx_seq";
-         else
-            out_result.model_id = "ensemble_mlp";
+         SAIEnsembleVote vote;
+         vote.Reset();
+         if(m_ensemble.Vote(fv, vote) && vote.n_models > 0)
+           {
+            final_score = vote.final_score;
+            model_confidence = MathAbs(vote.final_score);
+            model_id = m_ensemble.IsOnnxLoaded() ? "ensemble_onnx" : "ensemble_mlp";
+           }
         }
 
+      // 3. LSTM as optional tiebreaker (low weight, only if sequence valid)
+      if(m_use_lstm && m_lstm != NULL && m_last_sequence_valid)
+        {
+         double lstm_score = 0.0;
+         if(m_lstm.ForwardSequence(fv.features, lstm_score))
+           {
+            // Minor blend: LSTM only adjusts confidence, doesn't override direction
+            if(MathAbs(lstm_score) > 0.1 && (lstm_score > 0) == (final_score > 0))
+              {
+               model_confidence = MathMin(1.0, model_confidence + 0.05);
+               model_id += "+lstm";
+              }
+           }
+        }
+
+      // Calibrate confidence
       double raw_conf = MathAbs(final_score);
-      double cal_conf = m_calib.Calibrate(raw_conf, vote.agreement);
+      double cal_conf = m_calib.Calibrate(raw_conf, model_confidence);
+
+      // Final confidence check
+      double threshold = DynamicThreshold();
+      if(cal_conf < threshold)
+        {
+         SetUnavailable(out_result, StringFormat("Confidence %.3f below threshold %.3f", cal_conf, threshold));
+         out_result.drift_score = drift;
+         m_last_result = out_result;
+         return false;
+        }
 
       out_result.score = final_score;
       out_result.confidence = cal_conf;
       out_result.direction = (final_score > 0.0) ? 1 : ((final_score < 0.0) ? -1 : 0);
-      out_result.valid = (cal_conf >= DynamicThreshold() && out_result.direction != 0);
+      out_result.valid = (out_result.direction != 0);
       out_result.timestamp = TimeCurrent();
       out_result.drift_score = drift;
       out_result.vetoed = false;
+      out_result.model_id = model_id;
 
       m_last_result = out_result;
       return out_result.valid;
-     }
+      }
 
    bool PredictDecision(SAIRiskDecision &out_decision)
      {
@@ -798,19 +848,27 @@ public:
       m_perf.Update(was_profitable, m_last_result.confidence, m_last_result.drift_score);
      }
 
-   void InjectContext(double sr_dist, double zone_str, double pattern_score, EMarketRegime regime)
-     {
-      if(m_feat != NULL)
-        {
-         m_feat.InjectStructure(sr_dist, zone_str, pattern_score);
-         m_feat.InjectRegime(regime);
-        }
-      if(m_seq_feat != NULL)
-        {
-         m_seq_feat.InjectStructure(sr_dist, zone_str, pattern_score);
-         m_seq_feat.InjectRegime(regime);
-        }
-     }
+void InjectContext(double sr_dist, double zone_str, double pattern_score, EMarketRegime regime, double regime_confidence = 0.0)
+      {
+       if(m_feat != NULL)
+         {
+          m_feat.InjectStructure(sr_dist, zone_str, pattern_score);
+          m_feat.InjectRegime(regime);
+         }
+       if(m_seq_feat != NULL)
+         {
+          m_seq_feat.InjectStructure(sr_dist, zone_str, pattern_score);
+          m_seq_feat.InjectRegime(regime);
+         }
+       
+       // Update internal regime state when using external regime (HMM)
+       if(m_useExternalRegime)
+         {
+          m_detectedRegime = regime;
+          m_strategyConfidence = MathMax(0.0, MathMin(1.0, regime_confidence));
+          SelectStrategy();
+         }
+      }
 
    bool IsReady() const { return m_ready; }
    virtual bool IsHealthy() const override { return IsInitialized() && m_ready && m_useAI; }

@@ -328,7 +328,9 @@ void ExportBacktestReport()
   {
    CPipelineEngine *pipeline = g_kernel.Pipeline();
    if(pipeline == NULL) return;
-   CJournalManager *journal = g_kernel.Services()->Journal();
+   CServiceLocator *services = g_kernel.Services();
+   if(services == NULL) return;
+   CJournalManager *journal = services.Journal();
    if(journal == NULL) return;
 
    g_report.SetJournal(journal);

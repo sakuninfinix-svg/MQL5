@@ -8,47 +8,111 @@
 
 #include "PipelineStageBase.mqh"
 #include "../../AI/AIOrchestrator.mqh"
+#include "../../Analysis/SRManager.mqh"
+#include "../../Analysis/SRZoneStore.mqh"
+#include "../../Analysis/ZoneManager.mqh"
 
 class CAIInferStage : public CPipelineStageBase
   {
 private:
-   CAIOrchestrator *m_ai_orch;
+    CAIOrchestrator       *m_ai_orch;
+    CAnalysisSRManager    *m_sr;
+    CAnalysisZoneManager  *m_zone;
 
 public:
-   CAIInferStage() : CPipelineStageBase("AIInfer"), m_ai_orch(NULL) {}
-   void SetAIOrchestrator(CAIOrchestrator *orch) { m_ai_orch = orch; }
-   void Bind(CAIOrchestrator *orch) { m_ai_orch = orch; }
+    CAIInferStage() : CPipelineStageBase("AIInfer"), m_ai_orch(NULL), m_sr(NULL), m_zone(NULL) {}
+    void SetAIOrchestrator(CAIOrchestrator *orch) { m_ai_orch = orch; }
+    void Bind(CAIOrchestrator *orch, CAnalysisSRManager *sr, CAnalysisZoneManager *zone)
+      {
+       m_ai_orch = orch;
+       m_sr = sr;
+       m_zone = zone;
+      }
 
-   // FIX: Use correct CAIOrchestrator.Predict() signature — takes SAIInferenceResult&, no args
-   virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
-     {
-      if(!m_enabled) return STAGE_SKIP;
-      if(m_ai_orch == NULL)
-        {
-         if(m_debug) Print("[AIInferStage] AIOrchestrator is NULL");
-         return STAGE_SKIP;
-        }
+    double GetSRDistance() const
+      {
+       if(m_sr == NULL) return 0.5;
+       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+       double price = (bid + ask) / 2.0;
+       
+       SRZoneExtended sup, res;
+       bool hasSup = m_sr.GetNearestSupport(price, sup);
+       bool hasRes = m_sr.GetNearestResistance(price, res);
+       
+       double dist = 0.5;
+       if(hasSup && hasRes)
+         {
+          double range = res.price - sup.price;
+          if(range > 0) dist = (price - sup.price) / range;
+         }
+       else if(hasSup)
+         dist = 0.25;
+       else if(hasRes)
+         dist = 0.75;
+       
+       return MathMax(0.0, MathMin(1.0, dist));
+      }
 
-      // Only run inference when signal is valid
-      if(ctx.signal.direction == SIGNAL_NONE)
-         return STAGE_SKIP;
+    double GetZoneStrength() const
+      {
+       if(m_zone == NULL) return 0.5;
+       // ZoneManager doesn't expose strength directly, use 0.5 as default
+       return 0.5;
+      }
 
-      // Run AI inference — CAIOrchestrator.Predict() builds features internally
-      SAIInferenceResult ai_result;
-      ai_result.Reset();
-      if(!m_ai_orch.Predict(ai_result))
-        {
-         if(m_debug) Print("[AIInferStage] AI Predict failed or unavailable");
-         ctx.ai_valid = false;
-         return STAGE_SKIP;
-        }
+     // FIX: Use correct CAIOrchestrator.Predict() signature — takes SAIInferenceResult&, no args
+     virtual ENUM_STAGE_RESULT Execute(PipelineContext &ctx) override
+       {
+        if(!m_enabled) return STAGE_SKIP;
+        if(m_ai_orch == NULL)
+          {
+           if(m_debug) Print("[AIInferStage] AIOrchestrator is NULL");
+           return STAGE_SKIP;
+          }
 
-      // Store AI result in context
-      ctx.ai_valid = ai_result.valid;
-      ctx.ai_confidence = ai_result.confidence;
-      ctx.ai_score = (float)ai_result.score;
-      ctx.drift_score = (float)ai_result.drift_score;
-      ctx.ai_veto = ai_result.vetoed;
+        // Only run inference when signal is valid
+        if(ctx.signal.direction == SIGNAL_NONE)
+           return STAGE_SKIP;
+
+        // Calculate SR distance and zone strength
+        double sr_dist = GetSRDistance();
+        double zone_str = GetZoneStrength();
+
+        // Inject regime context from pipeline (HMM/RegimeFilter) into AI for gating
+        // RegimeStage runs before AIInferStage, so ctx.regime and ctx.regime_confidence are available
+        if(m_ai_orch.GetFeatureBuilder() != NULL)
+          {
+           m_ai_orch.InjectContext(
+               sr_dist,                 // SR distance (normalized)
+               zone_str,                // Zone strength (normalized)
+               ctx.pattern_score,       // Pattern score
+               ctx.regime,              // Regime from RegimeStage (HMM preferred)
+               ctx.regime_confidence    // Regime confidence from HMM
+           );
+          }
+
+         // Run AI inference — CAIOrchestrator.Predict() builds features internally
+         SAIInferenceResult ai_result;
+         ai_result.Reset();
+         if(!m_ai_orch.Predict(ai_result))
+           {
+            if(m_debug) Print("[AIInferStage] AI Predict failed or unavailable");
+            ctx.ai_valid = false;
+            return STAGE_SKIP;
+           }
+
+       // Store AI result in context
+       ctx.ai_valid = ai_result.valid;
+       ctx.ai_confidence = ai_result.confidence;
+       ctx.ai_score = (float)ai_result.score;
+       ctx.drift_score = (float)ai_result.drift_score;
+       ctx.ai_veto = ai_result.vetoed;
+       // Store model info for observability
+       ctx.ai_result.model_name = ai_result.model_id;
+       ctx.ai_result.model_healthy = ai_result.valid;
+       ctx.ai_result.validation_valid = ai_result.valid && !ai_result.vetoed;
+       ctx.ai_result.validation_reason = ai_result.vetoed ? ai_result.veto_reason : "OK";
 
       // Apply confidence gate using context threshold
       double minConf = ctx.ai_min_confidence;

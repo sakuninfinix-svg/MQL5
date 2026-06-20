@@ -63,6 +63,7 @@
   class CTelemetryRecorder;
   class CAdaptiveParameterManager;
   class CMarketRegimeDetector;
+  class CHMMRegimeDetector;
   class CTrade;
 #endif
 
@@ -86,6 +87,7 @@ struct SPipelineDependencies
    CTelemetryRecorder        *telemetry;
    CAdaptiveParameterManager *adaptive;
    CMarketRegimeDetector     *regime_det;
+   CHMMRegimeDetector        *hmm_regime;
    SPipelineDependencies()
      {
       Clear();
@@ -111,6 +113,7 @@ struct SPipelineDependencies
       telemetry = NULL;
       adaptive = NULL;
       regime_det = NULL;
+      hmm_regime = NULL;
      }
   };
 
@@ -134,9 +137,10 @@ private:
    CEventBus                 *m_bus;
    CSanityManager            *m_sanity;
    CTelemetryRecorder        *m_telemetry;
-   CAdaptiveParameterManager *m_adaptive;
-   CMarketRegimeDetector     *m_regime_det;
-   bool   m_debug_mode;
+    CAdaptiveParameterManager *m_adaptive;
+    CMarketRegimeDetector     *m_regime_det;
+    CHMMRegimeDetector        *m_hmm_regime;
+    bool   m_debug_mode;
    bool   m_profiling_enabled;
    CPerfTimer m_stage_timer;
    CPipelineStageRegistry m_stage_registry;
@@ -403,16 +407,16 @@ private:
      }
 
 public:
-   CPipelineEngine()
-      : m_data(NULL), m_sr(NULL), m_zone(NULL), m_pattern(NULL), m_signal(NULL),
-        m_ai_orch(NULL), m_regime(NULL), m_risk(NULL), m_exec(NULL), m_exit(NULL),
-        m_recovery(NULL), m_position_manager(NULL), m_dash(NULL), m_journal(NULL), m_bus(NULL),
-        m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL), m_regime_det(NULL),
-        m_debug_mode(false), m_profiling_enabled(true), m_last_observability(""),
-        m_observability_ticks(0)
-     {
-      m_stage_registry.RegisterDefaultStages();
-     }
+    CPipelineEngine()
+       : m_data(NULL), m_sr(NULL), m_zone(NULL), m_pattern(NULL), m_signal(NULL),
+         m_ai_orch(NULL), m_regime(NULL), m_risk(NULL), m_exec(NULL), m_exit(NULL),
+         m_recovery(NULL), m_position_manager(NULL), m_dash(NULL), m_journal(NULL), m_bus(NULL),
+         m_sanity(NULL), m_telemetry(NULL), m_adaptive(NULL), m_regime_det(NULL), m_hmm_regime(NULL),
+         m_debug_mode(false), m_profiling_enabled(true), m_last_observability(""),
+         m_observability_ticks(0)
+      {
+       m_stage_registry.RegisterDefaultStages();
+      }
 
    void SetDebugMode(bool on)
      {
@@ -451,22 +455,23 @@ public:
       m_journal_stage.EnableProfiling(on);
      }
 
-   void InjectDependencies(const SPipelineDependencies &deps)
-     {
-      m_data=deps.data; m_sr=deps.sr; m_zone=deps.zone; m_pattern=deps.pattern; m_signal=deps.signal;
-      m_ai_orch=deps.ai_orch; m_regime=deps.regime; m_risk=deps.risk; m_exec=deps.exec;
-      m_exit=deps.exit_engine; m_recovery=deps.recovery; m_dash=deps.dash; m_journal=deps.journal; m_bus=deps.bus;
-      m_sanity=deps.sanity; m_telemetry=deps.telemetry; m_adaptive=deps.adaptive;
-      m_regime_det=deps.regime_det;
-      m_position_manager = NULL;
+    void InjectDependencies(const SPipelineDependencies &deps)
+      {
+       m_data=deps.data; m_sr=deps.sr; m_zone=deps.zone; m_pattern=deps.pattern; m_signal=deps.signal;
+       m_ai_orch=deps.ai_orch; m_regime=deps.regime; m_risk=deps.risk; m_exec=deps.exec;
+       m_exit=deps.exit_engine; m_recovery=deps.recovery; m_dash=deps.dash; m_journal=deps.journal; m_bus=deps.bus;
+       m_sanity=deps.sanity; m_telemetry=deps.telemetry; m_adaptive=deps.adaptive;
+       m_regime_det=deps.regime_det;
+       m_hmm_regime=deps.hmm_regime;
+       m_position_manager = NULL;
       m_data_stage.Bind(m_data);
       m_analysis_sr_stage.Bind(m_sr, m_bus);
       m_analysis_zone_stage.Bind(m_zone);
-      m_pattern_stage.Bind(m_pattern);
-      m_regime_stage.Bind(m_regime, m_regime_det);
-      m_signal_stage.Bind(m_signal, m_ai_orch, m_sr, m_pattern);
-      m_ai_infer_stage.Bind(m_ai_orch);
-      m_risk_stage.Bind(m_risk);
+       m_pattern_stage.Bind(m_pattern, m_ai_orch);
+       m_regime_stage.Bind(m_regime, m_regime_det, m_hmm_regime);
+       m_signal_stage.Bind(m_signal, m_ai_orch, m_sr, m_pattern);
+       m_ai_infer_stage.Bind(m_ai_orch, m_sr, m_zone);
+       m_risk_stage.Bind(m_risk);
       m_adaptive_stage.Bind(m_adaptive);
       m_execution_stage.Bind(m_exec, m_recovery);
       m_position_stage.Bind(m_exit, m_data, m_position_manager);

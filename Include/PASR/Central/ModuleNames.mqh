@@ -35,5 +35,6 @@
 #define PASR_MOD_LATENCY_OPTIMIZER  "LatencyOptimizer"
 #define PASR_MOD_ASYNC_ORDER_MANAGER "AsyncOrderManager"
 #define PASR_MOD_CNN_PATTERN_RECOGNIZER "CNNPatternRecognizer"
+#define PASR_MOD_HMM_REGIME_DETECTOR "HMMRegimeDetector"
 
 #endif // __PASR_CENTRAL_MODULE_NAMES_MQH__

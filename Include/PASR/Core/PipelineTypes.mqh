@@ -228,29 +228,42 @@ struct PipelineContext
    SAccountSnapshot  account;
    CPositionRegistry positions;
 
-   EMarketRegime          regime;
-   double                 regime_confidence;
-   ENUM_TRADING_SESSION   session;
+    EMarketRegime          regime;
+    double                 regime_confidence;
+    ENUM_TRADING_SESSION   session;
 
-   SSignal           signal;
-   double            signal_strength;
+    // SR/Zone distance for AI feature injection
+    double            sr_distance;        // Normalized distance to nearest SR (0-1)
+    double            zone_strength;      // Normalized zone strength (0-1)
 
-   SAIResult         ai_result;
-   float             ai_score;
-   float             drift_score;
-   bool              ai_veto;
-   // FIX: Additional AI fields for infer stage gating
-   double            ai_confidence;
-   double            ai_min_confidence;
-   bool              ai_valid;
+    SSignal           signal;
+    double            signal_strength;
 
-   // FIX: Pattern fields for downstream stage access
-   bool              pattern_detected;
-   ENUM_SIGNAL_DIR   pattern_direction;
-   double            pattern_score;
+    SAIResult         ai_result;
+    float             ai_score;
+    float             drift_score;
+    bool              ai_veto;
+    // FIX: Additional AI fields for infer stage gating
+    double            ai_confidence;
+    double            ai_min_confidence;
+    bool              ai_valid;
 
-   SRiskResult       risk_result;
-   bool              trading_allowed;
+     // FIX: Pattern fields for downstream stage access
+     bool              pattern_detected;
+     ENUM_SIGNAL_DIR   pattern_direction;
+     double            pattern_score;
+     // Detailed pattern features for AI feature builder
+     double            pattern_buyProb;
+     double            pattern_sellProb;
+     double            pattern_conflict;
+     double            pattern_dominanceGap;
+     double            pattern_rejectionQuality;
+     double            pattern_trapQuality;
+     double            pattern_reclaimQuality;
+     double            pattern_followThrough;
+
+    SRiskResult       risk_result;
+    bool              trading_allowed;
 
    struct STradePlan
      {
@@ -298,22 +311,32 @@ struct PipelineContext
       account.Clear();
       positions.Clear();
       regime = REGIME_UNKNOWN;
-      regime_confidence = 0;
-      session = SESSION_UNKNOWN;
-      signal.Clear();
-      signal_strength = 0;
-      ai_result.Clear();
-      ai_score = 0;
-      drift_score = 0;
-      ai_veto = false;
-      ai_confidence = 0.0;
-      ai_min_confidence = 0.0;
-      ai_valid = false;
-      pattern_detected = false;
-      pattern_direction = SIGNAL_NONE;
-      pattern_score = 0.0;
-      ZeroMemory(risk_result);
-      trading_allowed = false;
+       regime_confidence = 0;
+       session = SESSION_UNKNOWN;
+       sr_distance = 0.5;
+       zone_strength = 0.5;
+       signal.Clear();
+       signal_strength = 0;
+       ai_result.Clear();
+       ai_score = 0;
+       drift_score = 0;
+       ai_veto = false;
+       ai_confidence = 0.0;
+       ai_min_confidence = 0.0;
+       ai_valid = false;
+        pattern_detected = false;
+        pattern_direction = SIGNAL_NONE;
+        pattern_score = 0.0;
+        pattern_buyProb = 0.0;
+        pattern_sellProb = 0.0;
+        pattern_conflict = 0.0;
+        pattern_dominanceGap = 0.0;
+        pattern_rejectionQuality = 0.0;
+        pattern_trapQuality = 0.0;
+        pattern_reclaimQuality = 0.0;
+        pattern_followThrough = 0.0;
+        ZeroMemory(risk_result);
+       trading_allowed = false;
       ZeroMemory(plan);
       plan_locked = false;
       ZeroMemory(exec_result);

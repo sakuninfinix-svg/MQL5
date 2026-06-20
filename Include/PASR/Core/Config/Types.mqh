@@ -168,51 +168,58 @@ struct AIConfig
    double LSTMBlendWeight;
    double EnsembleBlendWeight;
 
-   //--- GBR (Gradient Boosting Regressor) configuration
-   bool   EnableGBR;
-   int    GBRN_estimators;
-   double GBRLearning_rate;
-   int    GBRMax_depth;
-   double GBRMin_samples_split;
-   double GBRMin_samples_leaf;
-   double GBRSubsample;
-   double GBRColsample_bytree;
-   double GBRReg_alpha;
-   double GBRReg_lambda;
-   double GBRGamma;
-   string GBRModelPath;
-   double GBRBlendWeight;  // Blend weight for GBR in ensemble
+    //--- GBR (Gradient Boosting Regressor) configuration
+    bool   EnableGBR;
+    int    GBRN_estimators;
+    double GBRLearning_rate;
+    int    GBRMax_depth;
+    double GBRMin_samples_split;
+    double GBRMin_samples_leaf;
+    double GBRSubsample;
+    double GBRColsample_bytree;
+    double GBRReg_alpha;
+    double GBRReg_lambda;
+    double GBRGamma;
+    string GBRModelPath;
+    double GBRBlendWeight;  // Blend weight for GBR in ensemble
 
-   AIConfig()
-      : EnableAI(false),        MinConfidence(0.60),
-        LearningRate(0.001),    TrainIntervalBars(5),
-        ReplayBufferSize(512),  MinibatchSize(32),
-        PersistWeights(true),   ModelFileName("PASR_mlp_m0.bin"),
-        OnnxModelFileName("PASR_sequence.onnx"), EnableOnnx(false),
-        TrendEntryThreshold(0.60), TrendRiskMultiplier(1.20), TrendStrategyConfidence(0.85),
-        RangeEntryThreshold(0.65), RangeRiskMultiplier(1.30), RangeStrategyConfidence(0.85),
-        VolatileEntryThreshold(0.85), VolatileRiskMultiplier(0.90), VolatileStrategyConfidence(0.70),
-        ConservativeEntryThreshold(0.95), ConservativeRiskMultiplier(0.10), ConservativeStrategyConfidence(0.00),
-        ScalpEntryThreshold(0.70), ScalpRiskMultiplier(1.00), ScalpStrategyConfidence(0.75),
-        StrongTrendLevel(0.80), RangeTrendMax(0.30), RangeVolatilityMax(0.30),
-        VolatileLevel(0.80), TrendLevel(0.50), RegimeConfirmBars(3),
-        RegimeATRPeriod(20), RegimeADXPeriod(50),
-        DriftFailureWeight(0.35), RegimeFailureWeight(0.15),
-        ConfidenceRewardWeight(2.00), EdgeRewardWeight(1.25), RegimeRewardWeight(0.75), FailurePenaltyWeight(1.40),
-        NoTradeDriftWeight(0.50), ConservativeNoTradePenalty(0.25),
-        MinExpectedR(0.35), MaxFailureProbability(0.72),
-        StrongConfidenceBuffer(0.10), StrongConfidenceMin(0.75), StrongExpectedR(1.20), StrongMaxFailureProbability(0.45),
-        VolatileSLBoost(1.25), RangeSLTighten(0.90),
-        MinSL_ATR(0.60), MaxSL_ATR(3.00), MinTP_ATR(1.00), MaxTP_ATR(5.00), MinTPExpectedR(1.15),
-        RiskFailureWeight(0.45), MinRiskMultiplier(0.05), MaxRiskMultiplier(1.50),
-        ConservativeSignalThreshold(90.0), LowStrategyConfidence(0.40),
-        LowStrategySignalThreshold(70), RangeSignalThreshold(60), MeanRevertSignalThreshold(50),
-        LSTMBlendWeight(0.60), EnsembleBlendWeight(0.40),
-        EnableGBR(true), GBRN_estimators(150), GBRLearning_rate(0.05),
-        GBRMax_depth(4), GBRMin_samples_split(0.03), GBRMin_samples_leaf(0.015),
-        GBRSubsample(0.8), GBRColsample_bytree(0.7), GBRReg_alpha(0.05),
-        GBRReg_lambda(0.8), GBRGamma(0.05), GBRModelPath("PASR_gbr_m0.onnx"),
-        GBRBlendWeight(0.30) {}
+    //--- MTF Hard Gate thresholds (per AI_Development.md)
+    double MTFMinConfidence;
+    double MTFMinScore;
+    double VolatilityDriftThreshold;
+    double MaxConfidenceThreshold;
+
+AIConfig()
+       : EnableAI(false),        MinConfidence(0.60),
+         LearningRate(0.001),    TrainIntervalBars(5),
+         ReplayBufferSize(512),  MinibatchSize(32),
+         PersistWeights(true),   ModelFileName("PASR_mlp_m0.bin"),
+         OnnxModelFileName("PASR_sequence.onnx"), EnableOnnx(false),
+         TrendEntryThreshold(0.60), TrendRiskMultiplier(1.20), TrendStrategyConfidence(0.85),
+         RangeEntryThreshold(0.65), RangeRiskMultiplier(1.30), RangeStrategyConfidence(0.85),
+         VolatileEntryThreshold(0.85), VolatileRiskMultiplier(0.90), VolatileStrategyConfidence(0.70),
+         ConservativeEntryThreshold(0.95), ConservativeRiskMultiplier(0.10), ConservativeStrategyConfidence(0.00),
+         ScalpEntryThreshold(0.70), ScalpRiskMultiplier(1.00), ScalpStrategyConfidence(0.75),
+         StrongTrendLevel(0.80), RangeTrendMax(0.30), RangeVolatilityMax(0.30),
+         VolatileLevel(0.80), TrendLevel(0.50), RegimeConfirmBars(3),
+         RegimeATRPeriod(20), RegimeADXPeriod(50),
+         DriftFailureWeight(0.35), RegimeFailureWeight(0.15),
+         ConfidenceRewardWeight(2.00), EdgeRewardWeight(1.25), RegimeRewardWeight(0.75), FailurePenaltyWeight(1.40),
+         NoTradeDriftWeight(0.50), ConservativeNoTradePenalty(0.25),
+         MinExpectedR(0.35), MaxFailureProbability(0.72),
+         StrongConfidenceBuffer(0.10), StrongConfidenceMin(0.75), StrongExpectedR(1.20), StrongMaxFailureProbability(0.45),
+         VolatileSLBoost(1.25), RangeSLTighten(0.90),
+         MinSL_ATR(0.60), MaxSL_ATR(3.00), MinTP_ATR(1.00), MaxTP_ATR(5.00), MinTPExpectedR(1.15),
+         RiskFailureWeight(0.45), MinRiskMultiplier(0.05), MaxRiskMultiplier(1.50),
+         ConservativeSignalThreshold(90.0), LowStrategyConfidence(0.40),
+         LowStrategySignalThreshold(70), RangeSignalThreshold(60), MeanRevertSignalThreshold(50),
+         LSTMBlendWeight(0.60), EnsembleBlendWeight(0.40),
+         EnableGBR(true), GBRN_estimators(150), GBRLearning_rate(0.05),
+         GBRMax_depth(4), GBRMin_samples_split(0.03), GBRMin_samples_leaf(0.015),
+         GBRSubsample(0.8), GBRColsample_bytree(0.7), GBRReg_alpha(0.05),
+         GBRReg_lambda(0.8), GBRGamma(0.05), GBRModelPath("PASR_gbr_m0.onnx"),
+         GBRBlendWeight(0.30),
+         MTFMinConfidence(0.55), MTFMinScore(0.15), VolatilityDriftThreshold(0.70), MaxConfidenceThreshold(0.95) {}
   };
 
 //+------------------------------------------------------------------+

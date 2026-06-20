@@ -62,13 +62,13 @@ private:
       return true;
      }
 
-   bool CheckSession(LegacyFilterResult &r) const
-     {
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-      int dow = dt.day_of_week;  // 0=Sun .. 6=Sat
-      if(dow < 0 || dow > 6) return true;
-      const DaySession &sess = m_cfg.Market.Sessions[dow];
+    bool CheckSession(LegacyFilterResult &r) const
+      {
+       MqlDateTime dt;
+       TimeToStruct(TimeCurrent(), dt);
+       int dow = dt.day_of_week;  // 0=Sun .. 6=Sat
+       if(dow < 0 || dow > 6) return true;
+       DaySession sess = m_cfg.Market.Sessions[dow];
       if(!sess.Active)
         {
          r.passed = false;

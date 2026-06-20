@@ -6,6 +6,28 @@
 #ifndef __PASR_CENTRAL_SERVICE_LOCATOR_MQH__
 #define __PASR_CENTRAL_SERVICE_LOCATOR_MQH__
 
+#include <PASR/Infra/JournalManager.mqh>
+#include <PASR/Infra/TelemetryRecorder.mqh>
+#include <PASR/Infra/SanityManager.mqh>
+#include <PASR/Infra/HealthMonitor.mqh>
+#include <PASR/Infra/SnapshotManager.mqh>
+#include <PASR/Infra/SessionState.mqh>
+#include <PASR/Analysis/CNNPatternRecognizer.mqh>
+#include <PASR/Analysis/HMMRegimeDetector.mqh>
+#include <PASR/AI/AIOrchestrator.mqh>
+#include <PASR/Analysis/SRManager.mqh>
+#include <PASR/Analysis/ZoneManager.mqh>
+#include <PASR/Analysis/Pattern/PatternManager.mqh>
+#include <PASR/Signal/SignalManager.mqh>
+#include <PASR/Signal/RegimeFilter.mqh>
+#include <PASR/Trade/RiskManager.mqh>
+#include <PASR/Trade/ExecutionManager.mqh>
+#include <PASR/Trade/ExitEngine.mqh>
+#include <PASR/Trade/RecoveryManager.mqh>
+#include <PASR/UI/DashboardManager.mqh>
+#include <PASR/Infra/DataManager.mqh>
+#include <PASR/Analysis/AdaptiveParameterManager.mqh>
+
 class CServiceLocator
   {
 private:
