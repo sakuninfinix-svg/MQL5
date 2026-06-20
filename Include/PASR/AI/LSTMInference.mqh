@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| AI/LSTMInference.mqh — v1.00                                     |
+//| AI/LSTMInference.mqh — v1.01                                     |
 //| LSTM-based inference engine for time series prediction           |
 //| Copyright @2026                                                  |
 //| agsicentre.wordpress.com                                         |
@@ -181,7 +181,7 @@ private:
 
 public:
    CLSTMInference(int seed = 42)
-      : IManager(), m_loaded(false), m_model_id("lstm_v1_50seq_128hid_2layer"),
+      : IManager(), m_loaded(false), m_model_id("lstm_v1_50seq_128hid_2layer_untrained"),
         m_sequence_length(LSTM_SEQUENCE_LENGTH), m_feature_dim(AI_FEATURE_DIM),
         m_sequence_head(0), m_sequence_filled(false), m_rand_seed(seed), m_output_bias(0.0)
      {
@@ -196,11 +196,14 @@ public:
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
+
+      // Architecture alignment guard:
+      // This class still has no trained weight loader. Random initialization is useful
+      // for shape/smoke tests only, but it must not be treated as a production ML model.
       InitRandomWeights();
-      m_loaded = true;
-      PrintFormat("[LSTMInference] %d-layer %d-hidden %d-seq ready",
-                  LSTM_NUM_LAYERS, LSTM_HIDDEN_SIZE, LSTM_SEQUENCE_LENGTH);
-      return true;
+      m_loaded = false;
+      Print("[LSTMInference] disabled: no trained LSTM weight loader is implemented yet; random weights are not used for trading decisions");
+      return false;
      }
 
    virtual void Deinit() override
