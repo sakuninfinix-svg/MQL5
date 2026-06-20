@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| Orchestration/Stages/PatternStage.mqh - v0.10                   |
+//| Orchestration/Stages/PatternStage.mqh - v0.11                   |
 //| Runtime PatternRec pipeline stage                                |
 //+------------------------------------------------------------------+
 #property strict
@@ -11,6 +11,12 @@
 #include <PASR/Analysis/Pattern/PatternManager.mqh>
 #include <PASR/AI/AIOrchestrator.mqh>
 #include <PASR/Orchestration/PipelineStage.mqh>
+
+// Keep this window aligned with CNNPatternRecognizer.mqh.
+// The CNN path consumes 20 OHLC candles; copying 25 gives rule-based
+// pattern logic a little extra room while still keeping the stage light.
+#define PATTERN_STAGE_RATE_WINDOW 25
+#define PATTERN_STAGE_MIN_RATES   20
 
 class CPatternStage : public IPipelineStage
   {
@@ -55,10 +61,11 @@ public:
        m_timer.Start();
        MqlRates rates[];
        ArraySetAsSeries(rates, true);
-       int copied = CopyRates(_Symbol, _Period, 0, 8, rates);
-       if(copied < 4)
+       int copied = CopyRates(_Symbol, _Period, 0, PATTERN_STAGE_RATE_WINDOW, rates);
+       if(copied < PATTERN_STAGE_MIN_RATES)
          {
-          if(m_debug) Print("[Pipeline] PatternRec SKIP: insufficient rates");
+          if(m_debug) PrintFormat("[Pipeline] PatternRec SKIP: insufficient rates copied=%d required=%d",
+                                  copied, PATTERN_STAGE_MIN_RATES);
           if(m_profiling) m_timer.Log("Stage4_PatternRec");
           return STAGE_SKIP;
          }
