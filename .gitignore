@@ -15,6 +15,7 @@
 *.tmp
 .mql-auto-forwards
 
+
 # Dependencies
 node_modules/
 venv/
@@ -111,3 +112,11 @@ Thumbs.db
 
 # Original rules preserved
 *.log
+compile_mql5.sh
+compile_commands.json
+.gitignore
+create_dummy_logs.sh
+Include/LiveLog.mqh
+compile_commands.json
+tools/mql_tools_bridge_patch.js
+tools/mql5_compile_bridge.py

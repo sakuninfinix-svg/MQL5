@@ -23,7 +23,7 @@ OHLCV CSV (exported separately from MT5 History Center or EA):
   timestamp,open,high,low,close,volume
 
 REQUIREMENT: Both trade CSV and OHLCV CSV must be real MT5 data.
-Synthetic data is NOT supported — use generate_quality_training_data.py for that.
+Synthetic data is not part of the active pipeline; legacy generators are archived.
 """
 
 import numpy as np
@@ -38,7 +38,6 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from real_feature_extractor import RealAIFeatureExtractor, AI_FEATURE_DIM
-from generate_quality_training_data import GeneratorConfig
 
 
 # ============================================================================
@@ -225,7 +224,6 @@ def assign_regime(close: np.ndarray, lookback: int = 50) -> np.ndarray:
 def compute_features_at_entries(
     df_ohlcv: pd.DataFrame,
     df_trades: pd.DataFrame,
-    config: GeneratorConfig,
     max_time_diff_min: float = 90.0
 ) -> pd.DataFrame:
     """
@@ -399,15 +397,8 @@ def main():
 
     # 3. Compute features and match trades
     print("\n[3/3] Computing features and creating training data...")
-    config = GeneratorConfig(
-        total_bars=len(df_ohlcv),
-        symbol=args.symbol,
-        timeframe=args.timeframe,
-        base_price=float(df_ohlcv['close'].iloc[0]),
-    )
-
     df_train = compute_features_at_entries(
-        df_ohlcv, df_trades, config,
+        df_ohlcv, df_trades,
         max_time_diff_min=args.max_time_diff
     )
 

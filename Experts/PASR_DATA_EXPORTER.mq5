@@ -240,7 +240,7 @@ void WriteOHLCVBar(datetime time) {
    double low   = iLow(_Symbol, _Period, 0);
    double close = iClose(_Symbol, _Period, 0);
    long volume  = iVolume(_Symbol, _Period, 0);
-   
+
    FileWrite(g_ohlcvHandle,
       (string)time,
       DoubleToString(open, 5),
@@ -304,7 +304,7 @@ bool CheckEntry(int &signal) {
    // Need minimum momentum
    double maSlope = iMA(_Symbol, _Period, InpMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 5)
                   - iMA(_Symbol, _Period, InpMAPeriod, 0, MODE_SMA, PRICE_CLOSE, 10);
-   
+
    // Buy: price above MA, MA rising
    if(close > ma + atr * 0.3 && maSlope > 0) {
       signal = 1;
@@ -326,7 +326,7 @@ ulong OpenTrade(int signal) {
                                 : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double atr = GetATR(0);
    double sl, tp;
-   
+
    if(signal == 1) {  // Buy
       sl = price - atr * InpSLMultiplier;
       tp = price + atr * InpTPMultiplier;
@@ -357,7 +357,7 @@ void RecordPosition(ulong ticket, int direction, double entryPrice,
                      double slPrice, double tpPrice) {
    int n = ArraySize(g_pendingRecords);
    ArrayResize(g_pendingRecords, n + 1);
-   
+
    g_pendingRecords[n].ticket = ticket;
    g_pendingRecords[n].entryTime = TimeCurrent();
    g_pendingRecords[n].exitTime = 0;
@@ -393,7 +393,7 @@ void ProcessClosedPosition(ulong ticket) {
       }
    }
    if(idx < 0) return;  // Not tracked by us
-   
+
     // Get history order — iterate to find matching ticket
     CHistoryOrderInfo history;
     bool found = false;
@@ -405,15 +405,15 @@ void ProcessClosedPosition(ulong ticket) {
        }
     }
     if(!found) return;
-   
+
    TradeRecord &rec = g_pendingRecords[idx];
    rec.exitTime = history.TimeDone();
-   
+
    // Calculate profit
    double profit = history.Profit();
    double pointValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double pointSize = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-   
+
    if(rec.direction == 1) {
       rec.exitPrice = history.PriceOpen();
       rec.profitPips = (rec.exitPrice - rec.entryPrice) / pointSize;
@@ -421,10 +421,10 @@ void ProcessClosedPosition(ulong ticket) {
       rec.exitPrice = history.PriceOpen();
       rec.profitPips = (rec.entryPrice - rec.exitPrice) / pointSize;
    }
-   
+
    double slDistPips = MathAbs(rec.entryPrice - rec.slPrice) / pointSize;
    rec.profitR = (slDistPips > 0) ? rec.profitPips / slDistPips : 0.0;
-   
+
    // Determine if TP/SL was hit
    if(rec.direction == 1) {
       rec.hitTP = (rec.exitPrice >= rec.tpPrice - pointSize);
@@ -433,12 +433,12 @@ void ProcessClosedPosition(ulong ticket) {
       rec.hitTP = (rec.exitPrice <= rec.tpPrice + pointSize);
       rec.hitSL = (rec.exitPrice >= rec.slPrice - pointSize);
    }
-   
+
    rec.durationBars = (int)((rec.exitTime - rec.entryTime) / PeriodSeconds(_Period));
-   
+
    // Write to CSV
    WriteTradeToCSV(rec);
-   
+
    // Remove from pending
    for(int j = idx; j < ArraySize(g_pendingRecords) - 1; j++)
       g_pendingRecords[j] = g_pendingRecords[j + 1];
@@ -458,25 +458,25 @@ int OnInit() {
       Print("Failed to initialize OHLCV export");
       return INIT_FAILED;
    }
-   
+
    g_trade.SetExpertMagicNumber(InpMagicNumber);
    g_maHandle = iMA(_Symbol, _Period, InpMAPeriod, 0, MODE_SMA, PRICE_CLOSE);
    if(g_maHandle == INVALID_HANDLE) {
       Print("ERROR: Cannot create MA indicator");
       return INIT_FAILED;
    }
-   
+
    ArraySetAsSeries(g_maBuffer, true);
    g_totalExported = 0;
-   
+
    // Write first OHLCV bar
    WriteOHLCVBar(iTime(_Symbol, _Period, 0));
-   
+
    Print("PASR Data Exporter initialized");
    Print("  Symbol: ", _Symbol, " TF: ", EnumToString((ENUM_TIMEFRAMES)_Period));
    Print("  Export file: ", InpExportFileName);
    Print("  SL: ", InpSLMultiplier, "x ATR, TP: ", InpTPMultiplier, "x ATR");
-   
+
    return INIT_SUCCEEDED;
 }
 
@@ -493,11 +493,11 @@ void OnDeinit(const int reason) {
       FileClose(g_ohlcvHandle);
       g_ohlcvHandle = INVALID_HANDLE;
    }
-   
+
    // Clean up indicator handles
    if(g_maHandle != INVALID_HANDLE)
       IndicatorRelease(g_maHandle);
-   
+
    Print("PASR Data Exporter deinitialized");
    Print("Total trades exported: ", g_totalExported);
    Print("Total OHLCV bars exported: ", g_totalOHLCV);
@@ -515,10 +515,10 @@ void OnTick() {
    datetime currentBarTime = iTime(_Symbol, _Period, 0);
    if(currentBarTime == g_lastBarTime) return;
    g_lastBarTime = currentBarTime;
-   
+
    // Export OHLCV bar on every new bar
    WriteOHLCVBar(currentBarTime);
-   
+
    // --- Entry Logic (on new bar) ---
    // Only enter if no existing positions (simple single-position logic)
    if(PositionsTotal() == 0) {

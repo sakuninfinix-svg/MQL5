@@ -495,7 +495,12 @@ public:
 
       if(!m_feat.Init(data, bus))     { Print("AI: FeatureBuilder init failed"); ReleaseComponents(); return false; }
       if(!m_seq_feat.Init(data, bus)) { Print("AI: SequenceFeatureBuilder init failed"); ReleaseComponents(); return false; }
-      if(!m_ensemble.Init(data, bus)) { Print("AI: Ensemble init failed");       ReleaseComponents(); return false; }
+
+      SAIEnsembleConfig ensemble_cfg;
+      ensemble_cfg.enable_onnx     = m_cfg.AI.EnableOnnx;
+      ensemble_cfg.onnx_model_path = m_cfg.AI.OnnxModelFileName;
+      ensemble_cfg.mlp_model_path  = m_cfg.AI.ModelFileName;
+      if(!m_ensemble.Init(ensemble_cfg)) { Print("AI: Ensemble init failed"); ReleaseComponents(); return false; }
       if(!m_trainer.Init(data, bus))  { Print("AI: Trainer init failed");        ReleaseComponents(); return false; }
       if(!m_calib.Init(data, bus))    { Print("AI: Calibrator init failed");     ReleaseComponents(); return false; }
       if(!m_guard.Init(data, bus))    { Print("AI: Guard init failed");          ReleaseComponents(); return false; }

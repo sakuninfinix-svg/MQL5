@@ -61,12 +61,12 @@ input int    InpAITrainIntervalBars = 5;
 input int    InpAIReplayBufferSize = 512;
 input int    InpAIMinibatchSize = 32;
 input bool   InpAIPersistWeights = true;
-input string InpAIModelFileName = "PASR_gbr_m0.bin";
+input string InpAIModelFileName = "PASR_mlp_m0.bin";
 input bool   InpAIEnableOnnx = false;
 input string InpAIModelOnnxFileName = "PASR_sequence.onnx";
 
 input group "GBR Configuration"
-input bool   InpEnableGBR = true;              // Enable GBR for MTF
+input bool   InpEnableGBR = false;             // Enable GBR for MTF
 input int    InpGBRN_estimators = 150;         // Number of trees (100-200 optimal)
 input double InpGBRLearning_rate = 0.05;       // Learning rate (0.01-0.1 optimal)
 input int    InpGBRMax_depth = 4;              // Tree depth (3-6 optimal)

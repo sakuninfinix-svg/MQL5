@@ -48,7 +48,7 @@ public:
 
    // FIX: CAIEnsemble passed by pointer — avoids object-copy operator= error;
    //      uses IsReady() and GetModelCount() which are now public on CAIEnsemble
-   bool Validate(SAIFeatureVector &fv, CAIEnsemble *ensemble,
+   bool Validate(const SAIFeatureVector &fv, CAIEnsemble *ensemble,
                  AIFeatureValidationResult &result)
      {
       result.Clear();

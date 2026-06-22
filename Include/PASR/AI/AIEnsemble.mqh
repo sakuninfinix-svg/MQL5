@@ -21,6 +21,7 @@ struct SAIEnsembleConfig
    double onnx_weight;
    bool   enable_onnx;
    string onnx_model_path;
+   string mlp_model_path;
    int    seq_len;
    int    feat_dim;
 
@@ -30,6 +31,7 @@ struct SAIEnsembleConfig
       onnx_weight     = 0.3;
       enable_onnx     = false;
       onnx_model_path = "";
+      mlp_model_path  = "";
       seq_len         = AI_SEQ_LEN;
       feat_dim        = AI_FEATURE_DIM;
      }
@@ -74,6 +76,26 @@ private:
          PrintFormat("[AIEnsemble] ONNX model load failed: %s", path);
      }
 
+   string MLPPathForIndex(const string base_path, const int idx)
+     {
+      if(idx <= 0 || base_path == "")
+         return base_path;
+
+      string path = base_path;
+      string from = "_m0";
+      string to = StringFormat("_m%d", idx);
+      if(StringFind(path, from) >= 0)
+        {
+         StringReplace(path, from, to);
+         return path;
+        }
+
+      int dot = StringFind(path, ".bin");
+      if(dot >= 0)
+         return StringSubstr(path, 0, dot) + to + StringSubstr(path, dot);
+      return path;
+     }
+
 public:
    CAIEnsemble() : m_n_models(0), m_ready(false), m_onnx_loaded(false),
                    m_onnx_weight(0.3), m_last_onnx_score(0.0), m_last_onnx_outputs(0)
@@ -111,6 +133,14 @@ public:
          m_models[i] = new CMLPModel(i + 1);
          if(m_models[i] == NULL) return false;
          m_models[i].RandomInit(i + 1);
+         if(cfg.mlp_model_path != "")
+           {
+            string model_path = MLPPathForIndex(cfg.mlp_model_path, i);
+            if(m_models[i].LoadWeights(model_path))
+               PrintFormat("[AIEnsemble] MLP model loaded: %s", model_path);
+            else
+               PrintFormat("[AIEnsemble] MLP model load failed: %s, using random init", model_path);
+           }
          m_weights[i] = 1.0 / (double)m_n_models;
         }
 

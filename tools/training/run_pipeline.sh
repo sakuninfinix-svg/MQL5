@@ -32,7 +32,7 @@ EPOCHS="${EPOCHS:-300}"
 LR="${LR:-0.003}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 DROPOUT="${DROPOUT:-0.15}"
-HIDDEN="${HIDDEN:-32,16}"
+HIDDEN="${HIDDEN:-64,32}"
 SEEDS="${SEEDS:-42,137,73}"
 
 echo "============================================================"

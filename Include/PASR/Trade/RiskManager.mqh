@@ -246,7 +246,7 @@ private:
       TimeToStruct(TimeCurrent(), dt);
       int dow = dt.day_of_week;
       if(dow < 0 || dow > 6) return true;
-      const DaySession &sess = m_sessions[dow];
+      DaySession sess = m_sessions[dow];
       if(!sess.Active) return false;
       int nowMin = dt.hour * 60 + dt.min;
       int startMin = MathMax(0, MathMin(1439, sess.StartMinutes));

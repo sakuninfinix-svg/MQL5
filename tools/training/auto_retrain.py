@@ -217,22 +217,17 @@ def prepare_training_data(log: logging.Logger) -> Optional[str]:
 
     training_csv = str(OUTPUT_DIR / "MT5_Training_Data.csv")
 
-    if ohlcv_csv.exists():
-        log.info(f"Importing trades with OHLCV: {trade_csv} + {ohlcv_csv}")
-        ret = os.system(
-            f'cd "{TOOLS_DIR}" && python3 training/import_mt5_trades.py '
-            f'--csv "{trade_csv}" --ohlcv "{ohlcv_csv}" '
-            f'--output "{training_csv}"'
-        )
-    else:
-        log.warning("No OHLCV file — using augmented synthetic data as fallback")
-        synthetic = OUTPUT_DIR / "AI_Training_Data_Augmented.csv"
-        if synthetic.exists():
-            shutil.copy2(str(synthetic), training_csv)
-            ret = 0
-        else:
-            log.error("No training data available (no OHLCV, no augmented data)")
-            return None
+    if not ohlcv_csv.exists():
+        log.error(f"OHLCV file not found: {ohlcv_csv}")
+        log.error("Auto-retrain requires real MT5 OHLCV export; synthetic fallback is disabled.")
+        return None
+
+    log.info(f"Importing trades with OHLCV: {trade_csv} + {ohlcv_csv}")
+    ret = os.system(
+        f'cd "{TOOLS_DIR}" && python3 training/import_mt5_trades.py '
+        f'--csv "{trade_csv}" --ohlcv "{ohlcv_csv}" '
+        f'--output "{training_csv}"'
+    )
 
     if ret != 0 or not os.path.exists(training_csv):
         log.error("Training data preparation failed")

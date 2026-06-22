@@ -5,11 +5,12 @@ PASR Real Feature Extractor
 Computes all 34 AI features (f0-f33) from OHLCV data, matching
 AIFeatureBuilder.mqh Build() method exactly.
 
-Key differences from generate_quality_training_data.py:
+Key differences from legacy synthetic generators:
   - f26-f33: Real candlestick pattern detection (not hardcoded)
   - f0-f3: clip(ret, -0.05, 0.05) / 0.05 → [-1, 1] (matches MQL5)
   - f13: NormIndicator(obv_delta/vol_base, -3, 3) → [0, 1] (matches MQL5)
   - f22-f23: sinusoidal hour encoding (matches updated MQL5)
+  - f24-f25: z-score/skew in [-1, 1] (matches MQL5)
 
 Usage:
   from real_feature_extractor import RealAIFeatureExtractor, AI_FEATURE_DIM
@@ -347,7 +348,7 @@ class RealAIFeatureExtractor:
             f[22] = math.sin(2.0 * math.pi * hour / 24.0) * 0.5 + 0.5
             f[23] = math.cos(2.0 * math.pi * hour / 24.0) * 0.5 + 0.5
 
-            # f24-f25: Z-score and skewness — clip(z/3, ±1) * 0.5 + 0.5
+            # f24-f25: Z-score and skewness — clip(value/3, ±1) → [-1, 1]
             f[24] = self._zscore_single(close, i, 20)
             f[25] = self._skew_single(close, i, 20)
 
@@ -453,8 +454,7 @@ class RealAIFeatureExtractor:
         if std <= 0:
             return 0.5
         z = (close[i - 1] - mean) / std
-        z = np.clip(z / 3.0, -1.0, 1.0)
-        return z * 0.5 + 0.5
+        return float(np.clip(z / 3.0, -1.0, 1.0))
 
     def _skew_single(self, close, i, n):
         if i < n + 1:
@@ -463,8 +463,7 @@ class RealAIFeatureExtractor:
         if len(rets) < 3 or rets.std() == 0:
             return 0.5
         sk = np.mean(((rets - rets.mean()) / rets.std()) ** 3)
-        sk = np.clip(sk / 3.0, -1.0, 1.0)
-        return sk * 0.5 + 0.5
+        return float(np.clip(sk / 3.0, -1.0, 1.0))
 
 
 # ============================================================================

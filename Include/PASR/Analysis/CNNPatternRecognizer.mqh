@@ -161,7 +161,7 @@ private:
        ArrayInitialize(m_output_biases, 0.0);
     }
 
-    void Conv1D(double &input[], int input_size, CNNLayer1D &layer,
+    void Conv1D(double &in_data[], int input_size, CNNLayer1D &layer,
                 double &output[], int &output_size)
     {
        output_size = input_size - layer.kernel_size + 1;
@@ -184,7 +184,7 @@ private:
                    {
                       int weight_idx = layer.WeightIndex(channel, k, f);
                       int input_flat_idx = input_idx * layer.input_channels + channel;
-                      sum += input[input_flat_idx] * layer.weights[weight_idx];
+                      sum += in_data[input_flat_idx] * layer.weights[weight_idx];
                    }
                 }
              }
@@ -193,7 +193,7 @@ private:
        }
     }
 
-    void MaxPool1D(double &input[], int input_size, int num_filters, int pool_size,
+    void MaxPool1D(double &in_data[], int input_size, int num_filters, int pool_size,
                    double &output[], int &output_size)
     {
        output_size = input_size / pool_size;
@@ -211,14 +211,14 @@ private:
              {
                 int input_idx = (i * pool_size + k) * num_filters + f;
                 if(input_idx < input_size * num_filters)
-                   max_val = MathMax(max_val, input[input_idx]);
+                   max_val = MathMax(max_val, in_data[input_idx]);
              }
              output[i * num_filters + f] = max_val;
           }
        }
     }
 
-    void Dense(double &input[], CNNDenseLayer &layer,
+    void Dense(double &in_data[], CNNDenseLayer &layer,
                double &output[], bool use_relu = true)
     {
        ArrayResize(output, layer.output_size);
@@ -228,12 +228,12 @@ private:
        {
           double sum = layer.biases[j];
           for(int i = 0; i < layer.input_size; i++)
-             sum += input[i] * layer.weights[layer.WeightIndex(i, j)];
+             sum += in_data[i] * layer.weights[layer.WeightIndex(i, j)];
           output[j] = use_relu ? ReLU(sum) : sum;
        }
     }
 
-    bool NormalizeInput(const MqlRates rates[], int start_idx, double &normalized[])
+    bool NormalizeInput(const MqlRates &rates[], int start_idx, double &normalized[])
     {
        if(start_idx < 0) return false;
        if(start_idx + CNN_INPUT_SIZE > ArraySize(rates)) return false;
@@ -266,13 +266,13 @@ private:
        return true;
     }
 
-    bool UpdateInputBuffer(const MqlRates rates[], int latest_idx)
+    bool UpdateInputBuffer(const MqlRates &rates[], int latest_idx)
     {
        // rates[] is expected as series. PatternManager passes the scan shift, so the
        // CNN window is [latest_idx .. latest_idx + 19], not a rolling single-bar append.
        double temp_buffer[];
        if(!NormalizeInput(rates, latest_idx, temp_buffer)) return false;
-       
+
        for(int i = 0; i < CNN_INPUT_SIZE; i++)
           for(int f = 0; f < CNN_NUM_FEATURES; f++)
              m_input_buffer[i][f] = temp_buffer[i * CNN_NUM_FEATURES + f];
@@ -288,7 +288,8 @@ public:
         m_buffer_head(0), m_buffer_filled(false)
    {
       for(int i = 0; i < CNN_INPUT_SIZE; i++)
-         ArrayInitialize(m_input_buffer[i], 0.0);
+         for(int f = 0; f < CNN_NUM_FEATURES; f++)
+            m_input_buffer[i][f] = 0.0;
       ArrayInitialize(m_output_biases, 0.0);
    }
 
@@ -313,7 +314,7 @@ public:
    virtual void DeclareEvents() override {}
    virtual void OnEvent(const PASREvent &ev) override {}
 
-   bool RecognizePattern(const MqlRates rates[], int latest_idx, CNNPatternOutput &output)
+   bool RecognizePattern(const MqlRates &rates[], int latest_idx, CNNPatternOutput &output)
    {
       output.Reset();
       if(!m_initialized) return false;
@@ -322,17 +323,17 @@ public:
       if(!m_buffer_filled) return false;
 
       // Flatten input buffer
-      double input[CNN_INPUT_SIZE * CNN_NUM_FEATURES];
+      double in_data[CNN_INPUT_SIZE * CNN_NUM_FEATURES];
       for(int i = 0; i < CNN_INPUT_SIZE; i++)
       {
          for(int f = 0; f < CNN_NUM_FEATURES; f++)
-            input[i * CNN_NUM_FEATURES + f] = m_input_buffer[i][f];
+            in_data[i * CNN_NUM_FEATURES + f] = m_input_buffer[i][f];
       }
 
       // Conv1 over candle steps
       double conv1_out[];
       int conv1_size = 0;
-      Conv1D(input, CNN_INPUT_SIZE, m_conv1, conv1_out, conv1_size);
+      Conv1D(in_data, CNN_INPUT_SIZE, m_conv1, conv1_out, conv1_size);
       if(conv1_size <= 0) return false;
 
       // Conv2 over conv1 output steps
@@ -394,7 +395,7 @@ public:
       return true;
    }
 
-   bool RecognizePattern(const MqlRates rates[], CNNPatternOutput &output)
+   bool RecognizePattern(const MqlRates &rates[], CNNPatternOutput &output)
    {
       return RecognizePattern(rates, 0, output);
    }
@@ -419,7 +420,8 @@ public:
       m_buffer_head = 0;
       m_buffer_filled = false;
       for(int i = 0; i < CNN_INPUT_SIZE; i++)
-         ArrayInitialize(m_input_buffer[i], 0.0);
+         for(int f = 0; f < CNN_NUM_FEATURES; f++)
+            m_input_buffer[i][f] = 0.0;
    }
 };
 

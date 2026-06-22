@@ -4,7 +4,7 @@ PASR MLP Classifier Trainer v2 — Optimized Binary Classification
 =================================================================
 Key improvements over v1:
   1. Focal loss (gamma=2) — handles class imbalance, focuses on hard examples
-  2. Smaller default arch (34→32→16→1) — less overfitting on small datasets
+  2. Runtime-compatible default arch (34→64→32→1) for AIInference.mqh
   3. Gradient clipping (max_norm=1.0) — stable training
   4. Cosine annealing LR — better convergence than ReduceOnPlateau
   5. Label smoothing (0.05) — prevents overconfident predictions
@@ -219,7 +219,7 @@ class MLPClassifier:
         np.random.seed(seed)
         self.seed = seed
         self.dropout_rate = dropout_rate
-        self.hidden_dims = hidden_dims if hidden_dims else [32, 16]
+        self.hidden_dims = hidden_dims if hidden_dims else [64, 32]
         self.focal_gamma = focal_gamma
         self.label_smoothing = label_smoothing
 
@@ -429,7 +429,7 @@ def train_model(X: np.ndarray, y: np.ndarray, w: np.ndarray,
     # Class-balanced focal alpha
     focal_alpha = compute_focal_alpha(y_train)
 
-    arch_str = 'x'.join(str(h) for h in (hidden_dims or [32, 16]))
+    arch_str = 'x'.join(str(h) for h in (hidden_dims or [64, 32]))
     model = MLPClassifier(seed, dropout_rate, hidden_dims, focal_gamma, label_smoothing)
     model.optimizer.lr = lr
     best_loss = float('inf')
@@ -565,8 +565,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--dropout", type=float, default=0.15,
                         help="Dropout rate (0.0 = no dropout)")
-    parser.add_argument("--hidden", default="32,16",
-                        help="Hidden layer dims (comma-separated, e.g. '32,16' or '64,32')")
+    parser.add_argument("--hidden", default="64,32",
+                        help="Hidden layer dims (comma-separated, must match AIInference.mqh default '64,32')")
     parser.add_argument("--focal-gamma", type=float, default=2.0,
                         help="Focal loss gamma (0=BCE, 2=default)")
     parser.add_argument("--label-smoothing", type=float, default=0.05)

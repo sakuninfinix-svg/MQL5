@@ -35,6 +35,14 @@ private:
    double ReLU(double x)     const { return MathMax(0.0, x); }
    double Sigmoid(double x)  const { return 1.0 / (1.0 + MathExp(-x)); }
 
+   bool ReadFloatChecked(int handle, double &out_value)
+     {
+      if(FileIsEnding(handle))
+         return false;
+      out_value = (double)FileReadFloat(handle);
+      return true;
+     }
+
    // FIX v1.02: explicit feat_dim param — avoids any const/ArraySize issue
    void Forward1(double &x[], int feat_dim, double &h1[]) const
      {
@@ -112,6 +120,59 @@ public:
       Forward1(x, feat_dim, h1);
       Forward2(h1, h2);
       out_score = Forward3(h2);
+      return true;
+     }
+
+   bool LoadWeights(const string filename)
+     {
+      if(StringLen(filename) == 0) return false;
+      int handle = FileOpen(filename, FILE_READ | FILE_BIN);
+      if(handle == INVALID_HANDLE)
+         return false;
+
+      double din = 0.0, dh1 = 0.0, dh2 = 0.0, dout = 0.0;
+      bool ok = ReadFloatChecked(handle, din) && ReadFloatChecked(handle, dh1) &&
+                ReadFloatChecked(handle, dh2) && ReadFloatChecked(handle, dout);
+      int in_dim = (int)MathRound(din);
+      int h1_dim = (int)MathRound(dh1);
+      int h2_dim = (int)MathRound(dh2);
+      int out_dim = (int)MathRound(dout);
+
+      if(!ok || in_dim != AI_FEATURE_DIM || h1_dim != MLP_HIDDEN1 ||
+         h2_dim != MLP_HIDDEN2 || out_dim != 1)
+        {
+         FileClose(handle);
+         PrintFormat("[MLPModel] weight shape mismatch in '%s' got %d->%d->%d->%d expected %d->%d->%d->1",
+                     filename, in_dim, h1_dim, h2_dim, out_dim,
+                     AI_FEATURE_DIM, MLP_HIDDEN1, MLP_HIDDEN2);
+         return false;
+        }
+
+      for(int i = 0; i < AI_FEATURE_DIM * MLP_HIDDEN1 && ok; i++)
+         ok = ReadFloatChecked(handle, m_W1[i]);
+      for(int i = 0; i < MLP_HIDDEN1 && ok; i++)
+         ok = ReadFloatChecked(handle, m_b1[i]);
+      for(int i = 0; i < MLP_HIDDEN1 * MLP_HIDDEN2 && ok; i++)
+         ok = ReadFloatChecked(handle, m_W2[i]);
+      for(int i = 0; i < MLP_HIDDEN2 && ok; i++)
+         ok = ReadFloatChecked(handle, m_b2[i]);
+      for(int i = 0; i < MLP_HIDDEN2 && ok; i++)
+         ok = ReadFloatChecked(handle, m_W3[i]);
+      if(ok) ok = ReadFloatChecked(handle, m_b3);
+
+      double threshold = 0.0;
+      if(ok && ReadFloatChecked(handle, threshold))
+         PrintFormat("[MLPModel] decision threshold %.3f present in '%s' (ensemble uses raw probability)", threshold, filename);
+
+      FileClose(handle);
+      if(!ok)
+        {
+         PrintFormat("[MLPModel] truncated weight file '%s'", filename);
+         return false;
+        }
+
+      m_model_id = filename;
+      m_loaded = true;
       return true;
      }
 
