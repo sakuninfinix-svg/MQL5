@@ -1,8 +1,5 @@
 //+------------------------------------------------------------------+
-//| ONNXBridge.mqh                                                   |
-//| Wrapper for MQL5 ONNX runtime — scalar and sequence inference    |
-//| Copyright @2026                                                  |
-//| agsicentre.wordpress.com                                         |
+//| ONNXBridge.mqh — min­imizeScaler version                        |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __PASR_AI_ONNX_BRIDGE_MQH__
@@ -15,13 +12,13 @@
 #endif
 
 enum ENUM_ONNX_INPUT_MODE
-  {
+{
    ONNX_INPUT_SCALAR   = 0,
    ONNX_INPUT_SEQUENCE = 1
-  };
+};
 
 class CONNXBridge
-  {
+{
 private:
    long                 m_session;
    bool                 m_loaded;
@@ -31,6 +28,9 @@ private:
    int                  m_output_size;
    int                  m_seq_len;
    int                  m_feat_dim;
+   double               m_mean[AI_FEATURE_DIM];
+   double               m_scale[AI_FEATURE_DIM];
+   bool                 m_scaler_loaded;
 
    bool SetSequenceInputShape()
      {
@@ -49,9 +49,41 @@ private:
 public:
    CONNXBridge() : m_session(INVALID_HANDLE), m_loaded(false), m_model_path(""),
                    m_input_mode(ONNX_INPUT_SCALAR), m_input_size(AI_FEATURE_DIM),
-                   m_output_size(1), m_seq_len(AI_SEQ_LEN), m_feat_dim(AI_FEATURE_DIM) {}
+                   m_output_size(1), m_seq_len(AI_SEQ_LEN), m_feat_dim(AI_FEATURE_DIM),
+                   m_scaler_loaded(false)
+     {
+      for(int i=0; i<AI_FEATURE_DIM; i++)
+      {
+         m_mean[i]  = 0.0;
+         m_scale[i] = 1.0;
+      }
+     }
 
-  ~CONNXBridge() { Unload(); }
+   ~CONNXBridge() { Unload(); }
+
+   bool LoadScaler(const string scaler_path)
+     {
+      if(StringLen(scaler_path)==0) return false;
+      int handle=FileOpen(scaler_path, FILE_READ|FILE_BIN);
+      if(handle==INVALID_HANDLE) return false;
+      // read means
+      for(int i=0; i<AI_FEATURE_DIM; i++)
+        {
+         float v=FileReadFloat(handle);
+         if(GetLastError()!=0) { FileClose(handle); return false; }
+         m_mean[i]=(double)v;
+        }
+      // read scales
+      for(int i=0; i<AI_FEATURE_DIM; i++)
+        {
+         float v=FileReadFloat(handle);
+         if(GetLastError()!=0) { FileClose(handle); return false; }
+         m_scale[i]=(double)v;
+        }
+      FileClose(handle);
+      m_scaler_loaded=true;
+      return true;
+     }
 
    bool Load(const string path,
              const ENUM_ONNX_INPUT_MODE mode = ONNX_INPUT_SCALAR,
@@ -72,6 +104,7 @@ public:
       if(!m_loaded)
          PrintFormat("ONNXBridge: Failed to load '%s' (error=%d)", path, GetLastError());
 #else
+      PrintFormat("ONNXBridge: PASR_ENABLE_ONNX is not defined; '%s' will not be loaded", path);
       m_loaded = false;
 #endif
       return m_loaded;
@@ -86,7 +119,8 @@ public:
          m_session = INVALID_HANDLE;
         }
 #endif
-      m_loaded = false;
+      m_loaded=false;
+      m_scaler_loaded=false;
      }
 
    bool Run(float &features[], double &out_score)
@@ -94,6 +128,11 @@ public:
       out_score = 0.0;
       if(!m_loaded || m_session == INVALID_HANDLE || m_input_mode != ONNX_INPUT_SCALAR)
          return false;
+      if(m_scaler_loaded)
+        {
+         for(int i=0; i<m_feat_dim; i++)
+            features[i] = (float)((features[i] - m_mean[i]) * m_scale[i]);
+        }
 #ifdef PASR_ENABLE_ONNX
       float output_f[];
       ArrayResize(output_f, m_output_size);
@@ -121,20 +160,21 @@ public:
          return false;
       if(seq_len != m_seq_len || feat_dim != m_feat_dim)
          return false;
-
       const int expected = seq_len * feat_dim;
       if(ArraySize(sequence_input) < expected)
          return false;
-
 #ifdef PASR_ENABLE_ONNX
       if(!SetSequenceInputShape())
          return false;
-
       float input_f[];
       ArrayResize(input_f, expected);
-      for(int i = 0; i < expected; i++)
+      for(int i=0; i<expected; i++)
          input_f[i] = sequence_input[i];
-
+      if(m_scaler_loaded)
+        {
+         for(int i=0; i<expected; i++)
+            input_f[i] = (float)((input_f[i] - m_mean[i % m_feat_dim]) * m_scale[i % m_feat_dim]);
+        }
       float output_f[];
       ArrayResize(output_f, m_output_size);
       if(!OnnxRun(m_session, ONNX_DEFAULT, input_f, output_f))
@@ -142,10 +182,9 @@ public:
          PrintFormat("ONNXBridge: OnnxRun sequence failed (error=%d)", GetLastError());
          return false;
         }
-
       out_count = m_output_size;
       ArrayResize(outputs, out_count);
-      for(int i = 0; i < out_count; i++)
+      for(int i=0; i<out_count; i++)
          outputs[i] = (double)output_f[i];
       return true;
 #else
@@ -158,10 +197,9 @@ public:
       out_count = 0;
       if(!tensor.valid)
          return false;
-
       float input_f[];
       ArrayResize(input_f, AI_SEQ_TENSOR_SIZE);
-      for(int i = 0; i < AI_SEQ_TENSOR_SIZE; i++)
+      for(int i=0; i<AI_SEQ_TENSOR_SIZE; i++)
          input_f[i] = (float)tensor.data[i];
       return RunSequence(input_f, tensor.seq_len, tensor.feat_dim, outputs, out_count);
      }
@@ -170,17 +208,25 @@ public:
      {
       float fv_f[];
       ArrayResize(fv_f, AI_FEATURE_DIM);
-      for(int i = 0; i < AI_FEATURE_DIM; i++)
+      for(int i=0; i<AI_FEATURE_DIM; i++)
          fv_f[i] = (float)fv.features[i];
       return Run(fv_f, out_score);
      }
 
    bool                 IsLoaded() const { return m_loaded; }
+   bool                 IsCompiledIn() const
+     {
+#ifdef PASR_ENABLE_ONNX
+      return true;
+#else
+      return false;
+#endif
+     }
    string               GetModelPath() const { return m_model_path; }
    long                 GetSession() const { return m_session; }
    ENUM_ONNX_INPUT_MODE GetInputMode() const { return m_input_mode; }
    int                  GetSeqLen() const { return m_seq_len; }
    int                  GetFeatDim() const { return m_feat_dim; }
-  };
+};
 
 #endif // __PASR_AI_ONNX_BRIDGE_MQH__

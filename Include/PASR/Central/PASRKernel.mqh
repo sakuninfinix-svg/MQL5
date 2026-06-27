@@ -480,9 +480,9 @@ private:
 
       if(regime != NULL)
         {
-         m_src_regime = CModuleFactory::CreateRegimeSignalSource(regime, REGIME_MODE_VETO);
+         m_src_regime = CModuleFactory::CreateRegimeSignalSource(regime, REGIME_MODE_MODULATE);
          if(m_src_regime != NULL)
-            signal.RegisterSource(m_src_regime, 0.6);
+            signal.RegisterSource(m_src_regime, 0.0);
         }
 
       return true;

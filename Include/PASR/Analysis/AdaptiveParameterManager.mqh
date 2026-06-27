@@ -172,7 +172,7 @@ public:
       if(curBarTime == 0) return false;
       if(curBarTime == m_lastBarTime && m_cacheValid) return true;
 
-      EMarketRegime detectedRegime = m_regimeDetector.Detect(_Symbol, PERIOD_CURRENT, (DataManager*)m_data);
+      EMarketRegime detectedRegime = m_regimeDetector.Detect(_Symbol, PERIOD_CURRENT, m_data);
       SDynamicParams params = m_regimeDetector.GetParams();
 
       m_config.CurrentRegime = detectedRegime;

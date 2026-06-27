@@ -69,15 +69,21 @@ public:
 
       if(sig.direction == SIGNAL_NONE) return plan;
 
-      double atr     = (m_data != NULL) ? m_data.GetATRPoints() : 0;
+      if(m_data == NULL) { Print("[TradePlan] ERROR: DataManager NULL"); return plan; }
+
+      double atr     = m_data.GetATRPoints();
       double point   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
       double ask     = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double bid     = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
       if(atr <= 0 || point <= 0 || ask <= 0 || bid <= 0) return plan;
 
-      double slPoints = sig.slPoints > 0.0 ? sig.slPoints : atr * m_cfg.Risk.SLMultiplier;
-      double tpPoints = sig.tpPoints > 0.0 ? sig.tpPoints : atr * m_cfg.Risk.TPMultiplier;
+      // ATR-floor: enforce a hard floor on SL when ATR micro-spike would clip ticks
+      double minATR = m_cfg.Signal.MinATRPoints;
+      double effATR = (minATR > 0.0) ? MathMax(atr, minATR) : atr;
+
+      double slPoints = sig.slPoints > 0.0 ? sig.slPoints : effATR * m_cfg.Risk.SLMultiplier;
+      double tpPoints = sig.tpPoints > 0.0 ? sig.tpPoints : effATR * m_cfg.Risk.TPMultiplier;
       double slDist   = slPoints * point;
       double tp1Dist  = tpPoints * point;
       double tp2Dist  = tp1Dist * 2.0;

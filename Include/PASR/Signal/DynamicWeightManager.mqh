@@ -24,7 +24,7 @@ struct SourcePerformance
    double avgConfidence;
    double avgProfit;
    double currentWeight;
-   double lastUpdate;
+   datetime lastUpdate;
 
    void Reset()
    {
@@ -237,7 +237,7 @@ public:
       {
          string sourceName = parts[i];
          // Extract source name (remove confidence scores etc)
-         int colonPos = StringFind(sourceName, ':');
+         int colonPos = StringFind(sourceName, ":");
          if(colonPos > 0)
             sourceName = StringSubstr(sourceName, 0, colonPos);
 

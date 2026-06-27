@@ -30,13 +30,6 @@ struct CNNLayer1D
    int input_channels;
    int num_filters;
    int kernel_size;
-   int weight_stride;
-
-   void Reset()
-   {
-      ArrayInitialize(weights, 0.0);
-      ArrayInitialize(biases, 0.0);
-   }
 
    int WeightIndex(int channel, int k, int f) const
    {
@@ -50,12 +43,6 @@ struct CNNDenseLayer
    double biases[];
    int input_size;
    int output_size;
-
-   void Reset()
-   {
-      ArrayInitialize(weights, 0.0);
-      ArrayInitialize(biases, 0.0);
-   }
 
    int WeightIndex(int i, int j) const
    {
@@ -85,15 +72,13 @@ private:
    CNNDenseLayer m_dense1;
    double m_output_weights[CNN_DENSE_SIZE][CNN_OUTPUT_SIZE];
    double m_output_biases[CNN_OUTPUT_SIZE];
-   bool m_initialized;
+   bool m_modelInitialized;
    int m_rand_seed;
 
    double m_input_buffer[CNN_INPUT_SIZE][CNN_NUM_FEATURES];
-   int m_buffer_head;
    bool m_buffer_filled;
 
    double ReLU(double x) { return MathMax(0.0, x); }
-   double Sigmoid(double x) { return 1.0 / (1.0 + MathExp(-x)); }
    double Tanh(double x)
    {
       x = MathMax(-500.0, MathMin(500.0, x));
@@ -103,15 +88,13 @@ private:
 
     void InitializeWeights()
     {
-       MathSrand(m_rand_seed);
+       MathSrand((uint)m_rand_seed);
 
        // Initialize Conv1: 20 candles x 4 OHLC channels -> 16 filters
        m_conv1.input_size = CNN_INPUT_SIZE;
        m_conv1.input_channels = CNN_NUM_FEATURES;
        m_conv1.num_filters = CNN_CONV1_FILTERS;
        m_conv1.kernel_size = CNN_CONV1_KERNEL;
-       m_conv1.weight_stride = CNN_CONV1_KERNEL * CNN_NUM_FEATURES * CNN_CONV1_FILTERS;
-
        double scale1 = MathSqrt(2.0 / (CNN_NUM_FEATURES * CNN_CONV1_KERNEL));
        int conv1_weight_count = CNN_CONV1_KERNEL * CNN_NUM_FEATURES * CNN_CONV1_FILTERS;
        ArrayResize(m_conv1.weights, conv1_weight_count);
@@ -127,8 +110,6 @@ private:
        m_conv2.input_channels = CNN_CONV1_FILTERS;
        m_conv2.num_filters = CNN_CONV2_FILTERS;
        m_conv2.kernel_size = CNN_CONV2_KERNEL;
-       m_conv2.weight_stride = CNN_CONV2_KERNEL * CNN_CONV1_FILTERS * CNN_CONV2_FILTERS;
-
        double scale2 = MathSqrt(2.0 / (CNN_CONV1_FILTERS * CNN_CONV2_KERNEL));
        int conv2_weight_count = CNN_CONV2_KERNEL * CNN_CONV1_FILTERS * CNN_CONV2_FILTERS;
        ArrayResize(m_conv2.weights, conv2_weight_count);
@@ -277,15 +258,14 @@ private:
           for(int f = 0; f < CNN_NUM_FEATURES; f++)
              m_input_buffer[i][f] = temp_buffer[i * CNN_NUM_FEATURES + f];
 
-       m_buffer_head = 0;
        m_buffer_filled = true;
        return true;
     }
 
 public:
    CCNNPatternRecognizer(int seed = 44)
-      : IManager(), m_initialized(false), m_rand_seed(seed),
-        m_buffer_head(0), m_buffer_filled(false)
+      : IManager(), m_modelInitialized(false), m_rand_seed(seed),
+        m_buffer_filled(false)
    {
       for(int i = 0; i < CNN_INPUT_SIZE; i++)
          for(int f = 0; f < CNN_NUM_FEATURES; f++)
@@ -299,7 +279,7 @@ public:
    {
       if(!IManager::Init(data, bus)) return false;
       InitializeWeights();
-      m_initialized = true;
+      m_modelInitialized = true;
       PrintFormat("[CNNPatternRecognizer] 1D-CNN initialized: %d candles, %d conv1 filters, %d conv2 filters, %d classes",
                   CNN_INPUT_SIZE, CNN_CONV1_FILTERS, CNN_CONV2_FILTERS, CNN_OUTPUT_SIZE);
       return true;
@@ -307,23 +287,24 @@ public:
 
    virtual void Deinit() override
    {
-      m_initialized = false;
+      m_modelInitialized = false;
       IManager::Deinit();
    }
 
    virtual void DeclareEvents() override {}
-   virtual void OnEvent(const PASREvent &ev) override {}
+   virtual void OnEvent(const PASREvent &) override {}
 
    bool RecognizePattern(const MqlRates &rates[], int latest_idx, CNNPatternOutput &output)
    {
       output.Reset();
-      if(!m_initialized) return false;
+      if(!m_modelInitialized) return false;
 
       if(!UpdateInputBuffer(rates, latest_idx)) return false;
       if(!m_buffer_filled) return false;
 
       // Flatten input buffer
-      double in_data[CNN_INPUT_SIZE * CNN_NUM_FEATURES];
+      double in_data[];
+      ArrayResize(in_data, CNN_INPUT_SIZE * CNN_NUM_FEATURES);
       for(int i = 0; i < CNN_INPUT_SIZE; i++)
       {
          for(int f = 0; f < CNN_NUM_FEATURES; f++)
@@ -414,10 +395,9 @@ public:
       }
    }
 
-   bool IsBufferFilled() const { return m_initialized; }
+   bool IsBufferFilled() const { return m_modelInitialized; }
    void ResetBuffer()
    {
-      m_buffer_head = 0;
       m_buffer_filled = false;
       for(int i = 0; i < CNN_INPUT_SIZE; i++)
          for(int f = 0; f < CNN_NUM_FEATURES; f++)

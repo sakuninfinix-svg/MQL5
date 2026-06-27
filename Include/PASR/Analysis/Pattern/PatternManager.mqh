@@ -17,7 +17,7 @@
 #define PATTERN_TRAINABLE_COUNT 5
 #define PATTERN_FEATURE_COUNT 5
 #define PATTERN_WEIGHT_FILE "PASR_pattern_weights.bin"
-#define PATTERN_WEIGHT_MAGIC 20260608.0
+#define PATTERN_WEIGHT_MAGIC 20260608
 #define PATTERN_WEIGHT_VERSION 1.0
 
 #define PATTERN_IDX_PINBAR   0
@@ -94,20 +94,24 @@ struct SPatternResult
    double            confluenceScore;
    double            conflictScore;
    double            dominanceGap;
+   double            rangePoints;   // ATR-normalized range signal (price/atr)
+   double            atrPoints;     // ATR snapshot at detection (points)
    string            reason;
    datetime          barTime;
 
    void Clear()
      {
-      found = false;
-      type = PATTERN_NONE;
-      direction = 0;
-      extreme = 0.0;
-      confluenceScore = 0.0;
-      conflictScore = 0.0;
-      dominanceGap = 0.0;
-      reason = "";
-      barTime = 0;
+      found          = false;
+      type           = PATTERN_NONE;
+      direction      = 0;
+      extreme        = 0.0;
+      confluenceScore= 0.0;
+      conflictScore  = 0.0;
+      dominanceGap   = 0.0;
+      rangePoints    = 0.0;
+      atrPoints      = 0.0;
+      reason         = "";
+      barTime        = 0;
      }
   };
 
@@ -186,9 +190,12 @@ private:
       double magic = 0.0, version = 0.0, nPatterns = 0.0, nFeatures = 0.0;
       bool ok = ReadFloatChecked(handle, magic) && ReadFloatChecked(handle, version) &&
                 ReadFloatChecked(handle, nPatterns) && ReadFloatChecked(handle, nFeatures);
-      if(!ok || MathRound(magic) != (int)PATTERN_WEIGHT_MAGIC ||
-         (int)MathRound(nPatterns) != PATTERN_TRAINABLE_COUNT ||
-         (int)MathRound(nFeatures) != PATTERN_FEATURE_COUNT)
+      int magicValue = (int)MathRound(magic);
+      int patternCount = (int)MathRound(nPatterns);
+      int featureCount = (int)MathRound(nFeatures);
+      if(!ok || magicValue != PATTERN_WEIGHT_MAGIC ||
+         patternCount != PATTERN_TRAINABLE_COUNT ||
+         featureCount != PATTERN_FEATURE_COUNT)
         {
          FileClose(handle);
          PrintFormat("[PatternManager] header bobot pola tidak valid di '%s'", filename);
@@ -667,6 +674,11 @@ public:
       outResult.conflictScore = conflictScore;
       outResult.dominanceGap = dominanceGap;
       outResult.barTime = curTime;
+      outResult.atrPoints = atrPoints;
+      double hi = iHigh(_Symbol, _Period, scanShift);
+      double lo = iLow (_Symbol, _Period, scanShift);
+      if(hi > 0.0 && lo > 0.0 && atrPoints > 0.0)
+         outResult.rangePoints = ((hi - lo) / (_Point > 0.0 ? _Point : 1.0)) / atrPoints;
       outResult.reason = votes[bestIdx].label + StringFormat(" | SkorPola %.2f selisih %.2f konflik %.2f | rej %.2f trap %.2f reclaim %.2f ft %.2f | %s%s%s",
                          finalScore, dominanceGap, conflictScore,
                          m_lastFeatures.rejectionQuality, m_lastFeatures.trapQuality,

@@ -91,6 +91,7 @@ private:
    double            m_max_slippage;
    string            m_last_observability;
    bool              m_optimization_mode;
+   bool              m_tester_mode;
    int               m_sample_counter;
    int               m_sample_rate;
    datetime          m_last_rotation;
@@ -107,7 +108,7 @@ public:
         m_buffer_count(0), m_buffer_max(PASR_TELEMETRY_MAX_BUFFER),
         m_total_records(0), m_pipeline_ticks(0),
         m_execution_lags(0), m_avg_latency(0.0), m_max_slippage(0.0),
-        m_last_observability(""), m_optimization_mode(false),
+        m_last_observability(""), m_optimization_mode(false), m_tester_mode(false),
         m_sample_counter(0), m_sample_rate(1), m_last_rotation(0),
         m_current_file_size(0), m_sampled_records(0), m_skipped_records(0)
      {
@@ -133,8 +134,16 @@ public:
      {
       if(!IManager::Init(data, bus)) return false;
       
+      // Avoid large telemetry CSV output during Strategy Tester runs.
+      m_tester_mode = (MQLInfoInteger(MQL_TESTER) != 0);
+      if(m_tester_mode)
+        {
+         PASRLogInfo("Telemetry", "Tester mode detected - CSV telemetry disabled");
+         return true;
+        }
+
       // Detect optimization mode automatically
-      m_optimization_mode = MQLInfoInteger(MQL_OPTIMIZATION);
+      m_optimization_mode = (MQLInfoInteger(MQL_OPTIMIZATION) != 0);
       
       if(m_optimization_mode)
         {
@@ -156,13 +165,18 @@ public:
    virtual void Deinit() override
      {
       if(!m_initialized) return;
-      Flush();
-      CloseFile();
+      if(!m_tester_mode)
+        {
+         Flush();
+         CloseFile();
+        }
       
       string summary = StringFormat("Shutdown. Total=%I64u Sampled=%I64u Skipped=%I64u",
                                     m_total_records, m_sampled_records, m_skipped_records);
       if(m_optimization_mode)
          summary += " [Optimization Mode]";
+      if(m_tester_mode)
+         summary += " [Tester CSV Disabled]";
       
       PASRLogInfo("Telemetry", summary);
       IManager::Deinit();
@@ -190,6 +204,14 @@ public:
    void RecordMetric(const string name, double value,
                      const string unit, ulong stage_id=0, const string symbol="")
      {
+      // In optimization mode, apply sampling to reduce disk I/O
+      if(m_tester_mode)
+        {
+         m_skipped_records++;
+         m_total_records++;
+         return;
+        }
+
       // In optimization mode, apply sampling to reduce disk I/O
       if(m_optimization_mode)
         {

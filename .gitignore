@@ -14,7 +14,9 @@
 *.swo
 *.tmp
 .mql-auto-forwards
-
+*.bak
+*.dat
+*.Set
 
 # Dependencies
 node_modules/

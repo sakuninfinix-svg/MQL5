@@ -71,6 +71,7 @@ private:
    ulong     m_next_retry_ms;
    ExecutionSnapshot m_snapshot;
    CExecutionLedger  m_ledger;
+   datetime          m_last_exec_bar_time;
 
    void SyncLedgerSnapshot()
      {
@@ -151,6 +152,14 @@ private:
          return false;
         }
 
+      datetime barTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+      if(barTime > 0 && barTime == m_last_exec_bar_time)
+        {
+         result.status = EXEC_SKIP;
+         result.comment = "ExecutionCooldownBar";
+         return false;
+        }
+
       double sl = plan.sl;
       double tp = plan.tp;
       ClampStopsToMinLevel(plan.direction, sl, tp);
@@ -189,6 +198,8 @@ private:
          result.status = EXEC_OK;
          result.executed = true;
          result.ticket = m_trade.ResultOrder();
+         if(barTime > 0)
+            m_last_exec_bar_time = barTime;
          m_ledger.MarkSent(result.ticket, result.retcode, result.comment);
          return true;
         }
@@ -217,7 +228,8 @@ private:
 public:
    CExecutionManager()
       : IManager(), m_maxRetries(3), m_retryDelayMs(500),
-        m_has_pending(false), m_pending_retries(0), m_next_retry_ms(0)
+        m_has_pending(false), m_pending_retries(0), m_next_retry_ms(0),
+        m_last_exec_bar_time(0)
      {
       m_snapshot.Clear();
       m_snapshot.maxRetries = m_maxRetries;

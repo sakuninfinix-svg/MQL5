@@ -1,0 +1,22 @@
+{
+  "model": "GBR",
+  "n_estimators": 120,
+  "max_depth": 4,
+  "lr": 0.08,
+  "subsample": 0.8,
+  "input_dim": 34,
+  "acc": 0.5835593220338983,
+  "f1": 0.2941683424303361,
+  "auc": 0.6048456730354388,
+  "tp": 512,
+  "tn": 2931,
+  "fp": 358,
+  "fn": 2099,
+  "rows_total": 29500,
+  "rows_train": 23600,
+  "rows_test": 5900,
+  "label_distribution": {
+    "buy": 13053,
+    "not_buy": 16447
+  }
+}

@@ -321,6 +321,7 @@ public:
    double GetLastConfidence() const { return m_last_confidence; }
    datetime GetLastUpdate() const { return m_last_update; }
    bool IsLoaded() const { return m_loaded; }
+   bool IsOnnxSupported() const { return m_onnx.IsCompiledIn(); }
    string GetModelPath() const { return m_model_path; }
    
    // Get feature importance

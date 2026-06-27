@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
-//| Signal/PatternSignalSource.mqh — v3.10                           |
-//| ISignalSource plugin: normalized pattern regression fallback vote |
+//| Signal/PatternSignalSource.mqh — v3.11                           |
+//| ATR cross-check: weak range / ATR ratio penalty guard             |
 //+------------------------------------------------------------------+
 #property strict
 #ifndef __SIGNAL_PATTERN_SOURCE_MQH__
@@ -10,10 +10,13 @@
 #include "../Analysis/Pattern/PatternManager.mqh"
 
 class PatternSignalSource : public ISignalSource
-  {
+{
 private:
    CPatternManager *m_pattern;
    double           m_minConfidence;
+   double           m_minRangeATR;   // min candle range/ATR ratio to allow full confidence
+   double           m_maxRangeATR;   // max ratio above which we cap too-wide noise
+   bool             m_useATRScaling;
    datetime         m_lastEvaluated;
    ENUM_SIGNAL_DIR  m_lastDirection;
    double           m_lastConfidence;
@@ -29,9 +32,16 @@ private:
      }
 
 public:
-   PatternSignalSource(CPatternManager *p, double minConfidence = 0.40)
+   PatternSignalSource(CPatternManager *p, double minConfidence = 0.40,
+                       bool useATRScaling = true,
+                       double minRangeATR = 0.30,
+                       double maxRangeATR = 4.00)
       : m_pattern(p), m_minConfidence(MathMax(0.0, MathMin(1.0, minConfidence))),
-        m_lastEvaluated(0), m_lastDirection(SIGNAL_NONE), m_lastConfidence(0.0), m_lastReason("") {}
+        m_minRangeATR(MathMax(0.05, minRangeATR)),
+        m_maxRangeATR(MathMax(m_minRangeATR + 0.5, maxRangeATR)),
+        m_useATRScaling(useATRScaling),
+        m_lastEvaluated(0), m_lastDirection(SIGNAL_NONE),
+        m_lastConfidence(0.0), m_lastReason("") {}
 
    virtual string Name() override { return "PatternSignalSource"; }
 
@@ -59,10 +69,31 @@ public:
          return false;
         }
 
-      double gapBoost = MathMax(0.0, MathMin(1.0, pr.dominanceGap));
-      double conflictPenalty = MathMax(0.0, MathMin(1.0, pr.conflictScore));
-      out.confidence = MathMax(0.0, MathMin(1.0, score * (0.75 + 0.25 * gapBoost) * (1.0 - 0.35 * conflictPenalty)));
-      out.reason     = pr.reason;
+      double gapBoost       = MathMax(0.0, MathMin(1.0, pr.dominanceGap));
+      double conflictPenalty= MathMax(0.0, MathMin(1.0, pr.conflictScore));
+      double baseConf       = MathMax(0.0, MathMin(1.0,
+                                score * (0.75 + 0.25 * gapBoost) * (1.0 - 0.35 * conflictPenalty)));
+
+      // ATR cross-check guard: scale confidence by range/ATR ratio quality
+      double atrMult = 1.0;
+      string atrReason = "ATR-ok";
+      if(m_useATRScaling && pr.rangePoints > 0.0)
+        {
+         if(pr.rangePoints < m_minRangeATR)
+           {
+            // weak signal: range too small relative to current volatility = thin bar noise
+            atrMult = MathMax(0.4, pr.rangePoints / m_minRangeATR);
+            atrReason = StringFormat("thinspace r/ATR=%.2f", pr.rangePoints);
+           }
+         else if(pr.rangePoints > m_maxRangeATR)
+           {
+            // runaway candle: extreme expansion = low-quality rejection signal
+            atrMult = MathMax(0.4, m_maxRangeATR / pr.rangePoints);
+            atrReason = StringFormat("hugecape r/ATR=%.2f", pr.rangePoints);
+           }
+        }
+      out.confidence = MathMax(0.0, MathMin(1.0, baseConf * atrMult));
+      out.reason     = pr.reason + (atrMult < 0.999 ? "|" + atrReason : "");
 
       if(pr.direction > 0)
         {
@@ -88,6 +119,6 @@ public:
    ENUM_SIGNAL_DIR GetLastDirection() const { return m_lastDirection; }
    double GetLastConfidence() const { return m_lastConfidence; }
    string GetLastReason() const { return m_lastReason; }
-  };
+};
 
 #endif // __SIGNAL_PATTERN_SOURCE_MQH__

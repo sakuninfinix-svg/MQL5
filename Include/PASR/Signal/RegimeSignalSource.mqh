@@ -51,7 +51,7 @@ public:
       if(m_regime == NULL || !m_regime.IsReady())
         {
          out.direction  = SIGNAL_NONE;
-         out.confidence = 0.5;
+         out.confidence = 1.0;
          out.reason     = "Regime:NotReady";
          StoreLast(out, out.reason, REGIME_UNKNOWN);
          return true;

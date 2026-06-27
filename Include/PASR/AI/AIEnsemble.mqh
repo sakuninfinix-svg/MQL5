@@ -27,7 +27,7 @@ struct SAIEnsembleConfig
 
    SAIEnsembleConfig()
      {
-      n_models        = ENSEMBLE_MODEL_COUNT;
+      n_models        = 1;
       onnx_weight     = 0.3;
       enable_onnx     = false;
       onnx_model_path = "";
@@ -154,6 +154,7 @@ public:
    // FIX v1.03: accessors required by AIFeatureValidator and AITrainer
    bool       IsReady()        const { return m_ready; }
    bool       IsOnnxLoaded()   const { return m_onnx_loaded; }
+   bool       IsOnnxSupported() const { return m_onnx.IsCompiledIn(); }
    int        GetModelCount()  const { return m_n_models; }
    CMLPModel* GetModel(int idx)
      {

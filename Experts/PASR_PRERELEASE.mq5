@@ -10,114 +10,133 @@
 #include <PASR/Central/ServiceLocator.mqh>
 #include <PASR/AI/AIRetrainTrigger.mqh>
 #include <PASR/AI/GBRInference.mqh>
+#include <PASR/Analysis/MTFBiasEngine.mqh>
+#include <PASR/Signal/MTFHTFBiasSource.mqh>
 
-input bool InpDebugMode = true;
+input bool InpDebugMode = true; //Mode Debug
 input bool InpEnableProfiling = true;
 input int  InpTimerSeconds = 1;
 
 input group "PASR Identity"
-input long   InpMagicNumber = 123456;
+input long   InpMagicNumber = 123456; //Magic Number
 input string InpEAName = "PASR_MODULAR";
 
 input group "Risk"
-input double InpLotSize = 0.01;
-input double InpRiskPercent = 1.0;
-input double InpSLMultiplier = 1.5;
-input double InpTPMultiplier = 2.5;
-input double InpMaxDailyLossPct = 3.0;
-input double InpMaxDrawdownPct = 10.0;
-input int    InpMaxOpenPositions = 3;
+input double InpLotSize = 0.01; //Lot Size
+input bool   InpUseAutoLot = false; // Gunakan Auto Lot (aktifkan untuk menghitung lot otomatis berdasarkan risiko)
+input double InpAutoLotMin = 0.01; // Minimal Lot Size (untuk akun kecil)
+input double InpAutoLotMax = 10.0; // Maksimal Lot Size (untuk akun besar)
+input double InpRiskPercent = 1.0; //Resiko per Trade (%)
+input double InpSLMultiplier = 1.5; // SL x ATR
+input double InpTPMultiplier = 2.5; //TP x ATR
+input double InpMaxDailyLossPct = 3.0; // Max Loss perhari (%)
+input double InpMaxDrawdownPct = 10.0; // Max Drawdown perhari (%)
+input int    InpMaxOpenPositions = 3; // Max Open Posisi
 input int    InpMaxConsecLoss = 5;
 input bool   InpUseBreakEven = true;
 input double InpBreakEvenATRMult = 1.0;
-input bool   InpUseTrailingStop = false;
-input double InpTrailATRMult = 1.0;
-input bool   InpRecoveryEnabled = true;
+input bool   InpUseTrailingStop = false; //Trailing Stop
+input double InpTrailATRMult = 1.0; // Jarak Trailing xATR
+input double InpSLHeadroomPips = 0.0; // Headroom tambahan untuk Stop Loss (pips)
+input double InpTPHeadroomPips = 0.0; // Headroom tambahan untuk Take Profit (pips)
+input bool   InpRecoveryEnabled = true; // Recovery Mode
 input int    InpMaxRecoveryAttempts = 3;
 input int    InpRecoveryCooldownBars = 5;
-input double InpPartialClosePct = 0.5;
-input int    InpMaxTradeDurationDays = 0;
+input double InpPartialClosePct = 0.5; //Parsial Close (%)
+input int    InpMaxTradeDurationDays = 0; //Lama Durasi Maksimal (Hari)
 
 input group "Market"
-input int    InpATRPeriod = 14;
-input int    InpADXPeriod = 14;
+input int    InpATRPeriod = 14; //Periode ATR
+input int    InpADXPeriod = 14; // Periode ADX
 input double InpADXTrendThreshold = 25.0;
 input double InpSpreadFilterPips = 3.0;
-input string InpSessionSunday    = "00:00-23:00";   // Minggu (HH:MM-HH:MM)
+input string InpSessionSunday    = "00:00-00:00";   // Minggu (HH:MM-HH:MM)
 input string InpSessionMonday    = "00:00-23:00";   // Senin
 input string InpSessionTuesday   = "00:00-23:00";   // Selasa
 input string InpSessionWednesday = "00:00-23:00";   // Rabu
 input string InpSessionThursday  = "00:00-23:00";   // Kamis
-input string InpSessionFriday    = "00:00-23:00";   // Jumat
-input string InpSessionSaturday  = "00:00-23:00";   // Sabtu
-input bool   InpFilterNewsTime = false;
-input int    InpNewsBufferMinutes = 30;
+input string InpSessionFriday    = "00:00-15:00";   // Jumat
+input string InpSessionSaturday  = "00:00-00:00";   // Sabtu
+input bool   InpFilterNewsTime = true; //New Filter
+input int    InpNewsBufferMinutes = 30; // Lama Filter News (Menit)
 
 input group "AI"
-input bool   InpEnableAI = false;
+input bool   InpEnableAI = false; // Artificial Intelligence (ENABLED BY DEFAULT IS RISKY: model must be present + validated first)
 input double InpAIMinConfidence = 0.60; // AI Min Confidence
 input double InpAILearningRate = 0.0003;       // AI Learning Rate
 input int    InpAITrainIntervalBars = 5;
 input int    InpAIReplayBufferSize = 512;
 input int    InpAIMinibatchSize = 32;
-input bool   InpAIPersistWeights = true;
+input bool   InpAIPersistWeights = false;
 input string InpAIModelFileName = "PASR_mlp_m0.bin";
-input bool   InpAIEnableOnnx = false;
+input bool   InpAIEnableOnnx = false; // AI ONNX model
 input string InpAIModelOnnxFileName = "PASR_sequence.onnx";
 
 input group "GBR Configuration"
-input bool   InpEnableGBR = false;             // Enable GBR for MTF
-input int    InpGBRN_estimators = 150;         // Number of trees (100-200 optimal)
+input bool   InpEnableGBR = false;             // Enable GBR for MTF (keep OFF for live; experimental)
+input int    InpGBRN_estimators = 100;         // Number of trees (reduced from 150: less overfit risk)
 input double InpGBRLearning_rate = 0.05;       // Learning rate (0.01-0.1 optimal)
-input int    InpGBRMax_depth = 4;              // Tree depth (3-6 optimal)
-input double InpGBRMin_samples_split = 0.03;   // Min samples split (2-5%)
-input double InpGBRMin_samples_leaf = 0.015;   // Min samples leaf (1-3%)
+input int    InpGBRMax_depth = 3;              // Tree depth (REDUCED from 4: anti-overfit)
+input double InpGBRMin_samples_split = 0.05;   // Min samples split (raised from 3% to 5%: more conservative)
+input double InpGBRMin_samples_leaf = 0.025;   // Min samples leaf (raised from 1.5% to 2.5%)
 input double InpGBRSubsample = 0.8;           // Stochastic sampling (0.7-0.9)
 input double InpGBRColsample_bytree = 0.7;     // Feature sampling (0.6-0.8)
-input double InpGBRReg_alpha = 0.05;           // L1 regularization (0.0-0.1)
-input double InpGBRReg_lambda = 0.8;          // L2 regularization (0.5-1.0)
-input double InpGBRGamma = 0.05;               // Min loss reduction (0.0-0.1)
+input double InpGBRReg_alpha = 0.10;           // L1 regularization (raised from 0.05: more regularization)
+input double InpGBRReg_lambda = 1.0;          // L2 regularization (raised from 0.8)
+input double InpGBRGamma = 0.10;               // Min loss reduction (raised from 0.05)
 input string InpGBRModelPath = "PASR_gbr_m0.onnx"; // GBR ONNX model path
 
 input group "AI Regime Thresholds"
-input double InpAITrendEntryThreshold = 0.60;
-input double InpAITrendRiskMultiplier = 1.20;
-input double InpAIRangeEntryThreshold = 0.65;
-input double InpAIRangeRiskMultiplier = 1.10;  // AI Range Risk Multiplier
-input double InpAIVolatileEntryThreshold = 0.85; //AI Volatile Entry
-input double InpAIVolatileRiskMultiplier = 0.90;
+input double InpAITrendEntryThreshold = 0.65;     // RAISED from 0.60 (more selective)
+input double InpAITrendRiskMultiplier = 1.10;     // LOWERED from 1.20 (less risk on AI-driven trend)
+input double InpAIRangeEntryThreshold = 0.70;     // RAISED from 0.65
+input double InpAIRangeRiskMultiplier = 1.00;     // LOWERED from 1.10
+input double InpAIVolatileEntryThreshold = 0.90;  // RAISED from 0.85 (more selective)
+input double InpAIVolatileRiskMultiplier = 0.80;
 input double InpAIConservativeEntryThreshold = 0.95;
 input double InpAIConservativeRiskMultiplier = 0.10;
-input double InpAIScalpEntryThreshold = 0.70;
-input double InpAIScalpRiskMultiplier = 1.00;
+input double InpAIScalpEntryThreshold = 0.75;     // RAISED from 0.70
+input double InpAIScalpRiskMultiplier = 0.90;     // LOWERED from 1.00
 
 input group "AI Decision Rules"
-input double InpAIMinExpectedR = 0.50;                  // was 0.35 — below 0.50 is net-negative after spread
-input double InpAIMaxFailureProbability = 0.55;         // was 0.72 — 72% fail rate made AI gate useless
-input double InpAIStrongConfidenceBuffer = 0.10;
-input double InpAIStrongConfidenceMin = 0.75;
-input double InpAIStrongExpectedR = 1.20;
-input double InpAIStrongMaxFailureProbability = 0.40;   // was 0.45 — tighter for "strong" signals
-input double InpAIDriftFailureWeight = 0.35;
-input double InpAIRegimeFailureWeight = 0.25;           // was 0.15 — regime mismatch is a primary loss cause
-input double InpAIConfidenceRewardWeight = 2.00;
-input double InpAIEdgeRewardWeight = 1.25;
-input double InpAIRegimeRewardWeight = 0.75;
-input double InpAIFailurePenaltyWeight = 1.40;
-input double InpAIRiskFailureWeight = 0.45;
+input double InpAIMinExpectedR = 0.60;
+input double InpAIMaxFailureProbability = 0.45;
+input double InpAIStrongConfidenceBuffer = 0.15;
+input double InpAIStrongConfidenceMin = 0.80;
+input double InpAIStrongExpectedR = 1.40;
+input double InpAIStrongMaxFailureProbability = 0.35;
+input double InpAIDriftFailureWeight = 0.50;
+input double InpAIRegimeFailureWeight = 0.40;
+input double InpAIConfidenceRewardWeight = 1.20;
+input double InpAIEdgeRewardWeight = 1.00;
+input double InpAIRegimeRewardWeight = 0.50;
+input double InpAIFailurePenaltyWeight = 2.00;
+input double InpAIRiskFailureWeight = 0.65;
 
 input group "Signal / MTF"
-input bool   InpUseMTF = true;
+input bool   InpUseMTF = true; //Multi Time Frame
 input int    InpSignalLookback = 20;
 input int    InpMinConfluence = 1;
-input double InpSignalMinScore = 0.40;
-input double InpSignalMinDominanceGap = 0.05;
+input double InpSignalMinScore = 0.40; //Minimal Skor Sinyal
+input double InpSignalMinDominanceGap = 0.05; //
 input int    InpMaxSourceAgeSeconds = 120;
 input int    InpSignalCooldownBars = 3;
 input double InpMinRRRatio = 1.5;
 input double InpMaxSignalATR = 2.0;
 input double InpUrgencyHighThreshold = 0.75;
 input double InpUrgencyMediumThreshold = 0.55;
+
+input group "MTF Hard Filter"
+input bool             InpMTFHTFEnabled     = true;                  // HTF bias gate aktif
+input ENUM_TIMEFRAMES  InpMTFHTFPeriod      = PERIOD_H4;             // HTF time-frame
+input ENUM_TIMEFRAMES  InpMTFMidPeriod      = PERIOD_H1;             // Mid time-frame
+input int              InpMTFSequenceBars   = 3;                     // Bars for higher-high/lower-low scan
+input int              InpMTFBodyBars       = 3;                     // Bars for body persistence
+input int              InpMTFATRPeriod      = 14;                    // ATR period (HTF+Mid handles)
+input double           InpMTFStrengthMin    = 0.20;                  // Min body/ATR ratio (di bawah = skip veto)
+input double           InpMTFVetoConfidence = 0.40;                  // Confidence veto source
+input bool             InpMTFLogOnly        = false;                 // Log-only, tidak veto
+input double           InpMTFBlockThreshold = 0.20;                  // |composite| min untuk block
 
 input group "Pattern"
 input bool   InpEnablePatterns = true; //Enable Pattern
@@ -129,8 +148,8 @@ input double InpEngulfMultiplier = 1.1; // Engulfing Multiplier
 input bool   InpRequireConfirmation = false; //Require Confirmation
 
 input group "Auto-Retrain"
-input bool   InpAutoRetrainEnabled = false; // Ijinkan Online Learning
-input int    InpAutoRetrainTradeThreshold = 200; // Online Learning Threshold
+input bool   InpAutoRetrainEnabled = false; // KEEP OFF for live: online retraining causes concept drift
+input int    InpAutoRetrainTradeThreshold = 500; // Online Learning Threshold (raised from 200 to retrain less frequently)
 input string InpAutoRetrainWeightsFile = "PASR_mlp_m0.bin"; //Online Learning Otomatis
 
 input group "Display"
@@ -144,6 +163,8 @@ CPASRKernel g_kernel;
 CPerformanceReport g_report;
 CAIRetrainTrigger g_retrain;
 CGBRInference g_gbr;
+CMTFBiasEngine   g_mtfEngine;
+CMTFHTFBiasSource g_mtfSource;
 
 struct EAState
   {
@@ -202,6 +223,9 @@ StrategyConfig BuildConfigFromInputs()
    cfg.MagicNumber = InpMagicNumber;
 
    cfg.Risk.LotSize             = InpLotSize;
+   cfg.Risk.UseAutoLot          = InpUseAutoLot;
+   cfg.Risk.AutoLotMin          = InpAutoLotMin;
+   cfg.Risk.AutoLotMax          = InpAutoLotMax;
    cfg.Risk.RiskPercent         = InpRiskPercent;
    cfg.Risk.SLMultiplier        = InpSLMultiplier;
    cfg.Risk.TPMultiplier        = InpTPMultiplier;
@@ -213,6 +237,8 @@ StrategyConfig BuildConfigFromInputs()
    cfg.Risk.BreakEvenATRMult    = InpBreakEvenATRMult;
    cfg.Risk.UseTrailingStop     = InpUseTrailingStop;
    cfg.Risk.TrailATRMult        = InpTrailATRMult;
+   cfg.Risk.SLHeadroomPips      = InpSLHeadroomPips;
+   cfg.Risk.TPHeadroomPips      = InpTPHeadroomPips;
    cfg.Risk.RecoveryEnabled     = InpRecoveryEnabled;
    cfg.Risk.MaxRecoveryAttempts = InpMaxRecoveryAttempts;
    cfg.Risk.RecoveryCooldownBars= InpRecoveryCooldownBars;
@@ -338,44 +364,17 @@ void ExportBacktestReport()
    g_report.ExportHTML();
   }
 
+#ifdef PASR_ENABLE_TESTER_FITNESS
 double BuildTesterFitness()
   {
-    double profit           = TesterStatistics(STAT_PROFIT);
-    double profitFactor     = TesterStatistics(STAT_PROFIT_FACTOR);
-    double recoveryFactor   = TesterStatistics(STAT_RECOVERY_FACTOR);
-    double expectedPayoff   = TesterStatistics(STAT_EXPECTED_PAYOFF);
-    int    trades           = (int)TesterStatistics(STAT_TRADES);
-    double winTrades        = TesterStatistics(STAT_PROFIT_TRADES);
-    double winRate          = (trades > 0) ? (winTrades / trades) : 0.0;
-    double equityDrawdownPct= TesterStatistics(STAT_EQUITY_DD_RELATIVE);
-    double sharpeRatio      = TesterStatistics(STAT_SHARPE_RATIO);
-
-   if(trades < 10)
-      return -1000.0;
-   if(profit < 0.0)
-      return -1000.0 - MathAbs(profit) - equityDrawdownPct;
-
-   profit = MathMin(1000000.0, profit);
-   profitFactor     = MathMin(100.0, MathMax(0.0, profitFactor));
-   recoveryFactor   = MathMin(100.0, MathMax(0.0, recoveryFactor));
-   expectedPayoff   = MathMin(1000.0, MathMax(0.0, expectedPayoff));
-   equityDrawdownPct= MathMin(100.0, MathMax(0.0, equityDrawdownPct));
-   sharpeRatio      = MathMax(-5.0, MathMin(5.0, sharpeRatio));
-
-   double score = 0.0;
-   score += MathLog(1.0 + profit);
-   score += 2.0 * MathLog(1.0 + profitFactor);
-   score += 1.5 * MathLog(1.0 + recoveryFactor);
-   score += MathLog(1.0 + expectedPayoff);
-   score += 0.5 * winRate;
-   score += 0.25 * sharpeRatio;
-   score += MathMin(2.0, (double)trades / 50.0);
-   score -= 0.15 * equityDrawdownPct;
-
-   PrintFormat("[Tester] trades=%d winRate=%.2f pf=%.2f rf=%.2f exp=%.2f dd=%.2f sharpe=%.2f score=%.3f",
-               trades, winRate, profitFactor, recoveryFactor, expectedPayoff, equityDrawdownPct, sharpeRatio, score);
-   return score;
+   // DEAD CODE: kept for compatibility with old OptimizationCriterion references.
+   // Live OnTester() handles fitness computation inline (TesterStatistics is valid there only).
+   // Returning a fixed value avoids the runtime error 511 pointer-cast that occurred when this
+   // function was called by the genetic optimizer from a thread that did not own the tester
+   // state. See OnTester() above for the actual fitness computation.
+   return 0.0;
   }
+#endif
 
 int OnInit()
   {
@@ -435,18 +434,57 @@ int OnInit()
         }
      }
 
+  // Init MTF HTF bias engine and register as VETO source
+  if(InpUseMTF && InpMTFHTFEnabled)
+    {
+     SMTFBiasConfig mtf_cfg;
+     mtf_cfg.enabled         = true;
+     mtf_cfg.htfPeriod       = InpMTFHTFPeriod;
+     mtf_cfg.midPeriod       = InpMTFMidPeriod;
+     mtf_cfg.sequenceBars    = InpMTFSequenceBars;
+     mtf_cfg.bodyBars        = InpMTFBodyBars;
+     mtf_cfg.atrPeriod       = InpMTFATRPeriod;
+     mtf_cfg.atrStrengthMin  = InpMTFStrengthMin;
+     mtf_cfg.vetoConfidence  = InpMTFVetoConfidence;
+     mtf_cfg.logOnly         = InpMTFLogOnly;
+     if(g_mtfEngine.Init(mtf_cfg))
+       {
+        g_mtfSource.Bind(GetPointer(g_mtfEngine));
+        CServiceLocator *svc = g_kernel.Services();
+        if(svc != NULL)
+          {
+           CSignalManager *sig = svc.Signal();
+           if(sig != NULL)
+             {
+              double w = -InpMTFVetoConfidence;
+              if(w > 0.0) w = -w;
+              if(sig.RegisterSource(GetPointer(g_mtfSource), w))
+                 PrintFormat("[PASR] MTF HTF bias source registered (VETO w=%.2f thresh=%.2f)",
+                             w, InpMTFBlockThreshold);
+              else
+                 Print("[PASR] MTF HTF bias source registration failed");
+             }
+          }
+       }
+     else
+        Print("[PASR] MTF engine init failed; HTF filter disabled");
+    }
+
    return INIT_SUCCEEDED;
   }
 
-double OnTester()
-  {
-   return BuildTesterFitness();
-  }
+double PASRTesterFitness()
+{
+   // SAME DEAD-CODE: do not call BuildTesterFitness here either. Both functions
+   // would crash TesterStatistics() when invoked from a non-tester thread.
+   // OnTester() below is the canonical entrypoint used by the tester.
+   return 0.0;
+}
 
 void OnDeinit(const int reason)
   {
    EventKillTimer();
-   if(MQLInfoInteger(MQL_TESTER))
+   if(MQLInfoInteger(MQL_TESTER) != 0)
       ExportBacktestReport();
    g_kernel.OnDeinit(reason);
    g_state.Reset();

@@ -35,6 +35,9 @@ private:
    int                m_consecutive_errors;
    datetime           m_last_tick_time;
    datetime           m_trip_time;
+   datetime           m_last_report_time;
+   string             m_last_report_key;
+   int                m_log_throttle_sec;
    double             m_last_bid;
 
 public:
@@ -44,6 +47,9 @@ public:
       m_consecutive_errors = 0;
       m_last_tick_time = 0;
       m_trip_time = 0;
+      m_last_report_time = 0;
+      m_last_report_key = "";
+      m_log_throttle_sec = 300;
       m_last_bid = 0.0;
       m_config.max_stale_sec = 30;
       m_config.max_spread_points = 20;
@@ -60,10 +66,15 @@ public:
    virtual bool Init(IDataManager *data, CEventBus *bus) override
      {
       if(!IManager::Init(data, bus)) return false;
-      PASRLogInfo("SANITY", StringFormat("v2.02 — trip=%d reset=%ds stale=%ds",
+      double max_spread_points = PipToPoints(m_cfg.Market.SpreadFilterPips);
+      if(max_spread_points > 0.0)
+         m_config.max_spread_points = (int)MathRound(max_spread_points);
+
+      PASRLogInfo("SANITY", StringFormat("v2.02 — trip=%d reset=%ds stale=%ds spread=%dpts",
                               m_config.trip_threshold,
                               m_config.reset_timeout_sec,
-                              m_config.max_stale_sec));
+                              m_config.max_stale_sec,
+                              m_config.max_spread_points));
       return true;
      }
 
@@ -142,6 +153,13 @@ private:
       return (spread <= m_config.max_spread_points);
      }
 
+   double PipToPoints(const double pips) const
+     {
+      int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+      double factor = (digits == 3 || digits == 5) ? 10.0 : 1.0;
+      return MathMax(0.0, pips) * factor;
+     }
+
    bool CheckPriceGap(double bid)
      {
       if(m_last_bid == 0.0) { m_last_bid = bid; return true; }
@@ -175,8 +193,11 @@ private:
       m_trip_time = TimeCurrent();
       string msg = StringFormat("[CIRCUIT TRIPPED] %s — pausing %ds",
                                 reason, m_config.reset_timeout_sec);
-      SendEvt(EVENT_ID_SYSTEM_CRITICAL, msg);
-      PASRLogError("SANITY", msg);
+      if(ShouldReport("TRIP:" + reason))
+        {
+         SendEvt(EVENT_ID_SYSTEM_CRITICAL, msg);
+         PASRLogError("SANITY", msg);
+        }
      }
 
    bool TryResetBreaker()
@@ -190,8 +211,25 @@ private:
    void NotifyStateChange(string state_name)
      {
       string msg = "Circuit -> " + state_name;
-      SendEvt(EVENT_ID_SYSTEM_INFO, msg);
-      PASRLogInfo("SANITY", msg);
+      if(ShouldReport("STATE:" + state_name))
+        {
+         SendEvt(EVENT_ID_SYSTEM_INFO, msg);
+         PASRLogInfo("SANITY", msg);
+        }
+     }
+
+   bool ShouldReport(const string key)
+     {
+      datetime now = TimeCurrent();
+      if(key != m_last_report_key ||
+         m_last_report_time == 0 ||
+         now - m_last_report_time >= m_log_throttle_sec)
+        {
+         m_last_report_key = key;
+         m_last_report_time = now;
+         return true;
+        }
+      return false;
      }
 
    void SendEvt(ENUM_EVENT_ID id, string msg)

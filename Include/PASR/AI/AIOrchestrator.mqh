@@ -501,6 +501,8 @@ public:
       ensemble_cfg.onnx_model_path = m_cfg.AI.OnnxModelFileName;
       ensemble_cfg.mlp_model_path  = m_cfg.AI.ModelFileName;
       if(!m_ensemble.Init(ensemble_cfg)) { Print("AI: Ensemble init failed"); ReleaseComponents(); return false; }
+      if(m_cfg.AI.EnableOnnx && !m_ensemble.IsOnnxSupported())
+         Print("AI: ONNX disabled at compile time; define PASR_ENABLE_ONNX before enabling InpAIEnableOnnx");
       if(!m_trainer.Init(data, bus))  { Print("AI: Trainer init failed");        ReleaseComponents(); return false; }
       if(!m_calib.Init(data, bus))    { Print("AI: Calibrator init failed");     ReleaseComponents(); return false; }
       if(!m_guard.Init(data, bus))    { Print("AI: Guard init failed");          ReleaseComponents(); return false; }
@@ -534,6 +536,16 @@ public:
          m_gbr = new CGBRInference();
          if(m_gbr != NULL && m_gbr.Init(data, bus))
            {
+            if(!m_gbr.IsOnnxSupported())
+              {
+               Print("AI: GBR disabled because PASR_ENABLE_ONNX is not defined at compile time");
+               m_gbr.Deinit();
+               delete m_gbr;
+               m_gbr = NULL;
+               m_use_gbr = false;
+              }
+            else
+              {
             SGBRConfig gbr_cfg;
             gbr_cfg.n_estimators        = m_cfg.AI.GBRN_estimators;
             gbr_cfg.learning_rate       = m_cfg.AI.GBRLearning_rate;
@@ -556,6 +568,7 @@ public:
               }
             else
                Print("AI: GBR enabled but no model path, GBR will use fallback");
+              }
            }
          else
            {
