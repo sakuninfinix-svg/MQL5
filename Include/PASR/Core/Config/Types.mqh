@@ -25,26 +25,29 @@ struct RiskConfig
    double MaxDrawdownPct;
    int    MaxOpenPositions;
    int    MaxConsecLoss;
-   bool   UseBreakEven;
-   double BreakEvenATRMult;
-   bool   UseTrailingStop;
-   double TrailATRMult;
-   bool   RecoveryEnabled;
-   int    MaxRecoveryAttempts;
-   int    RecoveryCooldownBars;
-   double PartialClosePct;
-   int    MaxTradeDurationDays;
+    bool   UseBreakEven;
+    double BreakEvenATRMult;
+    bool   UseTrailingStop;
+    double TrailATRMult;
+    bool   RecoveryEnabled;
+    int    MaxRecoveryAttempts;
+    int    RecoveryCooldownBars;
+    double PartialClosePct;
+    int    MaxTradeDurationDays;
+    double SLHeadroomPips;       // Additional buffer for Stop Loss (pips)
+    double TPHeadroomPips;       // Additional buffer for Take Profit (pips)
 
-   RiskConfig()
-      : LotSize(0.01),          RiskPercent(1.0),
-        SLMultiplier(1.5),      TPMultiplier(2.5),
-        MaxDailyLossPct(3.0),   MaxDrawdownPct(10.0),
-        MaxOpenPositions(3),    MaxConsecLoss(5),
-        UseBreakEven(true),     BreakEvenATRMult(1.0),
-        UseTrailingStop(false), TrailATRMult(1.0),
-        RecoveryEnabled(true),  MaxRecoveryAttempts(3),
-        RecoveryCooldownBars(5),
-        PartialClosePct(0.5),   MaxTradeDurationDays(0) {}
+    RiskConfig()
+       : LotSize(0.01),          RiskPercent(1.0),
+         SLMultiplier(1.5),      TPMultiplier(2.5),
+         MaxDailyLossPct(3.0),   MaxDrawdownPct(10.0),
+         MaxOpenPositions(3),    MaxConsecLoss(5),
+         UseBreakEven(true),     BreakEvenATRMult(1.0),
+         UseTrailingStop(false), TrailATRMult(1.0),
+         RecoveryEnabled(true),  MaxRecoveryAttempts(3),
+         RecoveryCooldownBars(5),
+         PartialClosePct(0.5),   MaxTradeDurationDays(0),
+         SLHeadroomPips(0.0),    TPHeadroomPips(0.0) {}
   };
 
 //+------------------------------------------------------------------+

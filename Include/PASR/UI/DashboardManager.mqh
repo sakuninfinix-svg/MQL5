@@ -158,6 +158,18 @@ public:
       if(m_data != NULL)
          ctx.dailyPnL = m_data.GetDailyProfit();
 
+      // Read headroom values from config if data manager is available
+      double slHeadPips = 0.0, tpHeadPips = 0.0;
+      if(m_data != NULL)
+        {
+         StrategyConfig cfg = m_data.GetConfig();
+         slHeadPips = cfg.Risk.SLHeadroomPips;
+         tpHeadPips = cfg.Risk.TPHeadroomPips;
+        }
+      string headroomStr = "";
+      if(slHeadPips > 0.0 || tpHeadPips > 0.0)
+         headroomStr = StringFormat(" SLbuf=%.1f TPbuf=%.1f", slHeadPips, tpHeadPips);
+
       string text = m_prefix + " Dashboard\n";
       text += "Balance: " + DoubleToString(ctx.balance, 2) + "\n";
       text += "Equity : " + DoubleToString(ctx.equity, 2) + "\n";
@@ -166,7 +178,7 @@ public:
       text += "AI    : " + DoubleToString(m_aiScore, 3) + "\n";
       text += "Regime: " + MarketRegimeName(m_regime) + "\n";
       text += "Open  : " + IntegerToString(ctx.openPositions) + "\n";
-      text += "State : " + ctx.status;
+      text += "State : " + ctx.status + headroomStr;
       if(m_observabilityText != "")
          text += "\nObs   : " + m_observabilityText;
       Comment(text);

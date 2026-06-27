@@ -54,6 +54,8 @@ struct RiskSnapshot
    double   lotStep;
    datetime lastResetDay;
    string   status;
+   double   slHeadroomPts;   // Applied SL headroom in points
+   double   tpHeadroomPts;   // Applied TP headroom in points
 
    void Clear()
      {
@@ -75,6 +77,8 @@ struct RiskSnapshot
       lotStep = 0.0;
       lastResetDay = 0;
       status = "";
+      slHeadroomPts = 0.0;
+      tpHeadroomPts = 0.0;
      }
   };
 
@@ -427,6 +431,23 @@ public:
       double tpPoints = signal.tpPoints;
       if(tpPoints <= 0.0)
          tpPoints = slPoints * MathMax(1.0, m_cfg.Risk.TPMultiplier / MathMax(0.1, m_cfg.Risk.SLMultiplier));
+
+      // Apply headroom buffer (pips -> points) to widen SL/TP
+      double slHeadroomPts = PipToPoints(m_cfg.Risk.SLHeadroomPips);
+      double tpHeadroomPts = PipToPoints(m_cfg.Risk.TPHeadroomPips);
+      if(slHeadroomPts > 0.0)
+        {
+         slPoints += slHeadroomPts;
+         if(m_debugMode)
+            PrintFormat("[Risk] SL headroom applied: +%.1f pts (total slPoints=%.1f)", slHeadroomPts, slPoints);
+        }
+      if(tpHeadroomPts > 0.0)
+        {
+         tpPoints += tpHeadroomPts;
+         if(m_debugMode)
+            PrintFormat("[Risk] TP headroom applied: +%.1f pts (total tpPoints=%.1f)", tpHeadroomPts, tpPoints);
+        }
+
       ENUM_ORDER_TYPE orderType = (signal.direction == SIGNAL_SELL) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
       RiskCheckResult base = Check(slPoints, orderType);
       out.SetResult(base.allowed, base.suggestedLot, base.reason);
@@ -529,6 +550,8 @@ public:
       s.maxLot = m_maxLot;
       s.lotStep = m_lotStep;
       s.lastResetDay = m_lastResetDay;
+      s.slHeadroomPts = PipToPoints(m_cfg.Risk.SLHeadroomPips);
+      s.tpHeadroomPts = PipToPoints(m_cfg.Risk.TPHeadroomPips);
       if(m_circuitBroken) s.status = "CircuitBroken";
       else if(IsMaxDDActive()) s.status = "MaxDDActive";
       else if(m_openTrades >= m_maxOpenTrades) s.status = "MaxTrades";
@@ -539,13 +562,14 @@ public:
    void PrintDiagnostics() const
      {
       RiskSnapshot s = GetSnapshot();
-      PrintFormat("[RiskDiag] allowed=%s circuit=%s open=%d/%d loss=%.2f pct=%.2f/%.2f dd=%.2f/%.2f consec=%d/%d status=%s",
+      PrintFormat("[RiskDiag] allowed=%s circuit=%s open=%d/%d loss=%.2f pct=%.2f/%.2f dd=%.2f/%.2f consec=%d/%d slHead=%.1f tpHead=%.1f status=%s",
                   s.tradingAllowed ? "true" : "false",
                   s.circuitBroken ? "true" : "false",
                   s.openTrades, s.maxOpenTrades,
                   s.dailyPnl, s.dailyLossPctUsed, s.dailyLossPctLimit,
                   s.drawdownPct, s.maxDrawdownPct,
                   s.consecLoss, s.maxConsecLoss,
+                  s.slHeadroomPts, s.tpHeadroomPts,
                   s.status);
      }
   };
