@@ -18,6 +18,9 @@
 struct RiskConfig
   {
    double LotSize;
+   bool   UseAutoLot;       // Use risk-based auto lot sizing
+   double AutoLotMin;       // Minimum lot when auto lot is active
+   double AutoLotMax;       // Maximum lot when auto lot is active
    double RiskPercent;
    double SLMultiplier;
    double TPMultiplier;
@@ -25,29 +28,34 @@ struct RiskConfig
    double MaxDrawdownPct;
    int    MaxOpenPositions;
    int    MaxConsecLoss;
-    bool   UseBreakEven;
-    double BreakEvenATRMult;
-    bool   UseTrailingStop;
-    double TrailATRMult;
-    bool   RecoveryEnabled;
-    int    MaxRecoveryAttempts;
-    int    RecoveryCooldownBars;
-    double PartialClosePct;
-    int    MaxTradeDurationDays;
-    double SLHeadroomPips;       // Additional buffer for Stop Loss (pips)
-    double TPHeadroomPips;       // Additional buffer for Take Profit (pips)
+   bool   UseBreakEven;
+   double BreakEvenATRMult;
+   bool   UseTrailingStop;
+   double TrailATRMult;
+   bool   RecoveryEnabled;
+   int    MaxRecoveryAttempts;
+   int    RecoveryCooldownBars;
+   double PartialClosePct;
+   int    MaxTradeDurationDays;
+   double SLHeadroomPips;       // Flat buffer added to Stop Loss (pips)
+   double TPHeadroomPips;       // Flat buffer added to Take Profit (pips)
+   double SLHeadroomATRMult;    // Dynamic buffer: SL += ATR * this multiplier (0 = off)
+   double TPHeadroomATRMult;    // Dynamic buffer: TP += ATR * this multiplier (0 = off)
 
-    RiskConfig()
-       : LotSize(0.01),          RiskPercent(1.0),
-         SLMultiplier(1.5),      TPMultiplier(2.5),
-         MaxDailyLossPct(3.0),   MaxDrawdownPct(10.0),
-         MaxOpenPositions(3),    MaxConsecLoss(5),
-         UseBreakEven(true),     BreakEvenATRMult(1.0),
-         UseTrailingStop(false), TrailATRMult(1.0),
-         RecoveryEnabled(true),  MaxRecoveryAttempts(3),
-         RecoveryCooldownBars(5),
-         PartialClosePct(0.5),   MaxTradeDurationDays(0),
-         SLHeadroomPips(0.0),    TPHeadroomPips(0.0) {}
+   RiskConfig()
+      : LotSize(0.01),          UseAutoLot(false),
+        AutoLotMin(0.01),       AutoLotMax(10.0),
+        RiskPercent(1.0),
+        SLMultiplier(1.5),      TPMultiplier(2.5),
+        MaxDailyLossPct(3.0),   MaxDrawdownPct(10.0),
+        MaxOpenPositions(3),    MaxConsecLoss(5),
+        UseBreakEven(true),     BreakEvenATRMult(1.0),
+        UseTrailingStop(false), TrailATRMult(1.0),
+        RecoveryEnabled(true),  MaxRecoveryAttempts(3),
+        RecoveryCooldownBars(5),
+        PartialClosePct(0.5),   MaxTradeDurationDays(0),
+        SLHeadroomPips(0.0),    TPHeadroomPips(0.0),
+        SLHeadroomATRMult(0.0), TPHeadroomATRMult(0.0) {}
   };
 
 //+------------------------------------------------------------------+

@@ -2,7 +2,7 @@
 //|                                   Core/Config/Validator.mqh     |
 //|                                   Copyright 2026, Agsicentre    |
 //|                                                                  |
-//|  PURPOSE: Standalone config validation — 35 business rules.     |
+//|  PURPOSE: Standalone config validation — 40 business rules.     |
 //|    - Zero dependencies (no EventBus, no IManager)               |
 //|    - Returns human-readable error list                           |
 //|    - Called by CConfigManager before every ConfigReload dispatch |
@@ -321,6 +321,47 @@ public:
                   "[Config.Risk] RecoveryEnabled=true but MaxRecoveryAttempts=" +
                   IntegerToString(cfg.Risk.MaxRecoveryAttempts) +
                   ". Set MaxRecoveryAttempts >= 1 or disable recovery.");
+
+      //=== SECTION 9: Headroom & Auto Lot ==============================
+
+      // RULE 36 — SLHeadroomPips: must not be negative
+      if(cfg.Risk.SLHeadroomPips < 0.0)
+         AddError(errors, "[Config.Risk] SLHeadroomPips cannot be negative (got " +
+                  DoubleToString(cfg.Risk.SLHeadroomPips, 2) + ")");
+
+      // RULE 37 — TPHeadroomPips: must not be negative
+      if(cfg.Risk.TPHeadroomPips < 0.0)
+         AddError(errors, "[Config.Risk] TPHeadroomPips cannot be negative (got " +
+                  DoubleToString(cfg.Risk.TPHeadroomPips, 2) + ")");
+
+      // RULE 38 — SLHeadroomATRMult: [0, 2.0] — above 2x ATR would dominate the SL
+      if(cfg.Risk.SLHeadroomATRMult < 0.0 || cfg.Risk.SLHeadroomATRMult > 2.0)
+         AddError(errors, "[Config.Risk] SLHeadroomATRMult must be in [0.0, 2.0] (got " +
+                  DoubleToString(cfg.Risk.SLHeadroomATRMult, 3) +
+                  "). Use 0 to disable ATR-based dynamic headroom.");
+
+      // RULE 39 — TPHeadroomATRMult: [0, 2.0]
+      if(cfg.Risk.TPHeadroomATRMult < 0.0 || cfg.Risk.TPHeadroomATRMult > 2.0)
+         AddError(errors, "[Config.Risk] TPHeadroomATRMult must be in [0.0, 2.0] (got " +
+                  DoubleToString(cfg.Risk.TPHeadroomATRMult, 3) +
+                  "). Use 0 to disable ATR-based dynamic headroom.");
+
+      // RULE 40 — AutoLot bounds sanity
+      if(cfg.Risk.UseAutoLot)
+        {
+         if(cfg.Risk.AutoLotMin <= 0.0)
+            AddError(errors, "[Config.Risk] AutoLotMin must be > 0 when UseAutoLot=true (got " +
+                     DoubleToString(cfg.Risk.AutoLotMin, 4) + ")");
+         if(cfg.Risk.AutoLotMax <= 0.0)
+            AddError(errors, "[Config.Risk] AutoLotMax must be > 0 when UseAutoLot=true (got " +
+                     DoubleToString(cfg.Risk.AutoLotMax, 4) + ")");
+         if(cfg.Risk.AutoLotMin > 0.0 && cfg.Risk.AutoLotMax > 0.0 &&
+            cfg.Risk.AutoLotMin > cfg.Risk.AutoLotMax)
+            AddError(errors, "[Config.Risk] AutoLotMin (" +
+                     DoubleToString(cfg.Risk.AutoLotMin, 4) +
+                     ") must be <= AutoLotMax (" +
+                     DoubleToString(cfg.Risk.AutoLotMax, 4) + ")");
+        }
 
       return ArraySize(errors) == 0;
      }

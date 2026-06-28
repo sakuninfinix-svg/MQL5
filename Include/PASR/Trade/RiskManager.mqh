@@ -435,17 +435,35 @@ public:
       // Apply headroom buffer (pips -> points) to widen SL/TP
       double slHeadroomPts = PipToPoints(m_cfg.Risk.SLHeadroomPips);
       double tpHeadroomPts = PipToPoints(m_cfg.Risk.TPHeadroomPips);
+
+      // Dynamic headroom: ATR-relative (takes live ATR from DataManager if available)
+      if(m_cfg.Risk.SLHeadroomATRMult > 0.0 || m_cfg.Risk.TPHeadroomATRMult > 0.0)
+        {
+         double atrPts = (m_data != NULL) ? m_data.GetATRPoints() : 0.0;
+         if(atrPts > 0.0)
+           {
+            slHeadroomPts += atrPts * m_cfg.Risk.SLHeadroomATRMult;
+            tpHeadroomPts += atrPts * m_cfg.Risk.TPHeadroomATRMult;
+           }
+        }
+
       if(slHeadroomPts > 0.0)
         {
          slPoints += slHeadroomPts;
          if(m_debugMode)
-            PrintFormat("[Risk] SL headroom applied: +%.1f pts (total slPoints=%.1f)", slHeadroomPts, slPoints);
+            PrintFormat("[Risk] SL headroom applied: flat=%.1f atr_mult=%.2f total_added=%.1f pts (slPoints=%.1f)",
+                        PipToPoints(m_cfg.Risk.SLHeadroomPips),
+                        m_cfg.Risk.SLHeadroomATRMult,
+                        slHeadroomPts, slPoints);
         }
       if(tpHeadroomPts > 0.0)
         {
          tpPoints += tpHeadroomPts;
          if(m_debugMode)
-            PrintFormat("[Risk] TP headroom applied: +%.1f pts (total tpPoints=%.1f)", tpHeadroomPts, tpPoints);
+            PrintFormat("[Risk] TP headroom applied: flat=%.1f atr_mult=%.2f total_added=%.1f pts (tpPoints=%.1f)",
+                        PipToPoints(m_cfg.Risk.TPHeadroomPips),
+                        m_cfg.Risk.TPHeadroomATRMult,
+                        tpHeadroomPts, tpPoints);
         }
 
       ENUM_ORDER_TYPE orderType = (signal.direction == SIGNAL_SELL) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
@@ -464,14 +482,33 @@ public:
    double CalcLot(double slPoints) const
      {
       if(slPoints <= 0.0) return m_minLot;
-      double riskMoney = AccountBalance() * (m_riskPct / 100.0);
-      double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-      double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-      if(tickValue <= 0.0 || tickSize <= 0.0) return m_minLot;
-      double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      double valuePerPoint = tickValue * point / tickSize;
-      if(valuePerPoint <= 0.0) return m_minLot;
-      return NormaliseLot(riskMoney / (slPoints * valuePerPoint));
+
+      double rawLot;
+      if(m_cfg.Risk.UseAutoLot)
+        {
+         // Risk-based auto sizing: riskedMoney / (slPoints * valuePerPoint)
+         double balance  = AccountBalance();
+         double riskMoney = balance * (m_riskPct / 100.0);
+         double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+         double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+         if(tickValue <= 0.0 || tickSize <= 0.0) return m_minLot;
+         double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+         double valuePerPoint = tickValue * point / tickSize;
+         if(valuePerPoint <= 0.0) return m_minLot;
+         rawLot = riskMoney / (slPoints * valuePerPoint);
+
+         // Clamp to user-defined auto lot bounds
+         double autoMin = MathMax(m_minLot, m_cfg.Risk.AutoLotMin);
+         double autoMax = MathMin(m_maxLot, m_cfg.Risk.AutoLotMax);
+         rawLot = MathMax(autoMin, MathMin(autoMax, rawLot));
+        }
+      else
+        {
+         // Fixed lot size
+         rawLot = m_cfg.Risk.LotSize > 0.0 ? m_cfg.Risk.LotSize : m_minLot;
+        }
+
+      return NormaliseLot(rawLot);
      }
 
    void OnTradeOpened() { SyncOpenTradesFromBroker(); }
@@ -551,7 +588,18 @@ public:
       s.lotStep = m_lotStep;
       s.lastResetDay = m_lastResetDay;
       s.slHeadroomPts = PipToPoints(m_cfg.Risk.SLHeadroomPips);
+      // Include dynamic ATR component in snapshot if ATR is available
+      if(m_cfg.Risk.SLHeadroomATRMult > 0.0 && m_data != NULL)
+        {
+         double atrPts = m_data.GetATRPoints();
+         if(atrPts > 0.0) s.slHeadroomPts += atrPts * m_cfg.Risk.SLHeadroomATRMult;
+        }
       s.tpHeadroomPts = PipToPoints(m_cfg.Risk.TPHeadroomPips);
+      if(m_cfg.Risk.TPHeadroomATRMult > 0.0 && m_data != NULL)
+        {
+         double atrPts = m_data.GetATRPoints();
+         if(atrPts > 0.0) s.tpHeadroomPts += atrPts * m_cfg.Risk.TPHeadroomATRMult;
+        }
       if(m_circuitBroken) s.status = "CircuitBroken";
       else if(IsMaxDDActive()) s.status = "MaxDDActive";
       else if(m_openTrades >= m_maxOpenTrades) s.status = "MaxTrades";

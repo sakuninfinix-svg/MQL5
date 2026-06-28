@@ -39,6 +39,8 @@ input bool   InpUseTrailingStop = false; //Trailing Stop
 input double InpTrailATRMult = 1.0; // Jarak Trailing xATR
 input double InpSLHeadroomPips = 0.0; // Headroom tambahan untuk Stop Loss (pips)
 input double InpTPHeadroomPips = 0.0; // Headroom tambahan untuk Take Profit (pips)
+input double InpSLHeadroomATRMult = 0.0; // Dynamic SL headroom (x ATR, 0=off)
+input double InpTPHeadroomATRMult = 0.0; // Dynamic TP headroom (x ATR, 0=off)
 input bool   InpRecoveryEnabled = true; // Recovery Mode
 input int    InpMaxRecoveryAttempts = 3;
 input int    InpRecoveryCooldownBars = 5;
@@ -239,6 +241,8 @@ StrategyConfig BuildConfigFromInputs()
    cfg.Risk.TrailATRMult        = InpTrailATRMult;
    cfg.Risk.SLHeadroomPips      = InpSLHeadroomPips;
    cfg.Risk.TPHeadroomPips      = InpTPHeadroomPips;
+   cfg.Risk.SLHeadroomATRMult   = InpSLHeadroomATRMult;
+   cfg.Risk.TPHeadroomATRMult   = InpTPHeadroomATRMult;
    cfg.Risk.RecoveryEnabled     = InpRecoveryEnabled;
    cfg.Risk.MaxRecoveryAttempts = InpMaxRecoveryAttempts;
    cfg.Risk.RecoveryCooldownBars= InpRecoveryCooldownBars;
